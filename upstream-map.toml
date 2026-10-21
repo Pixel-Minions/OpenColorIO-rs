@@ -1703,15 +1703,14 @@ note = "p5-tone 5.3a: CreateGradingToneOp; CreateGradingToneTransform with 5.5d"
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_cpu.rs"]
-status = "partial"
-note = "p5-tone 5.3b: GradingToneOpCPU, the forward and reverse renderers of the log and video styles (mids, highlightShadow, whiteBlack, scontrast, ComputeHS/WB templates, ClampMaxRGB) in each wheel's operand orders, GetGradingToneCPURenderer for them; the linear style's renderers (LinLog, LogLin) with 5.3c"
+status = "done"
+note = "p5-tone 5.3b: GradingToneOpCPU, the log and video renderers in each wheel's operand orders; 5.3c: the linear style's renderers (LinLog, LogLin, OCIO_USE_SSE2 branches); checked by tests/grading_tone_oracle.rs (battery, dynamic sets)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_cpu.rs"]
-status = "partial"
-note = "p5-tone 5.3b: GetGradingToneCPURenderer (log and video; linear with 5.3c)"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpData.cpp"
@@ -4943,8 +4942,7 @@ note = "p2-rgbcurve 2.6a: basic and curves; 2.6b: max_ctrl_pnts, in dynamic_prop
 path = "tests/cpu/ops/gradingtone/GradingToneOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_cpu_tests.rs"]
-status = "partial"
-note = "p5-tone 5.3b: log_midtones, log_highlights, video_shadows, video_white_details, log_black_details, log_scontrast; identity and lin_midtones with 5.3c"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradingtone/GradingToneOpData_tests.cpp"

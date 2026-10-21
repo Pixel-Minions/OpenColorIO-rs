@@ -3207,6 +3207,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   tables); the battery's overflowing cases with the distinct-NaN probes check it on both
   platforms.
 
+### I-244. The linear GradingTone converts alpha to its log space and back
+
+- **Upstream:** the linear style's renderers grade in a log space: `LinLog` before the tones,
+  `LogLin` after (`ops/gradingtone/GradingToneOpCPU.cpp:1086-1145, 1147-1259` @ v2.5.2). Their
+  `OCIO_USE_SSE2` branches, which every x86-64 wheel compiles, load and store the whole
+  pixel, so alpha goes through both conversions too: `LogLin(LinLog(alpha))`, with OCIO's
+  `sseLog2` and `ssePower` approximations, which gives alpha back only approximately (and a
+  NaN alpha as the line's NaN, an infinite one as whatever the approximations make of it).
+  The scalar branch (`#else`) copies alpha, as the log and video styles leave it.
+- **Who notices:** anyone relying on a linear GradingToneTransform to keep alpha exactly,
+  such as a compositing pipeline comparing alphas.
+- **A fix:** keep the input's alpha, as the other grading renderers do (`out[3] = in[3]`).
+- **Status:** matched in `p5-tone` (5.3c, `crates/ocio-ops/src/ops/gradingtone/
+  grading_tone_op_cpu.rs`, `lin_log_pixel`, `log_lin_pixel`); the battery compares alpha bit
+  for bit for the linear style (`crates/ocio-ops/tests/grading_tone_oracle.rs`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

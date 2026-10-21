@@ -4,16 +4,19 @@
 //! The GradingTone op's CPU renderers: a port of
 //! `src/OpenColorIO/ops/gradingtone/GradingToneOpCPU.h` and `GradingToneOpCPU.cpp` @ v2.5.2.
 //!
-//! [`get_grading_tone_cpu_renderer`] picks one renderer per direction (and the linear style's
-//! own pair, WP 5.3c). Each holds the op data's dynamic property (for a dynamic one, a copy the
+//! [`get_grading_tone_cpu_renderer`] picks one renderer per direction, and the linear style's
+//! own pair. Each holds the op data's dynamic property (for a dynamic one, a copy the
 //! CPU processor exposes) and reads its values and their pre-render form once per `apply`
 //! (U-81: a set from another thread gives the whole old or the whole new value).
 //!
-//! The log and video styles have no `OCIO_USE_SSE2` branch: each tone (midtones, highlights,
-//! whites, shadows, blacks, s-contrast) is scalar `float` code, run once per color channel
-//! (`float`) and once for the master component on the three color channels together (a
-//! `float3` of three `float` lanes, each computed on its own). The renderers copy each pixel
-//! and grade its color channels in place; alpha is never written.
+//! The tones (midtones, highlights, whites, shadows, blacks, s-contrast) are scalar `float`
+//! code, run once per color channel (`float`) and once for the master component on the three
+//! color channels together (a `float3` of three `float` lanes, each computed on its own). The
+//! log and video renderers copy each pixel and grade its color channels in place; they never
+//! write alpha. The linear style's renderers grade in a log space, between `LinLog` and
+//! `LogLin`, whose `OCIO_USE_SSE2` branches (every x86-64 wheel compiles them) convert the
+//! four lanes of the pixel, alpha too (I-244), with OCIO's `sseLog2` and `ssePower`
+//! approximations; their operations meet only constants, so no operand order shows.
 //!
 //! # Operand orders
 //!
@@ -46,6 +49,7 @@ use crate::exception::{Exception, Result};
 use crate::math_utils::{clamp, sse_add, sse_mul, sse_sub, std_max, std_min};
 use crate::op::CpuOp;
 use crate::open_color_types::{DynamicPropertyType, GradingStyle, TransformDirection};
+use crate::sse::{sse_log2, sse_power};
 
 /// "Dynamic property type not supported by GradingTone." (GradingToneOpCPU.cpp:76 @ v2.5.2).
 const TYPE_NOT_SUPPORTED: &str = "Dynamic property type not supported by GradingTone.";
@@ -1883,6 +1887,69 @@ impl Rev {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The linear style's conversions to and from a log space.
+// ---------------------------------------------------------------------------------------------
+
+/// The constants of the linear style's conversions (`LogLinConstants`,
+/// GradingToneOpCPU.cpp:1063-1084 @ v2.5.2), as the `OCIO_USE_SSE2` branch uses them.
+mod log_lin {
+    /// `xbrk`.
+    pub(super) const XBRK: f32 = 0.0041318374739483946;
+    /// `shift`.
+    pub(super) const SHIFT: f32 = -0.000157849851665374;
+    /// `m = 1.f / (0.18f + shift)`.
+    pub(super) const M: f32 = 1.0 / (0.18 + SHIFT);
+    /// `gain`.
+    pub(super) const GAIN: f32 = 363.034608563;
+    /// `offs`.
+    pub(super) const OFFS: f32 = -7.0;
+    /// `ybrk`.
+    pub(super) const YBRK: f32 = -5.5;
+    /// `mgainInv = _mm_set1_ps(1.f / gain)`.
+    pub(super) const GAIN_INV: f32 = 1.0 / GAIN;
+    /// `mshift018 = _mm_set1_ps(shift + 0.18f)`.
+    pub(super) const SHIFT_018: f32 = SHIFT + 0.18;
+    /// `mpower = _mm_set1_ps(2.0f)`.
+    pub(super) const POWER: f32 = 2.0;
+}
+
+/// One lane of `LinLog`'s `OCIO_USE_SSE2` branch: above the break `log2((x + shift) * m)`
+/// (OCIO's `sseLog2`), else the line `x * gain + offs`; a NaN takes the line.
+///
+/// Port of `LinLog` (GradingToneOpCPU.cpp:1086-1102 @ v2.5.2), for one lane.
+fn lin_log(x: f32) -> f32 {
+    use log_lin::*;
+    let flag = x > XBRK;
+    let pix_lin = sse_add(sse_mul(x, GAIN), OFFS);
+    let pix = sse_log2(sse_mul(sse_add(x, SHIFT), M));
+    if flag { pix } else { pix_lin }
+}
+
+/// One lane of `LogLin`'s `OCIO_USE_SSE2` branch: above the break `2^x * (shift + 0.18) -
+/// shift` (OCIO's `ssePower`), else the line `(x - offs) / gain` (times its inverse); a NaN
+/// takes the line.
+///
+/// Port of `LogLin` (GradingToneOpCPU.cpp:1117-1133 @ v2.5.2), for one lane.
+fn log_lin(x: f32) -> f32 {
+    use log_lin::*;
+    let flag = x > YBRK;
+    let pix_lin = sse_mul(sse_sub(x, OFFS), GAIN_INV);
+    let pix = sse_sub(sse_mul(sse_power(POWER, x), SHIFT_018), SHIFT);
+    if flag { pix } else { pix_lin }
+}
+
+/// `LinLog` on the four lanes of a pixel, alpha included: the `OCIO_USE_SSE2` branch stores
+/// all four (I-244).
+fn lin_log_pixel(px: &mut [f32; 4]) {
+    *px = px.map(lin_log);
+}
+
+/// `LogLin` on the four lanes of a pixel, alpha included.
+fn log_lin_pixel(px: &mut [f32; 4]) {
+    *px = px.map(log_lin);
+}
+
 /// `std::min(out[i], 65504.f)` on the color channels: the grading controls at high values can
 /// push values above the largest half float, where they would overflow to infinity. A NaN
 /// stays.
@@ -1894,10 +1961,11 @@ fn clamp_max_rgb(out: &mut [f32; 4]) {
     out[2] = std_min(out[2], 65504.0);
 }
 
-/// The forward tones of one pixel, in upstream's order, and the clamp.
+/// The forward tones of one pixel, in upstream's order.
 ///
-/// Part of `GradingToneFwdOpCPU::apply` (GradingToneOpCPU.cpp:972-999 @ v2.5.2).
-fn fwd_pixel(v: &GradingTone, vpr: &GradingTonePreRender, out: &mut [f32; 4]) {
+/// Part of `GradingToneFwdOpCPU::apply` (GradingToneOpCPU.cpp:972-997 @ v2.5.2), and of
+/// `GradingToneLinearFwdOpCPU::apply` (1168-1193).
+fn fwd_tones(v: &GradingTone, vpr: &GradingTonePreRender, out: &mut [f32; 4]) {
     use RgbmChannel::{B, G, M, R};
     for ch in [R, G, B, M] {
         Fwd::mids(v, vpr, ch, out);
@@ -1915,13 +1983,13 @@ fn fwd_pixel(v: &GradingTone, vpr: &GradingTonePreRender, out: &mut [f32; 4]) {
         Fwd::white_black(v, vpr, ch, true, out);
     }
     Fwd::scontrast(v, vpr, out);
-    clamp_max_rgb(out);
 }
 
-/// The inverse tones of one pixel, in upstream's order, and the clamp.
+/// The inverse tones of one pixel, in upstream's order.
 ///
-/// Part of `GradingToneRevOpCPU::apply` (GradingToneOpCPU.cpp:1029-1056 @ v2.5.2).
-fn rev_pixel(v: &GradingTone, vpr: &GradingTonePreRender, out: &mut [f32; 4]) {
+/// Part of `GradingToneRevOpCPU::apply` (GradingToneOpCPU.cpp:1029-1054 @ v2.5.2), and of
+/// `GradingToneLinearRevOpCPU::apply` (1225-1250).
+fn rev_tones(v: &GradingTone, vpr: &GradingTonePreRender, out: &mut [f32; 4]) {
     use RgbmChannel::{B, G, M, R};
     Rev::scontrast(v, vpr, out);
     for ch in [M, R, G, B] {
@@ -1939,7 +2007,6 @@ fn rev_pixel(v: &GradingTone, vpr: &GradingTonePreRender, out: &mut [f32; 4]) {
     for ch in [M, R, G, B] {
         Rev::mids(v, vpr, ch, out);
     }
-    clamp_max_rgb(out);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2040,7 +2107,8 @@ impl CpuOp for GradingToneFwdOpCpu {
             return;
         };
         for px in pixels(rgba) {
-            fwd_pixel(&v, &vpr, px);
+            fwd_tones(&v, &vpr, px);
+            clamp_max_rgb(px);
         }
     }
 
@@ -2062,7 +2130,59 @@ impl CpuOp for GradingToneRevOpCpu {
             return;
         };
         for px in pixels(rgba) {
-            rev_pixel(&v, &vpr, px);
+            rev_tones(&v, &vpr, px);
+            clamp_max_rgb(px);
+        }
+    }
+
+    base_dynamic_properties!();
+}
+
+/// The forward renderer of the linear style: the tones in a log space, between `LinLog` and
+/// `LogLin`, which also convert alpha (I-244).
+///
+/// Port of `GradingToneLinearFwdOpCPU` (GradingToneOpCPU.cpp:94-100, 132-135 @ v2.5.2).
+#[derive(Debug)]
+struct GradingToneLinearFwdOpCpu {
+    base: GradingToneOpCpu,
+}
+
+impl CpuOp for GradingToneLinearFwdOpCpu {
+    /// Port of `GradingToneLinearFwdOpCPU::apply` (GradingToneOpCPU.cpp:1147-1202 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        let Some((v, vpr)) = self.base.state() else {
+            return;
+        };
+        for px in pixels(rgba) {
+            lin_log_pixel(px);
+            fwd_tones(&v, &vpr, px);
+            log_lin_pixel(px);
+            clamp_max_rgb(px);
+        }
+    }
+
+    base_dynamic_properties!();
+}
+
+/// The inverse renderer of the linear style.
+///
+/// Port of `GradingToneLinearRevOpCPU` (GradingToneOpCPU.cpp:117-123, 142-145 @ v2.5.2).
+#[derive(Debug)]
+struct GradingToneLinearRevOpCpu {
+    base: GradingToneOpCpu,
+}
+
+impl CpuOp for GradingToneLinearRevOpCpu {
+    /// Port of `GradingToneLinearRevOpCPU::apply` (GradingToneOpCPU.cpp:1204-1259 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        let Some((v, vpr)) = self.base.state() else {
+            return;
+        };
+        for px in pixels(rgba) {
+            lin_log_pixel(px);
+            rev_tones(&v, &vpr, px);
+            log_lin_pixel(px);
+            clamp_max_rgb(px);
         }
     }
 
@@ -2072,17 +2192,15 @@ impl CpuOp for GradingToneRevOpCpu {
 /// The renderer of the op data's style and direction.
 ///
 /// Port of `GetGradingToneCPURenderer` (src/OpenColorIO/ops/gradingtone/GradingToneOpCPU.cpp:
-/// 1265-1285 @ v2.5.2). The linear style's renderers come with WP 5.3c.
+/// 1265-1285 @ v2.5.2).
 pub fn get_grading_tone_cpu_renderer(tone: &GradingToneOpData) -> Result<Arc<dyn CpuOp>> {
-    if tone.get_style() == GradingStyle::Lin {
-        return Err(Exception::new(
-            "The GradingTone linear renderers are not ported yet (WP 5.3c).",
-        ));
-    }
     let base = GradingToneOpCpu::new(tone);
-    Ok(match tone.get_direction() {
-        TransformDirection::Forward => Arc::new(GradingToneFwdOpCpu { base }),
-        TransformDirection::Inverse => Arc::new(GradingToneRevOpCpu { base }),
+    let lin = tone.get_style() == GradingStyle::Lin;
+    Ok(match (tone.get_direction(), lin) {
+        (TransformDirection::Forward, true) => Arc::new(GradingToneLinearFwdOpCpu { base }),
+        (TransformDirection::Forward, false) => Arc::new(GradingToneFwdOpCpu { base }),
+        (TransformDirection::Inverse, true) => Arc::new(GradingToneLinearRevOpCpu { base }),
+        (TransformDirection::Inverse, false) => Arc::new(GradingToneRevOpCpu { base }),
     })
 }
 

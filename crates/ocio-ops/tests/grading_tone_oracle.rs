@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The GradingTone op's renderers against the wheel's `GradingToneTransform`:
-//! - the battery (`renderers_match_the_wheel`): the log and video styles (the linear style's
-//!   renderers come with WP 5.3c) in both directions with fast math on and off (the renderers
+//! - the battery (`renderers_match_the_wheel`): the three styles in both directions with fast math on and off (the renderers
 //!   ignore it), each tone alone and all of them together with values below and above 1 (each
 //!   of the curves' forward and reverse branches, the whites' and blacks' decreasing and
 //!   increasing cases, the s-contrast above and below 1), dynamic and fixed values, upstream's
@@ -35,8 +34,31 @@ use ocio_testkit::probe::{ProbeSet, Rng};
 use ocio_testkit::transform_text::f64_spec;
 use serde_json::{Value, json};
 
-/// The styles whose renderers are ported.
-const STYLES: [GradingStyle; 2] = [GradingStyle::Log, GradingStyle::Video];
+/// The styles.
+const STYLES: [GradingStyle; 3] = [GradingStyle::Log, GradingStyle::Lin, GradingStyle::Video];
+
+/// The linear value whose log the linear style's renderers grade is `t`: the inverse of their
+/// `LinLog` (`GradingToneOpCPU.cpp:1063-1115` @ v2.5.2) in double, to put probes near the
+/// curves' control points, which are in that log space.
+fn lin_of_log(t: f32) -> f32 {
+    let t = f64::from(t);
+    let shift = -0.000157849851665374f64;
+    if t > -5.5 {
+        (t.exp2() * (0.18 + shift) - shift) as f32
+    } else {
+        ((t + 7.0) / 363.034608563) as f32
+    }
+}
+
+/// `points` in the style's pixel space: the linear style's through [`lin_of_log`], with the
+/// break of its `LinLog`.
+fn to_pixel_space(style: GradingStyle, mut points: Vec<f32>) -> Vec<f32> {
+    if style == GradingStyle::Lin {
+        points = points.into_iter().map(lin_of_log).collect();
+        points.push(0.0041318374739483946);
+    }
+    points
+}
 
 /// The tones, by name, as the slots name them, in the order of [`field`].
 const TONES: [&str; 5] = ["blacks", "shadows", "midtones", "highlights", "whites"];
@@ -538,11 +560,13 @@ impl Family for GtFamily {
         Ok(Port::in_place(move |px| apply(&cpu, px)))
     }
 
-    /// Alpha, which the renderers never write; none when the optimizer removes the op (an
-    /// identity, not dynamic), where alpha is the CPU processor's to copy.
+    /// Alpha, which the log and video renderers never write; none for the linear style, and
+    /// none when the optimizer removes the op (an identity, not dynamic), where alpha is the CPU
+    /// processor's to copy.
     fn pass_through(&self, p: &GtParams, combo: &Combo) -> Channels {
         match p.op_data(transform_direction(combo.direction)) {
-            Ok(data) if !data.is_no_op() => A,
+            // The linear style converts alpha to its log space and back (I-244).
+            Ok(data) if !data.is_no_op() && p.style != GradingStyle::Lin => A,
             _ => [false; 4],
         }
     }
@@ -592,6 +616,7 @@ impl Family for GtFamily {
             points.extend(pr.sc_y[s]);
         }
         points.push(pr.pivot);
+        let mut points = to_pixel_space(p.style, points);
         points.retain(|x| x.is_finite());
         points.sort_by(f32::total_cmp);
         points.dedup();
@@ -631,6 +656,8 @@ fn curve_ramps(p: &GtParams, direction: Direction) -> Vec<f32> {
             values.push(lo - 0.1 * w + 1.2 * w * k as f32 / 23.0);
         }
     }
+    let mut values = to_pixel_space(p.style, values);
+    values.retain(|x| x.is_finite());
     values.sort_by(f32::total_cmp);
     values.dedup();
     values

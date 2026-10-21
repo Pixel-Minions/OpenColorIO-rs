@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of tests/cpu/ops/gradingtone/GradingToneOpCPU_tests.cpp @ v2.5.2: the log and video
-//! styles' tests (`identity` and `lin_midtones` need the linear style's renderers, WP 5.3c).
+//! Port of tests/cpu/ops/gradingtone/GradingToneOpCPU_tests.cpp @ v2.5.2.
 
 use super::*;
 use crate::ops::gradingtone::grading_tone::GradingRgbmsw;
@@ -47,6 +46,61 @@ fn check_both_ways(style: GradingStyle, gtd: &GradingTone, input: &[f32], expect
     gt.set_value(gtd).unwrap();
     let op = get_grading_tone_cpu_renderer(&gt).unwrap();
     validate_image(input, &apply(&op, expected));
+}
+
+/// The renderer's class name, as `typeid(c).name()` gives upstream's: its `Debug` text.
+fn class_name(op: &Arc<dyn CpuOp>) -> String {
+    let text = format!("{op:?}");
+    text.split_whitespace().next().unwrap().to_string()
+}
+
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, identity)` @ v2.5.2.
+#[test]
+fn identity() {
+    let qnan = f32::NAN;
+    let inf = f32::INFINITY;
+    // inf is clamp, so inverse would fail.
+    #[rustfmt::skip]
+    let image: [f32; 32] = [
+        -0.50, -0.25, 0.50, 0.0,
+        0.75, 1.00, 1.25, 1.0,
+        65000., 1.50, -65000., 0.0,
+        qnan, qnan, qnan, 0.0,
+        0.0, 0.0, 0.0, qnan,
+        0.0, 0.0, 0.0, inf,
+        -inf, -inf, -inf, 0.0,
+        0.0, 0.0, 0.0, -inf,
+    ];
+    let expected = image;
+
+    // Check that the right OpCPU is created: its class name contains the expected one.
+    for (style, fwd, rev) in [
+        (
+            GradingStyle::Log,
+            "GradingToneFwdOpCpu",
+            "GradingToneRevOpCpu",
+        ),
+        (
+            GradingStyle::Lin,
+            "GradingToneLinearFwdOpCpu",
+            "GradingToneLinearRevOpCpu",
+        ),
+        (
+            GradingStyle::Video,
+            "GradingToneFwdOpCpu",
+            "GradingToneRevOpCpu",
+        ),
+    ] {
+        let mut gd = GradingToneOpData::new(style);
+        let op = get_grading_tone_cpu_renderer(&gd).unwrap();
+        assert!(class_name(&op).contains(fwd), "{}", class_name(&op));
+        validate_image(&expected, &apply(&op, &image));
+
+        gd.set_direction(TransformDirection::Inverse);
+        let op = get_grading_tone_cpu_renderer(&gd).unwrap();
+        assert!(class_name(&op).contains(rev), "{}", class_name(&op));
+        validate_image(&image, &apply(&op, &expected));
+    }
 }
 
 /// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_midtones)` @ v2.5.2 (`TS1`, 150-164).
@@ -253,4 +307,32 @@ fn log_scontrast() {
     gt.set_value(&gtd).unwrap();
     let op = get_grading_tone_cpu_renderer(&gt).unwrap();
     validate_image(&input_32f, &apply(&op, &expected_32f));
+}
+
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, lin_midtones)` @ v2.5.2 (`TS7`, 459-474).
+#[test]
+fn lin_midtones() {
+    const STYLE: GradingStyle = GradingStyle::Lin;
+    // These are {R, G, B, master, center, width};
+    let midtones = GradingRgbmsw::new(0.3, 1.4, 1.8, 1., 1., 8.);
+    let input_32f: [f32; 12] = [
+        0.1, -0.1, 0.90, 1.0, 0.3, 0.6, 0.70, 0.5, 0.8, 1.5, 0.05, 0.0,
+    ];
+    let expected_32f: [f32; 12] = [
+        0.04102994,
+        -0.10000000,
+        3.07542735,
+        1.0,
+        0.08530666,
+        1.19569300,
+        2.65221218,
+        0.5,
+        0.26080380,
+        2.37429354,
+        0.08896667,
+        0.0,
+    ];
+    let mut gtd = GradingTone::new(STYLE);
+    gtd.midtones = midtones;
+    check_both_ways(STYLE, &gtd, &input_32f, &expected_32f);
 }
