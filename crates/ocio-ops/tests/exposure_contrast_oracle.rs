@@ -379,6 +379,11 @@ fn sets() -> Vec<(DynamicPropertyType, f64)> {
         (Exposure, f64::INFINITY),
         (Gamma, 1.0),
         (Contrast, 1.0),
+        // The scalar loops of a contrast of 1 meet a NaN exposure and a NaN pixel (the pixels'
+        // NaNs have payloads 0x200000 and 0x400000): each wheel's operand order decides whose
+        // NaN, and which sign, comes out.
+        (Exposure, f64::from_bits(0x7ff8_4000_0000_0000)),
+        (Exposure, f64::from_bits(0xfff4_0000_0000_0000)),
         (Exposure, 0.0),
     ]
 }

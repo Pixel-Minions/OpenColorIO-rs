@@ -22,12 +22,13 @@
 //! upstream saves before the store and writes back after it (`out[3] = outAlpha`): the port
 //! never writes alpha.
 //!
-//! The operand orders are the Windows wheel's, as the battery shows them
-//! (`tests/exposure_contrast_oracle.rs`, with no NaN left under W0002): the source's, but for
-//! the forward log style's `_mm_add_ps(offset, _mm_mul_ps(data, contrast))`, which the wheel
-//! computes with the product first, and the scalar `in[i] * exposure` of a contrast of 1, which
-//! it computes as `exposure * in[i]`. The reverse log style, which has no SSE2 branch, keeps
-//! the source's order.
+//! The operand orders are those of the wheels' machine code, as the battery and the dynamic
+//! sets show them (`tests/exposure_contrast_oracle.rs`, with no NaN left under W0002): the
+//! source's, but for the forward log style's `_mm_add_ps(offset, _mm_mul_ps(data, contrast))`,
+//! which both wheels compute with the product first, and the scalar `in[i] * exposure` of a
+//! contrast of 1, which the Windows wheel computes as `exposure * in[i]` and the Linux wheel as
+//! `in[i] * exposure` (see `scale_channel`). The reverse log style, which has no SSE2 branch,
+//! keeps the source's order.
 //!
 //! # The reverse log style's exposure step
 //!
@@ -147,13 +148,33 @@ impl EcRendererBase {
     }
 }
 
+/// One color channel times `factor`, in the operand order of each wheel's machine code.
+///
+/// The Windows wheel computes `factor * px` (`mulss xmm0, [rsi]`, `ECLinearRenderer::apply`
+/// near 0x18017f586), so a NaN `factor` wins over a NaN pixel. The Linux wheel computes
+/// `px * factor` in all four renderers, the vector loop and the scalar tail: `ECLinearRenderer`
+/// at 0x33e6d6 and 0x33e793, `ECLinearRevRenderer` at 0x33ece3, `ECVideoRenderer` at 0x33f253
+/// and `ECVideoRevRenderer` at 0x33e143 (read with `tools/wheel-inspect`).
+#[inline(always)]
+fn scale_channel(px: f32, factor: f32) -> f32 {
+    #[cfg(windows)]
+    {
+        sse_mul(factor, px)
+    }
+    #[cfg(not(windows))]
+    {
+        sse_mul(px, factor)
+    }
+}
+
 /// The color channels of each pixel times `factor`, alpha left alone: the scalar loops of a
-/// contrast of 1, `out[i] = in[i] * factor`, which the wheel computes as `factor * in[i]`.
+/// contrast of 1, `out[i] = in[i] * factor`, in each wheel's operand order
+/// ([`scale_channel`]).
 fn scale_rgb(rgba: &mut [f32], factor: f32) {
     for px in rgba.as_chunks_mut::<4>().0 {
-        px[0] = sse_mul(factor, px[0]);
-        px[1] = sse_mul(factor, px[1]);
-        px[2] = sse_mul(factor, px[2]);
+        px[0] = scale_channel(px[0], factor);
+        px[1] = scale_channel(px[1], factor);
+        px[2] = scale_channel(px[2], factor);
     }
 }
 
