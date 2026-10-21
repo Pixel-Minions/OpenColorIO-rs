@@ -190,6 +190,9 @@ fn values() -> Vec<Vec<Value>> {
         one(s("1")),
         one(s("")),
         one(json!({ "bytes": "78" })),
+        // Four bytes: a sequence of four ints, which pybind11's sequence casters refuse as
+        // bytes (verifier re-check round 3, C6).
+        one(json!({ "bytes": "61626364" })),
         vec![call(name("bytearray"), json!([{ "bytes": "78" }]))],
         one(json!({ "none": null })),
         vec![call(name("complex"), json!([int("1"), int("2")]))],
