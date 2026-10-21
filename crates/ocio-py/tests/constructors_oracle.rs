@@ -179,7 +179,8 @@ fn constructors_and_identity_as_the_wheels() {
 
 /// The errors the port raises where the wheel's behaviour is undefined: reading an instance
 /// no constructor constructed (U-86), constructing `pybind11_object` itself, which
-/// `__reduce__()` does through copyreg (U-87).
+/// `__reduce__()` does through copyreg (U-87), a keyword name pybind11 fails to write in an
+/// error (U-99).
 #[test]
 fn undefined_behaviour_raises_the_ports_errors() {
     common::start_python();
@@ -229,6 +230,35 @@ fn undefined_behaviour_raises_the_ports_errors() {
             let e = attempt.unwrap_err();
             assert!(e.is_instance_of::<pyo3::exceptions::PyTypeError>(py), "{e}");
             assert_eq!(e.value(py).to_string(), no_instances);
+        }
+        // A keyword whose name isn't UTF-8, in the error of a call no overload takes (U-99).
+        let kwargs = pyo3::types::PyDict::new(py);
+        kwargs
+            .set_item(
+                pyo3::types::PyString::from_encoded_object(
+                    &pyo3::types::PyBytes::new(py, b"\xed\xa0\x80"),
+                    Some(c"utf-8"),
+                    Some(c"surrogatepass"),
+                )
+                .unwrap(),
+                1,
+            )
+            .unwrap();
+        for f in ["GetEnvVariable", "TransformDirection"] {
+            let e = ocio
+                .getattr(f)
+                .unwrap()
+                .call((), Some(&kwargs))
+                .unwrap_err();
+            assert!(e.is_instance_of::<pyo3::exceptions::PyTypeError>(py), "{e}");
+            let name = if f == "GetEnvVariable" { f } else { "__init__" };
+            assert_eq!(
+                e.value(py).to_string(),
+                format!(
+                    "{name}(): a keyword argument's name pybind11 can't write in its error (the \
+                     wheel's process aborts; docs/improvements.md, U-99)"
+                )
+            );
         }
     });
 }

@@ -1905,6 +1905,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `dispatch_oracle.rs`, `vectors_load_sequences_as_the_wheels`,
   `arrays_load_sequences_as_the_wheels`.
 
+### I-237. A NUL in an argument's `repr()` cuts pybind11's error short
+
+- **Upstream:** pybind11's dispatcher builds the TypeError of a call no overload takes as a C++
+  string ("... Invoked with: " and each argument's `repr()`, each keyword's name) and sets it
+  with `PyErr_SetString`, which reads it up to its first NUL: through the wheel,
+  `GetEnvVariable(x)` with a `repr(x)` of `'a\x00b'` says "Invoked with: a", and
+  `GetEnvVariable(**{'a\x00b': 1})` "Invoked with: kwargs: a" (`dispatch_oracle.rs`).
+- **Who notices:** Python code that reads the error of a refused call whose arguments' reprs or
+  keyword names hold a NUL.
+- **A fix:** set the whole message.
+- **Status:** matched in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `incompatible`);
+  `dispatch_oracle.rs`, `module_functions_answer_as_the_wheels`.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."
@@ -4452,3 +4465,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   reads the 4 values of the array from memory it didn't initialize (...)", in `p6-core`
   (`crates/ocio-py/src/dispatch.rs`, the `[T; N]` caster); `dispatch_oracle.rs`,
   `arrays_refuse_what_the_wheel_reads_undefined` (the port only).
+
+### U-99. A keyword name that isn't UTF-8 in a refused call aborts the process
+
+- **Upstream:** when no overload takes a call, pybind11's dispatcher writes each keyword's name
+  into its error (`"{}=".format(name)` made a C++ string) outside the `try` that guards the
+  arguments' reprs, so the exception a name with a lone surrogate raises leaves the C
+  function: `OCIO.GetEnvVariable(**{chr(0xd800): 1})` aborts the wheel's process (exit 127
+  on Windows; the verifier's probes of p6-core).
+- **Who notices:** Python code that passes a keyword argument whose name holds a lone surrogate
+  to a call no overload takes.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises TypeError "GetEnvVariable(): a keyword argument's name pybind11
+  can't write in its error (the wheel's process aborts; ...)", the formatting error as its
+  cause, in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `incompatible`);
+  `constructors_oracle.rs`, `undefined_behaviour_raises_the_ports_errors` (the port only).

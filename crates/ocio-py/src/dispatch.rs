@@ -214,15 +214,20 @@ pub fn dispatch<'py>(
             return Ok(result);
         }
     }
-    Err(PyTypeError::new_err(incompatible(f, args, kwargs)))
+    Err(PyTypeError::new_err(incompatible(f, args, kwargs)?))
 }
 
-/// The `TypeError` text of a call no overload accepts.
+/// The `TypeError` text of a call no overload accepts, as pybind11's dispatcher writes it: each
+/// argument's `repr()` ("<repr raised Error>" when it raises or isn't UTF-8, the C++ string
+/// pybind11 makes of it), each keyword `"{}=".format(name)` and its value's `repr()`; then cut
+/// at the first NUL, since pybind11 sets the error from the C string (I-237). A keyword whose
+/// formatting fails (a name that isn't UTF-8) aborts the wheel's process, as pybind11 formats it
+/// outside its `try`: the port's error (U-99).
 fn incompatible(
     f: &Function,
     args: &Bound<'_, PyTuple>,
     kwargs: Option<&Bound<'_, PyDict>>,
-) -> String {
+) -> PyResult<String> {
     let mut msg = if f.constructor {
         format!(
             "{}(): incompatible constructor arguments. The following argument types are \
@@ -256,21 +261,35 @@ fn incompatible(
             msg.push_str("; ");
         }
         msg.push_str("kwargs: ");
-        let items: Vec<String> = kwargs
-            .iter()
-            .map(|(k, v)| {
-                let key = k.str().map(|s| s.to_string()).unwrap_or_default();
-                format!("{key}={}", repr_or_error(&v))
-            })
-            .collect();
+        let mut items = Vec::new();
+        for (k, v) in kwargs.iter() {
+            let key = PyString::new(k.py(), "{}=")
+                .call_method1("format", (&k,))
+                .and_then(|s| Ok(s.cast_into::<PyString>()?.to_str()?.to_string()))
+                .map_err(|e| {
+                    let error = PyTypeError::new_err(format!(
+                        "{}(): a keyword argument's name pybind11 can't write in its error \
+                         (the wheel's process aborts; docs/improvements.md, U-99)",
+                        f.name
+                    ));
+                    error.set_cause(k.py(), Some(e));
+                    error
+                })?;
+            items.push(format!("{key}{}", repr_or_error(&v)));
+        }
         msg.push_str(&items.join(", "));
     }
-    msg
+    if let Some(nul) = msg.find('\0') {
+        msg.truncate(nul);
+    }
+    Ok(msg)
 }
 
+/// `repr(v)` as pybind11 appends it to a C++ string: "<repr raised Error>" when `repr()` raises
+/// or gives text that isn't UTF-8 (a lone surrogate).
 fn repr_or_error(v: &Bound<'_, PyAny>) -> String {
     v.repr()
-        .map(|r| r.to_string())
+        .and_then(|r| Ok(r.to_str()?.to_string()))
         .unwrap_or_else(|_| "<repr raised Error>".to_string())
 }
 

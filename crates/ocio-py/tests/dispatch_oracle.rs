@@ -100,6 +100,37 @@ fn calls() -> Vec<Value> {
     let made = steps.len() - 1;
     steps.push(set(json!([var(), { "ref": made }]), json!([])));
     steps.push(get());
+    // Arguments whose repr() is a lone surrogate, holds a NUL, or raises, in "Invoked with"
+    // (positional, keyword, a constructor's); a keyword name with a NUL (verifier re-check 5).
+    for repr in [
+        ev(json!({ "str": "78eda080" })),
+        ev(json!({ "str": "610062" })),
+        ev(json!({ "list": [] })),
+    ] {
+        let method = if repr["eval"].get("list").is_some() {
+            "pop"
+        } else {
+            "__str__"
+        };
+        let base = steps.len();
+        for step in instance(
+            vec![repr],
+            "R",
+            "object",
+            vec![("__repr__", attr(0, method))],
+            json!([]),
+        ) {
+            steps.push(shift_refs(&step, base));
+        }
+        let r = json!({ "ref": steps.len() - 1 });
+        steps.push(call(name("OCIO.GetEnvVariable"), json!([r])));
+        steps.push(json!({ "call": name("OCIO.GetEnvVariable"), "args": [int("1")], "kwargs": [["x", r]] }));
+        steps.push(call(name("OCIO.TransformDirection"), json!([r])));
+    }
+    steps.push(json!({ "call": name("OCIO.GetEnvVariable"), "kwargs": [["a\u{0}b", int("1")]] }));
+    steps.push(
+        json!({ "call": name("OCIO.TransformDirection"), "kwargs": [["a\u{0}b", int("1")]] }),
+    );
     steps
 }
 
