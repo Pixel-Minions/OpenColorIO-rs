@@ -1690,7 +1690,7 @@ path = "src/OpenColorIO/ops/gradingtone/GradingToneOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op.rs"]
 status = "partial"
-note = "p5-tone 5.3a: the op and CreateGradingToneOp; 5.3b: getCPUOp; extractGpuShaderInfo with 5.3d-e (ocio-gpu gpu_processor.rs); CreateGradingToneTransform and BuildGradingToneOp with 5.5d"
+note = "p5-tone 5.3a: the op and CreateGradingToneOp; 5.3b: getCPUOp; 5.3d: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateGradingToneTransform and BuildGradingToneOp with 5.5d"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOp.h"
@@ -1729,13 +1729,14 @@ status = "done"
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gradingtone/grading_tone_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p5-tone 5.3d: AddGTProperties, the mids, highlights/shadows, whites/blacks and s-contrast shaders, both programs; checked against the wheel in the 10 languages at every optimization level (tests/grading_tone_op_gpu_oracle.rs: gpu_shader, the uniforms after dynamic sets, the description's own copy of the property)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gradingtone/grading_tone_op_gpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.cpp"
