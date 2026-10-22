@@ -32,6 +32,10 @@ pub(crate) mod py_gpu_shader_creator;
 pub mod py_open_color_io;
 #[cfg(feature = "python")]
 pub(crate) mod py_transform;
+/// What the identity registries hold, for the tests of their size and cost.
+#[cfg(feature = "python")]
+#[doc(hidden)]
+pub use py_transform::{RegistryStats, registry_stats};
 #[cfg(feature = "python")]
 pub(crate) mod py_types;
 #[cfg(feature = "python")]

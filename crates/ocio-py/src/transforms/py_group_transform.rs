@@ -40,22 +40,19 @@ macro_rules! holder_param {
     };
 }
 
-/// The children of a group's node.
-fn children(rc: &TransformRc) -> Vec<Option<TransformRc>> {
-    rc.lock().children.clone()
-}
-
 /// Port of `GroupTransformImpl::getTransform` (GroupTransform.cpp:92-102 @ v2.5.2): child
 /// `index`, "Invalid transform index <index>." outside the children.
 fn get_transform(py: Python<'_>, rc: &TransformRc, index: i32) -> PyResult<Option<TransformRc>> {
-    let children = children(rc);
-    if index < 0 || index as usize >= children.len() {
-        return Err(to_py_err(
+    // The one child, not a copy of them all: iterating a group reads each child once.
+    let child = usize::try_from(index)
+        .ok()
+        .and_then(|i| rc.lock().children.get(i).cloned());
+    child.ok_or_else(|| {
+        to_py_err(
             py,
             &ocio::Exception::new(format!("Invalid transform index {index}.")),
-        ));
-    }
-    Ok(children[index as usize].clone())
+        )
+    })
 }
 
 /// `getNumTransforms`.

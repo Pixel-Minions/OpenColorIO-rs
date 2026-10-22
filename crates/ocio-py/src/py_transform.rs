@@ -18,13 +18,17 @@
 //! (the `polymorphic_type_hook` of `PyOpenColorIO.h`): [`to_py`] does the same with a registry of
 //! weak references by node.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use ocio::{Transform, TransformType};
 use ocio_ops::open_color_types::TransformDirection;
 use pyo3::BoundObject;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyType, PyWeakrefReference};
+use pyo3::sync::PyOnceLock;
+use pyo3::types::{PyCFunction, PyDict, PyType, PyWeakrefReference};
 
 use crate::dispatch::{Function, Param};
 use crate::enums::enum_class;
@@ -241,15 +245,114 @@ pub(crate) struct TransformHolder(pub(crate) TransformRc);
 // ---------------------------------------------------------------------------------------------
 // The registry and the polymorphic cast
 
-/// pybind11's registered instances of the transform classes: each node's Python object, by a
-/// weak reference, while it lives.
-static INSTANCES: Mutex<Vec<(usize, Py<PyWeakrefReference>)>> = Mutex::new(Vec::new());
+/// pybind11's registered instances (`registered_instances`, an `unordered_multimap` from a C++
+/// pointer to the Python objects made for it, from which an object's deallocation removes it):
+/// the live Python objects by key, in the order they were registered, each by a weak reference
+/// whose callback removes it when the object dies. So it holds live objects only, and a lookup
+/// reads its own key's entries only, whatever else lives.
+///
+/// Never touch Python while holding its lock beyond reading a weak reference (no allocation,
+/// which can collect garbage, and no last reference dropped): an object dying then would call
+/// the callback, which takes the lock again.
+#[derive(Debug)]
+pub(crate) struct Registry<K> {
+    /// The weak references by key.
+    by_key: HashMap<K, Vec<Py<PyWeakrefReference>>>,
+    /// Each weak reference's key, by the weak reference's address.
+    keys: HashMap<usize, K>,
+}
 
-fn instances() -> MutexGuard<'static, Vec<(usize, Py<PyWeakrefReference>)>> {
-    INSTANCES
+impl<K: Eq + Hash + Clone> Registry<K> {
+    fn new() -> Self {
+        Registry {
+            by_key: HashMap::new(),
+            keys: HashMap::new(),
+        }
+    }
+
+    /// The first object registered under `key` that lives.
+    fn find<'py>(&self, py: Python<'py>, key: &K) -> Option<Bound<'py, PyAny>> {
+        self.by_key.get(key)?.iter().find_map(|wr| {
+            EXAMINED.fetch_add(1, Ordering::Relaxed);
+            wr.bind(py).upgrade()
+        })
+    }
+
+    fn insert(&mut self, key: K, wr: Py<PyWeakrefReference>) {
+        self.keys.insert(wr.as_ptr() as usize, key.clone());
+        self.by_key.entry(key).or_default().push(wr);
+    }
+
+    /// Removes the weak reference at `address`; it, to be dropped once the lock is released.
+    fn remove(&mut self, address: usize) -> Option<Py<PyWeakrefReference>> {
+        let key = self.keys.remove(&address)?;
+        let list = self.by_key.get_mut(&key)?;
+        let i = list.iter().position(|wr| wr.as_ptr() as usize == address)?;
+        let wr = list.remove(i);
+        if list.is_empty() {
+            self.by_key.remove(&key);
+        }
+        Some(wr)
+    }
+}
+
+/// A registry, locked.
+fn lock<K>(registry: &'static LazyLock<Mutex<Registry<K>>>) -> MutexGuard<'static, Registry<K>> {
+    registry
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
+
+/// Registers `obj` under `key` in `registry`, by a weak reference whose callback (`callback`,
+/// made once) removes it when `obj` dies.
+fn register_in<K: Eq + Hash + Clone + Send + 'static>(
+    registry: &'static LazyLock<Mutex<Registry<K>>>,
+    callback: &'static PyOnceLock<Py<PyCFunction>>,
+    obj: &Bound<'_, PyAny>,
+    key: K,
+) -> PyResult<()> {
+    let py = obj.py();
+    let callback = callback.get_or_try_init(py, || {
+        PyCFunction::new_closure(py, None, None, move |args, _| -> PyResult<()> {
+            let wr = args.get_item(0)?;
+            let removed = lock(registry).remove(wr.as_ptr() as usize);
+            drop(removed);
+            Ok(())
+        })
+        .map(Bound::unbind)
+    })?;
+    let wr = PyWeakrefReference::new_with(obj, callback.bind(py))?;
+    lock(registry).insert(key, wr.unbind());
+    Ok(())
+}
+
+/// The weak references the registries' lookups have read, for the tests of their cost.
+static EXAMINED: AtomicUsize = AtomicUsize::new(0);
+
+/// The registries' state, for tests: what the registries of transforms and of their format
+/// metadata hold, and how many entries their lookups have read in all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegistryStats {
+    /// The transform objects registered.
+    pub transforms: usize,
+    /// The `FormatMetadata` objects registered.
+    pub format_metadata: usize,
+    /// The entries the lookups have read since the module was loaded.
+    pub examined: usize,
+}
+
+/// [`RegistryStats`] now.
+pub fn registry_stats() -> RegistryStats {
+    RegistryStats {
+        transforms: lock(&INSTANCES).keys.len(),
+        format_metadata: lock(&METADATA_INSTANCES).keys.len(),
+        examined: EXAMINED.load(Ordering::Relaxed),
+    }
+}
+
+/// pybind11's registered instances of the transform classes, by node ([`Registry`]).
+static INSTANCES: LazyLock<Mutex<Registry<usize>>> = LazyLock::new(|| Mutex::new(Registry::new()));
+static INSTANCES_CALLBACK: PyOnceLock<Py<PyCFunction>> = PyOnceLock::new();
 
 /// The class of the module for a transform type (the `polymorphic_type_hook`).
 pub(crate) fn class_name(t: TransformType) -> &'static str {
@@ -282,19 +385,12 @@ pub(crate) fn class_name(t: TransformType) -> &'static str {
 
 /// The Python object of the live instance registered for `rc`, if any.
 fn registered<'py>(py: Python<'py>, rc: &TransformRc) -> Option<Bound<'py, PyAny>> {
-    let key = rc.key();
-    let mut list = instances();
-    list.retain(|(_, wr)| wr.bind(py).upgrade().is_some());
-    list.iter()
-        .find(|(k, _)| *k == key)
-        .and_then(|(_, wr)| wr.bind(py).upgrade())
+    lock(&INSTANCES).find(py, &rc.key())
 }
 
 /// Registers `obj` as the instance of `rc`.
 fn register(obj: &Bound<'_, PyAny>, rc: &TransformRc) -> PyResult<()> {
-    let wr = PyWeakrefReference::new(obj)?;
-    instances().push((rc.key(), wr.unbind()));
-    Ok(())
+    register_in(&INSTANCES, &INSTANCES_CALLBACK, obj, rc.key())
 }
 
 /// A returned `TransformRcPtr` (or a subclass's) as pybind11 casts it: `None` for a null
@@ -1087,9 +1183,11 @@ pub(crate) fn metadata_mut(t: &mut Transform) -> Option<&mut ocio::FormatMetadat
     })
 }
 
-/// The registered `FormatMetadata` objects: by node and path, while they live.
-type MetadataInstance = (usize, Vec<usize>, Py<PyWeakrefReference>);
-static METADATA_INSTANCES: Mutex<Vec<MetadataInstance>> = Mutex::new(Vec::new());
+/// The registered `FormatMetadata` objects, by node and path ([`Registry`]).
+type MetadataKey = (usize, Vec<usize>);
+static METADATA_INSTANCES: LazyLock<Mutex<Registry<MetadataKey>>> =
+    LazyLock::new(|| Mutex::new(Registry::new()));
+static METADATA_CALLBACK: PyOnceLock<Py<PyCFunction>> = PyOnceLock::new();
 
 /// `getFormatMetadata()` of the instance `this` holding `rc`, as pybind11 returns the reference:
 /// the `FormatMetadata` object registered for the element while it lives, else a new one.
@@ -1098,19 +1196,9 @@ pub(crate) fn format_metadata_out(
     this: &Bound<'_, PyAny>,
     rc: &TransformRc,
 ) -> Out {
-    let key = rc.key();
-    {
-        let mut list = METADATA_INSTANCES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        list.retain(|(_, _, wr)| wr.bind(py).upgrade().is_some());
-        if let Some(obj) = list
-            .iter()
-            .find(|(k, p, _)| *k == key && p.is_empty())
-            .and_then(|(_, _, wr)| wr.bind(py).upgrade())
-        {
-            return Ok(Some(obj.unbind()));
-        }
+    let key = (rc.key(), Vec::new());
+    if let Some(obj) = lock(&METADATA_INSTANCES).find(py, &key) {
+        return Ok(Some(obj.unbind()));
     }
     let cls = class(py, FORMAT_METADATA)?;
     let obj = cls.call_method1("__new__", (&cls,))?;
@@ -1120,11 +1208,7 @@ pub(crate) fn format_metadata_out(
         path: Vec::new(),
     };
     pybind11::set_value(&obj, FORMAT_METADATA, Bound::new(py, value)?.into_any())?;
-    let wr = PyWeakrefReference::new(&obj)?;
-    METADATA_INSTANCES
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push((key, Vec::new(), wr.unbind()));
+    register_in(&METADATA_INSTANCES, &METADATA_CALLBACK, &obj, key)?;
     Ok(Some(obj.unbind()))
 }
 
