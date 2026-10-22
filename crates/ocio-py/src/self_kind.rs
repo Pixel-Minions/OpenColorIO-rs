@@ -16,12 +16,18 @@
 //!   `defRepr`'s `OCIO_SHARED_PTR<T> &`), which gets an empty one and dereferences it;
 //! - [`SelfKind::Reference`]: a lambda taking `Class &` (the iterators, `bind_vector`,
 //!   `defRepr` of a class held by value), whose cast throws `reference_cast_error`: pybind11
-//!   tries the next overload, and raises its "incompatible function arguments" TypeError.
+//!   tries the next overload, and raises its "incompatible function arguments" TypeError;
+//! - [`SelfKind::Iterator`]: a lambda taking the class's `shared_ptr` that only builds an
+//!   iterator holding it (`ConfigRcPtr & self` → `RoleNameIterator(self)`,
+//!   `GroupTransform.__iter__`): the iterator, holding the empty one, is returned and lives;
+//!   its `__iter__` and its `repr` work, its `__len__`, `__getitem__` and `__next__` read
+//!   through the null pointer.
 //!
 //! The first two use a null pointer: the wheel's process dies (probed on Windows,
 //! 2026-10-22, in a process per probe: `crates/ocio-py/tests/none_self_oracle.rs`). The port
 //! raises ValueError instead ([`null_self`]); it raises pybind11's TypeError for the third,
-//! as the wheel does.
+//! as the wheel does. For the fourth it returns the iterator, whose methods that read the
+//! null pointer (where the wheel's process dies) raise ValueError ([`null_iterator`]).
 //!
 //! [`UNNAMED`] lists every such overload of the wheel's classes, by its class path, name and
 //! index among the function's overloads, with its kind, read from upstream's bindings
@@ -35,9 +41,10 @@ pub enum SelfKind {
     Pointer,
     Holder,
     Reference,
+    Iterator,
 }
 
-use SelfKind::{Holder, Pointer, Reference};
+use SelfKind::{Holder, Iterator, Pointer, Reference};
 
 /// The kind of the unnamed overload `index` of the method `name` of the class `class` (its
 /// path in the module, `Config.ColorSpaceIterator`), if there is one.
@@ -54,6 +61,16 @@ pub fn null_self(class: &str, name: &str) -> pyo3::PyErr {
     pyo3::exceptions::PyValueError::new_err(format!(
         "{class}.{name}: None as self, a null pointer the wheel calls the method through (its \
          process dies; docs/improvements.md, U-134)"
+    ))
+}
+
+/// The port's error for a method of the iterator that `class.name` made of `None` as `self`
+/// ([`SelfKind::Iterator`]), where the wheel reads through the iterator's null pointer
+/// (U-134).
+pub fn null_iterator(class: &str, name: &str) -> pyo3::PyErr {
+    pyo3::exceptions::PyValueError::new_err(format!(
+        "the iterator {class}.{name} made of None as self, a null pointer the wheel's iterator \
+         reads through (its process dies; docs/improvements.md, U-134)"
     ))
 }
 
@@ -116,7 +133,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("CPUProcessor", "isDynamic", 0, Pointer),  // :44
     // src/bindings/python/PyColorSpace.cpp @ v2.5.2
     ("ColorSpace", "getName", 0, Pointer),  // :165
-    ("ColorSpace", "getAliases", 0, Holder),  // :177
+    ("ColorSpace", "getAliases", 0, Iterator),  // :177
     ("ColorSpace", "clearAliases", 0, Pointer),  // :181
     ("ColorSpace", "getFamily", 0, Pointer),  // :184
     ("ColorSpace", "getEncoding", 0, Pointer),  // :188
@@ -125,7 +142,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("ColorSpace", "getInteropID", 0, Pointer),  // :200
     ("ColorSpace", "getInterchangeAttributes", 0, Pointer),  // :208
     ("ColorSpace", "getBitDepth", 0, Pointer),  // :210
-    ("ColorSpace", "getCategories", 0, Holder),  // :222
+    ("ColorSpace", "getCategories", 0, Iterator),  // :222
     ("ColorSpace", "clearCategories", 0, Pointer),  // :226
     ("ColorSpace", "isData", 0, Pointer),  // :230
     ("ColorSpace", "getReferenceSpaceType", 0, Pointer),  // :234
@@ -146,8 +163,8 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("ColorSpaceSet", "__sub__", 0, Holder),  // :54
     ("ColorSpaceSet", "__or__", 0, Holder),  // :60
     ("ColorSpaceSet", "__and__", 0, Holder),  // :66
-    ("ColorSpaceSet", "getColorSpaceNames", 0, Holder),  // :73
-    ("ColorSpaceSet", "getColorSpaces", 0, Holder),  // :77
+    ("ColorSpaceSet", "getColorSpaceNames", 0, Iterator),  // :73
+    ("ColorSpaceSet", "getColorSpaces", 0, Iterator),  // :77
     ("ColorSpaceSet", "clearColorSpaces", 0, Pointer),  // :93
     ("ColorSpaceSet.ColorSpaceNameIterator", "__len__", 0, Reference),  // :97
     ("ColorSpaceSet.ColorSpaceNameIterator", "__getitem__", 0, Reference),  // :101
@@ -168,12 +185,12 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("Config", "serialize", 1, Holder),  // :250
     ("Config", "getCacheID", 0, Pointer),  // :257
     ("Config", "getCurrentContext", 0, Pointer),  // :265
-    ("Config", "getEnvironmentVarNames", 0, Holder),  // :269
+    ("Config", "getEnvironmentVarNames", 0, Iterator),  // :269
     ("Config", "clearEnvironmentVars", 0, Pointer),  // :275
     ("Config", "getEnvironmentMode", 0, Pointer),  // :279
     ("Config", "loadEnvironment", 0, Pointer),  // :281
     ("Config", "getSearchPath", 0, Pointer),  // :283
-    ("Config", "getSearchPaths", 0, Holder),  // :287
+    ("Config", "getSearchPaths", 0, Iterator),  // :287
     ("Config", "clearSearchPaths", 0, Pointer),  // :291
     ("Config", "getWorkingDir", 0, Pointer),  // :295
     ("Config", "getConfigIOProxy", 0, Pointer),  // :299
@@ -182,27 +199,27 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("Config", "clearColorSpaces", 0, Pointer),  // :341
     ("Config", "isStrictParsingEnabled", 0, Pointer),  // :345
     ("Config", "getInactiveColorSpaces", 0, Pointer),  // :351
-    ("Config", "getRoleNames", 0, Holder),  // :391
-    ("Config", "getRoles", 0, Holder),  // :395
+    ("Config", "getRoleNames", 0, Iterator),  // :391
+    ("Config", "getRoles", 0, Iterator),  // :395
     ("Config", "clearSharedViews", 0, Pointer),  // :419
-    ("Config", "getSharedViews", 0, Holder),  // :421
+    ("Config", "getSharedViews", 0, Iterator),  // :421
     ("Config", "getDefaultDisplay", 0, Pointer),  // :425
-    ("Config", "getDisplays", 0, Holder),  // :427
-    ("Config", "getDisplaysAll", 0, Holder),  // :431
+    ("Config", "getDisplays", 0, Iterator),  // :427
+    ("Config", "getDisplaysAll", 0, Iterator),  // :431
     ("Config", "clearDisplays", 0, Pointer),  // :501
     ("Config", "clearVirtualDisplay", 0, Pointer),  // :546
-    ("Config", "getActiveDisplays", 0, Holder),  // :591
+    ("Config", "getActiveDisplays", 0, Iterator),  // :591
     ("Config", "clearActiveDisplays", 0, Pointer),  // :599
     ("Config", "getNumActiveDisplays", 0, Pointer),  // :601
-    ("Config", "getActiveViews", 0, Holder),  // :606
+    ("Config", "getActiveViews", 0, Iterator),  // :606
     ("Config", "clearActiveViews", 0, Pointer),  // :614
     ("Config", "getNumActiveViews", 0, Pointer),  // :616
     ("Config", "getDefaultLumaCoefs", 0, Holder),  // :620
-    ("Config", "getLookNames", 0, Holder),  // :637
-    ("Config", "getLooks", 0, Holder),  // :641
+    ("Config", "getLookNames", 0, Iterator),  // :637
+    ("Config", "getLooks", 0, Iterator),  // :641
     ("Config", "clearLooks", 0, Pointer),  // :647
-    ("Config", "getViewTransformNames", 0, Holder),  // :653
-    ("Config", "getViewTransforms", 0, Holder),  // :657
+    ("Config", "getViewTransformNames", 0, Iterator),  // :653
+    ("Config", "getViewTransforms", 0, Iterator),  // :657
     ("Config", "getDefaultSceneToDisplayViewTransform", 0, Pointer),  // :663
     ("Config", "getDefaultViewTransformName", 0, Pointer),  // :666
     ("Config", "clearViewTransforms", 0, Pointer),  // :672
@@ -321,14 +338,14 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("PyConfigIOProxy", "getConfigData", 0, Pointer),  // :61
     ("PyConfigIOProxy", "getFastLutFileHash", 0, Pointer),  // :62
     // src/bindings/python/PyContext.cpp @ v2.5.2
-    ("Context", "__iter__", 0, Holder),  // :110
+    ("Context", "__iter__", 0, Iterator),  // :110
     ("Context", "__len__", 0, Pointer),  // :114
     ("Context", "getCacheID", 0, Pointer),  // :149
     ("Context", "getSearchPath", 0, Pointer),  // :151
-    ("Context", "getSearchPaths", 0, Holder),  // :155
+    ("Context", "getSearchPaths", 0, Iterator),  // :155
     ("Context", "clearSearchPaths", 0, Pointer),  // :159
     ("Context", "getWorkingDir", 0, Pointer),  // :163
-    ("Context", "getStringVars", 0, Holder),  // :167
+    ("Context", "getStringVars", 0, Iterator),  // :167
     ("Context", "clearStringVars", 0, Pointer),  // :173
     ("Context", "getEnvironmentMode", 0, Pointer),  // :175
     ("Context", "loadEnvironment", 0, Pointer),  // :179
@@ -401,7 +418,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("GpuShaderCreator", "getTextureMaxWidth", 0, Pointer),  // :78
     ("GpuShaderCreator", "getAllowTexture1D", 0, Pointer),  // :84
     ("GpuShaderCreator", "getNextResourceIndex", 0, Pointer),  // :86
-    ("GpuShaderCreator", "getDynamicProperties", 0, Holder),  // :98
+    ("GpuShaderCreator", "getDynamicProperties", 0, Iterator),  // :98
     ("GpuShaderCreator", "finalize", 0, Pointer),  // :125
     ("GpuShaderCreator.DynamicPropertyIterator", "__len__", 0, Reference),  // :139
     ("GpuShaderCreator.DynamicPropertyIterator", "__getitem__", 0, Reference),  // :143
@@ -410,10 +427,10 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     // src/bindings/python/PyGpuShaderDesc.cpp @ v2.5.2
     ("GpuShaderDesc", "clone", 0, Pointer),  // :104
     ("GpuShaderDesc", "getShaderText", 0, Pointer),  // :106
-    ("GpuShaderDesc", "getUniforms", 0, Holder),  // :108
+    ("GpuShaderDesc", "getUniforms", 0, Iterator),  // :108
     ("GpuShaderDesc", "getUniformBufferSize", 0, Pointer),  // :112
-    ("GpuShaderDesc", "getTextures", 0, Holder),  // :157
-    ("GpuShaderDesc", "get3DTextures", 0, Holder),  // :184
+    ("GpuShaderDesc", "getTextures", 0, Iterator),  // :157
+    ("GpuShaderDesc", "get3DTextures", 0, Iterator),  // :184
     ("GpuShaderDesc.UniformData", "getDouble", 0, Reference),  // :196
     ("GpuShaderDesc.UniformData", "getBool", 0, Reference),  // :200
     ("GpuShaderDesc.UniformData", "getFloat3", 0, Reference),  // :204
@@ -454,7 +471,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("GradingBSplineCurve", "__eq__", 0, Reference),  // :319
     ("GradingBSplineCurve", "__ne__", 0, Reference),  // :323
     ("GradingBSplineCurve", "validate", 0, Pointer),  // :328
-    ("GradingBSplineCurve", "getControlPoints", 0, Holder),  // :332
+    ("GradingBSplineCurve", "getControlPoints", 0, Iterator),  // :332
     ("GradingBSplineCurve", "getSplineType", 0, Pointer),  // :336
     ("GradingBSplineCurve", "slopesAreDefault", 0, Pointer),  // :340
     ("GradingBSplineCurve", "getSlopes", 0, Holder),  // :342
@@ -495,12 +512,12 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("Look", "__repr__", 0, Holder),  // :74
     // src/bindings/python/PyNamedTransform.cpp @ v2.5.2
     ("NamedTransform", "getName", 0, Pointer),  // :127
-    ("NamedTransform", "getAliases", 0, Holder),  // :139
+    ("NamedTransform", "getAliases", 0, Iterator),  // :139
     ("NamedTransform", "clearAliases", 0, Pointer),  // :143
     ("NamedTransform", "getFamily", 0, Pointer),  // :146
     ("NamedTransform", "getDescription", 0, Pointer),  // :150
     ("NamedTransform", "getEncoding", 0, Pointer),  // :154
-    ("NamedTransform", "getCategories", 0, Holder),  // :175
+    ("NamedTransform", "getCategories", 0, Iterator),  // :175
     ("NamedTransform", "clearCategories", 0, Pointer),  // :179
     ("NamedTransform", "__repr__", 0, Holder),  // :182
     ("NamedTransform.NamedTransformCategoryIterator", "__len__", 0, Reference),  // :185
@@ -527,7 +544,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("Processor", "getCacheID", 0, Pointer),  // :38
     ("Processor", "getProcessorMetadata", 0, Pointer),  // :40
     ("Processor", "getFormatMetadata", 0, Pointer),  // :42
-    ("Processor", "getTransformFormatMetadata", 0, Holder),  // :45
+    ("Processor", "getTransformFormatMetadata", 0, Iterator),  // :45
     ("Processor", "createGroupTransform", 0, Pointer),  // :49
     ("Processor", "isDynamic", 0, Pointer),  // :62
     ("Processor", "getDefaultGPUProcessor", 0, Pointer),  // :75
@@ -537,8 +554,8 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("Processor.TransformFormatMetadataIterator", "__iter__", 0, Reference),  // :106
     ("Processor.TransformFormatMetadataIterator", "__next__", 0, Reference),  // :111
     // src/bindings/python/PyProcessorMetadata.cpp @ v2.5.2
-    ("ProcessorMetadata", "getFiles", 0, Holder),  // :44
-    ("ProcessorMetadata", "getLooks", 0, Holder),  // :48
+    ("ProcessorMetadata", "getFiles", 0, Iterator),  // :44
+    ("ProcessorMetadata", "getLooks", 0, Iterator),  // :48
     ("ProcessorMetadata.FileIterator", "__len__", 0, Reference),  // :58
     ("ProcessorMetadata.FileIterator", "__getitem__", 0, Reference),  // :59
     ("ProcessorMetadata.FileIterator", "__iter__", 0, Reference),  // :64
@@ -563,7 +580,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("ViewTransform", "getFamily", 0, Pointer),  // :100
     ("ViewTransform", "getDescription", 0, Pointer),  // :104
     ("ViewTransform", "getInterchangeAttributes", 0, Pointer),  // :112
-    ("ViewTransform", "getCategories", 0, Holder),  // :120
+    ("ViewTransform", "getCategories", 0, Iterator),  // :120
     ("ViewTransform", "clearCategories", 0, Pointer),  // :124
     ("ViewTransform", "getReferenceSpaceType", 0, Pointer),  // :126
     ("ViewTransform", "__repr__", 0, Holder),  // :133
@@ -593,7 +610,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("ColorSpaceMenuParameters", "getAppCategories", 0, Pointer),  // :141
     ("ColorSpaceMenuParameters", "getUserCategories", 0, Pointer),  // :146
     ("ColorSpaceMenuParameters", "getIncludeRoles", 0, Pointer),  // :151
-    ("ColorSpaceMenuParameters", "getAddedColorSpaces", 0, Holder),  // :159
+    ("ColorSpaceMenuParameters", "getAddedColorSpaces", 0, Iterator),  // :159
     ("ColorSpaceMenuParameters", "clearAddedColorSpaces", 0, Pointer),  // :163
     ("ColorSpaceMenuParameters", "__repr__", 0, Holder),  // :166
     ("ColorSpaceMenuParameters.AddedColorSpaceIterator", "__len__", 0, Reference),  // :169
@@ -663,11 +680,11 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("MixingSlider", "setSliderMaxEdge", 0, Pointer),  // :49
     ("MixingSlider", "getSliderMaxEdge", 0, Pointer),  // :51
     ("MixingSlider", "__repr__", 0, Reference),  // :58
-    ("MixingColorSpaceManager", "getMixingSpaces", 0, Holder),  // :67
+    ("MixingColorSpaceManager", "getMixingSpaces", 0, Iterator),  // :67
     ("MixingColorSpaceManager", "setSelectedMixingSpaceIdx", 0, Pointer),  // :71
     ("MixingColorSpaceManager", "getSelectedMixingSpaceIdx", 0, Pointer),  // :76
     ("MixingColorSpaceManager", "isPerceptuallyUniform", 0, Pointer),  // :78
-    ("MixingColorSpaceManager", "getMixingEncodings", 0, Holder),  // :80
+    ("MixingColorSpaceManager", "getMixingEncodings", 0, Iterator),  // :80
     ("MixingColorSpaceManager", "setSelectedMixingEncodingIdx", 0, Pointer),  // :84
     ("MixingColorSpaceManager", "getSelectedMixingEncodingIdx", 0, Pointer),  // :89
     ("MixingColorSpaceManager", "getSlider", 0, Pointer),  // :99
@@ -806,7 +823,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("GradingToneTransform", "makeNonDynamic", 0, Pointer),  // :69
     ("GradingToneTransform", "__repr__", 0, Holder),  // :72
     // src/bindings/python/transforms/PyGroupTransform.cpp @ v2.5.2
-    ("GroupTransform", "__iter__", 0, Holder),  // :65
+    ("GroupTransform", "__iter__", 0, Iterator),  // :65
     ("GroupTransform", "__len__", 0, Pointer),  // :69
     ("GroupTransform", "getFormatMetadata", 0, Pointer),  // :76
     ("GroupTransform", "__repr__", 0, Holder),  // :126

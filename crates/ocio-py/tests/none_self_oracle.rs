@@ -13,7 +13,13 @@
 //!   overload whose other argument doesn't load, and an overloaded function's zero-argument
 //!   overload (no second pass) raise the wheel's TypeError, which the port's matches;
 //! - every listed overload the port binds: `None` and arguments of its types give the port's
-//!   ValueError for a pointer or a holder, pybind11's TypeError for a reference.
+//!   ValueError for a pointer or a holder, pybind11's TypeError for a reference, and for an
+//!   overload that only builds an iterator, the iterator, whose `iter()` is itself and whose
+//!   `len`, `next` and indexing give the port's ValueError; each error's text is the one
+//!   docs/improvements.md's U-134 gives;
+//! - an overload that only builds an iterator, against the wheel: the iterator, `iter()` and
+//!   `repr()` as the wheel's, and `len`, `next` and indexing kill the wheel's process, each
+//!   in its own.
 #![cfg(feature = "python")]
 
 mod common;
@@ -144,14 +150,18 @@ fn the_table_is_the_wheels_unnamed_overloads() {
         "missing {missing:?}\nextra {extra:?}"
     );
     assert!(ours.len() > 700, "{}", ours.len());
-    let (mut pointers, mut holders) = (0, 0);
+    let (mut pointers, mut holders, mut iterators) = (0, 0, 0);
     for (c, n, k, kind) in UNNAMED {
         let types = &wheel
             .iter()
             .find(|(wc, wn, wk, _)| wc == c && wn == n && *wk == usize::from(*k))
             .unwrap()
             .3;
-        if matches!(kind, SelfKind::Pointer | SelfKind::Holder) && bound.contains(c) {
+        if matches!(
+            kind,
+            SelfKind::Pointer | SelfKind::Holder | SelfKind::Iterator
+        ) && bound.contains(c)
+        {
             for t in types {
                 assert!(
                     t == "str" || t.starts_with("PyOpenColorIO.PyOpenColorIO."),
@@ -160,9 +170,17 @@ fn the_table_is_the_wheels_unnamed_overloads() {
             }
             pointers += usize::from(*kind == SelfKind::Pointer);
             holders += usize::from(*kind == SelfKind::Holder);
+            iterators += usize::from(*kind == SelfKind::Iterator);
         }
     }
     assert!(pointers > 140 && holders > 50, "{pointers} {holders}");
+    // The 35 of the wheel: Config 13, ColorSpace 2, ColorSpaceSet 2, Context 3,
+    // NamedTransform 2, ProcessorMetadata 2, ViewTransform 1, GroupTransform 1 bound so far.
+    assert!(iterators >= 26, "{iterators}");
+    assert_eq!(
+        UNNAMED.iter().filter(|e| e.3 == SelfKind::Iterator).count(),
+        35
+    );
 }
 
 /// The class paths of the table the port's module binds.
@@ -305,7 +323,8 @@ fn argument(ty: &str) -> Option<&'static str> {
 fn every_bound_overload_with_none_as_self() {
     let wheel = wheel_unnamed();
     common::start_python();
-    let (mut errors, mut refused, mut skipped) = (0, 0, 0);
+    let (null_self, null_iterator) = register_texts();
+    let (mut errors, mut refused, mut skipped, mut iterators) = (0, 0, 0, 0);
     Python::attach(|py| {
         let ocio = py.import("PyOpenColorIO").unwrap();
         for (c, name, k, kind) in UNNAMED {
@@ -362,12 +381,35 @@ fn every_bound_overload_with_none_as_self() {
                         assert!(types.is_empty(), "{code}: {t}");
                         refused += 1;
                     } else {
-                        assert!(
-                            t.starts_with("ValueError") && t.contains("U-134"),
-                            "{code}: {t}"
+                        assert_eq!(
+                            t,
+                            format!(
+                                "ValueError: {}",
+                                null_self.replace("<Class>.<method>", &format!("{c}.{name}"))
+                            ),
+                            "{code}"
                         );
                         errors += 1;
                     }
+                }
+                SelfKind::Iterator => {
+                    outcome.unwrap_or_else(|e| panic!("{code}: {e}"));
+                    let expected = format!(
+                        "ValueError: {}",
+                        null_iterator.replace("<Class>.<method>", &format!("{c}.{name}"))
+                    );
+                    let check = std::ffi::CString::new(
+                        "assert iter(r) is r\nassert type(r).__qualname__.endswith('Iterator')",
+                    )
+                    .unwrap();
+                    py.run(&check, Some(&globals), None)
+                        .unwrap_or_else(|e| panic!("{code}: {e}"));
+                    for op in ["len(r)", "next(r)", "r[0]", "list(r)"] {
+                        let src = std::ffi::CString::new(op).unwrap();
+                        let err = py.run(&src, Some(&globals), None).expect_err(op);
+                        assert_eq!(err.to_string(), expected, "{code}: {op}");
+                    }
+                    iterators += 1;
                 }
                 SelfKind::Reference => {
                     // pybind11's TypeError; an operator's NotImplemented.
@@ -389,8 +431,106 @@ fn every_bound_overload_with_none_as_self() {
             }
         }
     });
-    // The classes bound so far (p6-config): later cards add theirs.
-    assert!(errors >= 231, "{errors}");
+    // The classes bound so far (p6-config): later cards add theirs. (The iterators were 26 of
+    // the errors before U-134's iterators.)
+    assert!(errors >= 205, "{errors}");
     assert!(refused >= 231, "{refused}");
     assert!(skipped <= 2, "{skipped}");
+    assert!(iterators >= 26, "{iterators}");
+}
+
+/// The texts of U-134's two errors as docs/improvements.md gives them (its lines joined),
+/// with `<Class>.<method>` for the method.
+fn register_texts() -> (String, String) {
+    let path = ocio_testkit::paths::workspace_root().join("docs/improvements.md");
+    let text = std::fs::read_to_string(path).unwrap();
+    let start = text.find("### U-134.").unwrap();
+    // To the next entry, or the register's end.
+    let end = text[start..]
+        .find("\n### ")
+        .map_or(text.len(), |e| start + e);
+    let entry = text[start..end]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let quoted = |head: &str| {
+        let at = entry
+            .find(&format!("\"{head}"))
+            .unwrap_or_else(|| panic!("{head}"));
+        let rest = &entry[at + 1..];
+        rest[..rest.find('"').unwrap()].to_string()
+    };
+    (
+        quoted("<Class>.<method>: None as self"),
+        quoted("the iterator <Class>.<method>"),
+    )
+}
+
+/// An overload that only builds an iterator, with `None` as `self`, against the wheel: the
+/// iterator lives, `iter()` gives it back and `repr()` works, as the wheel's; its `len`,
+/// `next` and indexing kill the wheel's process (each in its own), where the port raises
+/// U-134's ValueError.
+#[test]
+fn an_iterator_of_none_against_the_wheel() {
+    let (_, null_iterator) = register_texts();
+    let targets = [
+        ("Config", "getRoles"),
+        ("Config", "getLooks"),
+        ("ColorSpace", "getAliases"),
+        ("ColorSpaceSet", "getColorSpaces"),
+        ("Context", "__iter__"),
+        ("NamedTransform", "getCategories"),
+        ("GroupTransform", "__iter__"),
+    ];
+    // The iterator, as the wheel's (each step's value its type and repr, the address masked).
+    let mut alive = Script::new();
+    for (c, m) in targets {
+        let it = alive.call(n(&format!("OCIO.{c}.{m}")), vec![none()]);
+        alive.call(n("iter"), vec![r(it)]);
+        alive.call(n("type"), vec![r(it)]);
+    }
+    compare(&[alive]);
+    // Its methods that read the null pointer.
+    let mut scripts = Vec::new();
+    for (c, m) in targets {
+        for (op, args) in [
+            ("len", vec![]),
+            ("next", vec![]),
+            ("operator.getitem", vec![i(0)]),
+        ] {
+            let mut sc = Script::new();
+            let it = sc.call(n(&format!("OCIO.{c}.{m}")), vec![none()]);
+            let mut call_args = vec![r(it)];
+            call_args.extend(args);
+            sc.raises(n(op), call_args);
+            scripts.push((format!("{c}.{m}"), sc));
+        }
+    }
+    let json: Vec<Value> = scripts.iter().map(|(_, sc)| sc.json()).collect();
+    let theirs = Oracle::get()
+        .call("py_eval", json!({ "scripts": json }), &[])
+        .result;
+    let theirs = theirs["scripts"].as_array().unwrap();
+    assert_eq!(theirs.len(), scripts.len());
+    for ((method, sc), t) in scripts.iter().zip(theirs) {
+        let step = sc.steps.last().unwrap();
+        let code = &t["crashed"]["returncode"];
+        assert!(
+            code.as_i64().is_some_and(|c| c != 0),
+            "{step}: the wheel's process lives: {t}"
+        );
+        let ours = common::port(&sc.json());
+        let steps = ours["steps"].as_array().unwrap();
+        assert!(steps[0].get("value").is_some(), "{step}: {ours}");
+        let last = &steps[1];
+        assert_eq!(
+            last["raised"]["type"], "builtins.ValueError",
+            "{step}: {last}"
+        );
+        assert_eq!(
+            text(&last["raised"]["message"]),
+            null_iterator.replace("<Class>.<method>", method),
+            "{step}"
+        );
+    }
 }

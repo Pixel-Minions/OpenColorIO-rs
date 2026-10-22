@@ -640,7 +640,7 @@ macro_rules! iterator {
         );
 
         static $iter: Function = method_def!("__iter__", [$self], $qualified, |_, o, a, _| {
-            let _ = iter_rc!(o, a);
+            let _ = this_iter!(o, a);
             Ok(Some(a[0].clone().unbind()))
         });
 

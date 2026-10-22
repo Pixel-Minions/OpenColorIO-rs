@@ -270,7 +270,8 @@ fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> bool {
 
 /// The overload `index` of `f`, `o`, called: where pybind11 would call it with a null `self`
 /// (`None`, an unnamed overload whose `self` is a pointer or a holder, with conversions), the
-/// port's error (U-134, [`crate::self_kind`]); and where pybind11's dispatcher catches C++
+/// port's error (U-134, [`crate::self_kind`]), or for an overload that only builds an iterator
+/// of `self`, that iterator of the null pointer; and where pybind11's dispatcher catches C++
 /// exceptions, a Python callback's, which the library carries as a `ForeignException`, is
 /// its Python exception again (`error_already_set::restore`, chunk 6.6a).
 fn call<'py>(
@@ -293,6 +294,12 @@ fn call<'py>(
         ) && rest_loads(o, values)
         {
             return Err(crate::self_kind::null_self(class, f.name));
+        }
+        // An overload that only builds an iterator of `self`: the iterator of the null
+        // pointer, an instance of the class it returns.
+        if kind == Some(crate::self_kind::SelfKind::Iterator) && rest_loads(o, values) {
+            let it = crate::py_utils::new_null_iterator(py, o.ret, class, f.name)?;
+            return Ok(Some(it.unbind()));
         }
     }
     match ocio_ops::foreign_exception::try_foreign(|| (o.call)(py, o, values, convert)) {

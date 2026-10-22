@@ -516,7 +516,7 @@ static CAT_GETITEM: Function = method_def!(
 );
 
 static CAT_ITER: Function = method_def!("__iter__", [CAT_SELF], CATEGORY_ITERATOR, |_, o, a, _| {
-    let _ = iter_rc!(o, a);
+    let _ = this_iter!(o, a);
     Ok(Some(a[0].clone().unbind()))
 });
 

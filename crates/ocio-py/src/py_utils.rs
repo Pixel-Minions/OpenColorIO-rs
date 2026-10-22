@@ -25,11 +25,18 @@ pub(crate) struct PyIterator {
     obj: Option<Box<dyn Any + Send + Sync>>,
     /// `m_i`.
     index: Mutex<i32>,
+    /// The class and method that made it of `None` as `self` (U-134): `m_obj` is an empty
+    /// `shared_ptr` the wheel's methods read through.
+    null_self: Option<(&'static str, &'static str)>,
 }
 
 impl PyIterator {
-    /// `m_obj`, as the type `T` its class holds.
+    /// `m_obj`, as the type `T` its class holds; for an iterator made of `None` as `self`,
+    /// the port's error where the wheel reads through the null pointer (U-134).
     pub(crate) fn obj<T: 'static>(&self) -> PyResult<&T> {
+        if let (None, Some((class, name))) = (&self.obj, self.null_self) {
+            return Err(crate::self_kind::null_iterator(class, name));
+        }
         self.obj
             .as_ref()
             .and_then(|o| o.downcast_ref::<T>())
@@ -79,6 +86,28 @@ pub(crate) fn new_iterator<'py>(
     let value = PyIterator {
         obj,
         index: Mutex::new(0),
+        null_self: None,
+    };
+    pybind11::set_value(&instance, qualified, Bound::new(py, value)?.into_any())?;
+    Ok(instance)
+}
+
+/// The iterator `class.name` returns for `None` as `self` (an unnamed overload taking the
+/// class's `shared_ptr`, U-134): an instance of the iterator class `qualified` whose `m_obj` is
+/// null, which the wheel's `__iter__` returns and whose other methods read through it.
+pub(crate) fn new_null_iterator<'py>(
+    py: Python<'py>,
+    qualified: &str,
+    class: &'static str,
+    name: &'static str,
+) -> PyResult<Bound<'py, PyAny>> {
+    let cls = pybind11::class(py, qualified)
+        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(qualified.to_string()))?;
+    let instance = cls.call_method1("__new__", (&cls,))?;
+    let value = PyIterator {
+        obj: None,
+        index: Mutex::new(0),
+        null_self: Some((class, name)),
     };
     pybind11::set_value(&instance, qualified, Bound::new(py, value)?.into_any())?;
     Ok(instance)

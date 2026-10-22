@@ -5271,19 +5271,29 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `OCIO.Config.archive(None, 'out.ocioz')`, `OCIO.PyConfigIOProxy.getLutData(None, 'a')`:
   the wheel's process dies (probed on Windows, 2026-10-22, each in its own process). A lambda
   taking a reference (`Class &`: the iterators, `bind_vector`, `defRepr` of a class held by
-  value) refuses `None` with pybind11's TypeError, as a named overload does.
+  value) refuses `None` with pybind11's TypeError, as a named overload does. A lambda taking
+  the `shared_ptr` that only builds an iterator holding it (35 overloads: the iterator getters
+  of `Config`, such as `getRoles` and `getLooks`, of `ColorSpace`, `ColorSpaceSet`,
+  `Context`, `NamedTransform`, `ViewTransform`, `ProcessorMetadata` and others, and
+  `Context.__iter__`, `GroupTransform.__iter__`) returns an iterator of the empty pointer that
+  lives: `iter()` gives it back and `repr()` works, and its `__len__`, `__getitem__` and
+  `__next__` read through the null pointer (`len(OCIO.Config.getRoles(None))`: the process
+  dies; probed on Windows, 2026-10-22).
 - **Who notices:** Python code that calls a method through its class with `None` for `self`.
 - **A fix:** pybind11 could give every method's `self` a record that refuses `None`
   (`py::arg("self").none(false)`), or upstream could name its arguments.
 - **Status:** the port raises ValueError "<Class>.<method>: None as self, a null pointer the
   wheel calls the method through (its process dies; docs/improvements.md, U-134)" where
   pybind11 would make that call (`self` `None` with conversions, the other arguments loading),
-  and pybind11's TypeError elsewhere, as the wheel. Every unnamed method overload of the
-  wheel's classes is listed with how its `self` binds, read from upstream's bindings
-  (`crates/ocio-py/src/self_kind.rs`, owner decision 2026-10-22), and the dispatcher checks
-  it (`crates/ocio-py/src/dispatch.rs`, `call`); in `p6-config`. `none_self_oracle.rs`: the
+  and pybind11's TypeError elsewhere, as the wheel. An overload that only builds an iterator
+  returns it, as the wheel's, and its `__len__`, `__getitem__` and `__next__` raise ValueError
+  "the iterator <Class>.<method> made of None as self, a null pointer the wheel's iterator
+  reads through (its process dies; docs/improvements.md, U-134)". Every unnamed method
+  overload of the wheel's classes is listed with how its `self` binds, read from upstream's
+  bindings (`crates/ocio-py/src/self_kind.rs`, owner decision 2026-10-22), and the
+  dispatcher checks it (`crates/ocio-py/src/dispatch.rs`, `call`); in `p6-config`. `none_self_oracle.rs`: the
   table is the wheel's unnamed overloads, exactly; a probe per kind against the wheel in its
-  own process; every listed overload the port binds.
+  own process; every listed overload the port binds, each error's text as given here.
 
 ### U-141. A menu of a role that names no color space
 
