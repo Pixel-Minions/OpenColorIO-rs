@@ -3487,6 +3487,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`grading_hue_curve_transforms_save_in_version_1_as_in_the_wheel`) checks it against the
   wheel.
 
+## App helpers
+
+### I-316. A menu's last fall-back lists color spaces the parameters exclude
+
+- **Upstream:** when neither the app categories, the encodings nor the user categories match
+  any item, `FindColorSpaceInfos` falls back to every active color space of the reference
+  space type, and every active named transform if they are included
+  (`CategoryHelpers.cpp:524-554` @ v2.5.2). It doesn't test `includeColorSpaces` there, as it
+  does for the named transforms, so a menu of named transforms only
+  (`setIncludeColorSpaces(false)`, `setIncludeNamedTransforms(true)`) whose categories match
+  nothing lists all the color spaces too (probed against the wheel 2026-10-22).
+- **Who notices:** an application that asks for a menu of named transforms by category, on a
+  config where no named transform (or one without categories, with `treatNoCategoryAsAny`) has
+  them.
+- **A fix:** test `includeColorSpaces` in the last fall-back too.
+- **Status:** ported as upstream in `p5-helpers-1` (5.7a),
+  `apphelpers::category_helpers::find_color_space_infos`; checked against the wheel's menus
+  (`category_helpers_oracle_tests.rs`), where a mutant that tests `includeColorSpaces` fails.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

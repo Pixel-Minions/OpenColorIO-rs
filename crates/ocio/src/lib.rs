@@ -5,6 +5,7 @@
 //! (PLAN.md §2): results, text output, errors and accepted configs.
 #![deny(unsafe_code)]
 
+pub mod apphelpers;
 pub mod baker;
 pub mod baking_utils;
 pub mod builtinconfigs;
