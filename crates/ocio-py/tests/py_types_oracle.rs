@@ -67,7 +67,7 @@ const COMPLETE: [&str; 35] = [
 
 /// The classes a binding makes itself rather than bindPyTypes' declarations (bindPyConfigIOProxy's
 /// `py::bind_vector`): each compares with the wheel's entry for entry.
-const OWN_CLASSES: [&str; 1] = ["vector_of_uint8_t"];
+const OWN_CLASSES: [&str; 2] = ["vector_of_uint8_t", "PyConfigIOProxy"];
 
 /// The stand-ins `common::start_python` adds to the port's module until WP 6.6 binds them.
 const STAND_INS: [&str; 3] = [

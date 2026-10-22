@@ -18,7 +18,9 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use pyo3::prelude::*;
-use pyo3::types::{PyByteArray, PyCapsule, PyList, PySlice, PySliceMethods};
+use pyo3::types::{
+    PyByteArray, PyCapsule, PyList, PySlice, PySliceMethods, PyType, PyWeakrefReference,
+};
 
 use crate::dispatch::{Cast, Function, Overload, Param};
 use crate::py_transform::{class, def, none, ok};
@@ -950,10 +952,258 @@ fn bind_vector(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-/// Port of `bindPyConfigIOProxy` (src/bindings/python/PyConfigIOProxy.cpp:52-62 @ v2.5.2), so
-/// far its vector class (54-56).
+// ---------------------------------------------------------------------------------------------
+// PyConfigIOProxy
+
+/// The C++ value of a `PyConfigIOProxy` instance: the trampoline `PyConfigIOProxy`
+/// (PyConfigIOProxy.cpp:18-50 @ v2.5.2), which holds nothing of its own; its virtual functions
+/// call the Python overrides of the instance pybind11 registered for it ([`get_override`]).
+#[derive(Debug, Default)]
+pub(crate) struct ProxyNode;
+
+/// The types pybind11 found to have no Python override of a function (`get_type_override`'s
+/// `inactive_override_cache`), by the type's address and the function's name, each with a
+/// weak reference to the type, so that a type that died doesn't answer for another made at its
+/// address.
+static INACTIVE_OVERRIDES: Mutex<Vec<(usize, &'static str, Py<PyWeakrefReference>)>> =
+    Mutex::new(Vec::new());
+
+/// Whether the cache holds `(ty, name)`, dropping the entries of types that died.
+fn inactive(ty: &Bound<'_, PyType>, name: &str) -> bool {
+    let py = ty.py();
+    let mut cache = INACTIVE_OVERRIDES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.retain(|(_, _, w)| w.bind(py).upgrade().is_some());
+    let key = ty.as_ptr() as usize;
+    cache.iter().any(|(k, n, _)| *k == key && *n == name)
+}
+
+/// `function override = getattr(self, name, function())`: the attribute, or none when getting
+/// it fails (the error cleared); an attribute Python can't call is a TypeError ("Object of type
+/// '<C name>' is not an instance of 'function'", pybind11's `function` check).
+fn override_attr<'py>(this: &Bound<'py, PyAny>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let Ok(attr) = this.getattr(name) else {
+        return Ok(None);
+    };
+    if !attr.is_callable() {
+        return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "Object of type '{}' is not an instance of 'function'",
+            pybind11::tp_name(&attr.get_type())?
+        )));
+    }
+    Ok(Some(attr))
+}
+
+/// `override.is_cpp_function()`: the function of a method (an `instancemethod` or a bound
+/// method, one level, `detail::get_function`) is a C function (`PyCFunction_Check`).
+fn is_cpp_function(f: &Bound<'_, PyAny>) -> PyResult<bool> {
+    let py = f.py();
+    let types = py.import("types")?;
+    let kind = f.get_type().name()?;
+    let function = if kind == "instancemethod" || f.is_instance(&types.getattr("MethodType")?)? {
+        f.getattr("__func__")?
+    } else {
+        f.clone()
+    };
+    function.is_instance(&types.getattr("BuiltinFunctionType")?)
+}
+
+/// Whether the calling Python frame is the override itself, called on `this`: its code named
+/// `name` with a positional parameter, whose first local is `this` (`get_type_override`'s
+/// recursion check, through `PyThreadState_GetFrame` and `PyEval_GetFrameLocals`).
+fn called_from_override(this: &Bound<'_, PyAny>, name: &str) -> PyResult<bool> {
+    let py = this.py();
+    let Ok(frame) = py.import("sys")?.call_method1("_getframe", (0,)) else {
+        return Ok(false);
+    };
+    let code = frame.getattr("f_code")?;
+    let co_name: String = code.getattr("co_name")?.str()?.to_string();
+    let argcount: isize = code.getattr("co_argcount")?.extract()?;
+    if co_name != name || argcount <= 0 {
+        return Ok(false);
+    }
+    let locals = frame.getattr("f_locals")?;
+    let first = code.getattr("co_varnames")?.get_item(0)?;
+    let caller = locals.call_method1("get", (first,))?;
+    Ok(caller.is(this))
+}
+
+/// `get_override(this, name)` of the proxy `this` (`get_type_override`, pybind11 3.0): its
+/// Python override of the virtual function `name`, or none: the type known to have none; an
+/// attribute that is a C function (pybind11's own binding: the type is then remembered); a call
+/// from the override itself on the same instance.
+pub(crate) fn get_override<'py>(
+    this: &Bound<'py, PyAny>,
+    name: &'static str,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let ty = this.get_type();
+    if inactive(&ty, name) {
+        return Ok(None);
+    }
+    let attr = override_attr(this, name)?;
+    if let Some(f) = &attr
+        && is_cpp_function(f)?
+    {
+        let weak = PyWeakrefReference::new(&ty)?.unbind();
+        INACTIVE_OVERRIDES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((ty.as_ptr() as usize, name, weak));
+        return Ok(None);
+    }
+    if called_from_override(this, name)? {
+        return Ok(None);
+    }
+    Ok(attr)
+}
+
+/// pybind11's error of a pure virtual function without a Python override.
+pub(crate) fn pure_virtual(name: &str) -> PyErr {
+    pyo3::exceptions::PyRuntimeError::new_err(format!(
+        "Tried to call pure virtual function \"ConfigIOProxy::{name}\""
+    ))
+}
+
+/// An override's result as a `std::string` (`cast_safe<std::string>`): pybind11's string
+/// caster with conversions (`str` as strict UTF-8, `bytes`, `bytearray`), or [`cast_error`].
+pub(crate) fn cast_string(result: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    <crate::dispatch::StdString as Cast>::load(result, true)
+        .map(|s| s.0)
+        .ok_or_else(|| cast_error(result))
+}
+
+/// An override's result as a `std::vector<uint8_t>` (`cast_safe`): an instance of the class,
+/// moved from when nothing else refers to it, else copied; a `list` or a `bytearray` through
+/// the implicit conversion (its temporary moved from); else [`cast_error`].
+pub(crate) fn cast_vector(result: &Bound<'_, PyAny>) -> PyResult<ByteVector> {
+    if let Some(rc) = holder::<ByteVector>(result, VECTOR)? {
+        // `object::ref_count()`: what PyO3 deprecates for `ffi::Py_REFCNT`, which is unsafe.
+        #[allow(deprecated)]
+        let unreferenced = result.get_refcnt() == 1;
+        if unreferenced {
+            return Ok(std::mem::take(&mut *rc.lock()));
+        }
+        return Ok(ByteVector::from_bytes(rc.lock().data.clone()));
+    }
+    match vector_arg(result, true)? {
+        Some(rc) => Ok(std::mem::take(&mut *rc.lock())),
+        None => Err(cast_error(result)),
+    }
+}
+
+const PROXY: &str = q!("PyConfigIOProxy");
+const PROXY_SELF: Param = Param::new("self", PROXY);
+
+// .def(py::init()) (PyConfigIOProxy.cpp:59 @ v2.5.2).
+static PROXY_INIT: Function = Function {
+    name: "__init__",
+    constructor: true,
+    method: true,
+    operator: false,
+    overloads: &[Overload {
+        params: &[PROXY_SELF],
+        ret: "None",
+        call: |py, o, a, _| {
+            construct(&a[0], o.params[0].ty, Shared::new(ProxyNode))?;
+            none(py)
+        },
+        pos_only: 0,
+    }],
+};
+
+// .def("getLutData", &ConfigIOProxy::getLutData) (PyConfigIOProxy.cpp:60 @ v2.5.2): the
+// trampoline's `PYBIND11_OVERRIDE_PURE(std::vector<uint8_t>, ConfigIOProxy, getLutData,
+// filepath)` (22-30).
+static GET_LUT_DATA: Function = crate::method_def!(
+    "getLutData",
+    [PROXY_SELF, Param::new("arg0", "str")],
+    VECTOR,
+    |py, o, a, convert| {
+        let _this = this_shared!(o, a, ProxyNode);
+        let crate::dispatch::CharPtr(filepath) =
+            crate::arg!(a, 1, convert, crate::dispatch::CharPtr);
+        let Some(f) = get_override(&a[0], "getLutData")? else {
+            return Err(pure_virtual("getLutData"));
+        };
+        let arg = crate::dispatch::char_ptr_to_py(py, filepath.as_deref())?;
+        let result = f.call1((arg,))?;
+        let data = cast_vector(&result)?;
+        vector_out(py, data)
+    }
+);
+
+// .def("getConfigData", &ConfigIOProxy::getConfigData) (PyConfigIOProxy.cpp:61 @ v2.5.2): the
+// trampoline's `PYBIND11_OVERRIDE_PURE(std::string, ConfigIOProxy, getConfigData, )` (32-39).
+static GET_CONFIG_DATA: Function =
+    crate::method_def!("getConfigData", [PROXY_SELF], "str", |py, o, a, _| {
+        let _this = this_shared!(o, a, ProxyNode);
+        let Some(f) = get_override(&a[0], "getConfigData")? else {
+            return Err(pure_virtual("getConfigData"));
+        };
+        let result = f.call0()?;
+        let text = cast_string(&result)?;
+        Ok(Some(
+            crate::dispatch::std_string_to_py(py, &text)?
+                .into_any()
+                .unbind(),
+        ))
+    });
+
+// .def("getFastLutFileHash", &ConfigIOProxy::getFastLutFileHash) (PyConfigIOProxy.cpp:62 @
+// v2.5.2): the trampoline's `PYBIND11_OVERRIDE_PURE(std::string, ConfigIOProxy,
+// getFastLutFileHash, filepath)` (41-49).
+static GET_FAST_LUT_FILE_HASH: Function = crate::method_def!(
+    "getFastLutFileHash",
+    [PROXY_SELF, Param::new("arg0", "str")],
+    "str",
+    |py, o, a, convert| {
+        let _this = this_shared!(o, a, ProxyNode);
+        let crate::dispatch::CharPtr(filepath) =
+            crate::arg!(a, 1, convert, crate::dispatch::CharPtr);
+        let Some(f) = get_override(&a[0], "getFastLutFileHash")? else {
+            return Err(pure_virtual("getFastLutFileHash"));
+        };
+        let arg = crate::dispatch::char_ptr_to_py(py, filepath.as_deref())?;
+        let result = f.call1((arg,))?;
+        let text = cast_string(&result)?;
+        Ok(Some(
+            crate::dispatch::std_string_to_py(py, &text)?
+                .into_any()
+                .unbind(),
+        ))
+    }
+);
+
+/// Port of `py::class_<ConfigIOProxy, std::shared_ptr<ConfigIOProxy>, PyConfigIOProxy>(m,
+/// "PyConfigIOProxy")` and its definitions (PyConfigIOProxy.cpp:58-62 @ v2.5.2).
+fn bind_proxy(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let py = m.py();
+    let cls = pybind11::new_class(
+        py,
+        "PyConfigIOProxy",
+        "PyConfigIOProxy",
+        &[],
+        &[("__doc__", py.None().into_bound(py))],
+    )?;
+    cls.setattr("_pybind11_conduit_v1_", crate::enums::conduit(py)?)?;
+    for f in [
+        &PROXY_INIT,
+        &GET_LUT_DATA,
+        &GET_CONFIG_DATA,
+        &GET_FAST_LUT_FILE_HASH,
+    ] {
+        def(&cls, f)?;
+    }
+    m.setattr("PyConfigIOProxy", &cls)?;
+    Ok(())
+}
+
+/// Port of `bindPyConfigIOProxy` (src/bindings/python/PyConfigIOProxy.cpp:52-63 @ v2.5.2): the
+/// vector class (54-56), then the proxy class (58-62).
 pub(crate) fn bind_py_config_io_proxy(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    bind_vector(m)
+    bind_vector(m)?;
+    bind_proxy(m)
 }
 
 /// The capsule of a `module_local` class's type record, which pybind11 makes without a name.

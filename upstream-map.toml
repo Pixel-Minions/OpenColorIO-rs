@@ -3782,7 +3782,7 @@ path = "src/bindings/python/PyConfigIOProxy.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_config_io_proxy.rs"]
 status = "partial"
-note = "p6-config 6.6a: vector_of_uint8_t; PyConfigIOProxy to come"
+note = "p6-config 6.6a: vector_of_uint8_t, PyConfigIOProxy from Python; the library calling it to come"
 
 [[file]]
 path = "src/bindings/python/PyContext.cpp"

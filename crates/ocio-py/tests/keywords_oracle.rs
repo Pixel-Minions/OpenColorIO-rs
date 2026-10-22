@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 
 /// The classes bound so far whose functions the test calls, with their nested classes (the
 /// iterators), as the wheel's module path names them.
-const CLASSES: [&str; 30] = [
+const CLASSES: [&str; 31] = [
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -59,6 +59,7 @@ const CLASSES: [&str; 30] = [
     "LookTransform",
     "BuiltinConfigRegistry",
     "vector_of_uint8_t",
+    "PyConfigIOProxy",
 ];
 
 /// The nested classes no function of the module returns: no instance to call them with.
@@ -129,6 +130,8 @@ fn instances(sc: &mut Script) -> Vec<(String, usize)> {
         vec![json!({ "list": [i(1), i(2)] })],
     );
     put("vector_of_uint8_t", bytes);
+    let proxy = sc.call(n("OCIO.PyConfigIOProxy"), vec![]);
+    put("PyConfigIOProxy", proxy);
     let configs = sc.call(n("OCIO.BuiltinConfigRegistry"), vec![]);
     put("BuiltinConfigRegistry", configs);
     put(
