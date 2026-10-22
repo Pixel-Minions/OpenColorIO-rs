@@ -528,6 +528,22 @@ fn explicit_cases() -> Vec<Case<GtParams>> {
                 GtParams::new(style, t),
             ));
         }
+        // Whites whose width, or start and width, are huge: the increasing path's coefficients
+        // overflow in `float` (the verifier's Linux table flips of WB_FWD `w31`).
+        let mut t = GradingTone::new(style);
+        t.whites = with_rgbm(t.whites, 1.6, 1.6, 1.6, 1.6);
+        t.whites.width = 3e38;
+        cases.push(Case::new(
+            format!("{s}, whites 1.6, whites.width 3e38"),
+            GtParams::new(style, t),
+        ));
+        let mut t = all_on(style, true);
+        t.whites.start = 1e38;
+        t.whites.width = 1e38;
+        cases.push(Case::new(
+            format!("{s}, all tones, low true, whites start and width 1e38"),
+            GtParams::new(style, t),
+        ));
         // The s-contrast alone at values where `t < x1` and `t <= x1` of the forward
         // renderer's top segment differ in `float` (the verifier's mutant A24).
         if style != GradingStyle::Lin {
