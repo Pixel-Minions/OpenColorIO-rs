@@ -27,6 +27,7 @@ use ocio::{
     Interpolation, Lut1DHueAdjust, NegativeStyle, OptimizationFlags, Processor, RangeStyle,
     Transform, TransformDirection,
 };
+use ocio::{GradingHueCurve, HsyTransformStyle, HueCurveType};
 use ocio::{GradingPrimary, GradingRgbm, GradingStyle};
 use ocio::{GradingRgbmsw, GradingTone};
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
@@ -797,6 +798,24 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("isDynamic", Dumped::Bool(t.is_dynamic()));
             "GradingToneTransform"
         }
+        Transform::GradingHueCurve(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_GRADING_HUE_CURVE"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getStyle", dumped_enum(grading_style_name(t.style())));
+            put("getValue", dump_grading_hue_curve(&t.value()));
+            put(
+                "getRGBToHSY",
+                dumped_enum(match t.rgb_to_hsy() {
+                    HsyTransformStyle::None => "HSY_TRANSFORM_NONE",
+                    HsyTransformStyle::Transform1 => "HSY_TRANSFORM_1",
+                }),
+            );
+            put("isDynamic", Dumped::Bool(t.is_dynamic()));
+            "GradingHueCurveTransform"
+        }
         other => panic!("no dump for {other:?}"),
     };
     (class.to_string(), getters)
@@ -1129,6 +1148,29 @@ pub(crate) fn dump_grading_tone(v: &GradingTone) -> Dumped {
             ("scontrast", Dumped::F64(v.scontrast)),
             ("shadows", dump_grading_rgbmsw(&v.shadows)),
             ("whites", dump_grading_rgbmsw(&v.whites)),
+        ],
+    )
+}
+
+/// A `GradingHueCurve`, as `checks.dump` writes it out: `getDrawCurveOnly`, `isIdentity`, and
+/// its eight curves as properties.
+pub(crate) fn dump_grading_hue_curve(v: &GradingHueCurve) -> Dumped {
+    let c = |t| dump_b_spline_curve(v.curve(t).expect("a hue curve type"));
+    dumped_object(
+        "GradingHueCurve",
+        &[
+            ("getDrawCurveOnly", Dumped::Bool(v.get_draw_curve_only())),
+            ("isIdentity", Dumped::Bool(v.is_identity())),
+        ],
+        &[
+            ("hue_fx", c(HueCurveType::HueFx)),
+            ("hue_hue", c(HueCurveType::HueHue)),
+            ("hue_lum", c(HueCurveType::HueLum)),
+            ("hue_sat", c(HueCurveType::HueSat)),
+            ("lum_lum", c(HueCurveType::LumLum)),
+            ("lum_sat", c(HueCurveType::LumSat)),
+            ("sat_lum", c(HueCurveType::SatLum)),
+            ("sat_sat", c(HueCurveType::SatSat)),
         ],
     )
 }

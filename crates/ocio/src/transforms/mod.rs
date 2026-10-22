@@ -16,6 +16,7 @@ pub mod exposure_contrast_transform;
 pub mod file_format;
 pub mod file_transform;
 pub mod fixed_function_transform;
+pub mod grading_hue_curve_transform;
 pub mod grading_primary_transform;
 pub mod grading_rgb_curve_transform;
 pub mod grading_tone_transform;

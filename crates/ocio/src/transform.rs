@@ -43,6 +43,9 @@ use crate::transforms::file_transform::{FileTransform, build_file_transform_ops}
 use crate::transforms::fixed_function_transform::{
     FixedFunctionTransform, build_fixed_function_op, create_fixed_function_transform,
 };
+use crate::transforms::grading_hue_curve_transform::{
+    GradingHueCurveTransform, build_grading_hue_curve_op, create_grading_hue_curve_transform,
+};
 use crate::transforms::grading_primary_transform::{
     GradingPrimaryTransform, build_grading_primary_op, create_grading_primary_transform,
 };
@@ -148,6 +151,8 @@ pub enum Transform {
     File(FileTransform),
     /// `FixedFunctionTransform`.
     FixedFunction(FixedFunctionTransform),
+    /// `GradingHueCurveTransform`.
+    GradingHueCurve(GradingHueCurveTransform),
     /// `GradingPrimaryTransform`.
     GradingPrimary(GradingPrimaryTransform),
     /// `GradingRGBCurveTransform`.
@@ -231,6 +236,12 @@ impl From<FileTransform> for Transform {
 impl From<FixedFunctionTransform> for Transform {
     fn from(t: FixedFunctionTransform) -> Transform {
         Transform::FixedFunction(t)
+    }
+}
+
+impl From<GradingHueCurveTransform> for Transform {
+    fn from(t: GradingHueCurveTransform) -> Transform {
+        Transform::GradingHueCurve(t)
     }
 }
 
@@ -340,6 +351,7 @@ impl Transform {
             Transform::ExposureContrast(_) => TransformType::ExposureContrast,
             Transform::File(_) => TransformType::File,
             Transform::FixedFunction(_) => TransformType::FixedFunction,
+            Transform::GradingHueCurve(_) => TransformType::GradingHueCurve,
             Transform::GradingPrimary(_) => TransformType::GradingPrimary,
             Transform::GradingRgbCurve(_) => TransformType::GradingRgbCurve,
             Transform::GradingTone(_) => TransformType::GradingTone,
@@ -370,6 +382,7 @@ impl Transform {
             Transform::ExposureContrast(t) => t.direction(),
             Transform::File(t) => t.direction(),
             Transform::FixedFunction(t) => t.direction(),
+            Transform::GradingHueCurve(t) => t.direction(),
             Transform::GradingPrimary(t) => t.direction(),
             Transform::GradingRgbCurve(t) => t.direction(),
             Transform::GradingTone(t) => t.direction(),
@@ -400,6 +413,7 @@ impl Transform {
             Transform::ExposureContrast(t) => t.set_direction(dir),
             Transform::File(t) => t.set_direction(dir),
             Transform::FixedFunction(t) => t.set_direction(dir),
+            Transform::GradingHueCurve(t) => t.set_direction(dir),
             Transform::GradingPrimary(t) => t.set_direction(dir),
             Transform::GradingRgbCurve(t) => t.set_direction(dir),
             Transform::GradingTone(t) => t.set_direction(dir),
@@ -431,6 +445,7 @@ impl Transform {
             Transform::ExposureContrast(t) => t.validate(),
             Transform::File(t) => t.validate(),
             Transform::FixedFunction(t) => t.validate(),
+            Transform::GradingHueCurve(t) => t.validate(),
             Transform::GradingPrimary(t) => t.validate(),
             Transform::GradingRgbCurve(t) => t.validate(),
             Transform::GradingTone(t) => t.validate(),
@@ -514,6 +529,7 @@ impl Transform {
             Transform::ExposureContrast(t) => t.write_text(os),
             Transform::File(t) => t.write_text(os),
             Transform::FixedFunction(t) => t.write_text(os),
+            Transform::GradingHueCurve(t) => t.write_text(os),
             Transform::GradingPrimary(t) => t.write_text(os),
             Transform::GradingRgbCurve(t) => t.write_text(os),
             Transform::GradingTone(t) => t.write_text(os),
@@ -799,6 +815,7 @@ fn build_leaf_ops(
         Transform::GradingPrimary(t) => build_grading_primary_op(ops, t, dir),
         Transform::GradingRgbCurve(t) => build_grading_rgb_curve_op(ops, t, dir),
         Transform::GradingTone(t) => build_grading_tone_op(ops, t, dir),
+        Transform::GradingHueCurve(t) => build_grading_hue_curve_op(ops, t, dir),
         Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
         Transform::Lut3D(lut_transform) => build_lut3d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
@@ -838,12 +855,7 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::FixedFunction(_) => create_fixed_function_transform(group, op),
         OpData::GradingRgbCurve(_) => create_grading_rgb_curve_transform(group, op),
         OpData::Lut3D(_) => create_lut3d_transform(group, op),
-        // `CreateGradingHueCurveTransform` (src/OpenColorIO/ops/gradinghuecurve/
-        // GradingHueCurveOp.cpp:219-232 @ v2.5.2) comes with `GradingHueCurveTransform` (WP
-        // 5.5e).
-        OpData::GradingHueCurve(_) => Err(Exception::new(
-            "CreateGradingHueCurveTransform is not ported yet (WP 5.5e).",
-        )),
+        OpData::GradingHueCurve(_) => create_grading_hue_curve_transform(group, op),
         OpData::GradingTone(_) => create_grading_tone_transform(group, op),
         OpData::ExposureContrast(_) => create_exposure_contrast_transform(group, op),
         OpData::GradingPrimary(_) => create_grading_primary_transform(group, op),

@@ -2,7 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of tests/cpu/ops/gradinghuecurve/GradingHueCurveOp_tests.cpp @ v2.5.2. Its
-//! `create_transform` and `build_ops` need the `GradingHueCurveTransform` (5.5e).
+//! `create_transform` and `build_ops` need the `GradingHueCurveTransform`: they are in `ocio`
+//! (crates/ocio/src/transforms/grading_hue_curve_transform_tests.rs).
 
 use super::*;
 use crate::open_color_types::GradingStyle;

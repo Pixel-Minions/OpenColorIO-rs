@@ -7,11 +7,11 @@
 //! through yaml-cpp's emitter ([`save_transform`], [`write`]: `Config::serialize`).
 //!
 //! The reader: the typed loaders and their messages, the helpers that report unknown keys, bad
-//! values and repeated keys, and the transforms ([`load_transform`]), except the grading
-//! transforms (WP 5.5b-e); and the color spaces, looks, view transforms and
-//! named transforms, with their descriptions and interchange attributes; the views, the file and
-//! viewing rules, and the config itself ([`load_config`], [`read`]: `Config::CreateFromStream`).
-//! The writer: every saver but those of the grading transforms (WP 5.5b-e).
+//! values and repeated keys, and the transforms ([`load_transform`]); and the color spaces,
+//! looks, view transforms and named transforms, with their descriptions and interchange
+//! attributes; the views, the file and viewing rules, and the config itself ([`load_config`],
+//! [`read`]: `Config::CreateFromStream`).
+//! The writer: every saver.
 //!
 //! **Errors.** A loader fails with OCIO's `Exception` or with an exception of yaml-cpp, which
 //! upstream lets through (a key that isn't a string, a zombie node): [`LoadError`]. Upstream
@@ -41,7 +41,11 @@ use ocio_ops::open_color_types::{
     transform_direction_to_string,
 };
 use ocio_ops::open_color_types::{GradingStyle, grading_style_to_string};
+use ocio_ops::open_color_types::{HsyTransformStyle, HueCurveType};
 use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
+use ocio_ops::ops::gradinghuecurve::grading_hue_curve::{
+    GradingHueCurve, default_curve as default_hue_curve,
+};
 use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
 use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::GradingBSplineCurve;
 use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::{
@@ -77,6 +81,7 @@ use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransfo
 use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
 use crate::transforms::file_transform::FileTransform;
 use crate::transforms::fixed_function_transform::FixedFunctionTransform;
+use crate::transforms::grading_hue_curve_transform::GradingHueCurveTransform;
 use crate::transforms::grading_primary_transform::GradingPrimaryTransform;
 use crate::transforms::grading_rgb_curve_transform::GradingRgbCurveTransform;
 use crate::transforms::grading_tone_transform::GradingToneTransform;
@@ -1717,6 +1722,81 @@ fn load_grading_tone(node: &Node) -> LoadResult<GradingToneTransform> {
     Ok(t)
 }
 
+/// The hue curves' keys in the YAML, in `HueCurveType` order.
+///
+/// Port of `curveNames` of `save(YAML::Emitter&, ConstGradingHueCurveTransformRcPtr)`
+/// (OCIOYaml.cpp:2293-2294 @ v2.5.2), which the loader spells the same.
+const HUE_CURVE_NAMES: [&str; 8] = [
+    "hue_hue", "hue_sat", "hue_lum", "lum_sat", "sat_sat", "lum_lum", "sat_lum", "hue_fx",
+];
+
+/// A `GradingHueCurveTransform`: `style`, `direction`, `hsy_transform` (only `none`), the eight
+/// curves by their names, and `name`. A curve not given is its type's default curve for the
+/// style the transform has at the end; the curves are validated, then the transform takes
+/// them. An unknown key is a warning, "Unknown key in GradingHueCurveTransform: 'key'.".
+///
+/// Port of `load(const YAML::Node&, GradingHueCurveTransformRcPtr&)` (OCIOYaml.cpp:2148-2259 @
+/// v2.5.2).
+fn load_grading_hue_curve(node: &Node) -> LoadResult<GradingHueCurveTransform> {
+    check_duplicates(node)?;
+
+    let mut t = GradingHueCurveTransform::new(GradingStyle::Log);
+
+    let mut curves: [Option<GradingBSplineCurve>; 8] = Default::default();
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"style" => {
+                let style = load_string(value)?;
+                t.set_style(grading_style_from_string(Some(c_str(&style)))?);
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"hsy_transform" => {
+                let value = load_string(value)?;
+                if value != b"none" {
+                    return Err(throw_value_error(
+                        node.tag()?,
+                        &iter.first,
+                        b"Unknown hsy_transform value.",
+                    ));
+                }
+                t.set_rgb_to_hsy(HsyTransformStyle::None);
+            }
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            other => match HUE_CURVE_NAMES.iter().position(|n| n.as_bytes() == other) {
+                Some(c) => {
+                    let sc = curves[c].insert(GradingBSplineCurve::with_hue_curve_type(
+                        0,
+                        HueCurveType::CURVES[c],
+                    ));
+                    load_b_spline_curve(&iter.first, value, sc)?;
+                }
+                None => log_unknown_key_warning_in(node.tag()?, &iter.first)?,
+            },
+        }
+    }
+
+    let style = t.style();
+    let [hh, hs, hl, ls, ss, ll, sl, hfx] = HueCurveType::CURVES.map(|c| {
+        curves[c as usize]
+            .take()
+            .unwrap_or_else(|| default_hue_curve(c, style))
+    });
+
+    let curves = GradingHueCurve::with_curves(&hh, &hs, &hl, &ls, &ss, &ll, &sl, &hfx)?;
+
+    t.set_value(&curves)?;
+    Ok(t)
+}
+
 /// A `FileTransform`: `src`, `cccid`, `cdl_style`, `interpolation`, `direction`.
 ///
 /// Port of `load(const YAML::Node&, FileTransformRcPtr&)` (OCIOYaml.cpp:1336-1382 @ v2.5.2).
@@ -1769,16 +1849,6 @@ fn load_look_transform(node: &Node) -> LoadResult<LookTransform> {
         }
     }
     Ok(t)
-}
-
-/// The error of a transform class whose loader is not ported yet: `work_package` ports it.
-fn not_ported_yet(tag: &[u8], work_package: &str) -> LoadError {
-    let mut msg = b"Loading a !<".to_vec();
-    msg.extend_from_slice(tag);
-    msg.extend_from_slice(
-        format!("> from a config is not ported yet ({work_package}).").as_bytes(),
-    );
-    LoadError::Ocio(Exception::new(msg))
 }
 
 /// A transform: a map, whose tag names its class. Another node fails with "Unsupported
@@ -1838,9 +1908,7 @@ fn load_leaf(node: &Node) -> LoadResult<Transform> {
         b"GradingPrimaryTransform" => load_grading_primary(node)?.into(),
         b"GradingRGBCurveTransform" => load_grading_rgb_curve(node)?.into(),
         b"GradingToneTransform" => load_grading_tone(node)?.into(),
-        b"GradingHueCurveTransform" => {
-            return Err(not_ported_yet(&ty, "Phase 5"));
-        }
+        b"GradingHueCurveTransform" => load_grading_hue_curve(node)?.into(),
         b"FixedFunctionTransform" => load_fixed_function(node)?.into(),
         b"LogTransform" => load_log(node)?.into(),
         b"MatrixTransform" => load_matrix(node)?.into(),
@@ -3795,6 +3863,47 @@ fn save_grading_tone(out: &mut Emitter, t: &GradingToneTransform) {
 }
 
 /// A flow map when every curve is its type's default curve, else a block map: the name, the
+/// style, `hsy_transform: none` without the RGB to HSY conversion, and each curve that isn't
+/// its default or whose slopes aren't.
+///
+/// Port of `save(YAML::Emitter&, ConstGradingHueCurveTransformRcPtr)` (OCIOYaml.cpp:2261-2306
+/// @ v2.5.2).
+fn save_grading_hue_curve(out: &mut Emitter, t: &GradingHueCurveTransform) {
+    let vals = t.value();
+    let style = t.style();
+    let def_curves = HueCurveType::CURVES.map(|c| default_hue_curve(c, style));
+    let use_line_breaks = vals
+        .curves()
+        .iter()
+        .zip(&def_curves)
+        .any(|(curve, def)| curve != def);
+
+    out.put(verbatim_tag("GradingHueCurveTransform"));
+    if !use_line_breaks {
+        out.put(Flow);
+    }
+    out.put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    out.put(Key).put("style");
+    out.put(Value).put(Flow).put(grading_style_to_string(style));
+
+    if t.rgb_to_hsy() == HsyTransformStyle::None {
+        out.put(Key).put("hsy_transform");
+        out.put(Value).put(Flow).put("none");
+    }
+
+    for ((curve, def), name) in vals.curves().iter().zip(&def_curves).zip(HUE_CURVE_NAMES) {
+        if (curve != def) || !curve.slopes_are_default() {
+            save_b_spline_curve(out, name, curve);
+        }
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
 /// A block map: the name from version 2, the direction, then the children. It recurses once
 /// per nested group, in a small frame, as printing and validating do (U-60).
 ///
@@ -4018,6 +4127,7 @@ pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u3
         Transform::GradingPrimary(t) => save_grading_primary(out, t),
         Transform::GradingRgbCurve(t) => save_grading_rgb_curve(out, t),
         Transform::GradingTone(t) => save_grading_tone(out, t),
+        Transform::GradingHueCurve(t) => save_grading_hue_curve(out, t),
         Transform::Group(t) => save_group(out, t, major_version)?,
         Transform::LogAffine(t) => save_log_affine(out, t),
         Transform::LogCamera(t) => save_log_camera(out, t),

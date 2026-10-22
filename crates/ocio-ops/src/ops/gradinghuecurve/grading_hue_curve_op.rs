@@ -4,7 +4,8 @@
 //! The GradingHueCurve op: part of a port of
 //! `src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOp.h` and `GradingHueCurveOp.cpp` @
 //! v2.5.2: the op's behaviors and [`create_grading_hue_curve_op`]. `BuildGradingHueCurveOp`
-//! and `CreateGradingHueCurveTransform` work on the `GradingHueCurveTransform` (5.5e);
+//! and `CreateGradingHueCurveTransform` work on the `GradingHueCurveTransform`, in `ocio`
+//! (crates/ocio/src/transforms/grading_hue_curve_transform.rs);
 //! `extractGpuShaderInfo` is the GPU writer's (`ocio-gpu`, 5.4c).
 //!
 //! As for every family, the op is its data, [`OpData::GradingHueCurve`]: [`Op`]'s methods match

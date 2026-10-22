@@ -16,6 +16,7 @@
 //! - and the warnings logged while loading, byte for byte.
 
 use ocio_ops::open_color_types::GradingStyle;
+use ocio_ops::open_color_types::HsyTransformStyle;
 use ocio_ops::open_color_types::{
     CdlStyle, ExposureContrastStyle, FixedFunctionStyle, NegativeStyle,
 };
@@ -386,6 +387,25 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("isDynamic", json!(t.is_dynamic())));
             out.push(name(t.format_metadata()));
         }
+        Transform::GradingHueCurve(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    GradingStyle::Log => "GRADING_LOG",
+                    GradingStyle::Lin => "GRADING_LIN",
+                    GradingStyle::Video => "GRADING_VIDEO",
+                }}),
+            ));
+            out.push((
+                "getRGBToHSY",
+                json!({"enum": match t.rgb_to_hsy() {
+                    HsyTransformStyle::None => "HSY_TRANSFORM_NONE",
+                    HsyTransformStyle::Transform1 => "HSY_TRANSFORM_1",
+                }}),
+            ));
+            out.push(("isDynamic", json!(t.is_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
         Transform::LogAffine(t) => {
             out.push(("getBase", f64_out(t.base())));
             out.push(("getLogSideSlopeValue", f64s(&t.log_side_slope_value())));
@@ -574,6 +594,7 @@ fn class_name(t: &Transform) -> &'static str {
         Transform::ExposureContrast(_) => "ExposureContrast",
         Transform::File(_) => "File",
         Transform::FixedFunction(_) => "FixedFunction",
+        Transform::GradingHueCurve(_) => "GradingHueCurve",
         Transform::GradingPrimary(_) => "GradingPrimary",
         Transform::GradingRgbCurve(_) => "GradingRGBCurve",
         Transform::GradingTone(_) => "GradingTone",
@@ -1387,4 +1408,56 @@ fn grading_tone_transforms_load_as_in_the_wheel() {
         b"!<GradingToneTransform> {style: log, style: video}",
         b"!<GradingToneTransform> {direction: foo}",
     ]);
+}
+
+/// The GradingHueCurveTransform's keys: the styles, `hsy_transform`, each curve with its
+/// control points and slopes (defaults for the curves not given, of the style at the end),
+/// refused curves, unknown keys at each level, and the errors of each key. The coordinates
+/// with more digits than the text's 6 are compared through the saver's text
+/// (`ocio_yaml_save_oracle_tests.rs`). Version 2.5: earlier minor versions refuse the class.
+#[test]
+fn grading_hue_curve_transforms_load_as_in_the_wheel() {
+    check_v(
+        b"2.5",
+        &[
+            b"!<GradingHueCurveTransform> {}",
+            b"!<GradingHueCurveTransform> {style: LINEAR, hsy_transform: none}",
+            b"!<GradingHueCurveTransform> {style: linear, hsy_transform: hsy1}",
+            b"!<GradingHueCurveTransform> {style: linear, hsy_transform: NONE}",
+            b"!<GradingHueCurveTransform> {hsy_transform: [none]}",
+            b"!<GradingHueCurveTransform> {direction: inverse, style: video}",
+            b"!<GradingHueCurveTransform> {style: lin}",
+            b"!<GradingHueCurveTransform> {style: log, hue_hue: {control_points: [0, 0.15, 0.5, \
+              0.5, 1, 1.123456]}}",
+            b"!<GradingHueCurveTransform> {lum_lum: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, \
+              1, 1.1]}, style: linear}",
+            b"!<GradingHueCurveTransform> {style: video, hue_hue: {control_points: [0.02, -0.1, \
+              0.5, 0.5, 0.9, 0.8]}, hue_lum: {control_points: [0, 0, 0.2, 0.5, 1, 1.5]}, lum_sat: \
+              {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1]}, sat_lum: \
+              {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}, direction: inverse}",
+            b"!<GradingHueCurveTransform> {style: log, hue_fx: {control_points: [-0.15, 0.1, 0, \
+              -0.05, 0.2, -0.1, 0.4, 0.3, 0.6, 0.25, 0.8, 0.2, 0.9, 0.05, 1.1, -0.07]}, hue_sat: \
+              {control_points: [0, 1.2, 0.1, 1.2, 0.4, 0.7]}, sat_sat: {control_points: [0, 0.05, \
+              0.5, 0.8, 1, 1.05], slopes: [1.2, 0.8, 0.4]}}",
+            b"!<GradingHueCurveTransform> {style: log, sat_sat: {control_points: [0, .nan, 1, \
+              .inf], slopes: [-0.0, 1e-30]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_hue: {control_points: [0, 0, 1.5, \
+              1]}}",
+            b"!<GradingHueCurveTransform> {style: log, sat_sat: {control_points: [0, 0.6, 0.5, \
+              0.5, 1, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, lum_sat: {control_points: [0, 1, 0.5, \
+              0.2, 0.2, 0.7, 1, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_sat: {control_points: [0, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_sat: {control_points: [0, 1, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, sat_sat: {control_points: [0, 0, 0.1, 0.5, \
+              1, 1.5], slopes: [0, 1, 1.1, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_fx: {slopes: [1]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_fx: [0, 0, 1, 1]}",
+            b"!<GradingHueCurveTransform> {style: log, hue_fx: {control_points: [0, 0, 0.5, 0], \
+              foo: 1}}",
+            b"!<GradingHueCurveTransform> {name: hc, style: log, foo: 1}",
+            b"!<GradingHueCurveTransform> {style: log, style: video}",
+            b"!<GradingHueCurveTransform> {direction: foo}",
+        ],
+    );
 }

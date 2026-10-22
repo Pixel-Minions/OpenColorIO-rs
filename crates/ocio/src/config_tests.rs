@@ -8569,3 +8569,98 @@ fn grading_tone_serialization() {
         "parsing double failed",
     );
 }
+
+/// Port of `OCIO_ADD_TEST(Config, grading_huecurve_serialization)` @ v2.5.2.
+#[test]
+fn grading_huecurve_serialization() {
+    let _env = EnvGuard::new();
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingHueCurveTransform> {style: log}\n",
+            "        - !<GradingHueCurveTransform> {style: log, direction: inverse}\n",
+            "        - !<GradingHueCurveTransform> {style: linear}\n",
+            "        - !<GradingHueCurveTransform> {style: linear, direction: inverse}\n",
+            "        - !<GradingHueCurveTransform> {name: test, style: video}\n",
+            "        - !<GradingHueCurveTransform> {style: video, direction: inverse}\n",
+        );
+
+        // Write the config.
+        check_round_trip(&(profile_start_v(2, 5) + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingHueCurveTransform>\n",
+            "          style: log\n",
+            "          hue_hue: {control_points: [0, 0.15, 0.5, 0.5, 1, 1.123456]}\n",
+            "        - !<GradingHueCurveTransform>\n",
+            "          style: log\n",
+            "          hue_sat: {control_points: [0, 0, 0.5, 0.5, 1, 1.5]}\n",
+            "          lum_lum: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}\n",
+            "          direction: inverse\n",
+            "        - !<GradingHueCurveTransform>\n",
+            "          style: linear\n",
+            "          hsy_transform: none\n",
+            "          sat_sat: {control_points: [0, 0, 0.1, 0.2, 0.5, 0.5, 0.7, 0.6, 1, 1.5]}\n",
+            "          lum_lum: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}\n",
+            "        - !<GradingHueCurveTransform>\n",
+            "          style: video\n",
+            "          hue_hue: {control_points: [0.02, -0.1, 0.5, 0.5, 0.9, 0.8]}\n",
+            "          hue_lum: {control_points: [0, 0, 0.2, 0.5, 1, 1.5]}\n",
+            "          lum_sat: {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1]}\n",
+            "          sat_lum: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}\n",
+            "          direction: inverse\n",
+        );
+
+        // Write the config.
+        check_round_trip(&(profile_start_v(2, 5) + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingHueCurveTransform> {style: log}\n",
+        );
+        let str = profile_start_v(2, 4) + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Only config version 2.5 (or higher) can have GradingHueCurveTransform",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingHueCurveTransform>\n",
+            "          style: log\n",
+            "          sat_sat: {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1, 1]}\n",
+        );
+        let str = profile_start_v(2, 5) + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Number of slopes must match number of control points",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingHueCurveTransform> {style: linear, hsy_transform: hsy1}\n",
+        );
+        let str = profile_start_v(2, 5) + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Unknown hsy_transform value",
+        );
+    }
+}

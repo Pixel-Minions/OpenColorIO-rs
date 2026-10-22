@@ -133,6 +133,12 @@ fn arms() -> Vec<Arm> {
             invalid: None,
         },
         Arm {
+            class: TransformType::GradingHueCurve,
+            valid: GradingHueCurveTransform::new(GradingStyle::Log).into(),
+            // The curves are validated as they are set.
+            invalid: None,
+        },
+        Arm {
             class: TransformType::File,
             valid: ft.into(),
             invalid: Some(FileTransform::new().into()),
@@ -215,6 +221,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
         Transform::ExposureContrast(t) => calls!(t),
         Transform::File(t) => calls!(t),
         Transform::FixedFunction(t) => calls!(t),
+        Transform::GradingHueCurve(t) => calls!(t),
         Transform::GradingPrimary(t) => calls!(t),
         Transform::GradingRgbCurve(t) => calls!(t),
         Transform::GradingTone(t) => calls!(t),
@@ -236,7 +243,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
 #[test]
 fn every_arm_dispatches_to_its_class() {
     let arms = arms();
-    assert_eq!(arms.len(), 22, "one arm per variant");
+    assert_eq!(arms.len(), 23, "one arm per variant");
     for arm in arms {
         let class = arm.class;
         let mut transform = arm.valid;

@@ -3,7 +3,8 @@
 
 //! The GradingHueCurve op family: a port of `src/OpenColorIO/ops/gradinghuecurve/` @ v2.5.2.
 //! Its curves (5.0c), the op data and the op (5.4a), the renderers (5.4b); the GPU shader comes
-//! with 5.4c, the transform with 5.5e.
+//! with 5.4c, the transform is in `ocio`
+//! (crates/ocio/src/transforms/grading_hue_curve_transform.rs).
 
 pub mod grading_hue_curve;
 pub mod grading_hue_curve_op;

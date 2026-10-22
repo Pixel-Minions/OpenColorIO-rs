@@ -577,3 +577,65 @@ fn grading_tone_transforms_are_refused_in_version_1() {
         ],
     );
 }
+
+/// The GradingHueCurveTransform's saver: a flow map when every curve is its default, a block
+/// map otherwise; `hsy_transform: none`; the curves that aren't the default or whose slopes
+/// aren't, as floats; special values and coordinates with more digits than the writer's
+/// precision.
+#[test]
+fn grading_hue_curve_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2.5",
+        &[
+            "!<GradingHueCurveTransform> {style: log}",
+            "!<GradingHueCurveTransform> {style: linear, hsy_transform: none, direction: \
+             inverse, name: hc}",
+            "!<GradingHueCurveTransform> {style: video, hue_hue: {control_points: [0, 0.15, 0.5, \
+             0.5, 1, 1.123456]}}",
+            "!<GradingHueCurveTransform> {style: linear, lum_lum: {control_points: [-7, -7, 0, 0, \
+             7, 7], slopes: [1, 1, 1]}}",
+            "!<GradingHueCurveTransform> {style: video, hue_hue: {control_points: [0.02, -0.1, \
+             0.5, 0.5, 0.9, 0.8]}, hue_lum: {control_points: [0, 0, 0.2, 0.5, 1, 1.5]}, lum_sat: \
+             {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1]}, sat_lum: \
+             {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}, direction: inverse}",
+            "!<GradingHueCurveTransform> {style: log, sat_sat: {control_points: [0, .nan, 1, \
+             .inf], slopes: [-0.0, 1e-30]}}",
+            "!<GradingHueCurveTransform> {style: log, lum_sat: {control_points: [0, \
+             1.1754944e-38, 0.30000001, 0.123456789, 1, 3.4028234e38], slopes: [1.0000001, \
+             0.99999994, 1e-45]}}",
+            "!<GradingHueCurveTransform> {style: video, hue_fx: {control_points: [0, 0, 0.5, 0], \
+             slopes: [0, -0.0]}}",
+            "!<GroupTransform> {children: [!<GradingHueCurveTransform> {style: log}, \
+             !<GradingHueCurveTransform> {style: video, hue_sat: {control_points: [0, 1, 0.5, \
+             2]}}]}",
+        ],
+    );
+}
+
+/// Versions 2.0 to 2.4 refuse a GradingHueCurveTransform (`checkVersionConsistency`), in a
+/// group too.
+#[test]
+fn grading_hue_curve_transforms_are_refused_before_version_2_5() {
+    check_refused_v(
+        "2.4",
+        &[
+            "!<GradingHueCurveTransform> {style: log}",
+            "!<GroupTransform> {children: [!<GradingHueCurveTransform> {style: video}]}",
+        ],
+    );
+    check_refused_v("2", &["!<GradingHueCurveTransform> {style: linear}"]);
+}
+
+/// Version 1 configs accept a GradingHueCurveTransform: upstream's check refuses it only in
+/// versions 2.0 to 2.4 (docs/improvements.md, I-291).
+#[test]
+fn grading_hue_curve_transforms_save_in_version_1_as_in_the_wheel() {
+    check_save_v(
+        "1",
+        &[
+            "!<GradingHueCurveTransform> {style: log}",
+            "!<GradingHueCurveTransform> {style: video, hue_sat: {control_points: [0, 1, 0.5, \
+             2]}, name: hc}",
+        ],
+    );
+}

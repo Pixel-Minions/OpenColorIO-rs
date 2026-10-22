@@ -3401,6 +3401,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   copied exactly); checked byte for byte against the wheel
   (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`).
 
+### I-291. A version 1 config may hold a GradingHueCurveTransform
+
+- **Upstream:** `Config::Impl::checkVersionConsistency` refuses a GradingHueCurveTransform
+  only when `m_majorVersion == 2 && m_minorVersion < 5` (`Config.cpp:5785-5791` @ v2.5.2),
+  where the other classes version 2 brought test `m_majorVersion < 2`. A version 1 config
+  (whose minor version is 0) loads and serializes one, though no version 1 library can read
+  it, and the config is refused by every version 2 library before 2.5.
+- **Who notices:** a version 1 config that holds a GradingHueCurveTransform (by hand, or built
+  through the API and serialized).
+- **A fix:** refuse it before version 2.5, `m_majorVersion < 2 || (m_majorVersion == 2 &&
+  m_minorVersion < 5)`.
+- **Status:** ported as upstream in `p5-transforms` (5.5e), `Config::
+  check_transform_version_consistency`; `ocio_yaml_save_oracle_tests.rs`
+  (`grading_hue_curve_transforms_save_in_version_1_as_in_the_wheel`) checks it against the
+  wheel.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
