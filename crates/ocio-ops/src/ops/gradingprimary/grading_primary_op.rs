@@ -4,8 +4,9 @@
 //! The GradingPrimary op: part of a port of `src/OpenColorIO/ops/gradingprimary/
 //! GradingPrimaryOp.h` and `GradingPrimaryOp.cpp` @ v2.5.2: the op's behaviors and
 //! [`create_grading_primary_op`]. `BuildGradingPrimaryOp` and `CreateGradingPrimaryTransform`
-//! work on the `GradingPrimaryTransform` (5.5b); `extractGpuShaderInfo` is the GPU writer's
-//! (`ocio-gpu`, 5.2d).
+//! work on the `GradingPrimaryTransform`, in `ocio`
+//! (crates/ocio/src/transforms/grading_primary_transform.rs); `extractGpuShaderInfo` is the GPU
+//! writer's (`ocio-gpu`, 5.2d).
 //!
 //! As for every family, the op is its data, [`OpData::GradingPrimary`]: [`Op`]'s methods match
 //! on it and call the methods here, `GradingPrimaryOp`'s overrides.

@@ -4750,6 +4750,13 @@ impl Config {
                     ));
                 }
             }
+            Transform::GradingPrimary(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have GradingPrimaryTransform.",
+                    ));
+                }
+            }
             Transform::Range(_) => {
                 if major < 2 {
                     return Err(Exception::new(

@@ -420,3 +420,70 @@ fn exposure_contrast_transforms_are_refused_in_version_1() {
         ],
     );
 }
+
+/// The GradingPrimaryTransform's saver: a flow map for default values, a block map otherwise;
+/// each style's controls, the contrast pivot forced by a contrast or pivot that isn't the
+/// default, the other styles' controls dropped, the clamps; and special values and values
+/// with more digits than the writer's precision.
+#[test]
+fn grading_primary_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2",
+        &[
+            "!<GradingPrimaryTransform> {style: log}",
+            "!<GradingPrimaryTransform> {style: linear, direction: inverse, name: gp}",
+            "!<GradingPrimaryTransform> {style: video}",
+            "!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.12345678, 0], \
+             master: 0.1}, contrast: {rgb: [1.1, 1, 1], master: 1.1}, gamma: {rgb: [1.1, 1.2, \
+             1.3], master: 1}, saturation: 0.9, pivot: {black: 0.1, white: 1.1}, clamp: {black: \
+             0.1, white: 1.1}}",
+            "!<GradingPrimaryTransform> {style: log, pivot: {contrast: -0.2}}",
+            "!<GradingPrimaryTransform> {style: log, pivot: {contrast: -0.1}}",
+            "!<GradingPrimaryTransform> {style: log, contrast: {rgb: [1, 1, 1], master: 1.5}}",
+            "!<GradingPrimaryTransform> {style: log, offset: {rgb: [1, 1, 1], master: 1}, lift: \
+             {rgb: [1, 1, 1], master: 1}, exposure: {rgb: [1, 1, 1], master: 1}, gain: {rgb: [2, \
+             2, 2], master: 2}}",
+            "!<GradingPrimaryTransform> {style: linear, offset: {rgb: [0.1, 0.12345678, 0], \
+             master: 0.1}, exposure: {rgb: [-1.1, 0.9, -0.01], master: 1.1}, contrast: {rgb: \
+             [1.1, 1, 1], master: 1.1}, saturation: 1.1, direction: inverse}",
+            "!<GradingPrimaryTransform> {style: linear, pivot: {contrast: 0.18, black: 0.5, \
+             white: 2}}",
+            "!<GradingPrimaryTransform> {style: linear, pivot: {black: 0.5}, clamp: {white: 1.1}}",
+            "!<GradingPrimaryTransform> {style: linear, gamma: {rgb: [2, 2, 2], master: 2}}",
+            "!<GradingPrimaryTransform> {style: video, lift: {rgb: [0.1, 0, 0], master: 0.1}, \
+             gamma: {rgb: [1.1, 1, 1], master: 1.1}, gain: {rgb: [1.1, 1, 1], master: 1.1}, \
+             offset: {rgb: [0, 0, 0], master: 0.5}, pivot: {contrast: 0.3, white: 1.1}, clamp: \
+             {black: 0.1}}",
+            "!<GradingPrimaryTransform> {style: video, contrast: {rgb: [2, 2, 2], master: 2}, \
+             brightness: {rgb: [1, 1, 1], master: 1}}",
+            "!<GradingPrimaryTransform> {style: log, brightness: {rgb: [.nan, .inf, -.inf], \
+             master: -0.0}, saturation: .nan}",
+            "!<GradingPrimaryTransform> {style: log, gamma: {rgb: [.nan, 1, 1], master: 1}, \
+             pivot: {contrast: .nan, black: .nan}, clamp: {black: .nan, white: .nan}}",
+            "!<GradingPrimaryTransform> {style: linear, offset: {rgb: [1e-30, 1e300, \
+             4.9e-324], master: 0.12345678901234567}, saturation: 1.0000000000000002, pivot: \
+             {contrast: 0.30000000000000004}}",
+            "!<GradingPrimaryTransform> {style: video, clamp: {black: -1.7976931348623157e308, \
+             white: 1.7976931348623157e308}}",
+            "!<GradingPrimaryTransform> {style: video, clamp: {black: -1e308, white: 1e308}}",
+            "!<GradingPrimaryTransform> {style: log, clamp: {black: -.inf, white: .inf}}",
+            "!<GradingPrimaryTransform> {style: log, saturation: 3.4028234663852886e38, \
+             brightness: {rgb: [1.1754943508222875e-38, 0, 0], master: 0}}",
+            "!<GroupTransform> {children: [!<GradingPrimaryTransform> {style: log}, \
+             !<GradingPrimaryTransform> {style: video, saturation: 2}]}",
+        ],
+    );
+}
+
+/// Version 1 configs refuse a GradingPrimaryTransform (`checkVersionConsistency`), in a group
+/// too.
+#[test]
+fn grading_primary_transforms_are_refused_in_version_1() {
+    check_refused_v(
+        "1",
+        &[
+            "!<GradingPrimaryTransform> {style: log}",
+            "!<GroupTransform> {children: [!<GradingPrimaryTransform> {style: video}]}",
+        ],
+    );
+}

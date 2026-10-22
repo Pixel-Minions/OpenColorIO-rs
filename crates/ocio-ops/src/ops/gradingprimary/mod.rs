@@ -3,7 +3,8 @@
 
 //! The GradingPrimary op family: a port of `src/OpenColorIO/ops/gradingprimary/` @ v2.5.2.
 //! Its values and their pre-render form (5.0a), the op data and the op (5.2a), the renderers
-//! (5.2b, 5.2c); the GPU shader comes with 5.2d, the transform with 5.5b.
+//! (5.2b, 5.2c); the GPU shader comes with 5.2d, the transform is in `ocio`
+//! (crates/ocio/src/transforms/grading_primary_transform.rs).
 
 pub mod grading_primary;
 pub mod grading_primary_op;

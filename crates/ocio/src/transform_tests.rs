@@ -5,6 +5,7 @@
 //! the enum.
 
 use super::*;
+use crate::GradingStyle;
 use crate::{Allocation, FixedFunctionStyle, Interpolation, RangeStyle, TransformType};
 
 /// One transform of each class: a valid one, an invalid one where the class can be made
@@ -114,6 +115,12 @@ fn arms() -> Vec<Arm> {
             invalid: None,
         },
         Arm {
+            class: TransformType::GradingPrimary,
+            valid: GradingPrimaryTransform::new(GradingStyle::Log).into(),
+            // The values are validated as they are set.
+            invalid: None,
+        },
+        Arm {
             class: TransformType::File,
             valid: ft.into(),
             invalid: Some(FileTransform::new().into()),
@@ -196,6 +203,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
         Transform::ExposureContrast(t) => calls!(t),
         Transform::File(t) => calls!(t),
         Transform::FixedFunction(t) => calls!(t),
+        Transform::GradingPrimary(t) => calls!(t),
         Transform::Group(t) => calls!(t),
         Transform::LogAffine(t) => calls!(t),
         Transform::LogCamera(t) => calls!(t),
@@ -214,7 +222,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
 #[test]
 fn every_arm_dispatches_to_its_class() {
     let arms = arms();
-    assert_eq!(arms.len(), 19, "one arm per variant");
+    assert_eq!(arms.len(), 20, "one arm per variant");
     for arm in arms {
         let class = arm.class;
         let mut transform = arm.valid;

@@ -40,8 +40,11 @@ use ocio_ops::open_color_types::{
     fixed_function_style_to_string, interpolation_to_string, negative_style_to_string,
     transform_direction_to_string,
 };
+use ocio_ops::open_color_types::{GradingStyle, grading_style_to_string};
 use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
+use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
+use ocio_ops::parse_utils::grading_style_from_string;
 use ocio_ops::parse_utils::{
     ROLE_DEFAULT, allocation_from_string, bit_depth_from_string, cdl_style_from_string,
     exposure_contrast_style_from_string, interpolation_from_string, join_string_env_style,
@@ -69,6 +72,7 @@ use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransfo
 use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
 use crate::transforms::file_transform::FileTransform;
 use crate::transforms::fixed_function_transform::FixedFunctionTransform;
+use crate::transforms::grading_primary_transform::GradingPrimaryTransform;
 use crate::transforms::group_transform::GroupTransform;
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
@@ -250,6 +254,27 @@ pub(crate) fn throw_value_error(node_name: &[u8], key: &Node, msg: &[u8]) -> Loa
     os.extend_from_slice(&key_name);
     os.extend_from_slice(b"' from '");
     os.extend_from_slice(node_name);
+    os.extend_from_slice(b"' failed: ");
+    os.extend_from_slice(msg);
+    LoadError::Ocio(Exception::new(os))
+}
+
+/// The error "At line N, the value parsing of the key 'key' failed: msg", the line of the key;
+/// or the error that reading the key or its mark gives.
+///
+/// Port of `throwValueError(const YAML::Node&, const std::string&)` (OCIOYaml.cpp:285-298 @
+/// v2.5.2).
+pub(crate) fn throw_value_error_key(key: &Node, msg: &[u8]) -> LoadError {
+    let key_name = match load_string(key) {
+        Ok(name) => name,
+        Err(err) => return err,
+    };
+    let line = match line_of(key) {
+        Ok(line) => line,
+        Err(err) => return err,
+    };
+    let mut os = format!("At line {line}, the value parsing of the key '").into_bytes();
+    os.extend_from_slice(&key_name);
     os.extend_from_slice(b"' failed: ");
     os.extend_from_slice(msg);
     LoadError::Ocio(Exception::new(os))
@@ -1088,6 +1113,306 @@ fn load_exposure_contrast(node: &Node) -> LoadResult<ExposureContrastTransform> 
     Ok(t)
 }
 
+/// A `GradingRGBM` value of the key `parent`: a map of `rgb` (three doubles) and `master`, both
+/// required, read into `rgbm` (a key repeated in it: the last one).
+///
+/// Port of `load(const YAML::Node&, const YAML::Node&, GradingRGBM&)` (OCIOYaml.cpp:1521-1566
+/// @ v2.5.2).
+fn load_grading_rgbm(parent: &Node, node: &Node, rgbm: &mut GradingRgbm) -> LoadResult<()> {
+    if node.node_type()? == NodeType::Map {
+        let mut rgb_ok = false;
+        let mut master_ok = false;
+
+        for iter in node.iter() {
+            let key = iter.first.as_::<Vec<u8>>()?;
+            if iter.second.is_null()? || !iter.second.is_defined() {
+                continue;
+            }
+            match key.as_slice() {
+                b"rgb" => {
+                    let vals = load_vec_f64(&iter.second)?;
+                    if vals.len() != 3 {
+                        return Err(throw_error(
+                            &iter.first,
+                            b"The RGB value needs to be a 3 doubles.",
+                        ));
+                    }
+                    rgbm.red = vals[0];
+                    rgbm.green = vals[1];
+                    rgbm.blue = vals[2];
+                    rgb_ok = true;
+                }
+                b"master" => {
+                    rgbm.master = load_double(&iter.second)?;
+                    master_ok = true;
+                }
+                _ => log_unknown_key_warning(parent, &iter.first)?,
+            }
+        }
+        if !rgb_ok || !master_ok {
+            return Err(throw_value_error_key(
+                parent,
+                b"Both rgb and master values are required.",
+            ));
+        }
+        Ok(())
+    } else {
+        Err(throw_value_error_key(
+            parent,
+            b"The value needs to be a map.",
+        ))
+    }
+}
+
+/// A value of a primary grading's pivot or clamp map and whether it was given.
+struct Given<'a> {
+    /// The value, set when the key is read.
+    value: &'a mut f64,
+    /// Set when the key is read.
+    loaded: &'a mut bool,
+}
+
+impl Given<'_> {
+    /// Reads `node` into the value, and sets the flag.
+    fn load(&mut self, node: &Node) -> LoadResult<()> {
+        *self.value = load_double(node)?;
+        *self.loaded = true;
+        Ok(())
+    }
+}
+
+/// A primary grading's pivots, the value of the key `parent`: a map of `contrast`, `black` and
+/// `white`, at least one of them, each read into its value with its flag set. An unknown key
+/// is a warning naming the map's tag.
+///
+/// Port of `loadPivot` (OCIOYaml.cpp:1568-1611 @ v2.5.2).
+fn load_pivot(
+    parent: &Node,
+    node: &Node,
+    mut val: Given<'_>,
+    mut black: Given<'_>,
+    mut white: Given<'_>,
+) -> LoadResult<()> {
+    if node.node_type()? == NodeType::Map {
+        for iter in node.iter() {
+            let key = iter.first.as_::<Vec<u8>>()?;
+            if iter.second.is_null()? || !iter.second.is_defined() {
+                continue;
+            }
+            match key.as_slice() {
+                b"contrast" => val.load(&iter.second)?,
+                b"black" => black.load(&iter.second)?,
+                b"white" => white.load(&iter.second)?,
+                _ => log_unknown_key_warning(node, &iter.first)?,
+            }
+        }
+
+        if !*val.loaded && !*black.loaded && !*white.loaded {
+            return Err(throw_value_error_key(
+                parent,
+                b"At least one of the pivot values must be provided.",
+            ));
+        }
+        Ok(())
+    } else {
+        Err(throw_value_error_key(
+            parent,
+            b"The value needs to be a map.",
+        ))
+    }
+}
+
+/// A primary grading's clamps, the value of the key `parent`: a map of `black` and `white`, at
+/// least one of them, each read into its value with its flag set. An unknown key is a warning
+/// naming the map's tag.
+///
+/// Port of `loadClamp` (OCIOYaml.cpp:1613-1650 @ v2.5.2).
+fn load_clamp(
+    parent: &Node,
+    node: &Node,
+    mut black: Given<'_>,
+    mut white: Given<'_>,
+) -> LoadResult<()> {
+    if node.node_type()? == NodeType::Map {
+        for iter in node.iter() {
+            let key = iter.first.as_::<Vec<u8>>()?;
+            if iter.second.is_null()? || !iter.second.is_defined() {
+                continue;
+            }
+            match key.as_slice() {
+                b"black" => black.load(&iter.second)?,
+                b"white" => white.load(&iter.second)?,
+                _ => log_unknown_key_warning(node, &iter.first)?,
+            }
+        }
+
+        if !*black.loaded && !*white.loaded {
+            return Err(throw_value_error_key(
+                parent,
+                b"At least one of the clamp values must be provided.",
+            ));
+        }
+        Ok(())
+    } else {
+        Err(throw_value_error_key(
+            parent,
+            b"The value needs to be a map.",
+        ))
+    }
+}
+
+/// A `GradingPrimaryTransform`: `style`, `direction`, the controls, `pivot`, `clamp` and
+/// `name`. The controls are read into the log style's defaults; then those given replace the
+/// defaults of the style the transform has at the end, and the transform takes them,
+/// validated for the style. An unknown key is a warning, "Unknown key in
+/// GradingPrimaryTransform: 'key'.".
+///
+/// Port of `load(const YAML::Node&, GradingPrimaryTransformRcPtr&)` (OCIOYaml.cpp:1652-1807 @
+/// v2.5.2).
+fn load_grading_primary(node: &Node) -> LoadResult<GradingPrimaryTransform> {
+    check_duplicates(node)?;
+
+    let mut t = GradingPrimaryTransform::new(GradingStyle::Log);
+    let mut values = GradingPrimary::new(GradingStyle::Log);
+    let mut brightness_loaded = false;
+    let mut contrast_loaded = false;
+    let mut gamma_loaded = false;
+    let mut offset_loaded = false;
+    let mut exposure_loaded = false;
+    let mut lift_loaded = false;
+    let mut gain_loaded = false;
+    let mut saturation_loaded = false;
+    let mut pivot_loaded = false;
+    let mut pivot_black_loaded = false;
+    let mut pivot_white_loaded = false;
+    let mut clamp_black_loaded = false;
+    let mut clamp_white_loaded = false;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"style" => {
+                let style = load_string(value)?;
+                t.set_style(grading_style_from_string(Some(c_str(&style)))?);
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"brightness" => {
+                brightness_loaded = true;
+                load_grading_rgbm(&iter.first, value, &mut values.brightness)?;
+            }
+            b"contrast" => {
+                contrast_loaded = true;
+                load_grading_rgbm(&iter.first, value, &mut values.contrast)?;
+            }
+            b"gamma" => {
+                gamma_loaded = true;
+                load_grading_rgbm(&iter.first, value, &mut values.gamma)?;
+            }
+            b"offset" => {
+                offset_loaded = true;
+                load_grading_rgbm(&iter.first, value, &mut values.offset)?;
+            }
+            b"exposure" => {
+                exposure_loaded = true;
+                load_grading_rgbm(&iter.first, value, &mut values.exposure)?;
+            }
+            b"lift" => {
+                lift_loaded = true;
+                load_grading_rgbm(&iter.first, value, &mut values.lift)?;
+            }
+            b"gain" => {
+                gain_loaded = true;
+                load_grading_rgbm(&iter.first, value, &mut values.gain)?;
+            }
+            b"pivot" => load_pivot(
+                &iter.first,
+                value,
+                Given {
+                    value: &mut values.pivot,
+                    loaded: &mut pivot_loaded,
+                },
+                Given {
+                    value: &mut values.pivot_black,
+                    loaded: &mut pivot_black_loaded,
+                },
+                Given {
+                    value: &mut values.pivot_white,
+                    loaded: &mut pivot_white_loaded,
+                },
+            )?,
+            b"saturation" => {
+                saturation_loaded = true;
+                values.saturation = load_double(value)?;
+            }
+            b"clamp" => load_clamp(
+                &iter.first,
+                value,
+                Given {
+                    value: &mut values.clamp_black,
+                    loaded: &mut clamp_black_loaded,
+                },
+                Given {
+                    value: &mut values.clamp_white,
+                    loaded: &mut clamp_white_loaded,
+                },
+            )?,
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning_in(node.tag()?, &iter.first)?,
+        }
+    }
+
+    let mut values_set = GradingPrimary::new(t.style());
+    if brightness_loaded {
+        values_set.brightness = values.brightness;
+    }
+    if contrast_loaded {
+        values_set.contrast = values.contrast;
+    }
+    if gamma_loaded {
+        values_set.gamma = values.gamma;
+    }
+    if offset_loaded {
+        values_set.offset = values.offset;
+    }
+    if exposure_loaded {
+        values_set.exposure = values.exposure;
+    }
+    if lift_loaded {
+        values_set.lift = values.lift;
+    }
+    if gain_loaded {
+        values_set.gain = values.gain;
+    }
+    if saturation_loaded {
+        values_set.saturation = values.saturation;
+    }
+    if pivot_loaded {
+        values_set.pivot = values.pivot;
+    }
+    if pivot_black_loaded {
+        values_set.pivot_black = values.pivot_black;
+    }
+    if pivot_white_loaded {
+        values_set.pivot_white = values.pivot_white;
+    }
+    if clamp_black_loaded {
+        values_set.clamp_black = values.clamp_black;
+    }
+    if clamp_white_loaded {
+        values_set.clamp_white = values.clamp_white;
+    }
+
+    t.set_value(&values_set)?;
+    Ok(t)
+}
+
 /// A `FileTransform`: `src`, `cccid`, `cdl_style`, `interpolation`, `direction`.
 ///
 /// Port of `load(const YAML::Node&, FileTransformRcPtr&)` (OCIOYaml.cpp:1336-1382 @ v2.5.2).
@@ -1206,10 +1531,10 @@ fn load_leaf(node: &Node) -> LoadResult<Transform> {
         b"LogAffineTransform" => load_log_affine(node)?.into(),
         b"LogCameraTransform" => load_log_camera(node)?.into(),
         b"ExposureContrastTransform" => load_exposure_contrast(node)?.into(),
-        b"GradingPrimaryTransform"
-        | b"GradingRGBCurveTransform"
-        | b"GradingHueCurveTransform"
-        | b"GradingToneTransform" => return Err(not_ported_yet(&ty, "Phase 5")),
+        b"GradingPrimaryTransform" => load_grading_primary(node)?.into(),
+        b"GradingRGBCurveTransform" | b"GradingToneTransform" | b"GradingHueCurveTransform" => {
+            return Err(not_ported_yet(&ty, "Phase 5"));
+        }
         b"FixedFunctionTransform" => load_fixed_function(node)?.into(),
         b"LogTransform" => load_log(node)?.into(),
         b"MatrixTransform" => load_matrix(node)?.into(),
@@ -2875,6 +3200,152 @@ fn save_fixed_function(out: &mut Emitter, t: &FixedFunctionTransform) -> SaveRes
     Ok(())
 }
 
+/// A GradingRGBM control, unless it is `default_rgbm`: a flow map of `rgb` and `master`.
+///
+/// Port of `save(YAML::Emitter&, const char*, const GradingRGBM&, const GradingRGBM&)`
+/// (OCIOYaml.cpp:1809-1825 @ v2.5.2).
+fn save_grading_rgbm(
+    out: &mut Emitter,
+    param_name: &str,
+    rgbm: &GradingRgbm,
+    default_rgbm: &GradingRgbm,
+) {
+    if rgbm != default_rgbm {
+        let vals = [rgbm.red, rgbm.green, rgbm.blue];
+        out.put(Key).put(param_name);
+        out.put(Value).put(Flow).put(BeginMap);
+        out.put(Key).put("rgb").put(Value).put(Flow).put(&vals[..]);
+        out.put(Key).put("master");
+        out.put(Value).put(Flow).put(rgbm.master);
+        out.put(EndMap);
+    }
+}
+
+/// A double control, unless it is `default_val`.
+///
+/// Port of `save(YAML::Emitter&, const char*, double, double)` (OCIOYaml.cpp:1827-1833 @
+/// v2.5.2).
+fn save_double_param(out: &mut Emitter, param_name: &str, val: f64, default_val: f64) {
+    if val != default_val {
+        out.put(Key).put(param_name).put(Value).put(Flow).put(val);
+    }
+}
+
+/// The `pivot` flow map: the contrast pivot when `save_contrast`, and the black and white
+/// pivots that aren't their defaults; nothing when there is nothing to write.
+///
+/// Port of `savePivot` (OCIOYaml.cpp:1835-1851 @ v2.5.2).
+fn save_pivot(
+    out: &mut Emitter,
+    (val, save_contrast): (f64, bool),
+    (black_val, default_black_val): (f64, f64),
+    (white_val, default_white_val): (f64, f64),
+) {
+    if save_contrast || black_val != default_black_val || white_val != default_white_val {
+        out.put(Key).put("pivot");
+        out.put(Value).put(Flow).put(BeginMap);
+        if save_contrast {
+            out.put(Key).put("contrast").put(Value).put(Flow).put(val);
+        }
+        save_double_param(out, "black", black_val, default_black_val);
+        save_double_param(out, "white", white_val, default_white_val);
+        out.put(EndMap);
+    }
+}
+
+/// The `clamp` flow map of the black and white clamps that aren't their defaults; nothing when
+/// both are.
+///
+/// Port of `saveClamp` (OCIOYaml.cpp:1853-1865 @ v2.5.2).
+fn save_clamp(
+    out: &mut Emitter,
+    (black_val, default_black_val): (f64, f64),
+    (white_val, default_white_val): (f64, f64),
+) {
+    if black_val != default_black_val || white_val != default_white_val {
+        out.put(Key).put("clamp");
+        out.put(Value).put(Flow).put(BeginMap);
+        save_double_param(out, "black", black_val, default_black_val);
+        save_double_param(out, "white", white_val, default_white_val);
+        out.put(EndMap);
+    }
+}
+
+/// A flow map when the values are the style's defaults, else a block map: the name, the style,
+/// the style's controls that aren't their defaults, the pivots (the contrast pivot of the log
+/// and linear styles whenever the contrast or the pivot isn't the default), and the clamps.
+///
+/// Port of `save(YAML::Emitter&, ConstGradingPrimaryTransformRcPtr)` (OCIOYaml.cpp:1867-1925 @
+/// v2.5.2).
+fn save_grading_primary(out: &mut Emitter, t: &GradingPrimaryTransform) {
+    out.put(verbatim_tag("GradingPrimaryTransform"));
+
+    let style = t.style();
+    let vals = t.value();
+    let default_vals = GradingPrimary::new(style);
+
+    if vals == default_vals {
+        out.put(Flow);
+    }
+    out.put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    out.put(Key).put("style");
+    out.put(Value).put(Flow).put(grading_style_to_string(style));
+    match style {
+        GradingStyle::Log => {
+            save_grading_rgbm(
+                out,
+                "brightness",
+                &vals.brightness,
+                &default_vals.brightness,
+            );
+            save_grading_rgbm(out, "contrast", &vals.contrast, &default_vals.contrast);
+            save_grading_rgbm(out, "gamma", &vals.gamma, &default_vals.gamma);
+            save_double_param(out, "saturation", vals.saturation, default_vals.saturation);
+            let force_pivot =
+                (vals.contrast != default_vals.contrast) || (vals.pivot != default_vals.pivot);
+            save_pivot(
+                out,
+                (vals.pivot, force_pivot),
+                (vals.pivot_black, default_vals.pivot_black),
+                (vals.pivot_white, default_vals.pivot_white),
+            );
+        }
+        GradingStyle::Lin => {
+            save_grading_rgbm(out, "offset", &vals.offset, &default_vals.offset);
+            save_grading_rgbm(out, "exposure", &vals.exposure, &default_vals.exposure);
+            save_grading_rgbm(out, "contrast", &vals.contrast, &default_vals.contrast);
+            save_double_param(out, "saturation", vals.saturation, default_vals.saturation);
+            let force_pivot =
+                (vals.contrast != default_vals.contrast) || (vals.pivot != default_vals.pivot);
+            save_pivot(out, (vals.pivot, force_pivot), (0., 0.), (0., 0.));
+        }
+        GradingStyle::Video => {
+            save_grading_rgbm(out, "lift", &vals.lift, &default_vals.lift);
+            save_grading_rgbm(out, "gamma", &vals.gamma, &default_vals.gamma);
+            save_grading_rgbm(out, "gain", &vals.gain, &default_vals.gain);
+            save_grading_rgbm(out, "offset", &vals.offset, &default_vals.offset);
+            save_double_param(out, "saturation", vals.saturation, default_vals.saturation);
+            save_pivot(
+                out,
+                (0., false),
+                (vals.pivot_black, default_vals.pivot_black),
+                (vals.pivot_white, default_vals.pivot_white),
+            );
+        }
+    }
+    save_clamp(
+        out,
+        (vals.clamp_black, default_vals.clamp_black),
+        (vals.clamp_white, default_vals.clamp_white),
+    );
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
 /// A block map: the name from version 2, the direction, then the children. It recurses once
 /// per nested group, in a small frame, as printing and validating do (U-60).
 ///
@@ -3082,7 +3553,7 @@ fn save_range(out: &mut Emitter, t: &RangeTransform) {
 /// refused with "Unsupported Transform() type for serialization.".
 ///
 /// Port of `save(YAML::Emitter&, ConstTransformRcPtr, unsigned int)` (OCIOYaml.cpp:3353-3420 @
-/// v2.5.2). The grading savers come with their classes (WP 5.5b-e).
+/// v2.5.2).
 pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u32) -> SaveResult {
     match t {
         Transform::Allocation(t) => save_allocation_transform(out, t),
@@ -3095,6 +3566,7 @@ pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u3
         Transform::File(t) => save_file(out, t, major_version),
         Transform::ExposureContrast(t) => save_exposure_contrast(out, t),
         Transform::FixedFunction(t) => save_fixed_function(out, t)?,
+        Transform::GradingPrimary(t) => save_grading_primary(out, t),
         Transform::Group(t) => save_group(out, t, major_version)?,
         Transform::LogAffine(t) => save_log_affine(out, t),
         Transform::LogCamera(t) => save_log_camera(out, t),

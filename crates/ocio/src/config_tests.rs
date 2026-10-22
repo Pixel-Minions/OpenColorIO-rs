@@ -8121,3 +8121,252 @@ fn exposure_contrast_serialization() {
         );
     }
 }
+
+/// Port of `OCIO_ADD_TEST(Config, grading_primary_serialization)` @ v2.5.2.
+#[test]
+fn grading_primary_serialization() {
+    let _env = EnvGuard::new();
+    let load_error = |str_end: &str, what: &str| {
+        let str = profile_v2_start() + str_end;
+        check_throw_what(Config::create_from_stream(str.as_bytes()), what);
+    };
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingPrimaryTransform> {style: log}\n",
+            "        - !<GradingPrimaryTransform> {style: log, contrast: {rgb: [1.1, 1, 1], master: 1.1}}\n",
+            "        - !<GradingPrimaryTransform> {style: log, direction: inverse}\n",
+            "        - !<GradingPrimaryTransform> {style: linear, saturation: 0.9}\n",
+            "        - !<GradingPrimaryTransform> {style: linear, saturation: 1.1, direction: inverse}\n",
+            "        - !<GradingPrimaryTransform> {name: test, style: video}\n",
+            "        - !<GradingPrimaryTransform> {style: video, direction: inverse}\n",
+        );
+
+        let str = profile_v2_start() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Write the config.
+
+        // Pivot contrast is always saved even if it is the default value (log & linear) when
+        // contrast is not default. When controls are not default, transform is saved on
+        // separate lines.
+        let str_end_back = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingPrimaryTransform> {style: log}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          contrast: {rgb: [1.1, 1, 1], master: 1.1}\n",
+            "          pivot: {contrast: -0.2}\n",
+            "        - !<GradingPrimaryTransform> {style: log, direction: inverse}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          saturation: 0.9\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          saturation: 1.1\n",
+            "          direction: inverse\n",
+            "        - !<GradingPrimaryTransform> {name: test, style: video}\n",
+            "        - !<GradingPrimaryTransform> {style: video, direction: inverse}\n",
+        );
+
+        let str_back = profile_v2_start() + str_end_back;
+        check_serialized(&config.serialize().unwrap(), &str_back);
+    }
+
+    {
+        // Pivot contrast value is included for log and linear even if it is the default value.
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          brightness: {rgb: [0.1, 0.12345678, 0], master: 0.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          contrast: {rgb: [1.1, 1, 1], master: 1.1}\n",
+            "          pivot: {contrast: -0.2}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          gamma: {rgb: [1.1, 1.1, 1], master: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          saturation: 0.9\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          pivot: {contrast: -0.1, black: 0.1, white: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          pivot: {black: 0.1, white: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          pivot: {black: 0.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          clamp: {black: 0.1, white: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          clamp: {black: 0.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          offset: {rgb: [0.1, 0.12345678, 0], master: 0.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          contrast: {rgb: [1.1, 1, 1], master: 1.1}\n",
+            "          pivot: {contrast: 0.18}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          exposure: {rgb: [-1.1, 0.9, -0.01], master: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          saturation: 0.9\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          pivot: {contrast: -0.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          clamp: {black: 0.1, white: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          clamp: {white: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: video\n",
+            "          offset: {rgb: [0.1, 0.12345678, 0], master: 0.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: video\n",
+            "          gain: {rgb: [1.1, 1, 1], master: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: video\n",
+            "          gamma: {rgb: [1.1, 1, 1], master: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: video\n",
+            "          lift: {rgb: [0.1, 0.12345678, 0], master: 0.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: video\n",
+            "          pivot: {black: 0.1, white: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: video\n",
+            "          pivot: {white: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: video\n",
+            "          clamp: {black: 0.1, white: 1.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: video\n",
+            "          clamp: {black: 0.1}\n",
+        );
+        let str = profile_v2_start() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Write the config.
+        check_serialized(&config.serialize().unwrap(), &str);
+    }
+
+    {
+        // Primary can be on one line or multiple lines (but is written on multiple lines).
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.12345678, 0], master: 0.1}, pivot: {contrast: -0.2}}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          offset:\n",
+            "            rgb: [0.1, 0.12345678, 0]\n",
+            "            master: 0.1\n",
+            "          pivot: {contrast: 0.18}\n",
+        );
+
+        let str_end_back = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: log\n",
+            "          brightness: {rgb: [0.1, 0.12345678, 0], master: 0.1}\n",
+            "        - !<GradingPrimaryTransform>\n",
+            "          style: linear\n",
+            "          offset: {rgb: [0.1, 0.12345678, 0], master: 0.1}\n",
+        );
+        let str = profile_v2_start() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Write the config.
+        let str_back = profile_v2_start() + str_end_back;
+
+        check_serialized(&config.serialize().unwrap(), &str_back);
+    }
+
+    // Rgb not enough values.
+    load_error(
+        "    from_scene_reference: !<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0], master: 0.1}}\n",
+        "The RGB value needs to be a 3 doubles",
+    );
+
+    // Rgb too many values.
+    load_error(
+        "    from_scene_reference: !<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.12345678, 0, 0], master: 0.1}}\n",
+        "The RGB value needs to be a 3 doubles",
+    );
+
+    // Rgbm has to be a map.
+    load_error(
+        concat!(
+            "    from_scene_reference: !<GradingPrimaryTransform> ",
+            "{style: log, brightness: [0.1, 0.12345678, 0, 0]}\n"
+        ),
+        "'brightness' failed: The value needs to be a map",
+    );
+
+    // Rgbm missing master.
+    load_error(
+        concat!(
+            "    from_scene_reference: !<GradingPrimaryTransform> ",
+            "{style: log, brightness: {rgb: [0.1, 0.12345678, 0]}}\n"
+        ),
+        "'brightness' failed: Both rgb and master values are required",
+    );
+
+    // Rgbm master has too many values.
+    load_error(
+        concat!(
+            "    from_scene_reference: !<GradingPrimaryTransform> ",
+            "{style: log, brightness: {rgb: [0.1, 0.12345678, 0], master: [0.1, 0.2, 0.3]}}\n"
+        ),
+        "parsing double failed",
+    );
+
+    // Rgbm missing rgb.
+    load_error(
+        "    from_scene_reference: !<GradingPrimaryTransform> {style: log, brightness: {master: 0.1}}\n",
+        "'brightness' failed: Both rgb and master values are required",
+    );
+
+    // Pivot has to be a map.
+    load_error(
+        "    from_scene_reference: !<GradingPrimaryTransform> {style: log, pivot: 0.1}\n",
+        "'pivot' failed: The value needs to be a map",
+    );
+
+    // Pivot has to define some values.
+    load_error(
+        "    from_scene_reference: !<GradingPrimaryTransform> {style: log, pivot: {}}\n",
+        "'pivot' failed: At least one of the pivot values must be provided",
+    );
+
+    // Clamp has to be a map.
+    load_error(
+        "    from_scene_reference: !<GradingPrimaryTransform> {style: log, clamp: 0.1}\n",
+        "'clamp' failed: The value needs to be a map",
+    );
+
+    // Clamp has to define some values.
+    load_error(
+        "    from_scene_reference: !<GradingPrimaryTransform> {style: log, clamp: {}}\n",
+        "'clamp' failed: At least one of the clamp values must be provided",
+    );
+}

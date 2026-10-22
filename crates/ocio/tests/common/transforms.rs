@@ -26,6 +26,7 @@ use ocio::{
     Interpolation, Lut1DHueAdjust, NegativeStyle, OptimizationFlags, Processor, RangeStyle,
     Transform, TransformDirection,
 };
+use ocio::{GradingPrimary, GradingRgbm, GradingStyle};
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as Depth;
@@ -760,6 +761,17 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("isGammaDynamic", Dumped::Bool(t.is_gamma_dynamic()));
             "ExposureContrastTransform"
         }
+        Transform::GradingPrimary(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_GRADING_PRIMARY"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getStyle", dumped_enum(grading_style_name(t.style())));
+            put("getValue", dump_grading_primary(&t.value()));
+            put("isDynamic", Dumped::Bool(t.is_dynamic()));
+            "GradingPrimaryTransform"
+        }
         other => panic!("no dump for {other:?}"),
     };
     (class.to_string(), getters)
@@ -926,4 +938,72 @@ pub(crate) fn exposure_contrast_style_name(style: ExposureContrastStyle) -> &'st
         ExposureContrastStyle::Video => "EXPOSURE_CONTRAST_VIDEO",
         ExposureContrastStyle::Logarithmic => "EXPOSURE_CONTRAST_LOGARITHMIC",
     }
+}
+
+/// A grading style's name in PyOpenColorIO.
+pub(crate) fn grading_style_name(style: GradingStyle) -> &'static str {
+    match style {
+        GradingStyle::Log => "GRADING_LOG",
+        GradingStyle::Lin => "GRADING_LIN",
+        GradingStyle::Video => "GRADING_VIDEO",
+    }
+}
+
+/// A value object as `checks.dump` writes it out: its class, its getters, its properties.
+pub(crate) fn dumped_object(
+    class: &str,
+    getters: &[(&str, Dumped)],
+    properties: &[(&str, Dumped)],
+) -> Dumped {
+    let map = |entries: &[(&str, Dumped)]| {
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    };
+    Dumped::Object(Dump {
+        class: class.to_string(),
+        getters: map(getters),
+        properties: map(properties),
+        uncalled: Vec::new(),
+        children: Vec::new(),
+    })
+}
+
+/// A `GradingRGBM`, as `checks.dump` writes it out: its four fields as properties.
+pub(crate) fn dump_grading_rgbm(v: &GradingRgbm) -> Dumped {
+    dumped_object(
+        "GradingRGBM",
+        &[],
+        &[
+            ("blue", Dumped::F64(v.blue)),
+            ("green", Dumped::F64(v.green)),
+            ("master", Dumped::F64(v.master)),
+            ("red", Dumped::F64(v.red)),
+        ],
+    )
+}
+
+/// A `GradingPrimary`, as `checks.dump` writes it out: its fields as properties (the
+/// binding's static `NoClampBlack` and `NoClampWhite` aren't the class's properties).
+pub(crate) fn dump_grading_primary(v: &GradingPrimary) -> Dumped {
+    dumped_object(
+        "GradingPrimary",
+        &[],
+        &[
+            ("brightness", dump_grading_rgbm(&v.brightness)),
+            ("clampBlack", Dumped::F64(v.clamp_black)),
+            ("clampWhite", Dumped::F64(v.clamp_white)),
+            ("contrast", dump_grading_rgbm(&v.contrast)),
+            ("exposure", dump_grading_rgbm(&v.exposure)),
+            ("gain", dump_grading_rgbm(&v.gain)),
+            ("gamma", dump_grading_rgbm(&v.gamma)),
+            ("lift", dump_grading_rgbm(&v.lift)),
+            ("offset", dump_grading_rgbm(&v.offset)),
+            ("pivot", Dumped::F64(v.pivot)),
+            ("pivotBlack", Dumped::F64(v.pivot_black)),
+            ("pivotWhite", Dumped::F64(v.pivot_white)),
+            ("saturation", Dumped::F64(v.saturation)),
+        ],
+    )
 }

@@ -64,6 +64,7 @@ pub use ocio_ops::open_color_types::{
     Lut1DHueAdjust, NamedTransformVisibility, NegativeStyle, OptimizationFlags, ReferenceSpaceType,
     RgbCurveType, SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
 };
+pub use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
 pub use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
     GradingBSplineCurve, GradingControlPoint,
 };
@@ -86,6 +87,7 @@ pub use transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
 pub use transforms::exposure_contrast_transform::ExposureContrastTransform;
 pub use transforms::file_transform::FileTransform;
 pub use transforms::fixed_function_transform::FixedFunctionTransform;
+pub use transforms::grading_primary_transform::GradingPrimaryTransform;
 pub use transforms::group_transform::GroupTransform;
 pub use transforms::log_affine_transform::LogAffineTransform;
 pub use transforms::log_camera_transform::LogCameraTransform;

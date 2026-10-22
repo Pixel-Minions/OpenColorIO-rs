@@ -16,6 +16,7 @@ pub mod exposure_contrast_transform;
 pub mod file_format;
 pub mod file_transform;
 pub mod fixed_function_transform;
+pub mod grading_primary_transform;
 pub mod group_transform;
 pub mod log_affine_transform;
 pub mod log_camera_transform;

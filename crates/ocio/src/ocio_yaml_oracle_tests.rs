@@ -15,6 +15,7 @@
 //!   matched;
 //! - and the warnings logged while loading, byte for byte.
 
+use ocio_ops::open_color_types::GradingStyle;
 use ocio_ops::open_color_types::{
     CdlStyle, ExposureContrastStyle, FixedFunctionStyle, NegativeStyle,
 };
@@ -348,6 +349,18 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("isGammaDynamic", json!(t.is_gamma_dynamic())));
             out.push(name(t.format_metadata()));
         }
+        Transform::GradingPrimary(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    GradingStyle::Log => "GRADING_LOG",
+                    GradingStyle::Lin => "GRADING_LIN",
+                    GradingStyle::Video => "GRADING_VIDEO",
+                }}),
+            ));
+            out.push(("isDynamic", json!(t.is_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
         Transform::LogAffine(t) => {
             out.push(("getBase", f64_out(t.base())));
             out.push(("getLogSideSlopeValue", f64s(&t.log_side_slope_value())));
@@ -536,6 +549,7 @@ fn class_name(t: &Transform) -> &'static str {
         Transform::ExposureContrast(_) => "ExposureContrast",
         Transform::File(_) => "File",
         Transform::FixedFunction(_) => "FixedFunction",
+        Transform::GradingPrimary(_) => "GradingPrimary",
         Transform::Group(_) => "Group",
         Transform::LogAffine(_) => "LogAffine",
         Transform::LogCamera(_) => "LogCamera",
@@ -1164,5 +1178,78 @@ fn exposure_contrast_transforms_load_as_in_the_wheel() {
         b"!<ExposureContrastTransform> {exposure: 1, exposure: 2}",
         b"!<ExposureContrastTransform> {expo: 1, log_midgray: 2, foo: }",
         b"!<ExposureContrastTransform>\n      exposure: 1\n      bar: 2",
+    ]);
+}
+
+/// The GradingPrimaryTransform's keys: the styles in each spelling, each control of each
+/// style (the controls of the other styles are read and dropped), the pivots and clamps, the
+/// values refused for the style, unknown keys at each level, and the errors of each key.
+/// The values with more digits than the text's 6 are compared through the saver's text
+/// (`ocio_yaml_save_oracle_tests.rs`).
+#[test]
+fn grading_primary_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<GradingPrimaryTransform> {}",
+        b"!<GradingPrimaryTransform> {style: log}",
+        b"!<GradingPrimaryTransform> {style: LINEAR}",
+        b"!<GradingPrimaryTransform> {style: Video, direction: inverse}",
+        b"!<GradingPrimaryTransform> {direction: inverse, style: video}",
+        b"!<GradingPrimaryTransform> {style: lin}",
+        b"!<GradingPrimaryTransform> {style: \"\"}",
+        b"!<GradingPrimaryTransform> {style: \"log\\0x\"}",
+        b"!<GradingPrimaryTransform> {style: [log]}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.2, 0.3], master: \
+          0.4}, contrast: {rgb: [1.1, 1, 1], master: 1.1}, gamma: {rgb: [1.1, 1.2, 1.3], master: \
+          1}, saturation: 0.9, pivot: {contrast: -0.1, black: 0.1, white: 1.1}, clamp: {black: \
+          0.1, white: 1.1}}",
+        b"!<GradingPrimaryTransform> {style: linear, offset: {rgb: [0.1, 0.12345678, 0], \
+          master: 0.1}, exposure: {rgb: [-1.1, 0.9, -0.01], master: 1.1}, contrast: {rgb: [1.1, \
+          1, 1], master: 1.1}, pivot: {contrast: 0.18}}",
+        b"!<GradingPrimaryTransform> {style: video, lift: {rgb: [0.1, 0, 0], master: 0.1}, \
+          gamma: {rgb: [1.1, 1, 1], master: 1.1}, gain: {rgb: [1.1, 1, 1], master: 1.1}, offset: \
+          {rgb: [0, 0, 0], master: 0.5}, pivot: {white: 1.1}, clamp: {black: 0.1}}",
+        b"!<GradingPrimaryTransform> {brightness: {rgb: [1, 1, 1], master: 1}, style: linear}",
+        b"!<GradingPrimaryTransform> {style: linear, brightness: {rgb: [1, 1, 1], master: 1}, \
+          lift: {rgb: [1, 1, 1], master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [.nan, .inf, -.inf], \
+          master: -0.0}, saturation: .nan, pivot: {contrast: 1e-30}}",
+        b"!<GradingPrimaryTransform> {style: log, gamma: {rgb: [0.001, 1, 1], master: 1}}",
+        b"!<GradingPrimaryTransform> {style: linear, contrast: {rgb: [1, 1, 1], master: 0}}",
+        b"!<GradingPrimaryTransform> {style: linear, gamma: {rgb: [0, 0, 0], master: 0}}",
+        b"!<GradingPrimaryTransform> {style: video, pivot: {black: 0.5, white: 0.5}}",
+        b"!<GradingPrimaryTransform> {style: video, clamp: {black: 2, white: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0], master: 0.1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0, 0, 0], master: \
+          0.1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: [0.1, 0.2, 0, 0]}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.2, 0]}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {master: 0.1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.2, 0], master: \
+          [0.1, 0.2, 0.3]}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [a, 0.2, 0], master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: 1, master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [1, 1, 1], master: 1, x: \
+          2}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [1, 1, 1], rgb: [2, 2, 2], \
+          master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: ~, master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: 0.1}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: {}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: {foo: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: {contrast: 0.1, foo: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: {contrast: x}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: !<Foo> {contrast: 0.1, bar: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, clamp: 0.1}",
+        b"!<GradingPrimaryTransform> {style: log, clamp: {}}",
+        b"!<GradingPrimaryTransform> {style: log, clamp: {white: 1, foo: 2}}",
+        b"!<GradingPrimaryTransform> {style: log, clamp: {black: ~}}",
+        b"!<GradingPrimaryTransform> {style: log, saturation: [1]}",
+        b"!<GradingPrimaryTransform> {style: log, saturation: ~}",
+        b"!<GradingPrimaryTransform> {name: gp, style: log, foo: 1}",
+        b"!<GradingPrimaryTransform> {name: \"a\\0b\"}",
+        b"!<GradingPrimaryTransform> {style: log, style: video}",
+        b"!<GradingPrimaryTransform> {direction: foo}",
+        b"!<GradingPrimaryTransform>\n      style: linear\n      offset:\n        rgb: [0.1, 0, \
+          0]\n        master: 0.1\n        other: 1",
     ]);
 }
