@@ -25,45 +25,83 @@ pub(crate) enum CallbackError {
     Cpp(PyErr),
 }
 
-/// pybind11's `error_already_set::what()` (`error_fetch_and_normalize`, pybind11 3.0): the
-/// exception type's C name (with "[WITH __notes__]" when it has notes), ": ", its `str()` (UTF-8
-/// with backslashreplace; "<EMPTY MESSAGE>" when empty), each note, then "\n\nAt:\n" and a line
-/// "  <file>(<line>): <function>" per frame, from the deepest of its traceback outwards.
+/// pybind11's `error_already_set::what()` (`error_fetch_and_normalize::error_string`, pybind11
+/// 3.0): the exception type's C name (with "[WITH __notes__]" when it has the attribute), ": ",
+/// then [`format_value_and_trace`].
 pub(crate) fn error_already_set_what(py: Python<'_>, err: &PyErr) -> Vec<u8> {
     let value = err.value(py);
     let ty: Bound<'_, PyType> = err.get_type(py);
     let mut out = crate::pybind11::tp_name(&ty)
         .unwrap_or_default()
         .into_bytes();
-    let notes = value.getattr("__notes__").ok();
-    if notes.is_some() {
+    if value.hasattr("__notes__").unwrap_or(false) {
         out.extend_from_slice(b"[WITH __notes__]");
     }
     out.extend_from_slice(b": ");
-    let text = |obj: &Bound<'_, PyAny>| -> Option<Vec<u8>> {
-        let s = obj.str().ok()?;
-        let b = s
-            .call_method1("encode", ("utf-8", "backslashreplace"))
-            .ok()?;
-        b.extract::<Vec<u8>>().ok()
+    out.extend_from_slice(&format_value_and_trace(py, err));
+    out
+}
+
+/// The text of `obj` as pybind11 reads it: `str()` (or the object itself, a note), encoded as
+/// UTF-8 with backslashreplace.
+fn utf8(obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    obj.call_method1("encode", ("utf-8", "backslashreplace"))?
+        .extract::<Vec<u8>>()
+}
+
+/// pybind11's `error_fetch_and_normalize::format_value_and_trace` (pybind11 3.0): the
+/// exception's `str()` as UTF-8 with backslashreplace ("<MESSAGE UNAVAILABLE DUE TO ANOTHER
+/// EXCEPTION>" when that raises); the notes of its `__notes__` list, each a `str` ("FAILURE
+/// obtaining __notes__[i]: " and the error otherwise); "<EMPTY MESSAGE>" for an empty text;
+/// then "\n\nAt:\n" and a line "  <file>(<line>): <function>" per frame, from the deepest of its
+/// traceback outwards; and, when `str()` raised, "\nMESSAGE UNAVAILABLE DUE TO EXCEPTION: " and
+/// that error's own [`error_already_set_what`] (after a line end of its own when there is no
+/// traceback).
+fn format_value_and_trace(py: Python<'_>, err: &PyErr) -> Vec<u8> {
+    let value = err.value(py);
+    let mut message_error = None;
+    let mut result = match value.str().and_then(|s| utf8(s.as_any())) {
+        Ok(text) => text,
+        Err(e) => {
+            message_error = Some(error_already_set_what(py, &e));
+            b"<MESSAGE UNAVAILABLE DUE TO ANOTHER EXCEPTION>".to_vec()
+        }
     };
-    let mut result = match text(value.as_any()) {
-        Some(t) => t,
-        None => b"<MESSAGE UNAVAILABLE DUE TO ANOTHER EXCEPTION>".to_vec(),
-    };
-    if let Some(notes) = notes
-        && let Ok(n) = notes.len()
+    // `PyList_Size` and `PyList_GET_ITEM` of the attribute (a list's own items); a note that
+    // isn't a `str` is `PyUnicode_AsEncodedString`'s `PyErr_BadArgument`, a TypeError without
+    // a traceback.
+    if let Ok(notes) = value.getattr("__notes__")
+        && let Ok(notes) = notes.cast::<pyo3::types::PyList>()
     {
-        result.extend_from_slice(format!("\n__notes__ (len={n}):").as_bytes());
-        for note in notes.try_iter().into_iter().flatten().flatten() {
-            result.push(b'\n');
-            result.extend_from_slice(&text(&note).unwrap_or_default());
+        result.extend_from_slice(format!("\n__notes__ (len={}):", notes.len()).as_bytes());
+        for (i, note) in notes.iter().enumerate() {
+            let encoded = if note.is_instance_of::<pyo3::types::PyString>() {
+                utf8(&note)
+            } else {
+                Err(pyo3::exceptions::PyTypeError::new_err(
+                    "bad argument type for built-in operation",
+                ))
+            };
+            match encoded {
+                Ok(text) => {
+                    result.push(b'\n');
+                    result.extend_from_slice(&text);
+                }
+                Err(e) => {
+                    result.extend_from_slice(
+                        format!("\nFAILURE obtaining __notes__[{i}]: ").as_bytes(),
+                    );
+                    result.extend_from_slice(&error_already_set_what(py, &e));
+                }
+            }
         }
     }
     if result.is_empty() {
         result = b"<EMPTY MESSAGE>".to_vec();
     }
-    if let Some(tb) = err.traceback(py) {
+    let trace = err.traceback(py);
+    let have_trace = trace.is_some();
+    if let Some(tb) = trace {
         let mut tb = tb.into_any();
         while let Ok(next) = tb.getattr("tb_next") {
             if next.is_none() {
@@ -94,8 +132,14 @@ pub(crate) fn error_already_set_what(py: Python<'_>, err: &PyErr) -> Vec<u8> {
             frame = f.getattr("f_back").ok();
         }
     }
-    out.extend_from_slice(&result);
-    out
+    if let Some(message_error) = message_error {
+        if !have_trace {
+            result.push(b'\n');
+        }
+        result.extend_from_slice(b"\nMESSAGE UNAVAILABLE DUE TO EXCEPTION: ");
+        result.extend_from_slice(&message_error);
+    }
+    result
 }
 
 /// Throws a callback's error through the library.

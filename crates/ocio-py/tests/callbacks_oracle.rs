@@ -18,8 +18,14 @@
 //!   the frames of an exception raised in Python code: the same up to the port's outermost
 //!   frame, `run`, where the wheel's step interpreter has its script's `main` and `<module>`
 //!   too);
+//! - `error_already_set::what()` of a logging function's exceptions in the config reader's
+//!   message: an empty message, notes (one not UTF-8, one not a `str`), a message not UTF-8,
+//!   and a `str()` that raises, without a traceback or in a Python frame (the exceptions are
+//!   raised in a stdlib generator's frame by `copy.copy`, so the frames `what()` lists are the
+//!   same on both sides);
 //! - D-9: a callback that uses the config the library is working on raises the port's
-//!   RuntimeError, where the wheel's reads it.
+//!   RuntimeError, where the wheel's reads it; another thread's calls on the config while a
+//!   callback of a call on it waits are the wheel's.
 //!
 //! And, without the wheel, where its process dies or it keeps a value outside an enum: `None`
 //! for the proxy (U-124), for `LogMessage`'s message (U-123), a logging level outside the
@@ -218,6 +224,99 @@ fn frames_script() -> (Script, usize) {
     let c5 = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(p5)]);
     let k = sc.raises(ra(c5, "getProcessor"), vec![s("lin"), s("lut")]);
     (sc, k)
+}
+
+/// A config whose reading logs a warning (an unknown key).
+const WARNING_CONFIG: &str = "ocio_profile_version: 2\nroles: {default: raw}\n\
+     displays: {d: [!<View> {name: v, colorspace: raw}]}\n\
+     colorspaces: [!<ColorSpace> {name: raw}]\nbogus: 1\n";
+
+/// A class (a step) of instances that raise `exc` (a step) when `copy.copy` copies them:
+/// their `__reduce_ex__` (a dict's `__getitem__`, called without the instance) gives
+/// `(gen.throw, (exc,))`, which `copy._reconstruct` calls, `gen` a stdlib generator
+/// (`WeakSet.__iter__`) not started. The exception's traceback runs from `copy` through
+/// `_reconstruct` to the generator's frame, the deepest, which once ended has no `f_back`:
+/// `what()` lists that frame only, the same on both sides. `base` and `slot` (a method name)
+/// make `copy.copy` (a function: bound to the instance) a method of the class.
+fn raising_class(sc: &mut Script, name: &str, base: Vec<Value>, slot: &str, exc: usize) -> usize {
+    let set = sc.call(n("threading.WeakSet"), vec![]);
+    let generator = sc.call(ra(set, "__iter__"), vec![]);
+    let reduce = sc.call(
+        n("dict"),
+        vec![d(vec![(
+            i(4),
+            t(vec![ra(generator, "throw"), t(vec![r(exc)])]),
+        )])],
+    );
+    sc.call(
+        n("type"),
+        vec![
+            s(name),
+            t(base),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s(slot), n("copy.copy")),
+                (s("__reduce_ex__"), ra(reduce, "__getitem__")),
+            ]),
+        ],
+    )
+}
+
+/// `error_already_set::what()` of a logging function's exceptions, in the message of the
+/// config reader that catches them: an empty message, notes (one not UTF-8), a message not
+/// UTF-8, and a `str()` that raises (`__str__` a dict's `popitem`, without a traceback, or
+/// raising in a Python frame), notes too. The logging function is
+/// `operator.methodcaller("join", y)`, whose `iter(y)` copies `y` and raises.
+fn what_script() -> Script {
+    let mut sc = Script::new();
+    let popitem = sc.call(n("dict"), vec![]);
+    let e_class = sc.call(
+        n("type"),
+        vec![
+            s("E"),
+            t(vec![n("Exception")]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("__str__"), ra(popitem, "popitem")),
+            ]),
+        ],
+    );
+    let inner = sc.call(n("RuntimeError"), vec![s("no str")]);
+    let e2_class = raising_class(&mut sc, "E2", vec![n("Exception")], "__str__", inner);
+    let empty = sc.call(n("ValueError"), vec![]);
+    let noted = sc.call(n("ValueError"), vec![s("n")]);
+    sc.call(ra(noted, "add_note"), vec![s("note1")]);
+    // Lone surrogates (UTF-8 with surrogatepass, as the step interpreter reads text).
+    sc.call(ra(noted, "add_note"), vec![json!({ "str": "edb3bf" })]);
+    let surrogate = sc.call(n("ValueError"), vec![json!({ "str": "61edb3bf62" })]);
+    let no_str = sc.call(r(e_class), vec![s("x")]);
+    let no_str_noted = sc.call(r(e_class), vec![s("y")]);
+    sc.call(ra(no_str_noted, "add_note"), vec![s("nn")]);
+    let no_str_framed = sc.call(r(e2_class), vec![s("z")]);
+    // Notes set as a list holding a note that isn't a `str`.
+    let bad_note = sc.call(n("ValueError"), vec![s("t")]);
+    sc.step(
+        json!({ "setattr": r(bad_note), "name": "__notes__",
+                "value": common::script::l(vec![s("a"), i(5)]) }),
+        Expect::Value,
+    );
+    for exc in [
+        empty,
+        noted,
+        surrogate,
+        no_str,
+        no_str_noted,
+        no_str_framed,
+        bad_note,
+    ] {
+        let class = raising_class(&mut sc, "Y", vec![], "__iter__", exc);
+        let y = sc.call(r(class), vec![]);
+        let f = sc.call(n("operator.methodcaller"), vec![s("join"), r(y)]);
+        sc.call(n("OCIO.SetLoggingFunction"), vec![r(f)]);
+        sc.raises(n("OCIO.Config.CreateFromStream"), vec![s(WARNING_CONFIG)]);
+        sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    }
+    sc
 }
 
 fn proxy_script() -> Script {
@@ -455,7 +554,48 @@ fn message(step: &Value) -> String {
 /// The callbacks behave as the wheel's (see the module's documentation); D-9 where it differs.
 #[test]
 fn callbacks_as_the_wheels() {
-    compare(&[logging_script(), proxy_script()]);
+    compare(&[logging_script(), proxy_script(), what_script()]);
+    // The what() cases reach the branches they are for, in the wheel (the port's are equal).
+    let what = what_script();
+    let theirs = common::wheel(&[what.json()]).remove(0);
+    let messages: Vec<String> = theirs["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|st| st.get("raised").is_some())
+        .map(message)
+        .collect();
+    assert_eq!(messages.len(), 7, "{theirs}");
+    let at = "\n\nAt:\n  ";
+    for (m, parts) in messages.iter().zip([
+        &["ValueError: <EMPTY MESSAGE>", at][..],
+        &[
+            "ValueError[WITH __notes__]: n\n__notes__ (len=2):\nnote1\n\\udcff",
+            at,
+        ],
+        &["ValueError: a\\udcffb", at],
+        &[
+            "E: <MESSAGE UNAVAILABLE DUE TO ANOTHER EXCEPTION>",
+            at,
+            "\nMESSAGE UNAVAILABLE DUE TO EXCEPTION: KeyError: 'popitem(): dictionary is empty'",
+        ],
+        &[
+            "E[WITH __notes__]: <MESSAGE UNAVAILABLE DUE TO ANOTHER EXCEPTION>\n__notes__",
+            "\nMESSAGE UNAVAILABLE DUE TO EXCEPTION: KeyError",
+        ],
+        &[
+            "E2: <MESSAGE UNAVAILABLE DUE TO ANOTHER EXCEPTION>",
+            "\nMESSAGE UNAVAILABLE DUE TO EXCEPTION: RuntimeError: no str\n\nAt:\n  ",
+        ],
+        &[
+            "ValueError[WITH __notes__]: t\n__notes__ (len=2):\na\nFAILURE obtaining __notes__[1]: \
+           TypeError: bad argument type for built-in operation\n\nAt:\n  ",
+        ],
+    ]) {
+        for part in parts {
+            assert!(m.contains(part), "{part:?} in {m:?}");
+        }
+    }
 
     // The frames of what(): the wheel's step interpreter runs as a script (`main`, `<module>`),
     // the port's is called by this test (`run` is its outermost frame); the frames up to `run`
