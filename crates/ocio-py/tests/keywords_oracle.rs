@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 
 /// The classes bound so far whose functions the test calls, with their nested classes (the
 /// iterators), as the wheel's module path names them.
-const CLASSES: [&str; 25] = [
+const CLASSES: [&str; 28] = [
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -54,6 +54,9 @@ const CLASSES: [&str; 25] = [
     "Look",
     "NamedTransform",
     "ViewTransform",
+    "ColorSpaceTransform",
+    "DisplayViewTransform",
+    "LookTransform",
 ];
 
 /// The nested classes no function of the module returns: no instance to call them with.
@@ -81,6 +84,9 @@ fn instances(sc: &mut Script) -> Vec<(String, usize)> {
         "CDLTransform",
         "FileTransform",
         "FileRules",
+        "ColorSpaceTransform",
+        "DisplayViewTransform",
+        "LookTransform",
     ] {
         let k = sc.call(n(&format!("OCIO.{c}")), vec![]);
         put(c, k);

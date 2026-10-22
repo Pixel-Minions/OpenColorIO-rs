@@ -565,6 +565,8 @@ macro_rules! variant {
 variant!(ocio::AllocationTransform, Allocation);
 variant!(ocio::BuiltinTransform, Builtin);
 variant!(ocio::CdlTransform, Cdl);
+variant!(ocio::ColorSpaceTransform, ColorSpace);
+variant!(ocio::DisplayViewTransform, DisplayView);
 variant!(ocio::ExponentTransform, Exponent);
 variant!(ocio::ExponentWithLinearTransform, ExponentWithLinear);
 variant!(ocio::FileTransform, File);
@@ -573,6 +575,7 @@ variant!(ocio::GroupTransform, Group);
 variant!(ocio::LogAffineTransform, LogAffine);
 variant!(ocio::LogCameraTransform, LogCamera);
 variant!(ocio::LogTransform, Log);
+variant!(ocio::LookTransform, Look);
 variant!(ocio::Lut1DTransform, Lut1D);
 variant!(ocio::Lut3DTransform, Lut3D);
 variant!(ocio::transforms::matrix_transform::MatrixTransform, Matrix);
@@ -1053,6 +1056,8 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::transforms::py_allocation_transform::bind(m)?;
     crate::transforms::py_builtin_transform::bind(m)?;
     crate::transforms::py_cdl_transform::bind(m)?;
+    crate::transforms::py_color_space_transform::bind(m)?;
+    crate::transforms::py_display_view_transform::bind(m)?;
     crate::transforms::py_exponent_transform::bind(m)?;
     crate::transforms::py_exponent_with_linear_transform::bind(m)?;
     crate::transforms::py_file_transform::bind(m)?;
@@ -1061,6 +1066,7 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::transforms::py_log_affine_transform::bind(m)?;
     crate::transforms::py_log_camera_transform::bind(m)?;
     crate::transforms::py_log_transform::bind(m)?;
+    crate::transforms::py_look_transform::bind(m)?;
     crate::transforms::py_lut1d_transform::bind(m)?;
     crate::transforms::py_lut3d_transform::bind(m)?;
     crate::transforms::py_matrix_transform::bind(m)?;

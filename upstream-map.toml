@@ -4044,13 +4044,15 @@ note = "p6-transforms 6.3c"
 path = "src/bindings/python/transforms/PyColorSpaceTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_color_space_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-config 6.3g"
 
 [[file]]
 path = "src/bindings/python/transforms/PyDisplayViewTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_display_view_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-config 6.3g"
 
 [[file]]
 path = "src/bindings/python/transforms/PyExponentTransform.cpp"
@@ -4142,7 +4144,8 @@ note = "p6-transforms 6.3b"
 path = "src/bindings/python/transforms/PyLookTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_look_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-config 6.3g"
 
 [[file]]
 path = "src/bindings/python/transforms/PyLut1DTransform.cpp"

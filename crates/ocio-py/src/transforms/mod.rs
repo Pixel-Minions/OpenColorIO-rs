@@ -7,6 +7,8 @@
 pub(crate) mod py_allocation_transform;
 pub(crate) mod py_builtin_transform;
 pub(crate) mod py_cdl_transform;
+pub(crate) mod py_color_space_transform;
+pub(crate) mod py_display_view_transform;
 pub(crate) mod py_exponent_transform;
 pub(crate) mod py_exponent_with_linear_transform;
 pub(crate) mod py_file_transform;
@@ -15,6 +17,7 @@ pub(crate) mod py_group_transform;
 pub(crate) mod py_log_affine_transform;
 pub(crate) mod py_log_camera_transform;
 pub(crate) mod py_log_transform;
+pub(crate) mod py_look_transform;
 pub(crate) mod py_lut1d_transform;
 pub(crate) mod py_lut3d_transform;
 pub(crate) mod py_matrix_transform;
