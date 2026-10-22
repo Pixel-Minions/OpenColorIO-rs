@@ -908,7 +908,7 @@ pub fn builtin<'py>(
     f: &'static Function,
     doc: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    function(py, f, doc, Some(MODULE), None)
+    function(py, f, Doc::from(doc), Some(MODULE), None)
 }
 
 /// [`builtin`] for a function pybind11 makes without a scope (the getters of an enum's
@@ -918,20 +918,24 @@ pub fn builtin_unscoped<'py>(
     f: &'static Function,
     doc: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    function(py, f, doc, None, None)
+    function(py, f, Doc::from(doc), None, None)
 }
 
 fn function<'py>(
     py: Python<'py>,
     f: &'static Function,
-    doc: bool,
+    doc: Doc<'_>,
     module: Option<&str>,
     module_scope: Option<&Bound<'py, PyModule>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     RECORD_TYPE_READY.get_or_try_init(py, || {
         py.get_type::<FunctionRecord>().delattr("dispatch_call")
     })?;
-    let docstring = doc.then(|| crate::dispatch::docstring(f));
+    let docstring = match doc {
+        Doc::None => None,
+        Doc::Signatures => Some(crate::dispatch::docstring(f)),
+        Doc::Text(text) => Some(format!("{}\n{text}\n", crate::dispatch::docstring(f))),
+    };
     let record = Bound::new(
         py,
         FunctionRecord {
@@ -957,7 +961,10 @@ fn function<'py>(
 /// `m.def(name, ...)`: [`builtin`] of `f` into the module's dictionary, its record's scope the
 /// module (which makes it pickleable).
 pub fn def_function(m: &Bound<'_, PyModule>, f: &'static Function) -> PyResult<()> {
-    m.setattr(f.name, function(m.py(), f, true, Some(MODULE), Some(m))?)
+    m.setattr(
+        f.name,
+        function(m.py(), f, Doc::Signatures, Some(MODULE), Some(m))?,
+    )
 }
 
 /// A method: [`instance_method`] of [`builtin`].
@@ -971,4 +978,36 @@ pub fn method<'py>(py: Python<'py>, f: &'static Function) -> PyResult<Bound<'py,
 pub fn instance_of<'py>(obj: &Bound<'py, PyAny>, qualified: &str) -> Option<Bound<'py, PyAny>> {
     let cls = class(obj.py(), qualified)?;
     obj.get_type().is_subclass(&cls).ok()?.then(|| obj.clone())
+}
+
+/// A function's docstring as pybind11 writes it.
+#[derive(Debug, Clone, Copy)]
+enum Doc<'a> {
+    /// None (`__doc__` None).
+    None,
+    /// The signatures ([`crate::dispatch::docstring`]): the wheel's docstrings are empty.
+    Signatures,
+    /// The signatures, then a line end, the definition's own docstring and a line end (a
+    /// docstring the binding gives in place of `DOC(...)`, `PyLogCameraTransform.cpp:156-166`).
+    Text(&'a str),
+}
+
+impl From<bool> for Doc<'_> {
+    fn from(signatures: bool) -> Self {
+        if signatures {
+            Doc::Signatures
+        } else {
+            Doc::None
+        }
+    }
+}
+
+/// A method whose definition gives its own docstring `doc`: [`method`], with `doc` after the
+/// signature ([`Doc::Text`]).
+pub fn method_with_doc<'py>(
+    py: Python<'py>,
+    f: &'static Function,
+    doc: &str,
+) -> PyResult<Bound<'py, PyAny>> {
+    instance_method(py, function(py, f, Doc::Text(doc), Some(MODULE), None)?)
 }

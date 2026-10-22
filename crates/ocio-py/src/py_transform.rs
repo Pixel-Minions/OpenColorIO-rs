@@ -888,7 +888,12 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     crate::transforms::py_allocation_transform::bind(m)?;
+    crate::transforms::py_exponent_transform::bind(m)?;
+    crate::transforms::py_exponent_with_linear_transform::bind(m)?;
     crate::transforms::py_group_transform::bind(m)?;
+    crate::transforms::py_log_affine_transform::bind(m)?;
+    crate::transforms::py_log_camera_transform::bind(m)?;
+    crate::transforms::py_log_transform::bind(m)?;
     crate::transforms::py_matrix_transform::bind(m)?;
     crate::transforms::py_range_transform::bind(m)?;
     Ok(())
@@ -1110,4 +1115,15 @@ macro_rules! format_metadata_def {
             }
         )
     };
+}
+
+pub(crate) const NEGATIVE_STYLE: &str = q!("NegativeStyle");
+
+/// The library's `NegativeStyle` of the C++ value `v` ([`outside_enumerators`]).
+pub(crate) fn negative_style(v: i64) -> PyResult<ocio_ops::open_color_types::NegativeStyle> {
+    use ocio_ops::open_color_types::NegativeStyle::*;
+    [Clamp, Mirror, PassThru, Linear]
+        .into_iter()
+        .find(|s| *s as i64 == v)
+        .ok_or_else(|| outside_enumerators(NEGATIVE_STYLE, v))
 }
