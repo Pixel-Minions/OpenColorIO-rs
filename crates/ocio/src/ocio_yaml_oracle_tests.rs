@@ -374,6 +374,18 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("isDynamic", json!(t.is_dynamic())));
             out.push(name(t.format_metadata()));
         }
+        Transform::GradingTone(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    GradingStyle::Log => "GRADING_LOG",
+                    GradingStyle::Lin => "GRADING_LIN",
+                    GradingStyle::Video => "GRADING_VIDEO",
+                }}),
+            ));
+            out.push(("isDynamic", json!(t.is_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
         Transform::LogAffine(t) => {
             out.push(("getBase", f64_out(t.base())));
             out.push(("getLogSideSlopeValue", f64s(&t.log_side_slope_value())));
@@ -564,6 +576,7 @@ fn class_name(t: &Transform) -> &'static str {
         Transform::FixedFunction(_) => "FixedFunction",
         Transform::GradingPrimary(_) => "GradingPrimary",
         Transform::GradingRgbCurve(_) => "GradingRGBCurve",
+        Transform::GradingTone(_) => "GradingTone",
         Transform::Group(_) => "Group",
         Transform::LogAffine(_) => "LogAffine",
         Transform::LogCamera(_) => "LogCamera",
@@ -1318,5 +1331,60 @@ fn grading_rgb_curve_transforms_load_as_in_the_wheel() {
         b"!<GradingRGBCurveTransform> {direction: foo}",
         b"!<GradingRGBCurveTransform>\n      style: video\n      red:\n        control_points: \
           [0, 0, 1, 1]\n        other: 1",
+    ]);
+}
+
+/// The GradingToneTransform's keys: the styles, each range with its own keys (`center` for the
+/// midtones, `pivot` for the shadows and highlights), `s_contrast`, the values refused, unknown
+/// keys at each level, and the errors of each key. The values with more digits than the
+/// text's 6 are compared through the saver's text (`ocio_yaml_save_oracle_tests.rs`).
+#[test]
+fn grading_tone_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<GradingToneTransform> {}",
+        b"!<GradingToneTransform> {style: LINEAR, direction: inverse}",
+        b"!<GradingToneTransform> {direction: inverse, style: video}",
+        b"!<GradingToneTransform> {style: lin}",
+        b"!<GradingToneTransform> {style: \"log\\0x\"}",
+        b"!<GradingToneTransform> {style: log, blacks: {rgb: [0.1, 0.12345678, 0.9], master: \
+          1, start: 0.1, width: 0.9}, shadows: {rgb: [1, 1.1, 1.1111], master: 1.1, start: 0.9, \
+          pivot: 0.1}, midtones: {rgb: [0.85, 0.98, 1], master: 1.11, center: 0.1, width: 0.9}, \
+          highlights: {rgb: [1.1, 1.1111, 1], master: 1.2, start: 0.15, pivot: 1.1}, whites: \
+          {rgb: [0.95, 0.96, 0.95], master: 1.1, start: 0.1, width: 0.9}, s_contrast: 1.1}",
+        b"!<GradingToneTransform> {s_contrast: 1.5, style: linear}",
+        b"!<GradingToneTransform> {style: video, s_contrast: .nan, midtones: {rgb: [.nan, 1, \
+          1], master: 1, center: -0.0, width: 1e-30}}",
+        b"!<GradingToneTransform> {style: log, blacks: {rgb: [0.001, 1, 1], master: 1, start: \
+          0, width: 1}}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [1, 1, 1], master: 2.5, start: 0, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, midtones: {rgb: [1, 1, 1], master: 1, center: 0, \
+          width: 0}}",
+        b"!<GradingToneTransform> {style: log, s_contrast: 0}",
+        b"!<GradingToneTransform> {style: log, s_contrast: 2}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [0.1, 1], master: 1, start: 1, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, whites: [0.1, 0.12345678, 0, 0]}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [0.1, 1, 1], master: 0.1, width: \
+          1}}",
+        b"!<GradingToneTransform> {style: log, midtones: {rgb: [0.1, 1, 1], master: 0.1, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, midtones: {rgb: [0.1, 1, 1], master: 0.1, start: \
+          0, width: 1}}",
+        b"!<GradingToneTransform> {style: log, shadows: {rgb: [1, 1, 1], master: 1, start: 0.5, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, highlights: {rgb: [1, 1, 1], master: 1, start: \
+          0.5}}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [0.1, 1, 1], master: 0.1, start: \
+          [1, 1.1], width: 1}}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [1, 1, 1], master: 1, start: 0, \
+          width: 1, foo: 2}}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [1, 1, 1], master: ~, start: 0, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, s_contrast: [1]}",
+        b"!<GradingToneTransform> {style: log, s_contrast: ~}",
+        b"!<GradingToneTransform> {name: gt, style: log, foo: 1}",
+        b"!<GradingToneTransform> {style: log, style: video}",
+        b"!<GradingToneTransform> {direction: foo}",
     ]);
 }

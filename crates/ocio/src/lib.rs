@@ -69,6 +69,7 @@ pub use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
     GradingBSplineCurve, GradingControlPoint,
 };
 pub use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::GradingRgbCurve;
+pub use ocio_ops::ops::gradingtone::grading_tone::{GradingRgbmsw, GradingTone};
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 pub use ocio_ops::platform::{
     get_env_variable, is_env_variable_present, set_env_variable, unset_env_variable,
@@ -89,6 +90,7 @@ pub use transforms::file_transform::FileTransform;
 pub use transforms::fixed_function_transform::FixedFunctionTransform;
 pub use transforms::grading_primary_transform::GradingPrimaryTransform;
 pub use transforms::grading_rgb_curve_transform::GradingRgbCurveTransform;
+pub use transforms::grading_tone_transform::GradingToneTransform;
 pub use transforms::group_transform::GroupTransform;
 pub use transforms::log_affine_transform::LogAffineTransform;
 pub use transforms::log_camera_transform::LogCameraTransform;

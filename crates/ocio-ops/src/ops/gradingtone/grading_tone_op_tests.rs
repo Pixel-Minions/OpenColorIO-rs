@@ -2,7 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of tests/cpu/ops/gradingtone/GradingToneOp_tests.cpp @ v2.5.2. Its `create_transform`
-//! and `build_ops` need the `GradingToneTransform` (5.5d).
+//! and `build_ops` need the `GradingToneTransform`: they are in `ocio`
+//! (crates/ocio/src/transforms/grading_tone_transform_tests.rs).
 
 use super::*;
 use crate::open_color_types::GradingStyle;

@@ -28,6 +28,7 @@ use ocio::{
     Transform, TransformDirection,
 };
 use ocio::{GradingPrimary, GradingRgbm, GradingStyle};
+use ocio::{GradingRgbmsw, GradingTone};
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as Depth;
@@ -785,6 +786,17 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("isDynamic", Dumped::Bool(t.is_dynamic()));
             "GradingRGBCurveTransform"
         }
+        Transform::GradingTone(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_GRADING_TONE"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getStyle", dumped_enum(grading_style_name(t.style())));
+            put("getValue", dump_grading_tone(&t.value()));
+            put("isDynamic", Dumped::Bool(t.is_dynamic()));
+            "GradingToneTransform"
+        }
         other => panic!("no dump for {other:?}"),
     };
     (class.to_string(), getters)
@@ -1085,6 +1097,38 @@ pub(crate) fn dump_grading_rgb_curve(v: &GradingRgbCurve) -> Dumped {
             ("green", c(RgbCurveType::Green)),
             ("master", c(RgbCurveType::Master)),
             ("red", c(RgbCurveType::Red)),
+        ],
+    )
+}
+
+/// A `GradingRGBMSW`, as `checks.dump` writes it out: its six fields as properties.
+pub(crate) fn dump_grading_rgbmsw(v: &GradingRgbmsw) -> Dumped {
+    dumped_object(
+        "GradingRGBMSW",
+        &[],
+        &[
+            ("blue", Dumped::F64(v.blue)),
+            ("green", Dumped::F64(v.green)),
+            ("master", Dumped::F64(v.master)),
+            ("red", Dumped::F64(v.red)),
+            ("start", Dumped::F64(v.start)),
+            ("width", Dumped::F64(v.width)),
+        ],
+    )
+}
+
+/// A `GradingTone`, as `checks.dump` writes it out: its fields as properties.
+pub(crate) fn dump_grading_tone(v: &GradingTone) -> Dumped {
+    dumped_object(
+        "GradingTone",
+        &[],
+        &[
+            ("blacks", dump_grading_rgbmsw(&v.blacks)),
+            ("highlights", dump_grading_rgbmsw(&v.highlights)),
+            ("midtones", dump_grading_rgbmsw(&v.midtones)),
+            ("scontrast", Dumped::F64(v.scontrast)),
+            ("shadows", dump_grading_rgbmsw(&v.shadows)),
+            ("whites", dump_grading_rgbmsw(&v.whites)),
         ],
     )
 }

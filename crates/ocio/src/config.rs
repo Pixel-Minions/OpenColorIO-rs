@@ -4764,6 +4764,13 @@ impl Config {
                     ));
                 }
             }
+            Transform::GradingTone(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have GradingToneTransform.",
+                    ));
+                }
+            }
             Transform::Range(_) => {
                 if major < 2 {
                     return Err(Exception::new(

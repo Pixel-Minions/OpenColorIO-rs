@@ -3,8 +3,9 @@
 
 //! The GradingTone op: part of a port of `src/OpenColorIO/ops/gradingtone/GradingToneOp.h` and
 //! `GradingToneOp.cpp` @ v2.5.2: the op's behaviors and [`create_grading_tone_op`].
-//! `BuildGradingToneOp` and `CreateGradingToneTransform` work on the `GradingToneTransform`
-//! (5.5d); `extractGpuShaderInfo` is the GPU writer's (`ocio-gpu`, 5.3d).
+//! `BuildGradingToneOp` and `CreateGradingToneTransform` work on the `GradingToneTransform`,
+//! in `ocio` (crates/ocio/src/transforms/grading_tone_transform.rs); `extractGpuShaderInfo` is
+//! the GPU writer's (`ocio-gpu`, 5.3d).
 //!
 //! As for every family, the op is its data, [`OpData::GradingTone`]: [`Op`]'s methods match on
 //! it and call the methods here, `GradingToneOp`'s overrides.

@@ -8437,3 +8437,135 @@ fn grading_rgbcurve_serialization() {
         );
     }
 }
+
+/// Port of `OCIO_ADD_TEST(Config, grading_tone_serialization)` @ v2.5.2.
+#[test]
+fn grading_tone_serialization() {
+    let _env = EnvGuard::new();
+    let load_error = |str_end: &str, what: &str| {
+        let str = profile_v2_start() + str_end;
+        check_throw_what(Config::create_from_stream(str.as_bytes()), what);
+    };
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingToneTransform> {style: log}\n",
+            "        - !<GradingToneTransform> {style: log, s_contrast: 1.1}\n",
+            "        - !<GradingToneTransform> {style: log, direction: inverse}\n",
+            "        - !<GradingToneTransform> {style: linear}\n",
+            "        - !<GradingToneTransform> {style: linear, direction: inverse}\n",
+            "        - !<GradingToneTransform> {name: test, style: video}\n",
+            "        - !<GradingToneTransform> {style: video, direction: inverse}\n",
+        );
+
+        let str = profile_v2_start() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Write the config.
+
+        //  When controls are not default, transform is saved on separate lines.
+        let str_end_back = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingToneTransform> {style: log}\n",
+            "        - !<GradingToneTransform>\n",
+            "          style: log\n",
+            "          s_contrast: 1.1\n",
+            "        - !<GradingToneTransform> {style: log, direction: inverse}\n",
+            "        - !<GradingToneTransform> {style: linear}\n",
+            "        - !<GradingToneTransform> {style: linear, direction: inverse}\n",
+            "        - !<GradingToneTransform> {name: test, style: video}\n",
+            "        - !<GradingToneTransform> {style: video, direction: inverse}\n",
+        );
+
+        let str_back = profile_v2_start() + str_end_back;
+        check_serialized(&config.serialize().unwrap(), &str_back);
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingToneTransform>\n",
+            "          style: log\n",
+            "          blacks: {rgb: [0.1, 0.12345678, 0.9], master: 1, start: 0.1, width: 0.9}\n",
+            "          shadows: {rgb: [1, 1.1, 1.1111], master: 1.1, start: 0.9, pivot: 0.1}\n",
+            "          midtones: {rgb: [0.85, 0.98, 1], master: 1.11, center: 0.1, width: 0.9}\n",
+            "          highlights: {rgb: [1.1, 1.1111, 1], master: 1.2, start: 0.15, pivot: 1.1}\n",
+            "          whites: {rgb: [0.95, 0.96, 0.95], master: 1.1, start: 0.1, width: 0.9}\n",
+            "          s_contrast: 1.1\n",
+            "        - !<GradingToneTransform>\n",
+            "          style: log\n",
+            "          midtones: {rgb: [0.85, 0.98, 1], master: 1.11, center: 0.1, width: 0.9}\n",
+            "          highlights: {rgb: [1.1, 1.1111, 1], master: 1.2, start: 0.15, pivot: 1.1}\n",
+            "          whites: {rgb: [0.95, 0.96, 0.95], master: 1.1, start: 0.1, width: 0.9}\n",
+            "          s_contrast: 1.1\n",
+            "        - !<GradingToneTransform>\n",
+            "          style: linear\n",
+            "          blacks: {rgb: [0.1, 0.12345678, 0.9], master: 1, start: 0.1, width: 0.9}\n",
+            "          shadows: {rgb: [1, 1.1, 1.1111], master: 1.1, start: 0.9, pivot: 0.1}\n",
+            "          whites: {rgb: [0.95, 0.96, 0.95], master: 1.1, start: 0.1, width: 0.9}\n",
+            "          s_contrast: 1.1\n",
+            "        - !<GradingToneTransform>\n",
+            "          style: video\n",
+            "          shadows: {rgb: [1, 1.1, 1.1111], master: 1.1, start: 0.9, pivot: 0.1}\n",
+            "          midtones: {rgb: [0.85, 0.98, 1], master: 1.11, center: 0.1, width: 0.9}\n",
+            "          highlights: {rgb: [1.1, 1.1111, 1], master: 1.2, start: 0.15, pivot: 1.1}\n",
+            "          direction: inverse\n",
+        );
+
+        // Write the config.
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    // Rgb not enough values.
+    load_error(
+        "    from_scene_reference: !<GradingToneTransform> {style: log, whites: {rgb: [0.1, 1], master: 1, start: 1, width: 1}}\n",
+        "The RGB value needs to be a 3 doubles",
+    );
+
+    // Rgb too many values.
+    load_error(
+        "    from_scene_reference: !<GradingToneTransform> {style: log, whites: {rgb: [0.1, 0.12345678, 1, 1], master: 0.1, start: 1, width: 1}}\n",
+        "The RGB value needs to be a 3 doubles",
+    );
+
+    // Rgbm has to be a map.
+    load_error(
+        concat!(
+            "    from_scene_reference: !<GradingToneTransform> ",
+            "{style: log, whites: [0.1, 0.12345678, 0, 0]}\n"
+        ),
+        "'whites' failed: The value needs to be a map",
+    );
+
+    // Rgbmsw missing start.
+    load_error(
+        concat!(
+            "    from_scene_reference: !<GradingToneTransform> ",
+            "{style: log, whites: {rgb: [0.1, 1, 1], master: 0.1, width: 1}}\n"
+        ),
+        "'whites' failed: Rgb, master, start, and width values are required",
+    );
+
+    // Rgbmsw missing center.
+    load_error(
+        concat!(
+            "    from_scene_reference: !<GradingToneTransform> ",
+            "{style: log, midtones: {rgb: [0.1, 1, 1], master: 0.1, width: 1}}\n"
+        ),
+        "'midtones' failed: Rgb, master, center, and width values are required",
+    );
+
+    // Rgbmsw start has too many values.
+    load_error(
+        concat!(
+            "    from_scene_reference: !<GradingToneTransform> ",
+            "{style: log, whites: {rgb: [0.1, 1, 1], master: 0.1, start: [1, 1.1], width: 1}}\n"
+        ),
+        "parsing double failed",
+    );
+}

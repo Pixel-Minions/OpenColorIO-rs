@@ -532,3 +532,48 @@ fn grading_rgb_curve_transforms_are_refused_in_version_1() {
         ],
     );
 }
+
+/// The GradingToneTransform's saver: a flow map for default values, a block map otherwise,
+/// each range with its keys, the s-contrast; special values and values with more digits than
+/// the writer's precision.
+#[test]
+fn grading_tone_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2",
+        &[
+            "!<GradingToneTransform> {style: log}",
+            "!<GradingToneTransform> {style: linear, direction: inverse, name: gt}",
+            "!<GradingToneTransform> {style: video, s_contrast: 1.1}",
+            "!<GradingToneTransform> {style: log, blacks: {rgb: [0.1, 0.12345678, 0.9], master: \
+             1, start: 0.1, width: 0.9}, shadows: {rgb: [1, 1.1, 1.1111], master: 1.1, start: \
+             0.9, pivot: 0.1}, midtones: {rgb: [0.85, 0.98, 1], master: 1.11, center: 0.1, width: \
+             0.9}, highlights: {rgb: [1.1, 1.1111, 1], master: 1.2, start: 0.15, pivot: 1.1}, \
+             whites: {rgb: [0.95, 0.96, 0.95], master: 1.1, start: 0.1, width: 0.9}, s_contrast: \
+             1.1}",
+            "!<GradingToneTransform> {style: linear, whites: {rgb: [1, 1, 1], master: 1, start: \
+             0, width: 8}}",
+            "!<GradingToneTransform> {style: linear, whites: {rgb: [1, 1, 1], master: 1, start: \
+             0.000001, width: 8}}",
+            "!<GradingToneTransform> {style: video, s_contrast: .nan, midtones: {rgb: [.nan, 1, \
+             1], master: 1, center: -0.0, width: 1.0000000000000002}}",
+            "!<GradingToneTransform> {style: log, midtones: {rgb: [0.12345678901234567, \
+             1.0000000000000002, 1], master: 1, center: 0.30000000000000004, width: 1e300}}",
+            "!<GradingToneTransform> {style: log, blacks: {rgb: [1, 1, 1], master: 1, start: \
+             -.inf, width: .inf}}",
+            "!<GroupTransform> {children: [!<GradingToneTransform> {style: log}, \
+             !<GradingToneTransform> {style: video, s_contrast: 1.2}]}",
+        ],
+    );
+}
+
+/// Version 1 configs refuse a GradingToneTransform (`checkVersionConsistency`), in a group too.
+#[test]
+fn grading_tone_transforms_are_refused_in_version_1() {
+    check_refused_v(
+        "1",
+        &[
+            "!<GradingToneTransform> {style: log}",
+            "!<GroupTransform> {children: [!<GradingToneTransform> {style: video}]}",
+        ],
+    );
+}
