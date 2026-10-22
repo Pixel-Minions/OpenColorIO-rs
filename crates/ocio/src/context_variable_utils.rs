@@ -210,6 +210,7 @@ pub(crate) fn collect_context_variables(
         | Transform::Cdl(_)
         | Transform::Exponent(_)
         | Transform::ExponentWithLinear(_)
+        | Transform::ExposureContrast(_)
         | Transform::FixedFunction(_)
         | Transform::LogAffine(_)
         | Transform::LogCamera(_)

@@ -4591,9 +4591,9 @@ impl Config {
     /// styles of later minor versions. A group's children are checked the same way.
     ///
     /// Port of `Config::Impl::checkVersionConsistency(ConstTransformRcPtr&)`
-    /// (src/OpenColorIO/Config.cpp:5586-5832 @ v2.5.2). Its ExposureContrast and grading arms
-    /// come with those classes (Phase 5); until then their tags can't be loaded. Two messages
-    /// keep upstream's misspellings (docs/improvements.md, I-146).
+    /// (src/OpenColorIO/Config.cpp:5586-5832 @ v2.5.2). Its grading arms come with those
+    /// classes (WP 5.5b-e); until then their tags can't be loaded. Two messages keep upstream's
+    /// misspellings (docs/improvements.md, I-146).
     fn check_transform_version_consistency(&self, transform: &Transform) -> Result<()> {
         let major = self.major_version;
         let minor = self.minor_version;
@@ -4663,6 +4663,13 @@ impl Config {
                 if major < 2 {
                     return Err(Exception::new(
                         "Only config version 2 (or higher) can have ExponentWithLinearTransform.",
+                    ));
+                }
+            }
+            Transform::ExposureContrast(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have ExposureContrastTransform.",
                     ));
                 }
             }

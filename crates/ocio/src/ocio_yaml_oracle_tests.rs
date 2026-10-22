@@ -15,7 +15,9 @@
 //!   matched;
 //! - and the warnings logged while loading, byte for byte.
 
-use ocio_ops::open_color_types::{CdlStyle, FixedFunctionStyle, NegativeStyle};
+use ocio_ops::open_color_types::{
+    CdlStyle, ExposureContrastStyle, FixedFunctionStyle, NegativeStyle,
+};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -326,6 +328,26 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("getNegativeStyle", negative_style_out(t.negative_style())));
             out.push(name(t.format_metadata()));
         }
+        Transform::ExposureContrast(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    ExposureContrastStyle::Linear => "EXPOSURE_CONTRAST_LINEAR",
+                    ExposureContrastStyle::Video => "EXPOSURE_CONTRAST_VIDEO",
+                    ExposureContrastStyle::Logarithmic => "EXPOSURE_CONTRAST_LOGARITHMIC",
+                }}),
+            ));
+            out.push(("getExposure", f64_out(t.exposure())));
+            out.push(("getContrast", f64_out(t.contrast())));
+            out.push(("getGamma", f64_out(t.gamma())));
+            out.push(("getPivot", f64_out(t.pivot())));
+            out.push(("getLogExposureStep", f64_out(t.log_exposure_step())));
+            out.push(("getLogMidGray", f64_out(t.log_mid_gray())));
+            out.push(("isExposureDynamic", json!(t.is_exposure_dynamic())));
+            out.push(("isContrastDynamic", json!(t.is_contrast_dynamic())));
+            out.push(("isGammaDynamic", json!(t.is_gamma_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
         Transform::LogAffine(t) => {
             out.push(("getBase", f64_out(t.base())));
             out.push(("getLogSideSlopeValue", f64s(&t.log_side_slope_value())));
@@ -511,6 +533,7 @@ fn class_name(t: &Transform) -> &'static str {
         Transform::DisplayView(_) => "DisplayView",
         Transform::Exponent(_) => "Exponent",
         Transform::ExponentWithLinear(_) => "ExponentWithLinear",
+        Transform::ExposureContrast(_) => "ExposureContrast",
         Transform::File(_) => "File",
         Transform::FixedFunction(_) => "FixedFunction",
         Transform::Group(_) => "Group",
@@ -1097,4 +1120,49 @@ fn fixed_function_transforms_load_as_in_the_wheel() {
     // Version 2.5: the config refuses the styles of later versions in older ones
     // (`Config::Impl::checkVersionConsistency`, a config check after loading).
     check_v(b"2.5", &refs);
+}
+
+/// The ExposureContrastTransform's keys: each of exposure, contrast and gamma without a value
+/// (missing or null) is dynamic; the styles in each spelling, set before and after the
+/// direction; numbers in every spelling and the special ones; and its errors.
+#[test]
+fn exposure_contrast_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<ExposureContrastTransform> {}",
+        b"!<ExposureContrastTransform> {style: linear}",
+        b"!<ExposureContrastTransform> {style: VIDEO, exposure: 1.5}",
+        b"!<ExposureContrastTransform> {style: Log, contrast: 0.5, gamma: 1.1}",
+        b"!<ExposureContrastTransform> {style: video, exposure: 1.5, contrast: 0.5, gamma: 1.1, \
+          pivot: 0.18}",
+        b"!<ExposureContrastTransform> {style: log, exposure: -1.4, contrast: 0.6, gamma: 1.2, \
+          pivot: 0.2, log_exposure_step: 0.1, log_midway_gray: 0.5, direction: inverse}",
+        b"!<ExposureContrastTransform> {direction: inverse, style: video}",
+        b"!<ExposureContrastTransform> {style: video, direction: inverse}",
+        b"!<ExposureContrastTransform> {exposure: ~, contrast: , gamma: 2}",
+        b"!<ExposureContrastTransform> {exposure: .nan, contrast: -.inf, gamma: .inf}",
+        b"!<ExposureContrastTransform> {exposure: -0, contrast: 1e-30, gamma: 1e400, pivot: \
+          1e-400}",
+        b"!<ExposureContrastTransform> {exposure: 0.12345678901234567890, contrast: \
+          1.0000000000000002, gamma: 0x10, pivot: 010}",
+        b"!<ExposureContrastTransform> {log_exposure_step: .NaN, log_midway_gray: -.Inf}",
+        b"!<ExposureContrastTransform> {pivot: 0.088, log_exposure_step: 0.435}",
+        b"!<ExposureContrastTransform> {style: foo}",
+        b"!<ExposureContrastTransform> {style: \"\"}",
+        b"!<ExposureContrastTransform> {style: \"video\0x\"}",
+        b"!<ExposureContrastTransform> {style: \xe9x}",
+        b"!<ExposureContrastTransform> {style: [video]}",
+        b"!<ExposureContrastTransform> {exposure: abc}",
+        b"!<ExposureContrastTransform> {contrast: [1]}",
+        b"!<ExposureContrastTransform> {gamma: {a: 1}}",
+        b"!<ExposureContrastTransform> {pivot: \"1\0x\"}",
+        b"!<ExposureContrastTransform> {log_exposure_step: []}",
+        b"!<ExposureContrastTransform> {log_midway_gray: x}",
+        b"!<ExposureContrastTransform> {direction: foo}",
+        b"!<ExposureContrastTransform> {name: ec, exposure: 1}",
+        b"!<ExposureContrastTransform> {name: \"a\0b\"}",
+        b"!<ExposureContrastTransform> {name: [x]}",
+        b"!<ExposureContrastTransform> {exposure: 1, exposure: 2}",
+        b"!<ExposureContrastTransform> {expo: 1, log_midgray: 2, foo: }",
+        b"!<ExposureContrastTransform>\n      exposure: 1\n      bar: 2",
+    ]);
 }

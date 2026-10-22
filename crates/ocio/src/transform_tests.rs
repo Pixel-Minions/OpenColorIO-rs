@@ -108,6 +108,12 @@ fn arms() -> Vec<Arm> {
             invalid: Some(ewl_invalid.into()),
         },
         Arm {
+            class: TransformType::ExposureContrast,
+            valid: ExposureContrastTransform::new().into(),
+            // Nothing in an ExposureContrastTransform can be invalid.
+            invalid: None,
+        },
+        Arm {
             class: TransformType::File,
             valid: ft.into(),
             invalid: Some(FileTransform::new().into()),
@@ -187,6 +193,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
         Transform::DisplayView(t) => calls!(t),
         Transform::Exponent(t) => calls!(t),
         Transform::ExponentWithLinear(t) => calls!(t),
+        Transform::ExposureContrast(t) => calls!(t),
         Transform::File(t) => calls!(t),
         Transform::FixedFunction(t) => calls!(t),
         Transform::Group(t) => calls!(t),
@@ -207,7 +214,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
 #[test]
 fn every_arm_dispatches_to_its_class() {
     let arms = arms();
-    assert_eq!(arms.len(), 18, "one arm per variant");
+    assert_eq!(arms.len(), 19, "one arm per variant");
     for arm in arms {
         let class = arm.class;
         let mut transform = arm.valid;

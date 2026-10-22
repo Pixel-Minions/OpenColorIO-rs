@@ -338,3 +338,85 @@ fn a_config_with_a_lut1d_transform_is_not_serialized() {
         String::from_utf8_lossy(&wheel)
     );
 }
+
+/// Checks that the wheel and the port refuse each case's config of a profile version, with the
+/// same message.
+fn check_refused_v(version: &str, cases: &[&str]) {
+    let configs: Vec<String> = cases.iter().map(|c| config_text(version, c)).collect();
+    let calls: Vec<BatchCall<'_>> = configs
+        .iter()
+        .map(|text| BatchCall {
+            cmd: "config_calls",
+            args: json!({"config": {"yaml": {"bytes": hex(text.as_bytes())}}, "calls": []}),
+            blobs: Vec::new(),
+        })
+        .collect();
+    let wheel = Oracle::get().batch(&calls, true);
+    assert_eq!(wheel.len(), cases.len());
+    let mut failures = Vec::new();
+    for ((case, w), text) in cases.iter().zip(wheel).zip(&configs) {
+        let w = w.expect("config_calls").result;
+        let wheel_message = bytes(&w["config"]["exception"]["message"]);
+        let port = Config::create_from_stream(text.as_bytes());
+        match port {
+            Ok(_) => failures.push(format!("{case}: the port loads it, the wheel: {w}")),
+            Err(e) => {
+                if wheel_message.is_empty() || e.what() != wheel_message.as_slice() {
+                    failures.push(format!(
+                        "{case}:\n  wheel {}\n  port  {}",
+                        String::from_utf8_lossy(&wheel_message),
+                        String::from_utf8_lossy(e.what())
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The ExposureContrastTransform's saver: the dynamic values left out, the pivot always, the
+/// log values unless they are the defaults, the name, and special values.
+#[test]
+fn exposure_contrast_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2",
+        &[
+            "!<ExposureContrastTransform> {}",
+            "!<ExposureContrastTransform> {style: video, exposure: 1.5, contrast: 0.5, gamma: \
+             1.1, pivot: 0.18}",
+            "!<ExposureContrastTransform> {style: LOG, exposure: -1.4, contrast: 0.6, gamma: 1.2, \
+             pivot: 0.2, direction: inverse, name: ec}",
+            "!<ExposureContrastTransform> {direction: inverse, style: Video, contrast: 2}",
+            "!<ExposureContrastTransform> {log_exposure_step: 0.088, log_midway_gray: 0.435}",
+            "!<ExposureContrastTransform> {log_exposure_step: 0.0880000001, log_midway_gray: \
+             0.43500000000000005}",
+            "!<ExposureContrastTransform> {log_exposure_step: 0.1, log_midway_gray: 0.5, \
+             exposure: 0}",
+            "!<ExposureContrastTransform> {exposure: .nan, contrast: .inf, gamma: -.inf, pivot: \
+             -0.0}",
+            "!<ExposureContrastTransform> {exposure: 1e-30, contrast: 1e300, gamma: 1e-320, \
+             pivot: 4.9e-324}",
+            "!<ExposureContrastTransform> {exposure: 0.12345678901234567, contrast: \
+             1.0000000000000002, gamma: 123456789012345678, pivot: 0.30000000000000004}",
+            "!<ExposureContrastTransform> {log_exposure_step: .nan, log_midway_gray: .nan}",
+            "!<ExposureContrastTransform> {exposure: 3.4028234663852886e38, contrast: \
+             1.1754943508222875e-38, gamma: 1.7976931348623157e308}",
+            "!<GroupTransform> {children: [!<ExposureContrastTransform> {style: linear, \
+             exposure: 1}, !<ExposureContrastTransform> {name: x, gamma: 2}]}",
+        ],
+    );
+}
+
+/// Version 1 configs refuse an ExposureContrastTransform (`checkVersionConsistency`), in a
+/// group too.
+#[test]
+fn exposure_contrast_transforms_are_refused_in_version_1() {
+    check_refused_v(
+        "1",
+        &[
+            "!<ExposureContrastTransform> {}",
+            "!<ExposureContrastTransform> {style: video, exposure: 1}",
+            "!<GroupTransform> {children: [!<ExposureContrastTransform> {}]}",
+        ],
+    );
+}

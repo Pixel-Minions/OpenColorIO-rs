@@ -60,9 +60,9 @@ pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
     Allocation, BSplineType, BitDepth, CdlStyle, ColorSpaceDirection, ColorSpaceVisibility,
-    EnvironmentMode, FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NamedTransformVisibility,
-    NegativeStyle, OptimizationFlags, ReferenceSpaceType, RgbCurveType, SearchReferenceSpaceType,
-    TransformDirection, ViewTransformDirection, ViewType,
+    DynamicPropertyType, EnvironmentMode, ExposureContrastStyle, FixedFunctionStyle, GradingStyle,
+    Lut1DHueAdjust, NamedTransformVisibility, NegativeStyle, OptimizationFlags, ReferenceSpaceType,
+    RgbCurveType, SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
 };
 pub use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
     GradingBSplineCurve, GradingControlPoint,
@@ -83,6 +83,7 @@ pub use transforms::color_space_transform::ColorSpaceTransform;
 pub use transforms::display_view_transform::DisplayViewTransform;
 pub use transforms::exponent_transform::ExponentTransform;
 pub use transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+pub use transforms::exposure_contrast_transform::ExposureContrastTransform;
 pub use transforms::file_transform::FileTransform;
 pub use transforms::fixed_function_transform::FixedFunctionTransform;
 pub use transforms::group_transform::GroupTransform;

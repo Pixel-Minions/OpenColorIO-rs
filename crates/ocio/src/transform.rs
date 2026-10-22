@@ -36,6 +36,9 @@ use crate::transforms::exponent_transform::{
 use crate::transforms::exponent_with_linear_transform::{
     ExponentWithLinearTransform, build_exponent_with_linear_op, create_gamma_transform,
 };
+use crate::transforms::exposure_contrast_transform::{
+    ExposureContrastTransform, build_exposure_contrast_op, create_exposure_contrast_transform,
+};
 use crate::transforms::file_transform::{FileTransform, build_file_transform_ops};
 use crate::transforms::fixed_function_transform::{
     FixedFunctionTransform, build_fixed_function_op, create_fixed_function_transform,
@@ -130,6 +133,8 @@ pub enum Transform {
     Exponent(ExponentTransform),
     /// `ExponentWithLinearTransform`.
     ExponentWithLinear(ExponentWithLinearTransform),
+    /// `ExposureContrastTransform`.
+    ExposureContrast(ExposureContrastTransform),
     /// `FileTransform`.
     File(FileTransform),
     /// `FixedFunctionTransform`.
@@ -193,6 +198,12 @@ impl From<ExponentTransform> for Transform {
 impl From<ExponentWithLinearTransform> for Transform {
     fn from(t: ExponentWithLinearTransform) -> Transform {
         Transform::ExponentWithLinear(t)
+    }
+}
+
+impl From<ExposureContrastTransform> for Transform {
+    fn from(t: ExposureContrastTransform) -> Transform {
+        Transform::ExposureContrast(t)
     }
 }
 
@@ -293,6 +304,7 @@ impl Transform {
             Transform::DisplayView(_) => TransformType::DisplayView,
             Transform::Exponent(_) => TransformType::Exponent,
             Transform::ExponentWithLinear(_) => TransformType::ExponentWithLinear,
+            Transform::ExposureContrast(_) => TransformType::ExposureContrast,
             Transform::File(_) => TransformType::File,
             Transform::FixedFunction(_) => TransformType::FixedFunction,
             Transform::Group(_) => TransformType::Group,
@@ -319,6 +331,7 @@ impl Transform {
             Transform::DisplayView(t) => t.direction(),
             Transform::Exponent(t) => t.direction(),
             Transform::ExponentWithLinear(t) => t.direction(),
+            Transform::ExposureContrast(t) => t.direction(),
             Transform::File(t) => t.direction(),
             Transform::FixedFunction(t) => t.direction(),
             Transform::Group(t) => t.direction(),
@@ -345,6 +358,7 @@ impl Transform {
             Transform::DisplayView(t) => t.set_direction(dir),
             Transform::Exponent(t) => t.set_direction(dir),
             Transform::ExponentWithLinear(t) => t.set_direction(dir),
+            Transform::ExposureContrast(t) => t.set_direction(dir),
             Transform::File(t) => t.set_direction(dir),
             Transform::FixedFunction(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
@@ -372,6 +386,7 @@ impl Transform {
             Transform::DisplayView(t) => t.validate(),
             Transform::Exponent(t) => t.validate(),
             Transform::ExponentWithLinear(t) => t.validate(),
+            Transform::ExposureContrast(t) => t.validate(),
             Transform::File(t) => t.validate(),
             Transform::FixedFunction(t) => t.validate(),
             Transform::Group(t) => t.validate(),
@@ -451,6 +466,7 @@ impl Transform {
             Transform::DisplayView(t) => t.write_text(os),
             Transform::Exponent(t) => t.write_text(os),
             Transform::ExponentWithLinear(t) => t.write_text(os),
+            Transform::ExposureContrast(t) => t.write_text(os),
             Transform::File(t) => t.write_text(os),
             Transform::FixedFunction(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
@@ -725,6 +741,9 @@ fn build_leaf_ops(
         Transform::ExponentWithLinear(exponent_transform) => {
             build_exponent_with_linear_op(ops, exponent_transform, dir)
         }
+        Transform::ExposureContrast(ec_transform) => {
+            build_exposure_contrast_op(ops, ec_transform, dir)
+        }
         Transform::FixedFunction(ff_transform) => build_fixed_function_op(ops, ff_transform, dir),
         Transform::LogAffine(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
@@ -784,12 +803,7 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::GradingTone(_) => Err(Exception::new(
             "CreateGradingToneTransform is not ported yet (WP 5.5d).",
         )),
-        // `CreateExposureContrastTransform` (src/OpenColorIO/ops/exposurecontrast/
-        // ExposureContrastOp.cpp:197-210 @ v2.5.2) comes with `ExposureContrastTransform` (WP
-        // 5.5a).
-        OpData::ExposureContrast(_) => Err(Exception::new(
-            "CreateExposureContrastTransform is not ported yet (WP 5.5a).",
-        )),
+        OpData::ExposureContrast(_) => create_exposure_contrast_transform(group, op),
         // `CreateGradingPrimaryTransform` (src/OpenColorIO/ops/gradingprimary/
         // GradingPrimaryOp.cpp:223-236 @ v2.5.2) comes with `GradingPrimaryTransform` (WP 5.5b).
         OpData::GradingPrimary(_) => Err(Exception::new(

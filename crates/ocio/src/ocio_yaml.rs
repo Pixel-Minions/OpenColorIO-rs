@@ -7,11 +7,11 @@
 //! through yaml-cpp's emitter ([`save_transform`], [`write`]: `Config::serialize`).
 //!
 //! The reader: the typed loaders and their messages, the helpers that report unknown keys, bad
-//! values and repeated keys, and the transforms ([`load_transform`]), except ExposureContrast
-//! and the grading transforms (Phase 5); and the color spaces, looks, view transforms and
+//! values and repeated keys, and the transforms ([`load_transform`]), except the grading
+//! transforms (WP 5.5b-e); and the color spaces, looks, view transforms and
 //! named transforms, with their descriptions and interchange attributes; the views, the file and
 //! viewing rules, and the config itself ([`load_config`], [`read`]: `Config::CreateFromStream`).
-//! The writer: every saver but those of ExposureContrast and the grading transforms (Phase 5).
+//! The writer: every saver but those of the grading transforms (WP 5.5b-e).
 //!
 //! **Errors.** A loader fails with OCIO's `Exception` or with an exception of yaml-cpp, which
 //! upstream lets through (a key that isn't a string, a zombie node): [`LoadError`]. Upstream
@@ -36,14 +36,16 @@ use ocio_ops::open_color_types::{
     FixedFunctionStyle, NamedTransformVisibility, NegativeStyle, ReferenceSpaceType,
     SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
     allocation_to_string, bit_depth_to_string, cdl_style_to_string,
-    fixed_function_style_from_string, fixed_function_style_to_string, interpolation_to_string,
-    negative_style_to_string, transform_direction_to_string,
+    exposure_contrast_style_to_string, fixed_function_style_from_string,
+    fixed_function_style_to_string, interpolation_to_string, negative_style_to_string,
+    transform_direction_to_string,
 };
+use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
     ROLE_DEFAULT, allocation_from_string, bit_depth_from_string, cdl_style_from_string,
-    interpolation_from_string, join_string_env_style, negative_style_from_string,
-    split_string_env_style, transform_direction_from_string,
+    exposure_contrast_style_from_string, interpolation_from_string, join_string_env_style,
+    negative_style_from_string, split_string_env_style, transform_direction_from_string,
 };
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::pystring::os_path;
@@ -64,6 +66,7 @@ use crate::transforms::color_space_transform::ColorSpaceTransform;
 use crate::transforms::display_view_transform::DisplayViewTransform;
 use crate::transforms::exponent_transform::ExponentTransform;
 use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
 use crate::transforms::file_transform::FileTransform;
 use crate::transforms::fixed_function_transform::FixedFunctionTransform;
 use crate::transforms::group_transform::GroupTransform;
@@ -1022,6 +1025,69 @@ fn load_display_view(node: &Node) -> LoadResult<DisplayViewTransform> {
     Ok(t)
 }
 
+/// An `ExposureContrastTransform`: `exposure`, `contrast`, `gamma`, `pivot`,
+/// `log_exposure_step`, `log_midway_gray`, `style`, `direction`, `name`. Each of exposure,
+/// contrast and gamma that has no value (missing, or null) is dynamic.
+///
+/// Port of `load(const YAML::Node&, ExposureContrastTransformRcPtr&)` (OCIOYaml.cpp:1194-1286
+/// @ v2.5.2).
+fn load_exposure_contrast(node: &Node) -> LoadResult<ExposureContrastTransform> {
+    let mut t = ExposureContrastTransform::new();
+
+    check_duplicates(node)?;
+
+    let mut dyn_exposure = true;
+    let mut dyn_contrast = true;
+    let mut dyn_gamma = true;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"exposure" => {
+                t.set_exposure(load_double(value)?);
+                dyn_exposure = false;
+            }
+            b"contrast" => {
+                t.set_contrast(load_double(value)?);
+                dyn_contrast = false;
+            }
+            b"gamma" => {
+                t.set_gamma(load_double(value)?);
+                dyn_gamma = false;
+            }
+            b"pivot" => t.set_pivot(load_double(value)?),
+            b"log_exposure_step" => t.set_log_exposure_step(load_double(value)?),
+            b"log_midway_gray" => t.set_log_mid_gray(load_double(value)?),
+            b"style" => {
+                let style = load_string(value)?;
+                t.set_style(exposure_contrast_style_from_string(Some(c_str(&style)))?);
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+
+    // Missing values are dynamic.
+    if dyn_exposure {
+        t.make_exposure_dynamic();
+    }
+    if dyn_contrast {
+        t.make_contrast_dynamic();
+    }
+    if dyn_gamma {
+        t.make_gamma_dynamic();
+    }
+    Ok(t)
+}
+
 /// A `FileTransform`: `src`, `cccid`, `cdl_style`, `interpolation`, `direction`.
 ///
 /// Port of `load(const YAML::Node&, FileTransformRcPtr&)` (OCIOYaml.cpp:1336-1382 @ v2.5.2).
@@ -1139,8 +1205,8 @@ fn load_leaf(node: &Node) -> LoadResult<Transform> {
         b"ExponentWithLinearTransform" => load_exponent_with_linear(node)?.into(),
         b"LogAffineTransform" => load_log_affine(node)?.into(),
         b"LogCameraTransform" => load_log_camera(node)?.into(),
-        b"ExposureContrastTransform"
-        | b"GradingPrimaryTransform"
+        b"ExposureContrastTransform" => load_exposure_contrast(node)?.into(),
+        b"GradingPrimaryTransform"
         | b"GradingRGBCurveTransform"
         | b"GradingHueCurveTransform"
         | b"GradingToneTransform" => return Err(not_ported_yet(&ty, "Phase 5")),
@@ -2668,6 +2734,66 @@ fn save_exponent_with_linear(out: &mut Emitter, t: &ExponentWithLinearTransform)
     out.put(EndMap);
 }
 
+/// The name, the style, the exposure, contrast and gamma that aren't dynamic (a dynamic value
+/// isn't saved), the pivot, and the log exposure step and mid-gray unless they are the
+/// defaults.
+///
+/// Port of `save(YAML::Emitter&, ConstExposureContrastTransformRcPtr)` (OCIOYaml.cpp:1288-1332
+/// @ v2.5.2).
+fn save_exposure_contrast(out: &mut Emitter, t: &ExposureContrastTransform) {
+    out.put(verbatim_tag("ExposureContrastTransform"));
+    out.put(Flow).put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    out.put(Key).put("style");
+    out.put(Value)
+        .put(Flow)
+        .put(exposure_contrast_style_to_string(t.style()));
+
+    // Do not save dynamic values.
+
+    if !t.is_exposure_dynamic() {
+        out.put(Key)
+            .put("exposure")
+            .put(Value)
+            .put(Flow)
+            .put(t.exposure());
+    }
+    if !t.is_contrast_dynamic() {
+        out.put(Key)
+            .put("contrast")
+            .put(Value)
+            .put(Flow)
+            .put(t.contrast());
+    }
+    if !t.is_gamma_dynamic() {
+        out.put(Key)
+            .put("gamma")
+            .put(Value)
+            .put(Flow)
+            .put(t.gamma());
+    }
+
+    out.put(Key).put("pivot");
+    out.put(Value).put(Flow).put(t.pivot());
+
+    let les = t.log_exposure_step();
+    if les != ExposureContrastOpData::LOGEXPOSURESTEP_DEFAULT {
+        out.put(Key).put("log_exposure_step");
+        out.put(Value).put(Flow).put(les);
+    }
+
+    let lmg = t.log_mid_gray();
+    if lmg != ExposureContrastOpData::LOGMIDGRAY_DEFAULT {
+        out.put(Key).put("log_midway_gray");
+        out.put(Value).put(Flow).put(lmg);
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
 /// The source, the CCC ID when there is one, the CDL style unless it's the default, and the
 /// interpolation unless it's `default` (in version 1, `default` is written `linear`).
 ///
@@ -2956,7 +3082,7 @@ fn save_range(out: &mut Emitter, t: &RangeTransform) {
 /// refused with "Unsupported Transform() type for serialization.".
 ///
 /// Port of `save(YAML::Emitter&, ConstTransformRcPtr, unsigned int)` (OCIOYaml.cpp:3353-3420 @
-/// v2.5.2). The ExposureContrast and grading savers come with their classes (Phase 5).
+/// v2.5.2). The grading savers come with their classes (WP 5.5b-e).
 pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u32) -> SaveResult {
     match t {
         Transform::Allocation(t) => save_allocation_transform(out, t),
@@ -2967,6 +3093,7 @@ pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u3
         Transform::Exponent(t) => save_exponent(out, t, major_version),
         Transform::ExponentWithLinear(t) => save_exponent_with_linear(out, t),
         Transform::File(t) => save_file(out, t, major_version),
+        Transform::ExposureContrast(t) => save_exposure_contrast(out, t),
         Transform::FixedFunction(t) => save_fixed_function(out, t)?,
         Transform::Group(t) => save_group(out, t, major_version)?,
         Transform::LogAffine(t) => save_log_affine(out, t),

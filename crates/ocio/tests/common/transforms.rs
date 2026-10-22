@@ -22,8 +22,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use ocio::{
-    Config, FixedFunctionStyle, FormatMetadata, GroupTransform, Interpolation, Lut1DHueAdjust,
-    NegativeStyle, OptimizationFlags, Processor, RangeStyle, Transform, TransformDirection,
+    Config, ExposureContrastStyle, FixedFunctionStyle, FormatMetadata, GroupTransform,
+    Interpolation, Lut1DHueAdjust, NegativeStyle, OptimizationFlags, Processor, RangeStyle,
+    Transform, TransformDirection,
 };
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
@@ -236,6 +237,7 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
         (Transform::Exponent(a), Transform::Exponent(b)) => Some(a.equals(b)),
         (Transform::ExponentWithLinear(a), Transform::ExponentWithLinear(b)) => Some(a.equals(b)),
         (Transform::FixedFunction(a), Transform::FixedFunction(b)) => Some(a.equals(b)),
+        (Transform::ExposureContrast(a), Transform::ExposureContrast(b)) => Some(a.equals(b)),
         _ => None,
     }
 }
@@ -737,6 +739,27 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("getParams", dumped_f64s(&t.params()));
             "FixedFunctionTransform"
         }
+        Transform::ExposureContrast(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_EXPOSURE_CONTRAST"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put(
+                "getStyle",
+                dumped_enum(exposure_contrast_style_name(t.style())),
+            );
+            put("getExposure", Dumped::F64(t.exposure()));
+            put("getContrast", Dumped::F64(t.contrast()));
+            put("getGamma", Dumped::F64(t.gamma()));
+            put("getPivot", Dumped::F64(t.pivot()));
+            put("getLogExposureStep", Dumped::F64(t.log_exposure_step()));
+            put("getLogMidGray", Dumped::F64(t.log_mid_gray()));
+            put("isExposureDynamic", Dumped::Bool(t.is_exposure_dynamic()));
+            put("isContrastDynamic", Dumped::Bool(t.is_contrast_dynamic()));
+            put("isGammaDynamic", Dumped::Bool(t.is_gamma_dynamic()));
+            "ExposureContrastTransform"
+        }
         other => panic!("no dump for {other:?}"),
     };
     (class.to_string(), getters)
@@ -893,5 +916,14 @@ pub(crate) fn fixed_function_style_name(style: FixedFunctionStyle) -> &'static s
         RgbToHsyLin => "FIXED_FUNCTION_RGB_TO_HSY_LIN",
         RgbToHsyLog => "FIXED_FUNCTION_RGB_TO_HSY_LOG",
         RgbToHsyVid => "FIXED_FUNCTION_RGB_TO_HSY_VID",
+    }
+}
+
+/// An exposure contrast style's name in PyOpenColorIO.
+pub(crate) fn exposure_contrast_style_name(style: ExposureContrastStyle) -> &'static str {
+    match style {
+        ExposureContrastStyle::Linear => "EXPOSURE_CONTRAST_LINEAR",
+        ExposureContrastStyle::Video => "EXPOSURE_CONTRAST_VIDEO",
+        ExposureContrastStyle::Logarithmic => "EXPOSURE_CONTRAST_LOGARITHMIC",
     }
 }

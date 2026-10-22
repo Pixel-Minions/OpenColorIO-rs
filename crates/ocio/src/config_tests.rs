@@ -8032,3 +8032,92 @@ fn set_config_io_proxy() {
         crate::caching::clear_all_caches();
     }
 }
+
+/// Port of `OCIO_ADD_TEST(Config, exposure_contrast_serialization)` @ v2.5.2.
+#[test]
+fn exposure_contrast_serialization() {
+    let _env = EnvGuard::new();
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<ExposureContrastTransform> {style: video,",
+            " contrast: 0.5, gamma: 1.1, pivot: 0.18}\n",
+            "        - !<ExposureContrastTransform> {style: video, exposure: 1.5,",
+            " gamma: 1.1, pivot: 0.18}\n",
+            "        - !<ExposureContrastTransform> {style: video, exposure: 1.5,",
+            " contrast: 0.5, pivot: 0.18}\n",
+            "        - !<ExposureContrastTransform> {style: video, exposure: 1.5,",
+            " contrast: 0.5, gamma: 1.1, pivot: 0.18}\n",
+            "        - !<ExposureContrastTransform> {style: video,",
+            " exposure: 1.5, contrast: 0.5,",
+            " gamma: 1.1, pivot: 0.18}\n",
+            "        - !<ExposureContrastTransform> {style: video, exposure: -1.4,",
+            " contrast: 0.6, gamma: 1.2, pivot: 0.2,",
+            " direction: inverse}\n",
+            "        - !<ExposureContrastTransform> {style: log, exposure: 1.5,",
+            " contrast: 0.6, gamma: 1.2, pivot: 0.18}\n",
+            "        - !<ExposureContrastTransform> {style: log, exposure: 1.5,",
+            " contrast: 0.5, gamma: 1.1, pivot: 0.18,",
+            " direction: inverse}\n",
+            "        - !<ExposureContrastTransform> {style: log, exposure: 1.5,",
+            " contrast: 0.6, gamma: 1.2,",
+            " pivot: 0.18}\n",
+            "        - !<ExposureContrastTransform> {style: linear, exposure: 1.5,",
+            " contrast: 0.5, gamma: 1.1, pivot: 0.18}\n",
+            "        - !<ExposureContrastTransform> {style: linear, exposure: 1.5,",
+            " contrast: 0.5, gamma: 1.1, pivot: 0.18,",
+            " direction: inverse}\n",
+            "        - !<ExposureContrastTransform> {style: linear, exposure: 1.5,",
+            " contrast: 0.5, gamma: 1.1,",
+            " pivot: 0.18}\n",
+        );
+
+        let str = profile_v2_start() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        check_serialized(&config.serialize().unwrap(), &str);
+
+        // For exposure contrast transforms, no value for exposure, contrast or gamma means
+        // dynamic.
+        let cs = config.color_space("lnh").unwrap();
+        let cst = cs.transform(ColorSpaceDirection::FromReference).unwrap();
+        let Transform::Group(grp) = cst else {
+            panic!("not a group: {cst:?}");
+        };
+        assert_eq!(grp.num_transforms(), 12);
+        let ec = |i: i32| match grp.transform(i).unwrap() {
+            Transform::ExposureContrast(ec) => ec,
+            t => panic!("not an ExposureContrastTransform: {t:?}"),
+        };
+        let ec0 = ec(0);
+        assert!(ec0.is_exposure_dynamic());
+        assert!(!ec0.is_contrast_dynamic());
+        assert!(!ec0.is_gamma_dynamic());
+        let ec1 = ec(1);
+        assert!(!ec1.is_exposure_dynamic());
+        assert!(ec1.is_contrast_dynamic());
+        assert!(!ec1.is_gamma_dynamic());
+        let ec2 = ec(2);
+        assert!(!ec2.is_exposure_dynamic());
+        assert!(!ec2.is_contrast_dynamic());
+        assert!(ec2.is_gamma_dynamic());
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<ExposureContrastTransform> {style: wrong}\n",
+        );
+
+        let str = profile_v2_start() + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Unknown exposure contrast style",
+        );
+    }
+}
