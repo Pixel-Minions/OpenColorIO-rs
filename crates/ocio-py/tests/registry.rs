@@ -49,11 +49,14 @@ fn the_registries_hold_the_live_objects_only_and_look_up_by_node() {
             py,
             &globals,
             "for _ in range(4 * N): OCIO.MatrixTransform()\n\
-             for _ in range(N): OCIO.RangeTransform().getFormatMetadata()",
+             for _ in range(N): OCIO.RangeTransform().getFormatMetadata()\n\
+             for _ in range(N): OCIO.Context(); OCIO.ProcessorMetadata()\n\
+             for _ in range(N): OCIO.Context().__deepcopy__({})",
         );
         let after = stats(py, &globals);
         assert_eq!(after.transforms, base.transforms);
         assert_eq!(after.format_metadata, base.format_metadata);
+        assert_eq!(after.shared, base.shared);
 
         // A group's children: registered when Python gets them, found again by node.
         run(
@@ -109,5 +112,6 @@ fn the_registries_hold_the_live_objects_only_and_look_up_by_node() {
         let end = stats(py, &globals);
         assert_eq!(end.transforms, base.transforms);
         assert_eq!(end.format_metadata, base.format_metadata);
+        assert_eq!(end.shared, base.shared);
     });
 }

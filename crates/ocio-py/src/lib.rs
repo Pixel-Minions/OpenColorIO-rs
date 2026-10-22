@@ -27,11 +27,15 @@ pub mod enums;
 #[cfg(feature = "python")]
 pub(crate) mod py_builtin_transform_registry;
 #[cfg(feature = "python")]
+pub(crate) mod py_context;
+#[cfg(feature = "python")]
 pub(crate) mod py_format_metadata;
 #[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
 #[cfg(feature = "python")]
 pub mod py_open_color_io;
+#[cfg(feature = "python")]
+pub(crate) mod py_processor_metadata;
 #[cfg(feature = "python")]
 pub(crate) mod py_transform;
 /// What the identity registries hold, for the tests of their size and cost.
@@ -44,5 +48,7 @@ pub(crate) mod py_types;
 pub(crate) mod py_utils;
 #[cfg(feature = "python")]
 pub mod pybind11;
+#[cfg(feature = "python")]
+pub(crate) mod shared;
 #[cfg(feature = "python")]
 pub(crate) mod transforms;

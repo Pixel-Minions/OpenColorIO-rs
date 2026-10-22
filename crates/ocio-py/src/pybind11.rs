@@ -320,6 +320,23 @@ fn frees_value_getter(
     )))
 }
 
+/// `_PyType_Lookup(ty, name)`: the attribute in the dictionaries of the type's MRO, if any (a
+/// `None` there reads as none).
+pub fn type_lookup<'py>(
+    ty: &Bound<'py, PyType>,
+    name: &str,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let found = runtime_item(ty.py(), "_lookup")?.call1((ty, name))?;
+    Ok((!found.is_none()).then_some(found))
+}
+
+/// The C name (`tp_name`) of `obj`'s type, as CPython writes it in messages (`%.200s`).
+pub fn c_type_name(obj: &Bound<'_, PyAny>) -> PyResult<String> {
+    runtime_item(obj.py(), "_type_name")?
+        .call1((obj,))?
+        .extract()
+}
+
 fn runtime_item<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
     runtime(py)?
         .get_item(name)?

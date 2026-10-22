@@ -360,6 +360,8 @@ pub struct RegistryStats {
     pub transforms: usize,
     /// The `FormatMetadata` objects registered.
     pub format_metadata: usize,
+    /// The objects of the other classes registered (contexts, rules, color spaces, ...).
+    pub shared: usize,
     /// The entries the lookups have read since the module was loaded.
     pub examined: usize,
 }
@@ -369,6 +371,7 @@ pub fn registry_stats() -> RegistryStats {
     RegistryStats {
         transforms: lock(&INSTANCES).keys.len(),
         format_metadata: crate::py_format_metadata::registered_count(),
+        shared: crate::shared::registered_count(),
         examined: EXAMINED.load(Ordering::Relaxed),
     }
 }

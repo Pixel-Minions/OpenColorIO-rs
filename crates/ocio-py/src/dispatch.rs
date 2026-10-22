@@ -733,6 +733,78 @@ impl<'py, T: Cast<'py>, const N: usize> Cast<'py> for [T; N] {
     }
 }
 
+/// A `std::map<std::string, std::string>` parameter: pybind11's `map_caster`. A `dict` (or a
+/// subclass), its items as the dict iterates them; else, with conversions only, an object with
+/// an `items` attribute whose type has `__getitem__` (pybind11's
+/// `object_is_convertible_to_std_map`, `PyMapping_Check`), whose items are
+/// `dict(PyMapping_Items(obj))` (their errors go through). Each key and value loads as a
+/// `std::string`, the first that doesn't refusing the map; a key the map holds already (`'a'`
+/// and `b'a'`) keeps its first value (`emplace`). In the keys' byte order, as `std::map`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StringMap(pub std::collections::BTreeMap<Vec<u8>, Vec<u8>>);
+
+impl<'py> Cast<'py> for StringMap {
+    /// `std::map`: 16 bytes in MSVC's STL, 48 in libstdc++ (not reserved: no vector holds it).
+    const CPP_SIZE: usize = if cfg!(windows) { 16 } else { 48 };
+
+    fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
+        Self::try_load(obj, convert).ok().flatten()
+    }
+
+    fn try_load(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<Self>> {
+        let py = obj.py();
+        let dict = match obj.cast::<PyDict>() {
+            Ok(dict) => dict.clone(),
+            Err(_) => {
+                // PyMapping_Check: the type's mp_subscript, which a type with `__getitem__` has
+                // (a C type with only sq_item and an `items` attribute is the exception).
+                let mapping = obj.hasattr("items").unwrap_or(false)
+                    && crate::pybind11::type_lookup(&obj.get_type(), "__getitem__")?.is_some();
+                if !mapping || !convert {
+                    return Ok(None);
+                }
+                dict_of_items(obj)?
+            }
+        };
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in dict.iter() {
+            let Some(StdString(k)) = StdString::try_load(&k, convert)? else {
+                return Ok(None);
+            };
+            let Some(StdString(v)) = StdString::try_load(&v, convert)? else {
+                return Ok(None);
+            };
+            map.entry(k).or_insert(v);
+        }
+        let _ = py;
+        Ok(Some(StringMap(map)))
+    }
+}
+
+/// `dict(PyMapping_Items(obj))` of an object that isn't a `dict`: `obj.items()` as a list
+/// (CPython's `method_output_as_list`, whose TypeError for a result that isn't iterable names
+/// the types), then a dict of it.
+fn dict_of_items<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyDict>> {
+    let py = obj.py();
+    let out = obj.call_method0("items")?;
+    let it = match out.try_iter() {
+        Ok(it) => it,
+        Err(e) if e.is_instance_of::<PyTypeError>(py) => {
+            return Err(PyTypeError::new_err(format!(
+                "{}.items() returned a non-iterable (type {})",
+                crate::pybind11::c_type_name(obj)?,
+                crate::pybind11::c_type_name(&out)?
+            )));
+        }
+        Err(e) => return Err(e),
+    };
+    let list = py.get_type::<pyo3::types::PyList>().call1((it,))?;
+    Ok(py
+        .get_type::<PyDict>()
+        .call1((list,))?
+        .cast_into::<PyDict>()?)
+}
+
 /// Any Python object (`py::object`), as it is.
 impl<'py> Cast<'py> for Bound<'py, PyAny> {
     /// `py::object`: a pointer.

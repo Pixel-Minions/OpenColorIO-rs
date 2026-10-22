@@ -31,6 +31,8 @@ CDLTransformTest.py::CDLTransformTest.test_validate_direction
 CDLTransformTest.py::CDLTransformTest.test_validate_power
 CDLTransformTest.py::CDLTransformTest.test_validate_saturation
 CDLTransformTest.py::CDLTransformTest.test_validate_slope
+ContextTest.py::ContextTest.test_copy
+ContextTest.py::ContextTest.test_interface
 ExponentTransformTest.py::ExponentTransformTest.test_constructor_with_keyword
 ExponentTransformTest.py::ExponentTransformTest.test_constructor_with_positional
 ExponentTransformTest.py::ExponentTransformTest.test_constructor_wrong_parameter_type

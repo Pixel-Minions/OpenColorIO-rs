@@ -3781,7 +3781,8 @@ status = "todo"
 path = "src/bindings/python/PyContext.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_context.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3d"
 
 [[file]]
 path = "src/bindings/python/PyDynamicProperty.cpp"
@@ -3899,7 +3900,8 @@ status = "todo"
 path = "src/bindings/python/PyProcessorMetadata.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_processor_metadata.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3d"
 
 [[file]]
 path = "src/bindings/python/PySystemMonitors.cpp"

@@ -27,7 +27,7 @@ use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
 /// for entry (transforms_oracle.rs checks them in detail).
-const COMPLETE: [&str; 16] = [
+const COMPLETE: [&str; 18] = [
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -44,6 +44,8 @@ const COMPLETE: [&str; 16] = [
     "CDLTransform",
     "FileTransform",
     "FormatMetadata",
+    "Context",
+    "ProcessorMetadata",
 ];
 
 /// The stand-ins `common::start_python` adds to the port's module until WP 6.6 binds them.
