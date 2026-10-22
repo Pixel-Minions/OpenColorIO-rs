@@ -430,7 +430,10 @@ fn an_environment_mode_outside_the_enumerators_is_the_ports_error() {
     let mut sc = Script::new();
     let mut refused = Vec::new();
     let c = sc.call(n("OCIO.Context"), vec![]);
-    for v in [3, 7, -1, 2147483647] {
+    // -1 in the Windows wheel, whose enum is an `int`; the same bits as the Linux wheel's
+    // `unsigned int`, which refuses a negative number (I-225).
+    let minus_one: i128 = if cfg!(windows) { -1 } else { (1 << 32) - 1 };
+    for v in [3, 7, minus_one, 2147483647] {
         let mode = sc.call(n("OCIO.EnvironmentMode"), vec![i(v)]);
         refused.push(sc.call(ra(c, "setEnvironmentMode"), vec![r(mode)]));
         refused.push(sc.call_kw(
