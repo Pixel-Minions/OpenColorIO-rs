@@ -3366,25 +3366,73 @@ fn iterator_functions(qualified: &'static str, item_ty: &'static str) -> [&'stat
 // ---------------------------------------------------------------------------------------------
 // The module functions (PyConfig.cpp:1481-1490 @ v2.5.2)
 
-/// The process's current config as Python shares it: `GetCurrentConfig` returns the same
-/// object while it lives, and a change made through it is the current config's. The library's
-/// current config (`ocio::get_current_config`) is where it comes from the first time, and
-/// `SetCurrentConfig` sets both (owner decision 2026-10-22: a Rust holder of the library's
-/// `Arc<Config>` keeps a snapshot).
-static CURRENT: Mutex<Option<ConfigRc>> = Mutex::new(None);
+/// The process's current config as Python shares it with the library (and a Rust application
+/// embedding Python): `GetCurrentConfig` returns the same object while it lives and the
+/// library's current config is the one the node was made from or last written back to; a
+/// change made through it is the current config's. The node is made again from the library's
+/// current config when that changed (`ocio::set_current_config` from Rust), and Python's
+/// changes are written back to the library when it is read (`ocio::get_current_config` calls
+/// [`publish_current_config`] first). A Rust holder of an earlier `Arc<Config>` keeps that
+/// snapshot (owner decision 2026-10-22).
+struct Current {
+    node: ConfigRc,
+    /// The library's current config the node was made from or last written back to.
+    published: Arc<Config>,
+}
 
-/// The current config's node (`GetCurrentConfig`), the library's the first time.
-pub(crate) fn current_config(py: Python<'_>) -> PyResult<ConfigRc> {
-    let mut current = CURRENT
+static CURRENT: Mutex<Option<Current>> = Mutex::new(None);
+
+fn current_lock() -> std::sync::MutexGuard<'static, Option<Current>> {
+    CURRENT
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some(rc) = current.as_ref() {
-        return Ok(rc.clone());
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The current config's node (`GetCurrentConfig`): the one Python has, while the library's
+/// current config is the one it was made from or written back to; else one made from the
+/// library's current config.
+pub(crate) fn current_config(py: Python<'_>) -> PyResult<ConfigRc> {
+    ocio::config::set_current_config_hook(Some(publish_current_config));
+    let library = py_result(py, ocio::config::current_config_as_is())?;
+    let mut current = current_lock();
+    if let Some(c) = current.as_ref()
+        && Arc::ptr_eq(&c.published, &library)
+    {
+        return Ok(c.node.clone());
     }
-    let config = py_result(py, ocio::config::get_current_config())?;
-    let rc = Shared::new(ConfigNode::new(config.clone_as_is()));
-    *current = Some(rc.clone());
-    Ok(rc)
+    let node = Shared::new(ConfigNode::new(library.clone_as_is()));
+    *current = Some(Current {
+        node: node.clone(),
+        published: library,
+    });
+    Ok(node)
+}
+
+/// The hook `ocio::get_current_config` calls first (any thread): Python's current config,
+/// written back and made the library's, unless the library's changed since (a
+/// `set_current_config` wins), a call of this thread is using it (D-9: the library keeps what
+/// it has), an object of it can't be written back (U-110, U-111: likewise), or Python can't
+/// run (not started, or finalizing).
+fn publish_current_config() {
+    let Some((node, published)) = current_lock()
+        .as_ref()
+        .map(|c| (c.node.clone(), c.published.clone()))
+    else {
+        return;
+    };
+    let _ = Python::try_attach(|_| {
+        let Ok(config) = with_config(&node, |n| Ok(Arc::new(n.config.clone_as_is()))) else {
+            return;
+        };
+        let mut current = current_lock();
+        if let Some(c) = current.as_mut()
+            && c.node.same(&node)
+            && Arc::ptr_eq(&c.published, &published)
+            && ocio::config::replace_current_config_as_is(&published, config.clone())
+        {
+            c.published = config;
+        }
+    });
 }
 
 // m.def("GetCurrentConfig", &GetCurrentConfig).
@@ -3413,14 +3461,15 @@ static SET_CURRENT_CONFIG: Function = function(
                 return Ok(None);
             };
             let config = config.ok_or_else(|| null_object("SetCurrentConfig(config)"))?;
-            let copy = with_config(&config, |n| {
+            ocio::config::set_current_config_hook(Some(publish_current_config));
+            let library = with_config(&config, |n| {
                 ocio::config::set_current_config(&n.config);
-                Ok(n.config.clone())
+                py_result(py, ocio::config::current_config_as_is())
             })?;
-            *CURRENT
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) =
-                Some(Shared::new(ConfigNode::new(copy)));
+            *current_lock() = Some(Current {
+                node: Shared::new(ConfigNode::new(library.clone_as_is())),
+                published: library,
+            });
             none(py)
         },
         pos_only: 0,

@@ -14,6 +14,12 @@
 //! place, as the wheel does, through the objects its getters return, which the library's
 //! `Arc<Config>` can't follow. [`config_to_python`] gives Python a copy of a Rust config, and
 //! [`config_from_python`] gives Rust a snapshot of a Python one, as it is at that moment.
+//!
+//! The process's current config is shared: `ocio::set_current_config` from Rust is the config
+//! Python's `GetCurrentConfig` returns next (a new object), `SetCurrentConfig` from Python is
+//! the one `ocio::get_current_config` returns, and what Python changes in place in its current
+//! config (through it, or the objects its getters return) is in the `Arc<Config>` the next
+//! `ocio::get_current_config` returns, a new snapshot (an earlier one keeps what it had).
 
 /// The Python `PyOpenColorIO.CPUProcessor` of `cpu`, sharing it: the object the module made for
 /// that processor while it lives, else a new one (as pybind11 returns a `CPUProcessorRcPtr`).

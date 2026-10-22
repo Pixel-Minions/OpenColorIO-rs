@@ -658,12 +658,38 @@ fn strerror(e: &std::io::Error) -> String {
 /// `g_currentConfig`, under its lock `g_currentConfigLock` (Config.cpp:110-113 @ v2.5.2).
 static CURRENT_CONFIG: Mutex<Option<Arc<Config>>> = Mutex::new(None);
 
+/// A function [`get_current_config`] calls first, outside the current config's lock: the
+/// Python module's, which writes back the changes Python made in place to its current config
+/// (owner decision 2026-10-22, Q1 = A: Python holds the current config as its own object).
+static CURRENT_CONFIG_HOOK: Mutex<Option<fn()>> = Mutex::new(None);
+
+/// Sets the function [`get_current_config`] calls first (`None`: none), for the Python module.
+#[doc(hidden)]
+pub fn set_current_config_hook(hook: Option<fn()>) {
+    *CURRENT_CONFIG_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = hook;
+}
+
 /// The process's current config: the one [`set_current_config`] gave, or, the first time
 /// without one, [`Config::create_from_env`]'s (whose error leaves no current config).
 ///
 /// Port of `GetCurrentConfig` (src/OpenColorIO/Config.cpp:115-125 @ v2.5.2).
 #[doc(alias = "GetCurrentConfig")]
 pub fn get_current_config() -> Result<Arc<Config>> {
+    let hook = *CURRENT_CONFIG_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(hook) = hook {
+        hook();
+    }
+    current_config_as_is()
+}
+
+/// [`get_current_config`] without its hook: the current config as the library holds it, for
+/// the Python module.
+#[doc(hidden)]
+pub fn current_config_as_is() -> Result<Arc<Config>> {
     let mut current = CURRENT_CONFIG
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -673,6 +699,23 @@ pub fn get_current_config() -> Result<Arc<Config>> {
     }
 
     Ok(Arc::clone(current.as_ref().expect("set above")))
+}
+
+/// Makes `config` itself the current config, when the current config is still `expected`
+/// (whether it was): the Python module's write-back of its current config, which a
+/// [`set_current_config`] made meanwhile wins over.
+#[doc(hidden)]
+pub fn replace_current_config_as_is(expected: &Arc<Config>, config: Arc<Config>) -> bool {
+    let mut current = CURRENT_CONFIG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match current.as_ref() {
+        Some(c) if Arc::ptr_eq(c, expected) => {
+            *current = Some(config);
+            true
+        }
+        _ => false,
+    }
 }
 
 /// Makes a copy of `config` ([`Config`]'s `Clone`, `createEditableCopy`) the process's current

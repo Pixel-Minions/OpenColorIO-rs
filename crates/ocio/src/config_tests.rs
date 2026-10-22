@@ -5459,8 +5459,10 @@ fn is_inactive() {
 
 /// `GetCurrentConfig` makes the current config once (`CreateFromEnv`, whose configs and
 /// messages `tests/config_files_oracle.rs` compares with the wheel's), and `SetCurrentConfig`
-/// gives it a copy of a config (Config.cpp:115-132 @ v2.5.2). The only test of the process's
-/// current config.
+/// gives it a copy of a config (Config.cpp:115-132 @ v2.5.2). The Python module's hidden
+/// hook: `get_current_config` calls it first, `current_config_as_is` doesn't, and its
+/// write-back replaces the current config only while it is the one it read. The only test of
+/// the process's current config.
 #[test]
 fn current_config() {
     let _env = EnvGuard::new();
@@ -5478,6 +5480,28 @@ fn current_config() {
     let current = get_current_config().unwrap();
     assert!(!Arc::ptr_eq(&current, &config));
     assert_eq!(current.serialize().unwrap(), config.serialize().unwrap());
+
+    // The hook.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    fn hook() {
+        CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    set_current_config_hook(Some(hook));
+    let read = get_current_config().unwrap();
+    assert_eq!(CALLS.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert!(Arc::ptr_eq(&read, &current_config_as_is().unwrap()));
+    assert_eq!(CALLS.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let mine = Arc::new(Config::create_raw().unwrap().as_ref().clone());
+    assert!(replace_current_config_as_is(&read, mine.clone()));
+    assert!(Arc::ptr_eq(&get_current_config().unwrap(), &mine));
+    assert_eq!(CALLS.load(std::sync::atomic::Ordering::SeqCst), 2);
+    // Expecting a config that is no longer the current one replaces nothing.
+    let other = Arc::new(Config::create_raw().unwrap().as_ref().clone());
+    assert!(!replace_current_config_as_is(&read, other.clone()));
+    assert!(Arc::ptr_eq(&current_config_as_is().unwrap(), &mine));
+    set_current_config_hook(None);
+    get_current_config().unwrap();
+    assert_eq!(CALLS.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
 /// Port of `OCIO_ADD_TEST(OCIOZArchive, is_config_archivable)` @ v2.5.2.
