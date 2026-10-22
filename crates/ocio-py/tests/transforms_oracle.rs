@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The transform classes of chunk 6.3a against the wheel (`Transform`, `MatrixTransform`,
-//! `RangeTransform`, `AllocationTransform`):
+//! `RangeTransform`, `AllocationTransform`, `GroupTransform` and its iterators):
 //! - each class's surface as the oracle's walk reports it (py_surface_walk.py's `_class`, run on
 //!   the port's class in the embedded interpreter, against the wheel's py_surface): metatype,
 //!   MRO, docstring, every member in order with its kind and docstring (pybind11's signatures:
@@ -13,22 +13,28 @@
 //!   the wrong length, `None`, a string, a float for an `int`), `equals`, the static functions
 //!   and their errors, `validate`, `repr`, `__deepcopy__`, `getFormatMetadata`'s identity, the
 //!   base class's methods on each class, a Python subclass, and a direction outside the
-//!   enumerators (I-261).
+//!   enumerators (I-261);
+//! - the group: its children shared with the Python objects given (identity and changes), in
+//!   order, a copy sharing them, its iterators (`len`, indexing, iteration to `StopIteration`),
+//!   the write formats, `write` to a string in each format and its errors, null children and a
+//!   group holding itself where the wheel survives them, a child's validation error.
 //!
-//! And, without the wheel (whose behaviour the port can't hold, U-112): an enum value outside
-//! its enumerators given to a setter is the port's error.
+//! And, without the wheel: an enum value outside its enumerators given to a setter is the port's
+//! error (the port's library can't hold it, U-112); so are a null child and a group holding
+//! itself where the wheel dereferences or recurses (U-110, U-111).
 #![cfg(feature = "python")]
 
 mod common;
 
 use common::script::{
-    Expect, Script, b, base_methods, compare, d, f, fl, i, l, n, none, r, ra, s, special, t,
+    Expect, Script, b, base_methods, by, compare, d, f, fl, i, l, n, none, r, ra, s, special, t,
 };
 use serde_json::Value;
 
 /// The classes this chunk binds completely.
-const CLASSES: [&str; 4] = [
+const CLASSES: [&str; 5] = [
     "Transform",
+    "GroupTransform",
     "MatrixTransform",
     "RangeTransform",
     "AllocationTransform",
@@ -504,10 +510,246 @@ fn allocation_script() -> Script {
     sc
 }
 
+/// `GroupTransform`, its iterators and `write` (to a string).
+fn group_script() -> Script {
+    let mut sc = Script::new();
+    // The current config `write` takes, the same on both sides.
+    sc.call(n("OCIO.UnsetEnvVariable"), vec![s("OCIO")]);
+    let g = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.eval(r(g), &["__len__", "getDirection", "__repr__"]);
+    base_methods(&mut sc, g, true);
+    // Children: shared, in order.
+    let m = sc.call(n("OCIO.MatrixTransform"), vec![]);
+    let rt = sc.call(
+        n("OCIO.RangeTransform"),
+        vec![f(0.1), f(1.1), f(0.2), f(1.4)],
+    );
+    sc.call(ra(g, "appendTransform"), vec![r(m)]);
+    sc.call(ra(g, "prependTransform"), vec![r(rt)]);
+    sc.call_kw(
+        ra(g, "appendTransform"),
+        vec![],
+        vec![("transform", r(m))],
+        Expect::Value,
+    );
+    sc.call(n("len"), vec![r(g)]);
+    sc.call(ra(g, "__getitem__"), vec![i(0)]);
+    sc.call(ra(g, "__getitem__"), vec![i(1)]);
+    sc.call(ra(g, "__getitem__"), vec![i(2)]);
+    sc.raises(ra(g, "__getitem__"), vec![i(3)]);
+    sc.raises(ra(g, "__getitem__"), vec![i(-1)]);
+    sc.raises(ra(g, "__getitem__"), vec![f(1.0)]);
+    sc.raises(ra(g, "__getitem__"), vec![i(1 << 40)]);
+    sc.call(ra(m, "setOffset"), vec![fl(&[0.1, 0.2, 0.3, 0.4])]);
+    sc.repr(r(g));
+    sc.call(
+        ra(rt, "setDirection"),
+        vec![n("OCIO.TRANSFORM_DIR_INVERSE")],
+    );
+    sc.repr(r(g));
+    sc.raises(ra(g, "appendTransform"), vec![i(1)]);
+    sc.raises(ra(g, "appendTransform"), vec![]);
+    sc.raises(ra(g, "appendTransform"), vec![n("OCIO.MatrixTransform")]);
+    // Iterators.
+    let it = sc.call(n("iter"), vec![r(g)]);
+    sc.call(n("type"), vec![r(it)]);
+    sc.call(n("iter"), vec![r(it)]);
+    sc.call(n("len"), vec![r(it)]);
+    sc.call(ra(it, "__getitem__"), vec![i(2)]);
+    sc.raises(ra(it, "__getitem__"), vec![i(3)]);
+    sc.raises(ra(it, "__getitem__"), vec![i(-1)]);
+    for _ in 0..3 {
+        sc.call(n("next"), vec![r(it)]);
+    }
+    sc.raises(n("next"), vec![r(it)]);
+    sc.raises(n("next"), vec![r(it)]);
+    sc.call(ra(g, "appendTransform"), vec![r(rt)]);
+    sc.call(n("next"), vec![r(it)]);
+    sc.call(n("len"), vec![r(it)]);
+    sc.call(n("list"), vec![r(g)]);
+    sc.raises(n("OCIO.GroupTransform.TransformIterator"), vec![]);
+    sc.raises(
+        n("OCIO.GroupTransform.TransformIterator.__len__"),
+        vec![r(g)],
+    );
+    // A copy shares the children.
+    let copy = sc.call(n("copy.deepcopy"), vec![r(g)]);
+    sc.call(ra(copy, "__getitem__"), vec![i(1)]);
+    sc.call(ra(copy, "appendTransform"), vec![r(m)]);
+    sc.call(n("len"), vec![r(copy)]);
+    sc.call(n("len"), vec![r(g)]);
+    // Constructors.
+    let g2 = sc.call(
+        n("OCIO.GroupTransform"),
+        vec![l(vec![r(m), r(rt)]), n("OCIO.TRANSFORM_DIR_INVERSE")],
+    );
+    sc.eval(r(g2), &["__len__", "getDirection", "__repr__"]);
+    sc.call(ra(g2, "__getitem__"), vec![i(0)]);
+    let g3 = sc.call_kw(
+        n("OCIO.GroupTransform"),
+        vec![],
+        vec![
+            ("direction", n("OCIO.TRANSFORM_DIR_INVERSE")),
+            ("transforms", t(vec![r(rt), r(g2)])),
+        ],
+        Expect::Value,
+    );
+    sc.eval(r(g3), &["__len__", "getDirection", "__repr__"]);
+    sc.call(n("OCIO.GroupTransform"), vec![l(vec![])]);
+    sc.raises(n("OCIO.GroupTransform"), vec![none()]);
+    sc.raises(n("OCIO.GroupTransform"), vec![i(1)]);
+    sc.raises(n("OCIO.GroupTransform"), vec![l(vec![i(1)])]);
+    sc.raises(n("OCIO.GroupTransform"), vec![s("ab")]);
+    sc.raises(n("OCIO.GroupTransform"), vec![r(m)]);
+    sc.raises(n("OCIO.GroupTransform"), vec![l(vec![r(m)]), none()]);
+    let listed = sc.call(n("iter"), vec![l(vec![r(m)])]);
+    sc.raises(n("OCIO.GroupTransform"), vec![r(listed)]);
+    let set = sc.call(n("set"), vec![l(vec![r(m)])]);
+    let from_set = sc.call(n("OCIO.GroupTransform"), vec![r(set)]);
+    sc.call(ra(from_set, "__getitem__"), vec![i(0)]);
+    // A child's validation error, the group's own direction.
+    let bad = sc.call(n("OCIO.RangeTransform"), vec![]);
+    sc.call(ra(g2, "appendTransform"), vec![r(bad)]);
+    sc.raises(ra(g2, "validate"), vec![]);
+    let dir5 = sc.call(n("OCIO.TransformDirection"), vec![i(5)]);
+    let g4 = sc.call(n("OCIO.GroupTransform"), vec![l(vec![r(m)])]);
+    sc.call(ra(g4, "setDirection"), vec![r(dir5)]);
+    sc.raises(ra(g4, "validate"), vec![]);
+    sc.call(ra(g4, "getDirection"), vec![]);
+    sc.repr(r(g4));
+    sc.call(
+        ra(g4, "setDirection"),
+        vec![n("OCIO.TRANSFORM_DIR_FORWARD")],
+    );
+    let m5 = sc.call(n("OCIO.MatrixTransform"), vec![]);
+    sc.call(ra(g4, "appendTransform"), vec![r(m5)]);
+    sc.call(ra(m5, "setDirection"), vec![r(dir5)]);
+    sc.raises(ra(g4, "validate"), vec![]);
+    sc.call_kw(
+        n("OCIO.GroupTransform"),
+        vec![],
+        vec![("transforms", l(vec![r(m5)]))],
+        Expect::Raised,
+    );
+    // A null child: counted, read and iterated (U-110 covers what dereferences it).
+    let holes = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(holes, "appendTransform"), vec![none()]);
+    sc.call(ra(holes, "appendTransform"), vec![r(m)]);
+    sc.call(ra(holes, "prependTransform"), vec![none()]);
+    sc.call(n("len"), vec![r(holes)]);
+    sc.call(ra(holes, "__getitem__"), vec![i(0)]);
+    sc.call(n("list"), vec![r(holes)]);
+    // The copy's repr dereferences its null children: U-110.
+    let copy = sc.call(n("copy.deepcopy"), vec![r(holes)]);
+    sc.unrepr(copy);
+    // A group that holds itself: what doesn't recurse through it (U-111 covers what does).
+    let cyc = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(cyc, "appendTransform"), vec![r(cyc)]);
+    sc.call(n("len"), vec![r(cyc)]);
+    // A child that fails validation before a null child or the cycle: its error.
+    let bad_holes = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(bad_holes, "appendTransform"), vec![r(bad)]);
+    sc.raises(ra(bad_holes, "validate"), vec![]);
+    sc.call(ra(bad_holes, "appendTransform"), vec![none()]);
+    sc.call(ra(bad_holes, "appendTransform"), vec![r(bad_holes)]);
+    sc.raises(ra(bad_holes, "validate"), vec![]);
+    // getFormatMetadata: the same object while it lives.
+    let md = sc.call(ra(g, "getFormatMetadata"), vec![]);
+    let md2 = sc.call(ra(g, "getFormatMetadata"), vec![]);
+    sc.unrepr(md);
+    sc.unrepr(md2);
+    // The write formats.
+    let wf = sc.call(n("OCIO.GroupTransform.GetWriteFormats"), vec![]);
+    sc.call(n("type"), vec![r(wf)]);
+    sc.call(n("len"), vec![r(wf)]);
+    for k in [0, 1, 2, 3, 4, -1, -100] {
+        sc.call(ra(wf, "__getitem__"), vec![i(k)]);
+    }
+    sc.raises(ra(wf, "__getitem__"), vec![i(5)]);
+    sc.call(n("iter"), vec![r(wf)]);
+    sc.call(n("list"), vec![r(wf)]);
+    sc.raises(n("next"), vec![r(wf)]);
+    let wf2 = sc.call(n("OCIO.GroupTransform.GetWriteFormats"), vec![]);
+    sc.call(n("next"), vec![r(wf2)]);
+    sc.call(n("operator.is_"), vec![r(wf), r(wf2)]);
+    sc.raises(n("OCIO.GroupTransform.GetWriteFormats"), vec![i(1)]);
+    sc.eval(n("OCIO.GroupTransform.GetWriteFormats.__doc__"), &[]);
+    // write, to a string, with the current config.
+    let mt = sc.call(n("OCIO.MatrixTransform"), vec![]);
+    sc.call(ra(mt, "setOffset"), vec![fl(&[0.1, 0.2, 0.3, 0.0])]);
+    let w = sc.call(n("OCIO.GroupTransform"), vec![l(vec![r(mt)])]);
+    let first = sc.call(ra(w, "write"), vec![s("Color Transform Format")]);
+    sc.unlog(first);
+    sc.call(ra(w, "write"), vec![s("Academy/ASC Common LUT Format")]);
+    sc.call(ra(w, "write"), vec![s("color transform format")]);
+    for f in [
+        "ColorDecisionList",
+        "ColorCorrection",
+        "ColorCorrectionCollection",
+        "nope",
+        "",
+    ] {
+        sc.raises(ra(w, "write"), vec![s(f)]);
+    }
+    sc.call(ra(w, "write"), vec![by(b"Color Transform Format")]);
+    sc.call_kw(
+        ra(w, "write"),
+        vec![],
+        vec![
+            ("formatName", s("Color Transform Format")),
+            ("config", none()),
+        ],
+        Expect::Value,
+    );
+    sc.raises(ra(w, "write"), vec![none()]);
+    sc.raises(ra(w, "write"), vec![]);
+    sc.raises(ra(w, "write"), vec![s("Color Transform Format"), i(1)]);
+    sc.raises(ra(w, "write"), vec![s("Color Transform Format"), r(m)]);
+    sc.call(ra(w, "write"), vec![s("Color Transform Format\u{0}x")]);
+    sc.call(ra(w, "setDirection"), vec![n("OCIO.TRANSFORM_DIR_INVERSE")]);
+    sc.call(ra(w, "write"), vec![s("Color Transform Format")]);
+    // Null children and a group that holds itself, as the writers see them; an empty group.
+    sc.call(ra(holes, "write"), vec![s("Color Transform Format")]);
+    sc.raises(ra(holes, "write"), vec![s("Academy/ASC Common LUT Format")]);
+    for f in [
+        "ColorDecisionList",
+        "ColorCorrection",
+        "ColorCorrectionCollection",
+    ] {
+        sc.raises(ra(holes, "write"), vec![s(f)]);
+        sc.raises(ra(cyc, "write"), vec![s(f)]);
+    }
+    sc.raises(ra(cyc, "write"), vec![s("nope")]);
+    let empty = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(empty, "write"), vec![s("Color Transform Format")]);
+    sc.raises(ra(empty, "write"), vec![s("ColorDecisionList")]);
+    sc.raises(ra(empty, "write"), vec![s("ColorCorrection")]);
+    sc.raises(ra(g3, "write"), vec![s("Color Transform Format")]);
+    // A Python subclass, as a child.
+    let sub = sc.call(
+        n("type"),
+        vec![
+            s("G"),
+            t(vec![n("OCIO.GroupTransform")]),
+            d(vec![(s("__module__"), s("probe"))]),
+        ],
+    );
+    let obj = sc.call(r(sub), vec![l(vec![r(m)])]);
+    sc.eval(r(obj), &["__len__", "__repr__"]);
+    sc.call(ra(g, "appendTransform"), vec![r(obj)]);
+    sc.call(ra(g, "__getitem__"), vec![i(4)]);
+    sc
+}
+
 /// The classes behave as the wheel's.
 #[test]
 fn the_classes_behave_as_the_wheels() {
-    compare(&[matrix_script(), range_script(), allocation_script()]);
+    compare(&[
+        matrix_script(),
+        range_script(),
+        allocation_script(),
+        group_script(),
+    ]);
 }
 
 /// An enum value outside its enumerators, which the wheel's setters store and the port's
@@ -546,4 +788,61 @@ fn an_enum_value_outside_the_enumerators_is_the_ports_error() {
             assert!(step.get("value").is_some(), "step {k}: {step}");
         }
     }
+}
+
+/// What the wheel can't survive is the port's error: a null child where upstream dereferences
+/// it (U-110) and a group that holds itself where upstream recurses through it (U-111).
+#[test]
+fn null_children_and_cycles_are_the_ports_errors() {
+    let mut sc = Script::new();
+    let raised = |sc: &mut Script, target, args| sc.raises(target, args);
+    let mut expect_u = Vec::new();
+    expect_u.push((
+        raised(&mut sc, n("OCIO.GroupTransform"), vec![l(vec![none()])]),
+        "U-110",
+    ));
+    let m = sc.call(n("OCIO.MatrixTransform"), vec![]);
+    let holes = sc.call(n("OCIO.GroupTransform"), vec![l(vec![r(m)])]);
+    sc.call(ra(holes, "appendTransform"), vec![none()]);
+    expect_u.push((raised(&mut sc, ra(holes, "validate"), vec![]), "U-110"));
+    expect_u.push((raised(&mut sc, ra(holes, "__repr__"), vec![]), "U-110"));
+    let outer = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(outer, "appendTransform"), vec![r(holes)]);
+    expect_u.push((raised(&mut sc, ra(outer, "validate"), vec![]), "U-110"));
+    expect_u.push((raised(&mut sc, ra(outer, "__repr__"), vec![]), "U-110"));
+    let cyc = sc.call(n("OCIO.GroupTransform"), vec![l(vec![r(m)])]);
+    sc.call(ra(cyc, "appendTransform"), vec![r(cyc)]);
+    expect_u.push((raised(&mut sc, ra(cyc, "validate"), vec![]), "U-111"));
+    expect_u.push((raised(&mut sc, ra(cyc, "__repr__"), vec![]), "U-111"));
+    for f in ["Color Transform Format", "academy/asc common lut format"] {
+        expect_u.push((raised(&mut sc, ra(cyc, "write"), vec![s(f)]), "U-111"));
+    }
+    let deep = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(deep, "appendTransform"), vec![r(outer)]);
+    sc.call(ra(outer, "appendTransform"), vec![r(deep)]);
+    expect_u.push((
+        raised(
+            &mut sc,
+            ra(deep, "write"),
+            vec![s("Color Transform Format")],
+        ),
+        "U-111",
+    ));
+    let ours = common::port(&sc.json());
+    let steps = ours["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), sc.steps.len());
+    for (k, step) in steps.iter().enumerate() {
+        match expect_u.iter().find(|(i, _)| *i == k) {
+            Some((_, u)) => {
+                let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
+                    &step["raised"]["message"],
+                ))
+                .unwrap();
+                assert!(message.contains(u), "step {k}: {step}");
+                assert_eq!(step["raised"]["type"], "builtins.RuntimeError", "step {k}");
+            }
+            None => assert!(step.get("value").is_some(), "step {k}: {step}"),
+        }
+    }
+    assert_eq!(expect_u.len(), 10);
 }

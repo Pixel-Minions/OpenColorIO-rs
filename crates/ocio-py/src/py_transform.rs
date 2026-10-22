@@ -121,6 +121,15 @@ impl TransformRc {
     /// that holds itself, through which upstream recurses until its stack overflows (U-111), are
     /// the port's errors. It walks the nested groups with a stack of its own.
     pub(crate) fn materialize(&self) -> PyResult<Transform> {
+        self.materialize_with(Holes::Error, Holes::Error)
+    }
+
+    /// [`materialize`](Self::materialize), with what stands for a null child (`nulls`) and for a
+    /// child that is a group the walk is in (`cycles`): the port's error, or an empty group,
+    /// which builds no op and is no CDL, as a null pointer does for the writers
+    /// (`BuildOps` skips a null transform, Transform.cpp:48-50 @ v2.5.2, and the CDL writers'
+    /// cast refuses it).
+    pub(crate) fn materialize_with(&self, nulls: Holes, cycles: Holes) -> PyResult<Transform> {
         // Each level: the node, its copy so far (a group), its children, the next child.
         struct Level {
             node: TransformRc,
@@ -140,6 +149,7 @@ impl TransformRc {
                 other => Err(Box::new(other.clone())),
             }
         };
+        let hole = || Transform::Group(ocio::GroupTransform::new());
         let mut stack = match open(self) {
             Ok(level) => vec![level],
             Err(leaf) => return Ok(*leaf),
@@ -148,11 +158,26 @@ impl TransformRc {
             let top = stack.last_mut().expect("a level");
             if let Some(child) = top.children.get(top.next) {
                 top.next += 1;
-                let Some(child) = child.clone() else {
-                    return Err(null_child());
+                let child = match (child.clone(), nulls) {
+                    (Some(child), _) => child,
+                    (None, Holes::Placeholder) => {
+                        top.copy.append_transform(hole());
+                        continue;
+                    }
+                    (None, Holes::Error) => return Err(null_child()),
                 };
                 if stack.iter().any(|l| l.node.same(&child)) {
-                    return Err(cycle());
+                    match cycles {
+                        Holes::Placeholder => {
+                            stack
+                                .last_mut()
+                                .expect("a level")
+                                .copy
+                                .append_transform(hole());
+                            continue;
+                        }
+                        Holes::Error => return Err(cycle()),
+                    }
                 }
                 match open(&child) {
                     Ok(level) => stack.push(level),
@@ -171,6 +196,16 @@ impl TransformRc {
             }
         }
     }
+}
+
+/// What [`TransformRc::materialize_with`] puts for a null child or a cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Holes {
+    /// The port's error (U-110, U-111): the wheel dereferences the null pointer or recurses
+    /// without end.
+    Error,
+    /// An empty group.
+    Placeholder,
 }
 
 /// The port's error for a null child where the wheel dereferences it (U-110).
@@ -306,6 +341,19 @@ pub(crate) fn holder(obj: &Bound<'_, PyAny>, qualified: &str) -> PyResult<Option
     let value = pybind11::read_value(&this, qualified)?;
     let holder = value.cast::<TransformHolder>()?;
     Ok(Some(holder.get().0.clone()))
+}
+
+/// A `TransformRcPtr` argument (pybind11's holder caster): an instance of the class
+/// `qualified`; with conversions, also `None`, a null pointer. `Ok(None)`: refused.
+pub(crate) fn holder_arg(
+    obj: &Bound<'_, PyAny>,
+    qualified: &str,
+    convert: bool,
+) -> PyResult<Option<Option<TransformRc>>> {
+    if obj.is_none() {
+        return Ok(convert.then_some(None));
+    }
+    Ok(holder(obj, qualified)?.map(Some))
 }
 
 /// The node of `self` (an overload's first parameter, whose type names the class), or the next
@@ -491,6 +539,26 @@ pub(crate) fn class<'py>(py: Python<'py>, qualified: &str) -> PyResult<Bound<'py
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(qualified.to_string()))
 }
 
+/// A class pybind11 nests in `outer` without a docstring (`py::class_<T>(outer, name)`): its
+/// `__doc__` None, then `_pybind11_conduit_v1_`.
+pub(crate) fn nested_class<'py>(
+    outer: &Bound<'py, PyType>,
+    outer_name: &str,
+    name: &str,
+) -> PyResult<Bound<'py, PyType>> {
+    let py = outer.py();
+    let cls = pybind11::new_class(
+        py,
+        name,
+        &format!("{outer_name}.{name}"),
+        &[],
+        &[("__doc__", py.None().into_bound(py))],
+    )?;
+    cls.setattr("_pybind11_conduit_v1_", crate::enums::conduit(py)?)?;
+    outer.setattr(name, &cls)?;
+    Ok(cls)
+}
+
 /// A default argument: its repr in the signature and its value.
 pub(crate) const fn default(
     repr: &'static str,
@@ -541,6 +609,7 @@ macro_rules! float_array_out {
 }
 
 pub(crate) const FLOAT: &str = "typing.SupportsFloat";
+pub(crate) const INT: &str = "typing.SupportsInt";
 
 // ---------------------------------------------------------------------------------------------
 // The base class
@@ -819,6 +888,7 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     crate::transforms::py_allocation_transform::bind(m)?;
+    crate::transforms::py_group_transform::bind(m)?;
     crate::transforms::py_matrix_transform::bind(m)?;
     crate::transforms::py_range_transform::bind(m)?;
     Ok(())

@@ -4,6 +4,9 @@ AllocationTransformTest.py::AllocationTransformTest.test_constructor_with_positi
 AllocationTransformTest.py::AllocationTransformTest.test_constructor_wrong_parameter_type
 AllocationTransformTest.py::AllocationTransformTest.test_transform_type
 AllocationTransformTest.py::AllocationTransformTest.test_vars
+GroupTransformTest.py::GroupTransformTest.test_constructor_wrong_parameter_type
+GroupTransformTest.py::GroupTransformTest.test_transform_type
+GroupTransformTest.py::GroupTransformTest.test_validate_direction
 MatrixTransformTest.py::MatrixTransformTest.test_direction
 MatrixTransformTest.py::MatrixTransformTest.test_interface
 OpenColorIOTest.py::OpenColorIOTest.test_attributes

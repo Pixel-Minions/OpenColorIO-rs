@@ -27,8 +27,9 @@ use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
 /// for entry (transforms_oracle.rs checks them in detail).
-const COMPLETE: [&str; 4] = [
+const COMPLETE: [&str; 5] = [
     "Transform",
+    "GroupTransform",
     "MatrixTransform",
     "RangeTransform",
     "AllocationTransform",

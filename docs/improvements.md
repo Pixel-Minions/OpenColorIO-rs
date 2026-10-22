@@ -4716,3 +4716,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `setFileOutputBitDepth` (MatrixTransform, RangeTransform), `RangeTransform.setStyle`,
   `AllocationTransform.setAllocation` and its constructor; `transforms_oracle.rs`,
   `an_enum_value_outside_the_enumerators_is_the_ports_error` (the port only).
+
+### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
+
+- **Upstream:** the binding opens the file with `std::ofstream f(fileName.c_str())`
+  (PyGroupTransform.cpp:81-101 @ v2.5.2), a narrow name that MSVC's C runtime reads in the
+  process's ANSI code page (or UTF-8, after a `setlocale` to a UTF-8 locale): the UTF-8 bytes
+  pybind11 makes of a Python `str` become another name, or none, depending on the machine's
+  settings. On Linux the bytes are the name.
+- **Who notices:** Python code on Windows that writes a group to a file whose name isn't ASCII.
+- **A fix:** open the file through OCIO's own UTF-8 conversion (`Platform::CreateOutputFileStream`
+  style), as the library's readers do.
+- **Status:** on Windows the port raises ValueError "the wheel opens a file name that isn't
+  ASCII through the C runtime's ANSI code page (docs/improvements.md, U-113)" and creates no
+  file; on Linux it writes the file under the bytes, as the wheel; in `p6-transforms` (6.3a,
+  `crates/ocio-py/src/transforms/py_group_transform.rs`, `open_text_file`);
+  `group_write_oracle.rs`.

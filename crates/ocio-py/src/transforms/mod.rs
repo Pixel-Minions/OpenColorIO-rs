@@ -5,5 +5,6 @@
 //! its `bindPy<Class>`.
 
 pub(crate) mod py_allocation_transform;
+pub(crate) mod py_group_transform;
 pub(crate) mod py_matrix_transform;
 pub(crate) mod py_range_transform;
