@@ -3870,9 +3870,9 @@ note = "6.1a: the module, its attributes, the two exceptions, the global functio
 [[file]]
 path = "src/bindings/python/PyOpenColorIO.h"
 kind = "binding"
-target = ["crates/ocio-py/src/py_open_color_io.rs"]
+target = ["crates/ocio-py/src/py_open_color_io.rs", "crates/ocio-py/src/py_transform.rs"]
 status = "partial"
-note = "6.1a: the module's declarations; the classes it declares come with their chunks"
+note = "6.1a: the module's declarations; the classes it declares come with their chunks. p6-transforms 6.3a: the Transform polymorphic_type_hook (py_transform.rs, class_name and to_py)"
 
 [[file]]
 path = "src/bindings/python/PyPackedImageDesc.cpp"
@@ -3914,13 +3914,15 @@ status = "todo"
 path = "src/bindings/python/PyTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p6-transforms 6.3a: the base class and the subclasses bound so far (Allocation, Matrix, Range)"
 
 [[file]]
 path = "src/bindings/python/PyTransform.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p6-transforms 6.3a: the declarations of the subclasses bound so far"
 
 [[file]]
 path = "src/bindings/python/PyTypes.cpp"
@@ -4001,7 +4003,8 @@ status = "todo"
 path = "src/bindings/python/transforms/PyAllocationTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_allocation_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3a"
 
 [[file]]
 path = "src/bindings/python/transforms/PyBuiltinTransform.cpp"
@@ -4127,13 +4130,15 @@ status = "todo"
 path = "src/bindings/python/transforms/PyMatrixTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_matrix_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3a"
 
 [[file]]
 path = "src/bindings/python/transforms/PyRangeTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_range_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3a"
 
 [[file]]
 path = "src/cmake/Config.cmake.in"

@@ -13,6 +13,8 @@
 //! docstrings the same way on both.
 #![allow(dead_code)]
 
+pub(crate) mod script;
+
 use std::sync::Once;
 
 use ocio_testkit::{Oracle, paths};
@@ -157,4 +159,82 @@ pub(crate) fn name(n: &str) -> Value {
 /// A call step.
 pub(crate) fn call(target: Value, args: Value) -> Value {
     json!({ "call": target, "args": args })
+}
+
+/// The wheel's py_surface report.
+pub(crate) fn wheel_surface() -> Value {
+    Oracle::get().call("py_surface", json!({}), &[]).result
+}
+
+/// The wheel's py_surface entry named `n` among the module's members.
+pub(crate) fn wheel_member(report: &Value, n: &str) -> Value {
+    report["module"]["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| String::from_utf8(ocio_testkit::oracle_values::bytes(&e["name"])).unwrap() == n)
+        .unwrap_or_else(|| panic!("{n}"))
+        .clone()
+}
+
+/// The port's entry for `OCIO.<n>`, as py_surface_walk.py reports a class (`_class`) or a value
+/// (`_value`), with the name the module's walk gives it.
+pub(crate) fn port_member(n: &str) -> Value {
+    start_python();
+    Python::attach(|py| {
+        let walk = py.import("py_surface_walk").unwrap();
+        let ocio = py.import("PyOpenColorIO").unwrap();
+        let v = ocio.getattr(n).unwrap();
+        let entry = if v.is_instance_of::<pyo3::types::PyType>() {
+            let seen = pyo3::types::PyDict::new(py);
+            walk.call_method1("_class", (v, format!("PyOpenColorIO.{n}"), seen))
+                .unwrap()
+        } else {
+            walk.call_method1("_value", (v,)).unwrap()
+        };
+        entry
+            .set_item("name", walk.call_method1("_text", (n,)).unwrap())
+            .unwrap();
+        let text: String = py
+            .import("json")
+            .unwrap()
+            .call_method1("dumps", (entry,))
+            .unwrap()
+            .extract()
+            .unwrap();
+        serde_json::from_str(&text).unwrap()
+    })
+}
+
+/// The wheel's reports of `scripts`, each run in a directory holding `files` (relative path,
+/// bytes) as its working directory (the oracle's with_files), without their "interpreter"
+/// flags.
+pub(crate) fn wheel_with_files(scripts: &[Value], files: &[(&str, Vec<u8>)]) -> Vec<Value> {
+    let files: serde_json::Map<String, Value> = files
+        .iter()
+        .map(|(name, bytes)| {
+            (
+                (*name).to_string(),
+                json!({ "bytes": ocio_testkit::oracle_values::hex(bytes) }),
+            )
+        })
+        .collect();
+    let result = Oracle::get()
+        .call(
+            "with_files",
+            json!({ "files": files, "command": "py_eval", "args": { "scripts": scripts } }),
+            &[],
+        )
+        .result;
+    result["scripts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            assert!(r.get("crashed").is_none(), "{r}");
+            r.as_object_mut().unwrap().remove("interpreter");
+            r
+        })
+        .collect()
 }

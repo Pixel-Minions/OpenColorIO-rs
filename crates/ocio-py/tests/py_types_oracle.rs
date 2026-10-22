@@ -25,6 +25,15 @@ use ocio_testkit::oracle_values::bytes;
 use pyo3::prelude::*;
 use serde_json::{Value, json};
 
+/// The declared classes whose cards bind them completely: each compares with the wheel's entry
+/// for entry (transforms_oracle.rs checks them in detail).
+const COMPLETE: [&str; 4] = [
+    "Transform",
+    "MatrixTransform",
+    "RangeTransform",
+    "AllocationTransform",
+];
+
 /// The stand-ins `common::start_python` adds to the port's module until WP 6.6 binds them.
 const STAND_INS: [&str; 3] = [
     "SetLoggingFunction",
@@ -117,7 +126,7 @@ fn the_module_names_are_the_wheels_in_its_order() {
 fn the_module_members_report_as_the_wheels() {
     let theirs = wheel_members();
     let ours = port_members();
-    let (mut enums, mut classes, mut others, mut bound) = (0, 0, 0, 0);
+    let (mut enums, mut classes, mut others, mut bound, mut complete) = (0, 0, 0, 0, 0);
     for our in &ours {
         let n = entry_name(our);
         let their = theirs.iter().find(|t| entry_name(t) == n).unwrap();
@@ -133,6 +142,11 @@ fn the_module_members_report_as_the_wheels() {
             continue;
         }
         classes += 1;
+        if COMPLETE.contains(&n.as_str()) {
+            assert_eq!(our, their, "{n}");
+            complete += 1;
+            continue;
+        }
         let strip = |v: &Value| {
             let mut v = v.clone();
             v.as_object_mut().unwrap().remove("members");
@@ -162,6 +176,7 @@ fn the_module_members_report_as_the_wheels() {
         bound += our_members.len() - 2;
     }
     assert_eq!(classes, 63);
+    assert_eq!(complete, COMPLETE.len());
     assert_eq!(enums, 31);
     // The constants, the exported values and the functions of bindPyTypes and
     // PyOpenColorIO.cpp.

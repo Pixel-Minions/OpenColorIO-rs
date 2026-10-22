@@ -1918,6 +1918,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `incompatible`);
   `dispatch_oracle.rs`, `module_functions_answer_as_the_wheels`.
 
+### I-261. A transform's direction outside the enumerators
+
+- **Upstream:** Python can make a `TransformDirection` outside its enumerators
+  (`OCIO.TransformDirection(5)`, I-223), and `setDirection` (or a constructor's `direction`)
+  stores it. Most classes keep the integer: `getDirection` gives it back
+  (`<TransformDirection.???: 5>`), `operator<<` writes "inverse"
+  (`TransformDirectionToString`), and `validate` raises from `Transform::validate`
+  (Transform.cpp:30-40 @ v2.5.2) with the C++ class's `typeid` name, which each compiler
+  writes its own way, after the class's prefix: "MatrixTransform validation failed: class
+  OpenColorIO_v2_5::MatrixTransformImpl: invalid direction." in the Windows wheel (MSVC), the
+  mangled `N16OpenColorIO_v2_519MatrixTransformImplE` in the Linux one (GCC);
+  `BuiltinTransformImpl` adds no prefix. The classes whose op data keep the direction in a
+  style (CDL, exponent, exponent with linear, exposure contrast, fixed function:
+  `GammaOpData::setDirection`, "invert when different") flip their direction instead, so
+  setting such a value twice gives the first direction back. A processor validates its
+  transform first (Processor.cpp:633), so none is built from such a value.
+- **Who notices:** Python code that sets a direction made from a number outside 0 and 1.
+- **A fix:** refuse the number when the enum is constructed (I-223's fix).
+- **Status:** matched in `p6-transforms` (6.3a, `crates/ocio-py/src/py_transform.rs`,
+  `set_direction`, `validate`, `invalid_direction`): the binding keeps the integer beside the
+  library's transform, whose own direction is forward for 0 and inverse otherwise;
+  `transforms_oracle.rs`.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."
@@ -4646,3 +4669,50 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `type.__setattr__(cls, 'value', ...)` (which the wheel refuses, D-7) and the property's own
   `__init__`. It also refuses a replacement the wheel survives, when the property stays
   reachable for the rest of the process (under another name of the class, say).
+
+### U-110. A group holding a null transform dereferences it
+
+- **Upstream:** pybind11's holder caster takes `None` for a `TransformRcPtr` (with conversions),
+  so `GroupTransform.appendTransform(None)`, `prependTransform(None)` and
+  `GroupTransform([None])` put a null pointer among the children. `len()`, indexing (`None`)
+  and iteration work; `repr()`, `validate()` (and so a processor) and `write()` dereference
+  it.
+- **Who notices:** Python code that passes `None` as a group's transform.
+- **A fix:** refuse `None` (`"transform"_a.none(false)`).
+- **Status:** the port raises RuntimeError "the group holds a null transform (a None it was
+  given), which the wheel dereferences here (docs/improvements.md, U-110)" where the wheel
+  dereferences it, after the children before it (the binding's
+  `TransformRc::materialize` and `validate`, `crates/ocio-py/src/py_transform.rs`), in
+  `p6-transforms` (6.3a).
+
+### U-111. A group holding itself recurses until the stack overflows
+
+- **Upstream:** a group can hold itself, directly or through another group
+  (`g.appendTransform(g)`): pybind11 shares the C++ object. Its `repr()`, `validate()` and
+  `write()` recurse through it without end, and the wheel's process dies of a stack overflow
+  (once every child before it validated, for `validate`).
+- **Who notices:** Python code that builds a cycle of groups.
+- **A fix:** refuse a transform that holds the group in `appendTransform` and
+  `prependTransform`.
+- **Status:** the port raises RuntimeError "the group holds itself, through which the wheel
+  recurses until its stack overflows (docs/improvements.md, U-111)" where the wheel recurses
+  (`crates/ocio-py/src/py_transform.rs`), in `p6-transforms` (6.3a).
+
+### U-112. A transform's setter given an enum value outside its enumerators
+
+- **Upstream:** Python can make an enum value outside its enumerators (I-223), and each setter
+  of a transform stores it: `setFileInputBitDepth(OCIO.BitDepth(42))`,
+  `setStyle(OCIO.RangeStyle(9))`, `setAllocation(OCIO.Allocation(7))`, and the constructors
+  that take one. Each later use then reads the integer through its own `switch` (the text
+  `operator<<` writes, `validate`, building ops): a value C++17 leaves undefined for an enum
+  without a fixed type, which the port's library enums can't hold. The direction is the
+  exception, matched (I-261).
+- **Who notices:** Python code that passes such a value to a transform.
+- **A fix:** refuse the number when the enum is constructed (I-223's fix).
+- **Status:** the port raises ValueError "PyOpenColorIO.PyOpenColorIO.BitDepth(42): the wheel
+  stores an enum value outside its enumerators, which the port's library can't hold
+  (docs/improvements.md, U-112)" from the setter (`outside_enumerators`,
+  `crates/ocio-py/src/py_transform.rs`), in `p6-transforms` (6.3a): `setFileInputBitDepth`,
+  `setFileOutputBitDepth` (MatrixTransform, RangeTransform), `RangeTransform.setStyle`,
+  `AllocationTransform.setAllocation` and its constructor; `transforms_oracle.rs`,
+  `an_enum_value_outside_the_enumerators_is_the_ports_error` (the port only).
