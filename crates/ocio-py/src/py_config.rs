@@ -98,20 +98,37 @@ pub(crate) type ConfigRc = Shared<ConfigNode>;
 
 /// Writes the nodes of `held` back into the config with `replace` (the object's new pointer,
 /// or none when the config no longer holds it: the node is dropped).
+///
+/// A node that can't be materialized (a group of its holding a null transform or itself,
+/// U-110, U-111) stops the write-back with that error, and every node stays held, the ones
+/// written before it with their new pointers, it and the ones after it as they were: the
+/// config's call raises the error, and so does each later call until Python repairs the object
+/// (owner decision 2026-10-22), whose node is then written back as any other.
 fn write_back<T, N>(
     held: &mut Vec<(Arc<T>, Shared<N>)>,
     mut replace: impl FnMut(&Arc<T>, T) -> Option<Arc<T>>,
     materialize: impl Fn(&N) -> PyResult<T>,
 ) -> PyResult<()> {
     let mut kept = Vec::with_capacity(held.len());
-    for (arc, node) in std::mem::take(held) {
-        let value = materialize(&node.lock())?;
+    let mut entries = std::mem::take(held).into_iter();
+    let mut result = Ok(());
+    for (arc, node) in entries.by_ref() {
+        let materialized = materialize(&node.lock());
+        let value = match materialized {
+            Ok(value) => value,
+            Err(e) => {
+                kept.push((arc, node));
+                result = Err(e);
+                break;
+            }
+        };
         if let Some(new) = replace(&arc, value) {
             kept.push((new, node));
         }
     }
+    kept.extend(entries);
     *held = kept;
-    Ok(())
+    result
 }
 
 impl ConfigNode {

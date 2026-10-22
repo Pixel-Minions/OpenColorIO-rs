@@ -23,7 +23,10 @@
 //! monitors (Phase 9).
 //!
 //! And, without the wheel, whose process dies there, `None` where upstream dereferences a null
-//! pointer or makes a `std::string` of it is the port's error (U-123, U-124).
+//! pointer or makes a `std::string` of it is the port's error (U-123, U-124); and against the
+//! wheel, a config whose own object holds a group that holds itself or a null transform: each
+//! call on it is the port's error (U-111, U-110: owner decision 2026-10-22), the other steps,
+//! the repair and the shared objects after it the wheel's.
 #![cfg(feature = "python")]
 
 mod common;
@@ -1339,5 +1342,148 @@ fn an_enum_value_outside_the_enumerators_is_the_ports_error() {
         ))
         .unwrap();
         assert!(message.contains("U-112"), "{}", ours["steps"][k]);
+    }
+}
+
+/// Runs `sc` on both sides: each step of `port_errors` succeeds in the wheel and raises the
+/// port's RuntimeError naming its register entry; every other step is the wheel's, each with
+/// the outcome the script expects of the wheel.
+fn compare_except(sc: &Script, port_errors: &[(usize, &str)]) {
+    let theirs = common::wheel(&[sc.json()]).remove(0);
+    let ours = common::port(&sc.json());
+    let (theirs, ours) = (
+        theirs["steps"].as_array().unwrap(),
+        ours["steps"].as_array().unwrap(),
+    );
+    assert_eq!(theirs.len(), sc.steps.len());
+    assert_eq!(ours.len(), sc.steps.len());
+    assert!(!port_errors.is_empty());
+    for (k, (a, b)) in ours.iter().zip(theirs).enumerate() {
+        assert_eq!(
+            b.get("raised").is_some(),
+            sc.expect[k] == Expect::Raised,
+            "step {k}: the wheel's outcome is not the expected one: {b}"
+        );
+        if let Some((_, entry)) = port_errors.iter().find(|(j, _)| *j == k) {
+            assert!(b.get("value").is_some(), "step {k}: {b}");
+            assert_eq!(
+                a["raised"]["type"], "builtins.RuntimeError",
+                "step {k}: {a}"
+            );
+            let message =
+                String::from_utf8(ocio_testkit::oracle_values::bytes(&a["raised"]["message"]))
+                    .unwrap();
+            assert!(
+                message.ends_with(&format!("(docs/improvements.md, {entry})")),
+                "step {k}: {message}"
+            );
+        } else {
+            // The wheel's results of those steps are among the objects a later step's can be.
+            let mut b = b.clone();
+            if let Some(same) = b.get_mut("same_as").and_then(Value::as_array_mut) {
+                same.retain(|j| {
+                    !port_errors
+                        .iter()
+                        .any(|(e, _)| Some(*e as u64) == j.as_u64())
+                });
+            }
+            assert_eq!(a, &b, "step {k}: {}", sc.steps[k]);
+        }
+    }
+}
+
+/// The calls on a config whose own object can't be written back (a group of its color space
+/// holding itself, U-111, or a null transform, U-110): owner decision 2026-10-22.
+fn unwritable_script(null: bool) -> (Script, Vec<(usize, &'static str)>) {
+    let entry = if null { "U-110" } else { "U-111" };
+    let mut sc = Script::new();
+    let c = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    let g0 = sc.call(n("OCIO.GroupTransform"), vec![]);
+    let m = sc.call(n("OCIO.MatrixTransform"), vec![]);
+    sc.call(ra(g0, "appendTransform"), vec![r(m)]);
+    let to_ref = n("OCIO.COLORSPACE_DIR_TO_REFERENCE");
+    for name in ["a", "b"] {
+        let cs = sc.call_kw(
+            n("OCIO.ColorSpace"),
+            vec![],
+            vec![("name", s(name))],
+            Expect::Value,
+        );
+        if name == "a" {
+            sc.call(ra(cs, "setTransform"), vec![r(g0), to_ref.clone()]);
+        }
+        call(&mut sc, c, "addColorSpace", vec![r(cs)]);
+    }
+    let look = sc.call_kw(
+        n("OCIO.Look"),
+        vec![],
+        vec![("name", s("l"))],
+        Expect::Value,
+    );
+    call(&mut sc, c, "addLook", vec![r(look)]);
+    call(&mut sc, c, "getCacheID", vec![]);
+    // The config's objects, held before, at and after the one that breaks.
+    let b = call(&mut sc, c, "getColorSpace", vec![s("b")]);
+    let a = call(&mut sc, c, "getColorSpace", vec![s("a")]);
+    let raw = call(&mut sc, c, "getColorSpace", vec![s("raw")]);
+    let lk = call(&mut sc, c, "getLook", vec![s("l")]);
+    let g = call(&mut sc, a, "getTransform", vec![to_ref.clone()]);
+    sc.call(n("type"), vec![r(g)]);
+    if null {
+        sc.call(ra(g, "appendTransform"), vec![none()]);
+    } else {
+        sc.call(ra(g, "appendTransform"), vec![r(g)]);
+    }
+    // Every call on the config raises, while the object stays as it is (the wheel's calls that
+    // don't walk the color space's transforms succeed).
+    let names = call(&mut sc, c, "getColorSpaceNames", vec![]);
+    let mut errors = vec![sc.call(n("list"), vec![r(names)])];
+    for (m, args) in [
+        ("getCacheID", vec![]),
+        ("getDescription", vec![]),
+        ("getColorSpace", vec![s("b")]),
+        ("getLook", vec![s("l")]),
+        ("getSearchPath", vec![]),
+        ("__repr__", vec![]),
+    ] {
+        errors.push(call(&mut sc, c, m, args));
+    }
+    // Changes through the objects meanwhile, then the repair.
+    call(&mut sc, b, "setFamily", vec![s("fam_after")]);
+    call(&mut sc, lk, "setDescription", vec![s("look's")]);
+    call(&mut sc, raw, "setDescription", vec![s("raw's")]);
+    let m2 = sc.call(n("OCIO.MatrixTransform"), vec![]);
+    call(&mut sc, a, "setTransform", vec![r(m2), to_ref.clone()]);
+    // The config's objects are the same objects, with the changes.
+    for (name, held) in [("b", b), ("a", a), ("raw", raw)] {
+        let cs = call(&mut sc, c, "getColorSpace", vec![s(name)]);
+        sc.call(n("operator.is_"), vec![r(cs), r(held)]);
+    }
+    let back = call(&mut sc, c, "getLook", vec![s("l")]);
+    sc.call(n("operator.is_"), vec![r(back), r(lk)]);
+    let b2 = call(&mut sc, c, "getColorSpace", vec![s("b")]);
+    call(&mut sc, b2, "getFamily", vec![]);
+    let raw2 = call(&mut sc, c, "getColorSpace", vec![s("raw")]);
+    call(&mut sc, raw2, "getDescription", vec![]);
+    call(&mut sc, back, "getDescription", vec![]);
+    let a2 = call(&mut sc, c, "getColorSpace", vec![s("a")]);
+    let t = call(&mut sc, a2, "getTransform", vec![to_ref]);
+    sc.call(n("type"), vec![r(t)]);
+    call(&mut sc, c, "getCacheID", vec![]);
+    let names = call(&mut sc, c, "getColorSpaceNames", vec![]);
+    sc.call(n("list"), vec![r(names)]);
+    call(&mut sc, c, "serialize", vec![]);
+    (sc, errors.into_iter().map(|k| (k, entry)).collect())
+}
+
+/// A config whose own object can't be written back: every call on it raises U-111's or
+/// U-110's error, where the wheel's succeed (owner decision 2026-10-22); once Python repairs
+/// the object, the config's objects are the same Python objects, with what changed through
+/// them meanwhile, and every other step is the wheel's.
+#[test]
+fn an_object_that_cant_be_written_back() {
+    for null in [false, true] {
+        let (sc, errors) = unwritable_script(null);
+        compare_except(&sc, &errors);
     }
 }

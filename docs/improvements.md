@@ -4983,7 +4983,14 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   given), which the wheel dereferences here (docs/improvements.md, U-110)" where the wheel
   dereferences it, after the children before it (the binding's
   `TransformRc::materialize` and `validate`, `crates/ocio-py/src/py_transform.rs`), in
-  `p6-transforms` (6.3a).
+  `p6-transforms` (6.3a). A config whose own object (a color space, look, view transform or
+  named transform Python got from it) holds such a group can't be written back before a call
+  (owner decision Q1 = A): every call on that config that reads or changes it (an iterator's
+  `len`, `next` and indexing included) raises this error while the group holds the null
+  transform, where the wheel fails only in the calls that reach it (owner decision
+  2026-10-22: stricter than the wheel); once Python removes it, the config's objects are
+  written back and shared as before (`p6-config`, `crates/ocio-py/src/py_config.rs`,
+  `write_back`; `config_oracle.rs`, `an_object_that_cant_be_written_back`).
 
 ### U-111. A group holding itself recurses until the stack overflows
 
@@ -4996,7 +5003,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `prependTransform`.
 - **Status:** the port raises RuntimeError "the group holds itself, through which the wheel
   recurses until its stack overflows (docs/improvements.md, U-111)" where the wheel recurses
-  (`crates/ocio-py/src/py_transform.rs`), in `p6-transforms` (6.3a).
+  (`crates/ocio-py/src/py_transform.rs`), in `p6-transforms` (6.3a). A config whose own object
+  holds such a group raises this error from every call that reads or changes it, while the
+  cycle lasts, where the wheel fails only in the calls that walk it (owner decision
+  2026-10-22, as for U-110); once Python breaks the cycle, the config's objects are written
+  back and shared as before (`p6-config`, `crates/ocio-py/src/py_config.rs`, `write_back`;
+  `config_oracle.rs`, `an_object_that_cant_be_written_back`).
 
 ### U-112. A transform's setter given an enum value outside its enumerators
 
