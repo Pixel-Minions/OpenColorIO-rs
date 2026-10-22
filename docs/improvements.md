@@ -3506,6 +3506,30 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `apphelpers::category_helpers::find_color_space_infos`; checked against the wheel's menus
   (`category_helpers_oracle_tests.rs`), where a mutant that tests `includeColorSpaces` fails.
 
+### I-317. Menus are kept for good, by the hash of their parameters' text
+
+- **Upstream:** `ColorSpaceMenuHelper::Create` keeps every menu it makes in a static map,
+  under `std::hash<std::string>` of the parameters' text (`operator<<`: the config's cache ID
+  and the parameters), and returns the kept menu for parameters of the same hash
+  (`ColorSpaceHelpers.cpp:421-450` @ v2.5.2). So: the map only grows (`ClearAllCaches` doesn't
+  empty it); a menu is logged about (its fall-backs, `FindColorSpaceInfos`) only when it is
+  made, while the config's validation warning is logged at every call; anything that changes
+  the items without changing the text gives the first menu (a config whose cache ID stays the
+  same, such as two configs of the same YAML whose inactive color spaces
+  `OCIO_INACTIVE_COLORSPACES` set differently); two texts of the same hash share a menu, and
+  the hash is MSVC's FNV-1a on Windows and libstdc++'s on Linux, so not the same texts.
+  `OCIO_DISABLE_ALL_CACHES` disables it, read once, at the first menu past the checks of its
+  parameters.
+- **Who notices:** applications that make many menus (memory), or that change a config's
+  environment between menus; logs that miss a menu's fall-back message the second time.
+- **A fix:** key the menus by the text itself, in a cache `ClearAllCaches` empties, keyed also
+  by what the cache ID misses; or keep no cache (menus are cheap to make).
+- **Status:** ported as upstream in `p5-helpers-1` (5.7b, `ColorSpaceMenuHelper::new`, keyed
+  by `caching::std_hash_string`); `color_space_menu_helper_oracle.rs` checks the logs of menus
+  asked for again against the wheel. `OCIO_DISABLE_ALL_CACHES` is read as upstream reads it but
+  not checked against the wheel: the oracle refuses to set it per request (it is read once per
+  process), and no command runs menus in a child process of their own.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -4916,3 +4940,49 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   an empty set as the wheel's; a set of one color space or none removing its own returns, as
   the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
   `py_look.rs`, `py_named_transform.rs`); `color_space_oracle.rs`, `look_view_named_oracle.rs`.
+
+### U-141. A menu of a role that names no color space
+
+- **Upstream:** `ColorSpaceInfo::CreateFromSingleRole` and `CreateFromRole` check
+  `config->hasRole(role)`, which is true for a role set to any name, then dereference
+  `config->getColorSpace(role)`, which is null when that name is no color space
+  (`ColorSpaceHelpers.cpp:59-94` @ v2.5.2). The config isn't valid then, but
+  `ColorSpaceMenuHelper::Create` only logs its validation's warning and goes on
+  (`ColorSpaceHelpers.cpp:385-394`): a menu whose parameters' role is such a role, or that
+  includes the roles of such a config, reads through a null pointer while it is made, and the
+  wheel's process dies.
+- **Who notices:** an application asking for a menu of a config whose role names a missing
+  color space (`config.setRole('r', 'missing')`, or a hand-written config).
+- **A fix:** treat the role as missing (or skip it among the roles), as for a role the config
+  doesn't have.
+- **Status:** the port's `ColorSpaceMenuHelper::new` returns an error ("ColorSpaceMenuHelper:
+  the role '<role>' refers to the color space '<name>', which doesn't exist: ...
+  (docs/improvements.md, U-141)"). In `p5-helpers-1` (5.7b, `apphelpers/
+  color_space_helpers.rs`, `role_color_space`); `color_space_menu_helper_oracle.rs`
+  (`roles_naming_a_missing_color_space_are_refused`).
+
+### U-142. A menu including a role set to the empty name
+
+- **Upstream:** a role set to `""` (`config.setRole('r', '')`) stays among the roles, but
+  `hasRole` is false for it. With `setIncludeRoles(true)`, `ColorSpaceMenuHelperImpl::refresh`
+  adds what `ColorSpaceInfo::CreateFromRole` returns for every role, a null pointer for that
+  one (`ColorSpaceHelpers.cpp:59-76, 502-511` @ v2.5.2). The menu is made (and counted in
+  `getNumColorSpaces`), but these read through the null item, and the wheel's process dies:
+  the getters of that index (`getName`, `getUIName`, `getFamily`, `getDescription`,
+  `getNumHierarchyLevels`, `getHierarchyLevel`; probed on Windows, 2026-10-22: `getName`), the
+  lookups by name or UI name that reach it before a match (`ColorSpaceHelpers.cpp:613-709`),
+  the menu's text (`operator<<`, 711-734), and the check of added color spaces that reach it
+  while the menu is made (515-583). Through Python, any call to the menu that pybind11 refuses
+  too: its TypeError message holds the menu's `repr` (the oracle's process died writing such
+  a menu out).
+- **Who notices:** an application asking for a menu with the roles of a config that has a role
+  set to the empty name.
+- **A fix:** skip the roles `CreateFromRole` gives nothing for.
+- **Status:** the port makes the menu as the wheel does, with the null item, and returns an
+  error ("ColorSpaceMenuHelper: the menu item of the role '<role>' is null (the role refers to
+  no color space): ... (docs/improvements.md, U-142)") from each of the calls above where they
+  read it: the item getters and the lookups return `Result` for it, and so does
+  `ColorSpaceMenuHelper::new` for the added color spaces. In `p5-helpers-1` (5.7b,
+  `apphelpers/color_space_helpers.rs`, `Entry`); `color_space_menu_helper_oracle.rs`
+  (`a_role_set_to_the_empty_name_gives_a_null_item`, which compares with the wheel what
+  doesn't read the item).

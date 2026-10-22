@@ -17,8 +17,9 @@ note = "build system"
 [[file]]
 path = "include/OpenColorIO/OpenColorAppHelpers.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs"]
-status = "todo"
+target = ["crates/ocio/src/lib.rs", "crates/ocio/src/apphelpers/color_space_helpers.rs"]
+status = "partial"
+note = "p5-helpers-1 5.7b: ColorSpaceMenuParameters, ColorSpaceMenuHelper and ColorSpaceHelpers::AddColorSpace (15-293) in apphelpers/color_space_helpers.rs, re-exported by lib.rs (operator<< as to_bytes)"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
@@ -664,15 +665,13 @@ status = "done"
 path = "src/OpenColorIO/apphelpers/ColorSpaceHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/color_space_helpers.rs"]
-status = "partial"
-note = "5.7a: ColorSpaceInfo (22-163)"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/ColorSpaceHelpers.h"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/color_space_helpers.rs"]
-status = "partial"
-note = "5.7a: ColorSpaceInfo (22-79)"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/DisplayViewHelpers.cpp"
@@ -4618,9 +4617,8 @@ status = "done"
 [[file]]
 path = "tests/cpu/apphelpers/ColorSpaceHelpers_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/apphelpers/color_space_helpers_tests.rs"]
-status = "partial"
-note = "5.7a: ColorSpaceInfo read_values, change_values"
+target = ["crates/ocio/src/apphelpers/color_space_helpers_tests.rs", "crates/ocio/tests/color_space_menu_helper_oracle.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/apphelpers/DisplayViewHelpers_tests.cpp"

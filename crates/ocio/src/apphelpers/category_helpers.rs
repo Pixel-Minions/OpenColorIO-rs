@@ -10,9 +10,6 @@
 //! and tells two apart by their addresses; the port keeps references into the config and
 //! compares them the same way ([`std::ptr::eq`]).
 
-// The menu helper (5.7b) uses them.
-#![allow(dead_code)]
-
 use ocio_ops::logging::{get_logging_level, log_message};
 use ocio_ops::open_color_types::{ColorSpaceVisibility, LoggingLevel, SearchReferenceSpaceType};
 use ocio_ops::utils::string_utils::{self, StringVec, c_str};
