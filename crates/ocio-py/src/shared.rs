@@ -40,8 +40,8 @@ impl<T> Shared<T> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The value, locked, unless it is locked already: the binding runs under the GIL, so a
-    /// locked value is one a call on this thread is using (a callback of the library's).
+    /// The value, locked, unless it is locked already (by a call of this thread, under a
+    /// callback of the library's, or of another thread whose callback released the GIL).
     pub(crate) fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
         match self.0.try_lock() {
             Ok(g) => Some(g),

@@ -23,7 +23,8 @@
 //! locked, and C++ lets the callback read (or change) it while the library works on it. A
 //! call's arguments are loaded before the config is locked (`config_method!`), so the Python
 //! code their casters run (`__index__`, `__float__`, `__bool__`, a sequence's items) may use
-//! the config, as in the wheel.
+//! the config, as in the wheel. A call on the config from another thread meanwhile waits for
+//! the first call's end, with the GIL released ([`lock_config`]).
 //!
 //! The static methods of `ConfigUtils` (`IdentifyBuiltinColorSpace`,
 //! `IdentifyInterchangeSpace`, `GetProcessorToBuiltinColorSpace`,
@@ -273,17 +274,71 @@ fn busy() -> PyErr {
     )
 }
 
+/// The thread whose call holds each locked config, by its key: a call finding a config locked
+/// by its own thread is a callback of that call (D-9); by another thread, it waits.
+static OWNERS: Mutex<Vec<(usize, std::thread::ThreadId)>> = Mutex::new(Vec::new());
+
+fn owners() -> std::sync::MutexGuard<'static, Vec<(usize, std::thread::ThreadId)>> {
+    OWNERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A config locked by a call of this thread, its owner recorded until the guard drops.
+struct ConfigGuard<'a> {
+    node: std::sync::MutexGuard<'a, ConfigNode>,
+    key: usize,
+}
+
+impl Drop for ConfigGuard<'_> {
+    fn drop(&mut self) {
+        // The owner goes first: the node's lock is released after this body.
+        let mut owners = owners();
+        if let Some(at) = owners.iter().position(|(k, _)| *k == self.key) {
+            owners.swap_remove(at);
+        }
+    }
+}
+
+/// The config `rc`, locked for this thread's call. Locked by a call of this thread, the
+/// config is in use by the library under a callback of that call: D-9's error. Locked by
+/// another thread (whose callback released the GIL, as Python code does now and then), the
+/// call waits, with the GIL released, until that thread's call ends, as the wheel's would
+/// run alongside it.
+fn lock_config(rc: &ConfigRc) -> PyResult<ConfigGuard<'_>> {
+    let this = std::thread::current().id();
+    loop {
+        if let Some(node) = rc.try_lock() {
+            owners().push((rc.key(), this));
+            return Ok(ConfigGuard {
+                node,
+                key: rc.key(),
+            });
+        }
+        let owner = owners()
+            .iter()
+            .find(|(k, _)| *k == rc.key())
+            .map(|(_, t)| *t);
+        if owner == Some(this) {
+            return Err(busy());
+        }
+        // Another thread's call (its owner recorded, or about to be): wait for its end.
+        Python::attach(|py| py.detach(|| drop(rc.lock())));
+    }
+}
+
 /// `f` of the config `rc`, its objects written back first.
 pub(crate) fn with_config<R>(
     rc: &ConfigRc,
     f: impl FnOnce(&mut ConfigNode) -> PyResult<R>,
 ) -> PyResult<R> {
-    let mut node = rc.try_lock().ok_or_else(busy)?;
-    node.sync()?;
-    f(&mut node)
+    let mut guard = lock_config(rc)?;
+    guard.node.sync()?;
+    f(&mut guard.node)
 }
 
-/// `f` of two configs (the same one twice, once locked).
+/// `f` of two configs (the same one twice, once locked; two in the order of their keys, so
+/// that two threads locking the same pair wait for each other in one order).
 fn with_two<R>(
     a: &ConfigRc,
     b: &ConfigRc,
@@ -292,7 +347,11 @@ fn with_two<R>(
     if a.same(b) {
         return with_config(a, |n| f(&n.config, &n.config));
     }
-    with_config(a, |na| with_config(b, |nb| f(&na.config, &nb.config)))
+    if a.key() < b.key() {
+        with_config(a, |na| with_config(b, |nb| f(&na.config, &nb.config)))
+    } else {
+        with_config(b, |nb| with_config(a, |na| f(&na.config, &nb.config)))
+    }
 }
 
 /// A returned config of its own.

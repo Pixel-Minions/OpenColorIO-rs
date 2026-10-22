@@ -30,7 +30,9 @@
 
 mod common;
 
-use common::script::{Expect, Script, by, compare, compare_reports, d, i, n, none, r, ra, s, t};
+use common::script::{
+    Expect, Script, b, by, compare, compare_reports, d, f, i, n, none, r, ra, s, t,
+};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::{Value, json};
@@ -391,6 +393,57 @@ fn d9_script() -> Script {
     sc
 }
 
+/// A call on a config from the script's thread while another thread's call on it waits in
+/// its logging function (a semaphore's `acquire`, which releases the GIL; a timer releases
+/// the semaphore after the script's calls began): the wheel's calls run alongside it, the
+/// port's wait for its end, with the GIL released, and give the wheel's answers.
+fn threads_script() -> Script {
+    let mut sc = Script::new();
+    let c = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(LOGGING_CONFIG)]);
+    let sem = sc.call(n("threading.Semaphore"), vec![i(0)]);
+    sc.call(n("OCIO.SetLoggingFunction"), vec![ra(sem, "acquire")]);
+    let worker = sc.call_kw(
+        n("threading.Thread"),
+        vec![],
+        vec![
+            ("target", ra(c, "validate")),
+            ("name", s("worker")),
+            ("daemon", b(false)),
+        ],
+        Expect::Value,
+    );
+    let timer = sc.call(
+        n("threading.Timer"),
+        vec![f(2.0), ra(sem, "release"), t(vec![i(1000)])],
+    );
+    sc.step(
+        json!({ "setattr": r(timer), "name": "name", "value": s("timer") }),
+        Expect::Value,
+    );
+    // Threads made by the port's test thread are daemons by default (a thread Python didn't
+    // start), the wheel's script's aren't; the timer's repr (its default name and daemon flag)
+    // isn't compared until both are set.
+    sc.unrepr(timer);
+    sc.step(
+        json!({ "setattr": r(timer), "name": "daemon", "value": b(false) }),
+        Expect::Value,
+    );
+    sc.call(ra(worker, "start"), vec![]);
+    sc.call(ra(timer, "start"), vec![]);
+    let pause = sc.call(n("threading.Event"), vec![]);
+    sc.call(ra(pause, "wait"), vec![f(1.0)]);
+    // The worker waits in its logging function now.
+    sc.call(n("len"), vec![ra(sem, "_cond._waiters")]);
+    let names = sc.call(ra(c, "getColorSpaceNames"), vec![]);
+    sc.call(n("list"), vec![r(names)]);
+    sc.call(ra(c, "getCacheID"), vec![]);
+    sc.call(ra(worker, "join"), vec![]);
+    sc.call(ra(timer, "join"), vec![]);
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    sc.call(ra(c, "getCacheID"), vec![]);
+    sc
+}
+
 /// The text of a report's exception message.
 fn message(step: &Value) -> String {
     String::from_utf8(ocio_testkit::oracle_values::bytes(
@@ -473,6 +526,9 @@ fn callbacks_as_the_wheels() {
     // Another config is free to use, as the wheel's.
     assert_eq!(theirs["steps"][4], ours["steps"][4]);
     assert_eq!(theirs["steps"][5], ours["steps"][5]);
+
+    // Another thread's call on the config: it waits, and is the wheel's.
+    compare(&[threads_script()]);
 }
 
 /// Where the wheel's process dies (U-123, U-124) or it keeps a level outside the enumerators
