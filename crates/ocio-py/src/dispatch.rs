@@ -252,15 +252,49 @@ fn bind<'py>(
     Ok(Some(values))
 }
 
-/// `o`'s call, where pybind11's dispatcher catches C++ exceptions: a Python callback's,
-/// which the library carries as a `ForeignException`, is its Python exception again
-/// (`error_already_set::restore`, chunk 6.6a).
+/// Whether the arguments after `self` of the overload `o` load as pybind11's casters load them
+/// with conversions, for the parameter types of the overloads [`crate::self_kind`] lists with a
+/// null `self` (a `const char *`: a `str`, `bytes` or `None`; a class's holder: an instance or
+/// `None`).
+fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> bool {
+    o.params.iter().zip(values).skip(1).all(|(p, v)| {
+        if p.ty == "str" {
+            v.is_none() || v.is_instance_of::<PyString>() || v.is_instance_of::<PyBytes>()
+        } else if p.ty.starts_with("PyOpenColorIO.PyOpenColorIO.") {
+            v.is_none() || crate::pybind11::instance_of(v, p.ty).is_some()
+        } else {
+            false
+        }
+    })
+}
+
+/// The overload `index` of `f`, `o`, called: where pybind11 would call it with a null `self`
+/// (`None`, an unnamed overload whose `self` is a pointer or a holder, with conversions), the
+/// port's error (U-134, [`crate::self_kind`]); and where pybind11's dispatcher catches C++
+/// exceptions, a Python callback's, which the library carries as a `ForeignException`, is
+/// its Python exception again (`error_already_set::restore`, chunk 6.6a).
 fn call<'py>(
     py: Python<'py>,
+    f: &Function,
+    index: usize,
     o: &Overload,
     values: &[Bound<'py, PyAny>],
     convert: bool,
 ) -> PyResult<Option<Py<PyAny>>> {
+    if convert && f.method && !f.constructor && values.first().is_some_and(|v| v.is_none()) {
+        let ty = o.params[0].ty;
+        let class = ty
+            .strip_prefix("PyOpenColorIO.PyOpenColorIO.")
+            .unwrap_or(ty);
+        let kind = crate::self_kind::kind(class, f.name, index);
+        if matches!(
+            kind,
+            Some(crate::self_kind::SelfKind::Pointer | crate::self_kind::SelfKind::Holder)
+        ) && rest_loads(o, values)
+        {
+            return Err(crate::self_kind::null_self(class, f.name));
+        }
+    }
     match ocio_ops::foreign_exception::try_foreign(|| (o.call)(py, o, values, convert)) {
         Ok(result) => result,
         Err(e) => Err(crate::callback::into_py_err(e)),
@@ -295,21 +329,21 @@ pub fn dispatch<'py>(
     }
     let overloaded = f.overloads.len() > 1;
     let mut second_pass = Vec::new();
-    for o in f.overloads {
+    for (index, o) in f.overloads.iter().enumerate() {
         let Some(values) = bind(py, o, f.method, args, kwargs)? else {
             continue;
         };
-        if let Some(result) = call(py, o, &values, !overloaded)? {
+        if let Some(result) = call(py, f, index, o, &values, !overloaded)? {
             return Ok(result);
         }
         // pybind11 tries again, with conversions, an overload with a positional parameter
         // (besides `self`) whose caster may convert: all of them, here.
         if overloaded && o.params.len() > usize::from(f.method) {
-            second_pass.push((o, values));
+            second_pass.push((index, o, values));
         }
     }
-    for (o, values) in second_pass {
-        if let Some(result) = call(py, o, &values, true)? {
+    for (index, o, values) in second_pass {
+        if let Some(result) = call(py, f, index, o, &values, true)? {
             return Ok(result);
         }
     }

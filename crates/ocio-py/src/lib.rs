@@ -83,6 +83,8 @@ pub(crate) mod py_viewing_rules;
 #[cfg(feature = "python")]
 pub mod pybind11;
 #[cfg(feature = "python")]
+pub mod self_kind;
+#[cfg(feature = "python")]
 pub(crate) mod shared;
 #[cfg(feature = "python")]
 pub(crate) mod transforms;

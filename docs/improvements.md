@@ -5237,6 +5237,33 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   reads it, as the wheel's does. In `p6-config` (6.6a,
   `crates/ocio-py/src/py_config_io_proxy.rs`); `vector_oracle.rs`.
 
+### U-134. `None` as `self` of a method bound without argument names
+
+- **Upstream:** pybind11 gives a method bound with `py::arg` names an argument record for
+  `self` that refuses `None`; a method bound without them (`.def("getName",
+  &ColorSpace::getName)`, and most of the module's lambdas) has none, and its class caster
+  loads `None` as a null pointer when it may convert (a function of one overload, or the
+  second pass of an overloaded one). A member function pointer is then called through the
+  null `this`, and a lambda taking the class's `shared_ptr` (`defRepr` included) dereferences
+  an empty one: `OCIO.Context.getSearchPath(None)`, `OCIO.ColorSpace.getName(None)`,
+  `OCIO.Context.__repr__(None)`, `OCIO.ColorSpaceSet.__eq__(None, OCIO.ColorSpaceSet())`,
+  `OCIO.Config.archive(None, 'out.ocioz')`, `OCIO.PyConfigIOProxy.getLutData(None, 'a')`:
+  the wheel's process dies (probed on Windows, 2026-10-22, each in its own process). A lambda
+  taking a reference (`Class &`: the iterators, `bind_vector`, `defRepr` of a class held by
+  value) refuses `None` with pybind11's TypeError, as a named overload does.
+- **Who notices:** Python code that calls a method through its class with `None` for `self`.
+- **A fix:** pybind11 could give every method's `self` a record that refuses `None`
+  (`py::arg("self").none(false)`), or upstream could name its arguments.
+- **Status:** the port raises ValueError "<Class>.<method>: None as self, a null pointer the
+  wheel calls the method through (its process dies; docs/improvements.md, U-134)" where
+  pybind11 would make that call (`self` `None` with conversions, the other arguments loading),
+  and pybind11's TypeError elsewhere, as the wheel. Every unnamed method overload of the
+  wheel's classes is listed with how its `self` binds, read from upstream's bindings
+  (`crates/ocio-py/src/self_kind.rs`, owner decision 2026-10-22), and the dispatcher checks
+  it (`crates/ocio-py/src/dispatch.rs`, `call`); in `p6-config`. `none_self_oracle.rs`: the
+  table is the wheel's unnamed overloads, exactly; a probe per kind against the wheel in its
+  own process; every listed overload the port binds.
+
 ### U-141. A menu of a role that names no color space
 
 - **Upstream:** `ColorSpaceInfo::CreateFromSingleRole` and `CreateFromRole` check
