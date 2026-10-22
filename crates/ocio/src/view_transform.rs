@@ -233,6 +233,26 @@ impl ViewTransform {
         Ok(())
     }
 
+    /// Stores `transform` itself (no copy, so not checked) as the transform to the reference
+    /// space or from it; `None` removes it.
+    ///
+    /// For the Python module: the binding holds the transforms itself, as nodes Python objects
+    /// share (upstream's getters return the very `TransformRcPtr` the object holds, through which
+    /// Python changes it), and gives the library a copy of them to print or to use. That copy
+    /// must not be checked again: upstream doesn't copy the transform it holds when it prints
+    /// it, so an invalid FixedFunctionTransform made so through Python prints as it is.
+    #[doc(hidden)]
+    pub fn set_transform_as_is(
+        &mut self,
+        transform: Option<Transform>,
+        dir: ViewTransformDirection,
+    ) {
+        match dir {
+            ViewTransformDirection::ToReference => self.to_ref_transform = transform,
+            ViewTransformDirection::FromReference => self.from_ref_transform = transform,
+        }
+    }
+
     /// Writes the view transform's text to `os`; the transforms on the same stream. The
     /// categories are not printed.
     ///
@@ -298,3 +318,32 @@ impl fmt::Display for ViewTransform {
 #[cfg(test)]
 #[path = "view_transform_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod as_is_tests {
+    use super::*;
+
+    /// The transform is stored as it is, where `set_transform`'s copy refuses it; `None`
+    /// removes it; each direction its own.
+    #[test]
+    fn set_transform_as_is_stores_without_checking() {
+        let ff = crate::color_space::invalid_fixed_function();
+        let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+        assert!(
+            vt.set_transform(Some(&ff), ViewTransformDirection::ToReference)
+                .is_err()
+        );
+        assert!(vt.transform(ViewTransformDirection::ToReference).is_none());
+        vt.set_transform_as_is(Some(ff), ViewTransformDirection::FromReference);
+        assert!(matches!(
+            vt.transform(ViewTransformDirection::FromReference),
+            Some(Transform::FixedFunction(t)) if t.params() == vec![1.0]
+        ));
+        assert!(vt.transform(ViewTransformDirection::ToReference).is_none());
+        vt.set_transform_as_is(None, ViewTransformDirection::FromReference);
+        assert!(
+            vt.transform(ViewTransformDirection::FromReference)
+                .is_none()
+        );
+    }
+}
