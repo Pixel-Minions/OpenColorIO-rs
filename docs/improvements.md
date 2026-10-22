@@ -3361,6 +3361,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`crates/ocio-ops/tests/grading_hue_curve_oracle.rs`) compares them bit for bit on both
   platforms.
 
+### I-274. The video GradingHueCurve's shader scales luma where its CPU renderer shifts it
+
+- **Upstream:** the CPU renderers scale luma by the hue-lum and sat-lum gains in the linear
+  style only, and shift it (`+ (hueLumGain + satLumGain - 2) * 0.1`) in the log and video
+  styles (`m_isLinear ? ... : ...`, `ops/gradinghuecurve/GradingHueCurveOpCPU.cpp:266-267,
+  334-335` @ v2.5.2). The GPU shader shifts in the log style only and scales in the linear and
+  video styles (`style == GRADING_LOG ? ... : ...`, `GradingHueCurveOpGPU.cpp:405-414,
+  528-537`). A video-style op with a hue-lum or sat-lum curve that isn't 1 gives other luma on
+  the GPU than on the CPU.
+- **Who notices:** a video GradingHueCurveTransform with hue-lum or sat-lum adjustments,
+  compared between a CPU and a GPU render.
+- **A fix:** shift in the video style on the GPU too, as the CPU does (or scale on both,
+  whichever upstream intended).
+- **Status:** matched in `p5-huecurve` (5.4c, `crates/ocio-gpu/src/ops/gradinghuecurve/
+  grading_hue_curve_op_gpu.rs`, `add_gc_forward_shader`, `add_gc_inverse_shader`); the shader
+  text is checked byte for byte against the wheel
+  (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
