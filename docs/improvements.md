@@ -3810,16 +3810,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     upstream wouldn't.
   The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.
 
-### U-4. A Python logging function crashes the interpreter's exit
+### U-4. A Python logging or hash function crashes the interpreter's exit
 
 - **Upstream:** a logging function set from Python is held in a C++ global
   (`Logging.cpp:71`), which outlives the Python interpreter. A process that exits with one
   still set crashes (a segmentation fault on both platforms, seen through the wheel in
   `p1-foundations`); `ResetToDefaultLoggingFunction()` before exit avoids it, and the oracle's
-  commands do so.
+  commands do so. A hash function set with `SetComputeHashFunction` is held the same way
+  (`PathUtils.cpp:33`) and crashes the exit the same way; `ResetComputeHashFunction()` avoids
+  it. Probed 2026-10-22: `python -c "import PyOpenColorIO as O; O.SetLoggingFunction(str.upper)"`
+  and the same with `SetComputeHashFunction` exit with 0xC0000005 (an access violation) on
+  Windows, and 139 (SIGSEGV) in Rocky Linux 9 (the p6-config verifier's probe).
 - **Options:** release the function when Python shuts down, or keep it and never release it;
   either way the process exits cleanly.
-- **Status:** open; decided in Phase 6 (the Python module).
+- **Status:** the port keeps the function and never releases it (a Rust static, which the
+  process doesn't drop at exit): such a process exits with 0 on both platforms, where the
+  wheel's dies (`p6-config`, 6.6a, `crates/ocio-py/src/py_open_color_io.rs`,
+  `SetLoggingFunction`, `SetComputeHashFunction`).
 
 ### U-5. A 1D LUT that doesn't fit its GPU texture width
 
