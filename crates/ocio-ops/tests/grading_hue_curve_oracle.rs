@@ -150,6 +150,8 @@ struct HcParams {
     draw: bool,
     points: [Vec<(f32, f32)>; 8],
     slopes: [Vec<f32>; 8],
+    /// A spline type other than the slot's, which only a draw-curve-only op accepts.
+    splines: [Option<BSplineType>; 8],
     knot_probes: bool,
 }
 
@@ -163,6 +165,7 @@ impl HcParams {
             draw: false,
             points: points.map(<[(f32, f32)]>::to_vec),
             slopes: points.map(|p| vec![0.0; p.len()]),
+            splines: [None; 8],
             knot_probes: true,
         }
     }
@@ -214,6 +217,12 @@ impl HcParams {
         self
     }
 
+    /// The same curves with curve `c` of spline type `t`.
+    fn with_spline(mut self, c: HueCurveType, t: BSplineType) -> Self {
+        self.splines[c as usize] = Some(t);
+        self
+    }
+
     /// Each slot's curve, what it is (0 x, 1 y, 2 slope), and its point.
     fn slot_places(&self) -> Vec<(usize, usize, usize)> {
         let mut places = Vec::new();
@@ -234,6 +243,9 @@ impl HcParams {
                 .map(|&(x, y)| GradingControlPoint::new(x, y))
                 .collect();
             let mut curve = GradingBSplineCurve::with_points_and_hue_curve_type(&points, t);
+            if let Some(spline) = self.splines[c] {
+                curve.set_spline_type(spline);
+            }
             for (i, &s) in self.slopes[c].iter().enumerate() {
                 curve.set_slope(i, s).unwrap();
             }
@@ -812,7 +824,164 @@ fn explicit_cases() -> Vec<Case<HcParams>> {
             .with_curve(LumLum, &[(0.0, 0.0), (0.4, 0.4), (0.7, 0.4), (1.0, 1.0)])
             .with_curve(HueFx, &[(0.0, 0.0), (0.4, -0.4), (0.6, -0.6), (0.9, 0.0)]),
     ));
+    extreme_cases(&mut cases);
     cases
+}
+
+/// The six spline types, in the enum's order.
+const SPLINES: [BSplineType; 6] = [
+    BSplineType::BSpline,
+    BSplineType::DiagonalBSpline,
+    BSplineType::HueHueBSpline,
+    BSplineType::Periodic1BSpline,
+    BSplineType::Periodic0BSpline,
+    BSplineType::Horizontal1BSpline,
+];
+
+/// A hue-sat curve of `n` points, the knot limit's: x at i / n, y between 0.5 and 1.4.
+fn many_points(n: usize) -> Vec<(f32, f32)> {
+    (0..n)
+        .map(|i| (i as f32 / n as f32, 0.5 + ((i * 5) % 7) as f32 * 0.15))
+        .collect()
+}
+
+/// Explicit cases for the corners of the curves' values, in each style: signed zeros, gains of
+/// 0, the largest finite and infinite values, a drawn curve of each spline type, and curves at
+/// the knot limit.
+fn extreme_cases(cases: &mut Vec<Case<HcParams>>) {
+    use GradingStyle::{Lin, Log, Video};
+    use HueCurveType::*;
+    use upstream::*;
+    let all = |style| {
+        let (ls, ll) = if style == Lin {
+            (LS_LIN, LL_LIN)
+        } else {
+            (LS, LL)
+        };
+        HcParams::new(style, [HH, HS, HL, ls, SS, ll, SL, HFX])
+    };
+    let (inf, ninf) = (f32::INFINITY, f32::NEG_INFINITY);
+    for style in STYLES {
+        let name = match style {
+            Log => "log",
+            Lin => "lin",
+            Video => "video",
+        };
+        // Signed zeros: points at -0.0 (the hue-hue, hue-fx, lum-lum and sat-sat curves), and
+        // slopes of -0.0.
+        let zeros = all(style)
+            .with_curve(HueHue, &[(-0.0, -0.0), (0.3, 0.35), (0.7, 0.65)])
+            .with_curve(HueFx, &[(-0.0, -0.0), (0.4, -0.1), (0.8, 0.05)])
+            .with_curve(
+                LumLum,
+                &[(-0.5, -0.5), (-0.0, -0.0), (0.5, 0.6), (1.0, 1.0)],
+            )
+            .with_curve(SatSat, &[(-0.0, -0.0), (0.5, 0.45), (1.0, 1.0)]);
+        cases.push(Case::new(
+            format!("signed zero points, {name}"),
+            zeros.clone(),
+        ));
+        cases.push(Case::new(
+            format!("signed zero points, {name}, no HSY"),
+            zeros.clone().no_hsy(),
+        ));
+        let mut slopes = zeros.clone();
+        for c in 0..8 {
+            slopes.slopes[c] = vec![-0.0; slopes.points[c].len()];
+        }
+        cases.push(Case::new(format!("signed zero slopes, {name}"), slopes));
+        // All four gain curves at 0.
+        let gains = all(style)
+            .with_curve(HueSat, &[(0.0, 0.0), (0.5, 0.0)])
+            .with_curve(HueLum, &[(0.1, 0.0), (0.6, 0.0)])
+            .with_curve(LumSat, &[(-8.0, 0.0), (8.0, 0.0)])
+            .with_curve(SatLum, &[(0.0, 0.0), (2.0, 0.0)]);
+        cases.push(Case::new(format!("zero gains, {name}"), gains.clone()));
+        cases.push(Case::new(
+            format!("zero gains, {name}, no HSY"),
+            gains.no_hsy(),
+        ));
+        // The hue-fx curve at +-3e38, then +inf; the lum-lum curve at -inf, which validation
+        // refuses (every y must be at least the one before, the first at least -f32::MAX): the
+        // battery compares the wheel's exception with the port's, byte for byte.
+        cases.push(Case::new(
+            format!("huge hue-fx, {name}"),
+            all(style).with_curve(HueFx, &[(0.1, 3e38), (0.4, -3e38), (0.7, inf)]),
+        ));
+        cases.push(Case::new(
+            format!("-inf lum-lum, {name}"),
+            all(style).with_curve(LumLum, &[(0.0, 0.0), (0.4, ninf), (0.8, 0.95), (1.1, 1.2)]),
+        ));
+        // Slopes of +-3e38 and +-inf, alternating in sign along each curve.
+        for (label, big) in [("huge", 3e38f32), ("infinite", inf)] {
+            let mut p = all(style);
+            for c in [HueHue, HueSat, SatSat, LumLum, HueFx, SatLum] {
+                let n = p.points[c as usize].len();
+                p.slopes[c as usize] = (0..n)
+                    .map(|i| if i % 2 == 0 { big } else { -big })
+                    .collect();
+            }
+            cases.push(Case::new(format!("{label} slopes, {name}"), p));
+        }
+        // The hue-lum curve at 0 and 3e38 on the way to f32::MAX, with and without the HSY
+        // conversion.
+        let hue_lum = all(style).with_curve(HueLum, &[(0.0, 3e38), (0.5, f32::MAX)]);
+        cases.push(Case::new(format!("max hue-lum, {name}"), hue_lum.clone()));
+        cases.push(Case::new(
+            format!("max hue-lum, {name}, no HSY"),
+            hue_lum.no_hsy(),
+        ));
+        // Hue-sat curves at the knot limit: 26 points make 118 knots, 27 exactly 120.
+        for n in [26, 27] {
+            cases.push(Case::new(
+                format!("{n} hue-sat points, {name}"),
+                HcParams::defaults(style).with_curve(HueSat, &many_points(n)),
+            ));
+        }
+    }
+    // Draw-curve-only ops with each spline type in the hue-sat slot (a draw-curve-only op
+    // doesn't check the types, but the curve's own validation depends on it: the B_SPLINE,
+    // DIAGONAL and HUE_HUE types need non-decreasing y), identity or shaped (non-decreasing,
+    // with a flat step), or, for the types that allow it, wavy; fixed and dynamic.
+    for spline in SPLINES {
+        let monotonic = matches!(
+            spline,
+            BSplineType::BSpline | BSplineType::DiagonalBSpline | BSplineType::HueHueBSpline
+        );
+        let shapes: &[&str] = if monotonic {
+            &["identity", "shaped"]
+        } else {
+            &["identity", "shaped", "wavy"]
+        };
+        for &shape in shapes {
+            for dynamic in [false, true] {
+                let mut p = HcParams::defaults(Log).draw().with_spline(HueSat, spline);
+                match shape {
+                    "shaped" => {
+                        for (point, y) in p.points[HueSat as usize]
+                            .iter_mut()
+                            .zip([1.0, 1.0, 1.2, 1.2, 1.5, 1.7])
+                        {
+                            point.1 = y;
+                        }
+                    }
+                    "wavy" => p.points[HueSat as usize][1] = (0.15, 1.4),
+                    _ => {}
+                }
+                if dynamic {
+                    p = p.dynamic();
+                }
+                cases.push(Case::new(
+                    format!(
+                        "draw {}, {shape}, {}",
+                        spline_name(spline),
+                        if dynamic { "dynamic" } else { "fixed" }
+                    ),
+                    p,
+                ));
+            }
+        }
+    }
 }
 
 /// The GradingHueCurve op's renderers against the wheel's GradingHueCurveTransform: every case
@@ -822,6 +991,36 @@ fn explicit_cases() -> Vec<Case<HcParams>> {
 #[test]
 fn renderers_match_the_wheel() {
     battery::run(&HueCurveFamily);
+}
+
+/// The corner cases are not vacuous: the battery lets a case pass when the wheel and the port
+/// both refuse it with the same text, so the port must accept each but the -inf lum-lum (and
+/// where it does, the battery fails unless the wheel does too, with the same pixels), and
+/// refuse that one, with the text the battery then compares with the wheel's.
+#[test]
+fn the_extreme_cases_are_accepted() {
+    let mut cases = Vec::new();
+    extreme_cases(&mut cases);
+    // Per style: signed zero points (with and without the conversion) and slopes, zero gains
+    // (both ways), the huge hue-fx, the -inf lum-lum, huge and infinite slopes, the maximal
+    // hue-lum (both ways) and the two knot-limit curves; and the drawn hue-sat curves: 3
+    // spline types identity or shaped, 3 also wavy, fixed or dynamic.
+    assert_eq!(cases.len(), STYLES.len() * 13 + (3 * 2 + 3 * 3) * 2);
+    let mut labels: Vec<&str> = cases.iter().map(|c| c.label()).collect();
+    labels.sort_unstable();
+    labels.dedup();
+    assert_eq!(labels.len(), cases.len());
+    for case in &cases {
+        for direction in [TransformDirection::Forward, TransformDirection::Inverse] {
+            let result = case.params().op_data(direction);
+            if case.label().starts_with("-inf lum-lum") {
+                // The text is the battery's to compare with the wheel's.
+                assert!(result.is_err(), "{} {direction:?}", case.label());
+            } else if let Err(e) = result {
+                panic!("{} {direction:?}: {e}", case.label());
+            }
+        }
+    }
 }
 
 /// Pixels for the dynamic tests: some on the knots, the specials' NaNs, infinities.
@@ -888,128 +1087,220 @@ fn sets(style: GradingStyle) -> Vec<GradingHueCurve> {
     ]
 }
 
-/// Each style in each direction, dynamic: the CPU processor's property set as `sets()` lists,
+/// What `check_dynamic_sets` compared.
+#[derive(Default)]
+struct DynamicStats {
+    /// The applies compared with the wheel's.
+    compared: usize,
+    /// The sets both refused.
+    refused: usize,
+    /// The applies whose wheel output differs from the one before.
+    changed: usize,
+}
+
+/// A dynamic op of `params`, in `direction`: the CPU processor's property set as `sets` lists,
 /// an apply after each set, against the wheel's `dynamic_apply` with the same steps, bit for
 /// bit (W0002 doesn't apply: these are inputs, not the battery's NaN parameters). A set the
-/// wheel refuses is refused by the port with the same text.
-#[test]
-fn dynamic_sets_apply_as_the_wheels() {
-    let input = pixels();
-    let bytes = f32_to_bytes(&input);
+/// wheel refuses is refused by the port with the same text. Returns the wheel's outputs, one
+/// per apply (the first before any set), as bits.
+fn check_dynamic_sets(
+    params: &HcParams,
+    direction: TransformDirection,
+    sets: &[GradingHueCurve],
+    input: &[f32],
+    failures: &mut Vec<String>,
+    stats: &mut DynamicStats,
+) -> Vec<Vec<u32>> {
+    let bytes = f32_to_bytes(input);
     let width = input.len() / 4;
-    let mut failures = Vec::new();
-    let mut compared = 0;
-    let mut refused = 0;
-    let mut changed = 0;
-    for style in STYLES {
-        for direction in [TransformDirection::Forward, TransformDirection::Inverse] {
-            let params = HcParams::defaults(style).dynamic();
-            let sets = sets(style);
-            let mut steps = vec![
-                json!({"get": "DYNAMIC_PROPERTY_GRADING_HUECURVE", "from": "cpu", "as": "p"}),
-                json!({"apply": [0, 1]}),
-            ];
-            for value in &sets {
-                steps.push(json!({"set": "p", "value": hue_curve_spec(value)}));
-                steps.push(json!({"apply": [0, 1]}));
-            }
-            let response = Oracle::get().call(
-                "dynamic_apply",
-                json!({
-                    "transform": params.transform(direction),
-                    "buffers": [{"blob": 0}, {"size": bytes.len(), "fill": [0]}],
-                    "images": [
-                        {"kind": "packed", "data": {"buffer": 0}, "width": width,
-                         "height": 1, "num_channels": 4},
-                        {"kind": "packed", "data": {"buffer": 1}, "width": width,
-                         "height": 1, "num_channels": 4},
-                    ],
-                    "steps": steps,
-                }),
-                &[&bytes],
-            );
-            let result = &response.result;
-            assert!(result.get("exception").is_none(), "{result}");
-            let wheel_steps = result["steps"].as_array().unwrap();
-            assert_eq!(wheel_steps.len(), 2 + 2 * sets.len(), "{result}");
+    let mut steps = vec![
+        json!({"get": "DYNAMIC_PROPERTY_GRADING_HUECURVE", "from": "cpu", "as": "p"}),
+        json!({"apply": [0, 1]}),
+    ];
+    for value in sets {
+        steps.push(json!({"set": "p", "value": hue_curve_spec(value)}));
+        steps.push(json!({"apply": [0, 1]}));
+    }
+    let response = Oracle::get().call(
+        "dynamic_apply",
+        json!({
+            "transform": params.transform(direction),
+            "buffers": [{"blob": 0}, {"size": bytes.len(), "fill": [0]}],
+            "images": [
+                {"kind": "packed", "data": {"buffer": 0}, "width": width,
+                 "height": 1, "num_channels": 4},
+                {"kind": "packed", "data": {"buffer": 1}, "width": width,
+                 "height": 1, "num_channels": 4},
+            ],
+            "steps": steps,
+        }),
+        &[&bytes],
+    );
+    let result = &response.result;
+    assert!(result.get("exception").is_none(), "{result}");
+    let wheel_steps = result["steps"].as_array().unwrap();
+    assert_eq!(wheel_steps.len(), 2 + 2 * sets.len(), "{result}");
 
-            // The port: the CPU processor of a forward processor of the op the wheel builds,
-            // its property set the same way.
-            let cpu = params.cpu(direction, true).unwrap();
-            assert!(cpu.has_dynamic_property(DynamicPropertyType::GradingHueCurve));
-            assert_eq!(wheel_steps[0]["has"], json!(true), "{result}");
-            let property = cpu
-                .get_dynamic_property(DynamicPropertyType::GradingHueCurve)
-                .unwrap()
-                .as_grading_hue_curve()
-                .unwrap();
-            let mut applies: Vec<Option<&GradingHueCurve>> = vec![None];
-            applies.extend(sets.iter().map(Some));
-            let mut previous: Option<Vec<u32>> = None;
-            for (k, set) in applies.iter().enumerate() {
-                if let Some(value) = set {
-                    let wheel_set = &wheel_steps[2 * k];
-                    match property.set_value(value) {
-                        Ok(()) => {
-                            assert!(wheel_set.get("exception").is_none(), "{wheel_set}");
-                        }
-                        Err(e) => {
-                            assert_eq!(
-                                wheel_set["exception"]["message"],
-                                json!(e.to_string()),
-                                "{wheel_set}"
-                            );
-                            refused += 1;
-                        }
-                    }
+    // The port: the CPU processor of a forward processor of the op the wheel builds, its
+    // property set the same way.
+    let cpu = params.cpu(direction, true).unwrap();
+    assert!(cpu.has_dynamic_property(DynamicPropertyType::GradingHueCurve));
+    assert_eq!(wheel_steps[0]["has"], json!(true), "{result}");
+    let property = cpu
+        .get_dynamic_property(DynamicPropertyType::GradingHueCurve)
+        .unwrap()
+        .as_grading_hue_curve()
+        .unwrap();
+    let mut applies: Vec<Option<&GradingHueCurve>> = vec![None];
+    applies.extend(sets.iter().map(Some));
+    let mut outputs: Vec<Vec<u32>> = Vec::new();
+    for (k, set) in applies.iter().enumerate() {
+        if let Some(value) = set {
+            let wheel_set = &wheel_steps[2 * k];
+            match property.set_value(value) {
+                Ok(()) => {
+                    assert!(wheel_set.get("exception").is_none(), "{wheel_set}");
                 }
-                let mut port = input.clone();
-                apply(&cpu, &mut port);
-                let step = &wheel_steps[2 * k + 1];
-                let index = step["result"]["buffers"][1]
-                    .as_u64()
-                    .unwrap_or_else(|| panic!("{step}")) as usize;
-                let wheel = bytes_to_f32(&response.blobs[index]);
-                assert_eq!(wheel.len(), port.len());
-                compared += 1;
-                let wheel_bits: Vec<u32> = wheel.iter().map(|v| v.to_bits()).collect();
-                if previous.as_ref().is_some_and(|p| *p != wheel_bits) {
-                    changed += 1;
-                }
-                previous = Some(wheel_bits);
-                let differ: Vec<String> = port
-                    .iter()
-                    .zip(&wheel)
-                    .enumerate()
-                    .filter(|(_, (p, w))| p.to_bits() != w.to_bits())
-                    .map(|(i, (p, w))| {
-                        format!(
-                            "[{i}] port {p:e} ({:#x}) wheel {w:e} ({:#x})",
-                            p.to_bits(),
-                            w.to_bits()
-                        )
-                    })
-                    .collect();
-                if !differ.is_empty() {
-                    failures.push(format!(
-                        "{style:?} {direction:?} after set {k}: {}",
-                        differ.join(", ")
-                    ));
+                Err(e) => {
+                    assert_eq!(
+                        wheel_set["exception"]["message"],
+                        json!(e.to_string()),
+                        "{wheel_set}"
+                    );
+                    stats.refused += 1;
                 }
             }
         }
+        let mut port = input.to_vec();
+        apply(&cpu, &mut port);
+        let step = &wheel_steps[2 * k + 1];
+        let index = step["result"]["buffers"][1]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{step}")) as usize;
+        let wheel = bytes_to_f32(&response.blobs[index]);
+        assert_eq!(wheel.len(), port.len());
+        stats.compared += 1;
+        let wheel_bits: Vec<u32> = wheel.iter().map(|v| v.to_bits()).collect();
+        if outputs.last().is_some_and(|p| *p != wheel_bits) {
+            stats.changed += 1;
+        }
+        outputs.push(wheel_bits);
+        let differ: Vec<String> = port
+            .iter()
+            .zip(&wheel)
+            .enumerate()
+            .filter(|(_, (p, w))| p.to_bits() != w.to_bits())
+            .map(|(i, (p, w))| {
+                format!(
+                    "[{i}] port {p:e} ({:#x}) wheel {w:e} ({:#x})",
+                    p.to_bits(),
+                    w.to_bits()
+                )
+            })
+            .collect();
+        if !differ.is_empty() {
+            failures.push(format!(
+                "{:?} {direction:?} after set {k}: {}",
+                params.style,
+                differ.join(", ")
+            ));
+        }
     }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    outputs
+}
+
+/// Each style in each direction, dynamic: the CPU processor's property set as `sets()` lists,
+/// an apply after each set, against the wheel's `dynamic_apply` with the same steps.
+#[test]
+fn dynamic_sets_apply_as_the_wheels() {
+    let input = pixels();
+    let mut failures = Vec::new();
+    let mut stats = DynamicStats::default();
+    for style in STYLES {
+        for direction in [TransformDirection::Forward, TransformDirection::Inverse] {
+            let params = HcParams::defaults(style).dynamic();
+            check_dynamic_sets(
+                &params,
+                direction,
+                &sets(style),
+                &input,
+                &mut failures,
+                &mut stats,
+            );
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}",
+        failures.join(
+            "
+"
+        )
+    );
     assert_eq!(
-        compared,
+        stats.compared,
         STYLES.len() * 2 * (1 + sets(GradingStyle::Log).len())
     );
-    assert_eq!(refused, STYLES.len() * 2);
+    assert_eq!(stats.refused, STYLES.len() * 2);
     // Most sets change the wheel's output (not the refused one).
     assert!(
-        changed >= STYLES.len() * 2 * 5,
-        "{changed} sets changed the output"
+        stats.changed >= STYLES.len() * 2 * 5,
+        "{} sets changed the output",
+        stats.changed
     );
+}
+
+/// A dynamic op built in draw-curve-only mode, its property then set to curves that don't draw
+/// (and back): the renderer is chosen when the op is built, so upstream's stays the draw
+/// renderer (`GetGradingHueCurveCPURenderer`, GradingHueCurveOpCPU.cpp:365-389 @ v2.5.2), and
+/// the port's must too, bit for bit with the wheel's at every step.
+#[test]
+fn a_dynamic_draw_op_set_to_normal_curves_applies_as_the_wheels() {
+    let input = pixels();
+    let cases = explicit_cases();
+    let get = |label: String| {
+        cases
+            .iter()
+            .find(|c| c.label() == label)
+            .unwrap_or_else(|| panic!("no case {label}"))
+            .params()
+            .clone()
+    };
+    let mut failures = Vec::new();
+    let mut stats = DynamicStats::default();
+    for style in STYLES {
+        let name = match style {
+            GradingStyle::Log => "log",
+            GradingStyle::Lin => "lin",
+            GradingStyle::Video => "video",
+        };
+        for direction in [TransformDirection::Forward, TransformDirection::Inverse] {
+            let normal = get(format!("all curves, {name}"));
+            assert!(!normal.draw);
+            let params = normal.clone().draw().dynamic();
+            let sets = vec![
+                normal.curves(),
+                get("upstream hh hfx".to_string()).curves(),
+                get(format!("defaults, {name}, drawn")).curves(),
+                normal.curves(),
+            ];
+            let outputs =
+                check_dynamic_sets(&params, direction, &sets, &input, &mut failures, &mut stats);
+            // The sets reach the draw renderer's curve: the wheel's outputs differ between the
+            // first curves and the drawn defaults.
+            assert_ne!(outputs[0], outputs[3], "{name} {direction:?}");
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}",
+        failures.join(
+            "
+"
+        )
+    );
+    assert_eq!(stats.compared, STYLES.len() * 2 * 5);
+    assert_eq!(stats.refused, 0);
 }
 
 /// The renderer's property is a copy of the op data's: a set on the op data's own property
