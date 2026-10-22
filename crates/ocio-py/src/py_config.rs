@@ -20,7 +20,10 @@
 //! **Calls into a config from a callback.** The binding locks a config while the library
 //! works on it. A Python callback the library calls meanwhile (the logging function, an I/O
 //! proxy) that uses the same config gets the port's error ([`busy`]): upstream's config isn't
-//! locked, and C++ lets the callback read (or change) it while the library works on it.
+//! locked, and C++ lets the callback read (or change) it while the library works on it. A
+//! call's arguments are loaded before the config is locked (`config_method!`), so the Python
+//! code their casters run (`__index__`, `__float__`, `__bool__`, a sequence's items) may use
+//! the config, as in the wheel.
 //!
 //! The static methods of `ConfigUtils` (`IdentifyBuiltinColorSpace`,
 //! `IdentifyInterchangeSpace`, `GetProcessorToBuiltinColorSpace`,
@@ -444,13 +447,39 @@ macro_rules! arg_in {
     };
 }
 
-/// A method of the config: `|py, n: &mut ConfigNode, a, convert| ...` after the write-back.
+/// What a config method does with the config, once its arguments are loaded.
+type Locked<'py> = Box<dyn FnOnce(&mut ConfigNode) -> Out + 'py>;
+
+/// A loaded call's work on the config (`f` of the node, after the write-back).
+fn locked<'py>(f: impl FnOnce(&mut ConfigNode) -> Out + 'py) -> PyResult<Option<Locked<'py>>> {
+    Ok(Some(Box::new(f)))
+}
+
+/// A method of the config. Without parameters: `|py, n: &mut ConfigNode, a, convert| ...`
+/// after the write-back. With parameters: `|py, a, convert| ...` loads the arguments (pybind11's
+/// casters, which may run Python code: `__index__`, `__float__`, a sequence's `__getitem__`,
+/// that may use the config) before the config is locked, and returns [`locked`] of the work on
+/// the config (or `Ok(None)`: the next overload).
 macro_rules! config_method {
-    ($name:literal, [$($param:expr),*], $ret:expr, $body:expr) => {
-        method_def!($name, [SELF $(, $param)*], $ret, |py, o, a, convert| {
+    ($name:literal, [], $ret:expr, $body:expr) => {
+        method_def!($name, [SELF], $ret, |py, o, a, convert| {
             let rc = this_shared!(o, a, ConfigNode);
             let f: &dyn Fn(Python<'_>, &mut ConfigNode, &[Bound<'_, PyAny>], bool) -> Out = &$body;
             with_config(&rc, |n| f(py, n, a, convert))
+        })
+    };
+    ($name:literal, [$($param:expr),+], $ret:expr, $body:expr) => {
+        method_def!($name, [SELF $(, $param)*], $ret, |py, o, a, convert| {
+            let rc = this_shared!(o, a, ConfigNode);
+            let load: &dyn for<'py> Fn(
+                Python<'py>,
+                &[Bound<'py, PyAny>],
+                bool,
+            ) -> PyResult<Option<Locked<'py>>> = &$body;
+            match load(py, a, convert)? {
+                Some(f) => with_config(&rc, f),
+                None => Ok(None),
+            }
         })
     };
 }
@@ -581,10 +610,12 @@ static SET_MAJOR_VERSION: Function = config_method!(
     "setMajorVersion",
     [Param::new("major", INT)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let major = arg_in!(a, 1, c, u32);
-        py_result(py, n.config.set_major_version(major))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.set_major_version(major))?;
+            none(py)
+        })
     }
 );
 
@@ -598,10 +629,12 @@ static SET_MINOR_VERSION: Function = config_method!(
     "setMinorVersion",
     [Param::new("minor", INT)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let minor = arg_in!(a, 1, c, u32);
-        py_result(py, n.config.set_minor_version(minor))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.set_minor_version(minor))?;
+            none(py)
+        })
     }
 );
 
@@ -609,11 +642,13 @@ static SET_VERSION: Function = config_method!(
     "setVersion",
     [Param::new("major", INT), Param::new("minor", INT)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let major = arg_in!(a, 1, c, u32);
         let minor = arg_in!(a, 2, c, u32);
-        py_result(py, n.config.set_version(major, minor))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.set_version(major, minor))?;
+            none(py)
+        })
     }
 );
 
@@ -637,10 +672,12 @@ static SET_NAME: Function = config_method!(
     "setName",
     [Param::new("name", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let NonNullCharPtr(name) = arg_in!(a, 1, c, NonNullCharPtr);
-        n.config.set_name(name);
-        none(py)
+        locked(move |n| {
+            n.config.set_name(name);
+            none(py)
+        })
     }
 );
 
@@ -654,12 +691,16 @@ static SET_FAMILY_SEPARATOR: Function = config_method!(
     "setFamilySeparator",
     [Param::new("separator", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let Some(separator) = char_arg(&a[1], c)? else {
             return Ok(None);
         };
-        py_result(py, n.config.set_family_separator(separator?))?;
-        none(py)
+        // The character caster's error comes before the call.
+        let separator = separator?;
+        locked(move |n| {
+            py_result(py, n.config.set_family_separator(separator))?;
+            none(py)
+        })
     }
 );
 
@@ -671,10 +712,12 @@ static SET_DESCRIPTION: Function = config_method!(
     "setDescription",
     [Param::new("description", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let description = text(arg_in!(a, 1, c, CharPtr));
-        n.config.set_description(description);
-        none(py)
+        locked(move |n| {
+            n.config.set_description(description);
+            none(py)
+        })
     }
 );
 
@@ -783,11 +826,13 @@ static ADD_ENVIRONMENT_VAR: Function = config_method!(
     "addEnvironmentVar",
     [Param::new("name", "str"), Param::new("defaultValue", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let name = text(arg_in!(a, 1, c, CharPtr));
         let CharPtr(value) = arg_in!(a, 2, c, CharPtr);
-        n.config.add_environment_var(name, value.as_deref());
-        none(py)
+        locked(move |n| {
+            n.config.add_environment_var(name, value.as_deref());
+            none(py)
+        })
     }
 );
 
@@ -802,9 +847,9 @@ static GET_ENVIRONMENT_VAR_DEFAULT: Function = config_method!(
     "getEnvironmentVarDefault",
     [Param::new("name", "str")],
     "str",
-    |py, n, a, c| {
+    |py, a, c| {
         let name = text(arg_in!(a, 1, c, CharPtr));
-        string_out(py, n.config.environment_var_default(name))
+        locked(move |n| string_out(py, n.config.environment_var_default(name)))
     }
 );
 
@@ -818,12 +863,14 @@ static SET_ENVIRONMENT_MODE: Function = config_method!(
     "setEnvironmentMode",
     [Param::new("mode", ENVIRONMENT_MODE)],
     "None",
-    |py, n, a, _| {
+    |py, a, _| {
         let Some(v) = crate::enums::enum_value(&a[1], ENVIRONMENT_MODE)? else {
             return Ok(None);
         };
-        n.config.set_environment_mode(environment_mode(v)?);
-        none(py)
+        locked(move |n| {
+            n.config.set_environment_mode(environment_mode(v)?);
+            none(py)
+        })
     }
 );
 
@@ -845,10 +892,12 @@ static SET_SEARCH_PATH: Function = config_method!(
     "setSearchPath",
     [Param::new("path", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let path = text(arg_in!(a, 1, c, CharPtr));
-        n.config.set_search_path(path);
-        none(py)
+        locked(move |n| {
+            n.config.set_search_path(path);
+            none(py)
+        })
     }
 );
 
@@ -867,10 +916,12 @@ static ADD_SEARCH_PATH: Function = config_method!(
     "addSearchPath",
     [Param::new("path", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let path = text(arg_in!(a, 1, c, CharPtr));
-        n.config.add_search_path(path);
-        none(py)
+        locked(move |n| {
+            n.config.add_search_path(path);
+            none(py)
+        })
     }
 );
 
@@ -882,10 +933,12 @@ static SET_WORKING_DIR: Function = config_method!(
     "setWorkingDir",
     [Param::new("dirName", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let dir = text(arg_in!(a, 1, c, CharPtr));
-        n.config.set_working_dir(dir);
-        none(py)
+        locked(move |n| {
+            n.config.set_working_dir(dir);
+            none(py)
+        })
     }
 );
 
@@ -900,12 +953,14 @@ static SET_CONFIG_IO_PROXY: Function = config_method!(
     "setConfigIOProxy",
     [Param::new("ciop", CONFIG_IO_PROXY)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let Some(proxy) = crate::py_config_io_proxy::proxy_arg(&a[1], c)? else {
             return Ok(None);
         };
-        n.config.set_config_io_proxy(proxy);
-        none(py)
+        locked(move |n| {
+            n.config.set_config_io_proxy(proxy);
+            none(py)
+        })
     }
 );
 
@@ -971,10 +1026,12 @@ static GET_COLOR_SPACE: Function = config_method!(
     "getColorSpace",
     [Param::new("name", "str")],
     COLOR_SPACE,
-    |py, n, a, c| {
+    |py, a, c| {
         let name = checked(arg_in!(a, 1, c, CharPtr), "Config.getColorSpace(name)")?;
-        let cs = n.color_space_by_name(&name);
-        color_space_out(py, cs)
+        locked(move |n| {
+            let cs = n.color_space_by_name(&name);
+            color_space_out(py, cs)
+        })
     }
 );
 
@@ -1016,9 +1073,9 @@ static GET_CANONICAL_NAME: Function = config_method!(
     "getCanonicalName",
     [Param::new("name", "str")],
     "str",
-    |py, n, a, c| {
+    |py, a, c| {
         let name = checked(arg_in!(a, 1, c, CharPtr), "Config.getCanonicalName(name)")?;
-        string_out(py, n.config.canonical_name(name))
+        locked(move |n| string_out(py, n.config.canonical_name(name)))
     }
 );
 
@@ -1028,14 +1085,16 @@ static ADD_COLOR_SPACE: Function = config_method!(
     "addColorSpace",
     [Param::new("colorSpace", COLOR_SPACE)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let Some(cs) = holder_arg::<ColorSpaceNode>(&a[1], COLOR_SPACE, c)? else {
             return Ok(None);
         };
         let cs = cs.ok_or_else(|| null_object("Config.addColorSpace(colorSpace)"))?;
         let cs = cs.lock().materialize()?;
-        py_result(py, n.config.add_color_space(&cs))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.add_color_space(&cs))?;
+            none(py)
+        })
     }
 );
 
@@ -1051,10 +1110,12 @@ static REMOVE_COLOR_SPACE: Function = config_method!(
     "removeColorSpace",
     [Param::new("name", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let name = text(arg_in!(a, 1, c, CharPtr));
-        n.config.remove_color_space(name);
-        none(py)
+        locked(move |n| {
+            n.config.remove_color_space(name);
+            none(py)
+        })
     }
 );
 
@@ -1065,7 +1126,7 @@ static IS_COLOR_SPACE_LINEAR: Function = config_method!(
         Param::new("referenceSpaceType", REFERENCE_SPACE_TYPE)
     ],
     "bool",
-    |py, n, a, c| {
+    |py, a, c| {
         let name = checked(
             arg_in!(a, 1, c, CharPtr),
             "Config.isColorSpaceLinear(colorSpace)",
@@ -1074,10 +1135,12 @@ static IS_COLOR_SPACE_LINEAR: Function = config_method!(
             return Ok(None);
         };
         let reference = reference_space_type(v)?;
-        ok(
-            py,
-            py_result(py, n.config.is_color_space_linear(name, reference))?,
-        )
+        locked(move |n| {
+            ok(
+                py,
+                py_result(py, n.config.is_color_space_linear(name, reference))?,
+            )
+        })
     }
 );
 
@@ -1085,9 +1148,9 @@ static IS_COLOR_SPACE_USED: Function = config_method!(
     "isColorSpaceUsed",
     [Param::new("name", "str")],
     "bool",
-    |py, n, a, c| {
+    |py, a, c| {
         let name = text(arg_in!(a, 1, c, CharPtr));
-        ok(py, n.config.is_color_space_used(name))
+        locked(move |n| ok(py, n.config.is_color_space_used(name)))
     }
 );
 
@@ -1101,9 +1164,9 @@ static PARSE_COLOR_SPACE_FROM_STRING: Function = config_method!(
     "parseColorSpaceFromString",
     [Param::new("str", "str")],
     "str",
-    |py, n, a, c| {
+    |py, a, c| {
         let s = text(arg_in!(a, 1, c, CharPtr));
-        string_out(py, n.config.parse_color_space_from_string(s))
+        locked(move |n| string_out(py, n.config.parse_color_space_from_string(s)))
     }
 );
 
@@ -1117,10 +1180,12 @@ static SET_STRICT_PARSING_ENABLED: Function = config_method!(
     "setStrictParsingEnabled",
     [Param::new("enabled", "bool")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let enabled = arg_in!(a, 1, c, bool);
-        n.config.set_strict_parsing_enabled(enabled);
-        none(py)
+        locked(move |n| {
+            n.config.set_strict_parsing_enabled(enabled);
+            none(py)
+        })
     }
 );
 
@@ -1128,10 +1193,12 @@ static SET_INACTIVE_COLOR_SPACES: Function = config_method!(
     "setInactiveColorSpaces",
     [Param::new("inactiveColorSpaces", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let names = text(arg_in!(a, 1, c, CharPtr));
-        n.config.set_inactive_color_spaces(names);
-        none(py)
+        locked(move |n| {
+            n.config.set_inactive_color_spaces(names);
+            none(py)
+        })
     }
 );
 
@@ -1144,12 +1211,12 @@ static IS_INACTIVE_COLOR_SPACE: Function = config_method!(
     "isInactiveColorSpace",
     [Param::new("colorspace", "str")],
     "bool",
-    |py, n, a, c| {
+    |py, a, c| {
         let name = checked(
             arg_in!(a, 1, c, CharPtr),
             "Config.isInactiveColorSpace(colorspace)",
         )?;
-        ok(py, n.config.is_inactive_color_space(name))
+        locked(move |n| ok(py, n.config.is_inactive_color_space(name)))
     }
 );
 
@@ -1165,7 +1232,7 @@ static SET_ROLE: Function = config_method!(
         Param::new("colorSpaceName", "str")
     ],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let CharPtr(role) = arg_in!(a, 1, c, CharPtr);
         let CharPtr(cs) = arg_in!(a, 2, c, CharPtr);
         let Some(role) = role else {
@@ -1174,8 +1241,10 @@ static SET_ROLE: Function = config_method!(
                 &ocio::Exception::new("The role name is null."),
             ));
         };
-        py_result(py, n.config.set_role(role, cs.as_deref()))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.set_role(role, cs.as_deref()))?;
+            none(py)
+        })
     }
 );
 
@@ -1183,9 +1252,9 @@ static HAS_ROLE: Function = config_method!(
     "hasRole",
     [Param::new("role", "str")],
     "bool",
-    |py, n, a, c| {
+    |py, a, c| {
         let role = text(arg_in!(a, 1, c, CharPtr));
-        ok(py, n.config.has_role(role))
+        locked(move |n| ok(py, n.config.has_role(role)))
     }
 );
 
@@ -1203,9 +1272,9 @@ static GET_ROLE_COLOR_SPACE: Function = config_method!(
     "getRoleColorSpace",
     [Param::new("roleName", "str")],
     "str",
-    |py, n, a, c| {
+    |py, a, c| {
         let role = text(arg_in!(a, 1, c, CharPtr));
-        string_out(py, n.config.role_color_space(role))
+        locked(move |n| string_out(py, n.config.role_color_space(role)))
     }
 );
 
@@ -1227,19 +1296,21 @@ static ADD_SHARED_VIEW: Function = config_method!(
         text_default("description")
     ],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let view = text(arg_in!(a, 1, c, CharPtr));
         let vt = text(arg_in!(a, 2, c, CharPtr));
         let cs = text(arg_in!(a, 3, c, CharPtr));
         let looks = text(arg_in!(a, 4, c, CharPtr));
         let rule = text(arg_in!(a, 5, c, CharPtr));
         let description = text(arg_in!(a, 6, c, CharPtr));
-        py_result(
-            py,
-            n.config
-                .add_shared_view(view, vt, cs, looks, rule, description),
-        )?;
-        none(py)
+        locked(move |n| {
+            py_result(
+                py,
+                n.config
+                    .add_shared_view(view, vt, cs, looks, rule, description),
+            )?;
+            none(py)
+        })
     }
 );
 
@@ -1247,10 +1318,12 @@ static REMOVE_SHARED_VIEW: Function = config_method!(
     "removeSharedView",
     [Param::new("view", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let view = text(arg_in!(a, 1, c, CharPtr));
-        py_result(py, n.config.remove_shared_view(view))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.remove_shared_view(view))?;
+            none(py)
+        })
     }
 );
 
@@ -1374,10 +1447,10 @@ macro_rules! display_view_getter {
             $name,
             [Param::new("display", "str"), Param::new("view", "str")],
             "str",
-            |py, n, a, c| {
+            |py, a, c| {
                 let display = text(arg_in!(a, 1, c, CharPtr));
                 let view = text(arg_in!(a, 2, c, CharPtr));
-                string_out(py, n.config.$get(display, view))
+                locked(move |n| string_out(py, n.config.$get(display, view)))
             }
         )
     };
@@ -1403,10 +1476,10 @@ macro_rules! display_view_predicate {
             $name,
             [Param::new("display", "str"), Param::new("view", "str")],
             "bool",
-            |py, n, a, c| {
+            |py, a, c| {
                 let display = text(arg_in!(a, 1, c, CharPtr));
                 let view = text(arg_in!(a, 2, c, CharPtr));
-                ok(py, n.config.$get(display, view))
+                locked(move |n| ok(py, n.config.$get(display, view)))
             }
         )
     };
@@ -1490,11 +1563,13 @@ static ADD_DISPLAY_SHARED_VIEW: Function = config_method!(
     "addDisplaySharedView",
     [Param::new("display", "str"), Param::new("view", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let display = text(arg_in!(a, 1, c, CharPtr));
         let view = text(arg_in!(a, 2, c, CharPtr));
-        py_result(py, n.config.add_display_shared_view(display, view))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.add_display_shared_view(display, view))?;
+            none(py)
+        })
     }
 );
 
@@ -1502,11 +1577,13 @@ static REMOVE_DISPLAY_VIEW: Function = config_method!(
     "removeDisplayView",
     [Param::new("display", "str"), Param::new("view", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let display = text(arg_in!(a, 1, c, CharPtr));
         let view = text(arg_in!(a, 2, c, CharPtr));
-        py_result(py, n.config.remove_display_view(display, view))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.remove_display_view(display, view))?;
+            none(py)
+        })
     }
 );
 
@@ -1559,9 +1636,9 @@ static HAS_VIRTUAL_VIEW: Function = config_method!(
     "hasVirtualView",
     [Param::new("view", "str")],
     "bool",
-    |py, n, a, c| {
+    |py, a, c| {
         let view = text(arg_in!(a, 1, c, CharPtr));
-        ok(py, n.config.has_virtual_view(view))
+        locked(move |n| ok(py, n.config.has_virtual_view(view)))
     }
 );
 
@@ -1576,19 +1653,21 @@ static ADD_VIRTUAL_DISPLAY_VIEW: Function = config_method!(
         text_default("description")
     ],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let view = text(arg_in!(a, 1, c, CharPtr));
         let vt = text(arg_in!(a, 2, c, CharPtr));
         let cs = text(arg_in!(a, 3, c, CharPtr));
         let looks = text(arg_in!(a, 4, c, CharPtr));
         let rule = text(arg_in!(a, 5, c, CharPtr));
         let description = text(arg_in!(a, 6, c, CharPtr));
-        py_result(
-            py,
-            n.config
-                .add_virtual_display_view(view, vt, cs, looks, rule, description),
-        )?;
-        none(py)
+        locked(move |n| {
+            py_result(
+                py,
+                n.config
+                    .add_virtual_display_view(view, vt, cs, looks, rule, description),
+            )?;
+            none(py)
+        })
     }
 );
 
@@ -1596,9 +1675,9 @@ static IS_VIRTUAL_VIEW_SHARED: Function = config_method!(
     "isVirtualViewShared",
     [Param::new("view", "str")],
     "bool",
-    |py, n, a, c| {
+    |py, a, c| {
         let view = text(arg_in!(a, 1, c, CharPtr));
-        ok(py, n.config.is_virtual_view_shared(view))
+        locked(move |n| ok(py, n.config.is_virtual_view_shared(view)))
     }
 );
 
@@ -1606,10 +1685,12 @@ static ADD_VIRTUAL_DISPLAY_SHARED_VIEW: Function = config_method!(
     "addVirtualDisplaySharedView",
     [Param::new("sharedView", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let view = text(arg_in!(a, 1, c, CharPtr));
-        py_result(py, n.config.add_virtual_display_shared_view(view))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.add_virtual_display_shared_view(view))?;
+            none(py)
+        })
     }
 );
 
@@ -1628,9 +1709,9 @@ static GET_VIRTUAL_DISPLAY_VIEWS: Function = method_def!(
 /// A getter of the virtual display's view's text.
 macro_rules! virtual_view_getter {
     ($name:literal, $get:ident) => {
-        config_method!($name, [Param::new("view", "str")], "str", |py, n, a, c| {
+        config_method!($name, [Param::new("view", "str")], "str", |py, a, c| {
             let view = text(arg_in!(a, 1, c, CharPtr));
-            string_out(py, n.config.$get(view))
+            locked(move |n| string_out(py, n.config.$get(view)))
         })
     };
 }
@@ -1656,10 +1737,12 @@ static REMOVE_VIRTUAL_DISPLAY_VIEW: Function = config_method!(
     "removeVirtualDisplayView",
     [Param::new("view", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let view = text(arg_in!(a, 1, c, CharPtr));
-        n.config.remove_virtual_display_view(view);
-        none(py)
+        locked(move |n| {
+            n.config.remove_virtual_display_view(view);
+            none(py)
+        })
     }
 );
 
@@ -1676,7 +1759,7 @@ static INSTANTIATE_DISPLAY_FROM_MONITOR_NAME: Function = config_method!(
     "instantiateDisplayFromMonitorName",
     [Param::new("monitorName", "str")],
     "int",
-    |py, n, a, c| {
+    |py, a, c| {
         let CharPtr(name) = arg_in!(a, 1, c, CharPtr);
         let Some(name) = name else {
             return Err(to_py_err(
@@ -1684,10 +1767,12 @@ static INSTANTIATE_DISPLAY_FROM_MONITOR_NAME: Function = config_method!(
                 &ocio::Exception::new("The system monitor name cannot be null."),
             ));
         };
-        ok(
-            py,
-            py_result(py, n.config.instantiate_display_from_monitor_name(name))?,
-        )
+        locked(move |n| {
+            ok(
+                py,
+                py_result(py, n.config.instantiate_display_from_monitor_name(name))?,
+            )
+        })
     }
 );
 
@@ -1698,7 +1783,7 @@ static INSTANTIATE_DISPLAY_FROM_ICC_PROFILE: Function = config_method!(
     "instantiateDisplayFromICCProfile",
     [Param::new("ICCProfileFilepath", "str")],
     "int",
-    |py, n, a, c| {
+    |py, a, c| {
         let CharPtr(path) = arg_in!(a, 1, c, CharPtr);
         let Some(path) = path else {
             return Err(to_py_err(
@@ -1706,10 +1791,12 @@ static INSTANTIATE_DISPLAY_FROM_ICC_PROFILE: Function = config_method!(
                 &ocio::Exception::new("The ICC profile filepath cannot be null."),
             ));
         };
-        ok(
-            py,
-            py_result(py, n.config.instantiate_display_from_icc_profile(path))?,
-        )
+        locked(move |n| {
+            ok(
+                py,
+                py_result(py, n.config.instantiate_display_from_icc_profile(path))?,
+            )
+        })
     }
 );
 
@@ -1727,10 +1814,12 @@ static IS_DISPLAY_TEMPORARY: Function = config_method!(
     "isDisplayTemporary",
     [Param::new("display", "str")],
     "bool",
-    |py, n, a, c| {
+    |py, a, c| {
         let StdString(display) = arg_in!(a, 1, c, StdString);
-        let first = displays_named(&n.config, &display).first().copied();
-        ok(py, first.is_some_and(|i| n.config.is_display_temporary(i)))
+        locked(move |n| {
+            let first = displays_named(&n.config, &display).first().copied();
+            ok(py, first.is_some_and(|i| n.config.is_display_temporary(i)))
+        })
     }
 );
 
@@ -1743,15 +1832,17 @@ static SET_DISPLAY_TEMPORARY: Function = config_method!(
         Param::new("isTemporary", "bool")
     ],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let StdString(display) = arg_in!(a, 1, c, StdString);
         let temporary = arg_in!(a, 2, c, bool);
-        for i in 0..n.config.num_displays_all() {
-            if compare(&display, n.config.display_all(i)) {
-                n.config.set_display_temporary(i, temporary);
+        locked(move |n| {
+            for i in 0..n.config.num_displays_all() {
+                if compare(&display, n.config.display_all(i)) {
+                    n.config.set_display_temporary(i, temporary);
+                }
             }
-        }
-        none(py)
+            none(py)
+        })
     }
 );
 
@@ -1779,13 +1870,15 @@ static ARE_VIRTUAL_VIEWS_EQUAL: Function = static_def!(
 /// A setter or a change of a list, a `const char *` argument.
 macro_rules! list_method {
     ($name:literal, $param:literal, $call:ident, $checked:expr) => {
-        config_method!($name, [Param::new($param, "str")], "None", |py, n, a, c| {
+        config_method!($name, [Param::new($param, "str")], "None", |py, a, c| {
             let s = match $checked {
                 Some(what) => checked(arg_in!(a, 1, c, CharPtr), what)?,
                 None => text(arg_in!(a, 1, c, CharPtr)),
             };
-            py_result(py, n.config.$call(s))?;
-            none(py)
+            locked(move |n| {
+                py_result(py, n.config.$call(s))?;
+                none(py)
+            })
         })
     };
 }
@@ -1869,28 +1962,26 @@ static SET_DEFAULT_LUMA_COEFS: Function = config_method!(
         "typing.Annotated[collections.abc.Sequence[typing.SupportsFloat], \"FixedSize(3)\"]"
     )],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let rgb = arg_in!(a, 1, c, [f64; 3]);
-        n.config.set_default_luma_coefs(&rgb);
-        none(py)
+        locked(move |n| {
+            n.config.set_default_luma_coefs(&rgb);
+            none(py)
+        })
     }
 );
 
 // ---------------------------------------------------------------------------------------------
 // Looks, view transforms, named transforms (PyConfig.cpp:634-698 @ v2.5.2)
 
-static GET_LOOK: Function = config_method!(
-    "getLook",
-    [Param::new("name", "str")],
-    LOOK,
-    |py, n, a, c| {
+static GET_LOOK: Function =
+    config_method!("getLook", [Param::new("name", "str")], LOOK, |py, a, c| {
         let name = text(arg_in!(a, 1, c, CharPtr));
-        match n.look_by_name(&name) {
+        locked(move |n| match n.look_by_name(&name) {
             Some(look) => out(py, LOOK, &look),
             None => none(py),
-        }
-    }
-);
+        })
+    });
 
 static GET_LOOK_NAMES: Function =
     config_iterator!("getLookNames", [], LOOK_NAME_ITERATOR, |_a, _c| Ok(Some(
@@ -1900,20 +1991,18 @@ static GET_LOOKS: Function = config_iterator!("getLooks", [], LOOK_ITERATOR, |_a
     IterArgs::None
 )));
 
-static ADD_LOOK: Function = config_method!(
-    "addLook",
-    [Param::new("look", LOOK)],
-    "None",
-    |py, n, a, c| {
+static ADD_LOOK: Function =
+    config_method!("addLook", [Param::new("look", LOOK)], "None", |py, a, c| {
         let Some(look) = holder_arg::<LookNode>(&a[1], LOOK, c)? else {
             return Ok(None);
         };
         let look = look.ok_or_else(|| null_object("Config.addLook(look)"))?;
         let look = look.lock().materialize()?;
-        py_result(py, n.config.add_look(&look))?;
-        none(py)
-    }
-);
+        locked(move |n| {
+            py_result(py, n.config.add_look(&look))?;
+            none(py)
+        })
+    });
 
 static CLEAR_LOOKS: Function = config_method!("clearLooks", [], "None", |py, n, _, _| {
     n.config.clear_looks();
@@ -1924,12 +2013,12 @@ static GET_VIEW_TRANSFORM: Function = config_method!(
     "getViewTransform",
     [Param::new("name", "str")],
     VIEW_TRANSFORM,
-    |py, n, a, c| {
+    |py, a, c| {
         let name = text(arg_in!(a, 1, c, CharPtr));
-        match n.view_transform_by_name(&name) {
+        locked(move |n| match n.view_transform_by_name(&name) {
             Some(vt) => out(py, VIEW_TRANSFORM, &vt),
             None => none(py),
-        }
+        })
     }
 );
 
@@ -1950,14 +2039,16 @@ static ADD_VIEW_TRANSFORM: Function = config_method!(
     "addViewTransform",
     [Param::new("viewTransform", VIEW_TRANSFORM)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let Some(vt) = holder_arg::<ViewTransformNode>(&a[1], VIEW_TRANSFORM, c)? else {
             return Ok(None);
         };
         let vt = vt.ok_or_else(|| null_object("Config.addViewTransform(viewTransform)"))?;
         let vt = vt.lock().materialize()?;
-        py_result(py, n.config.add_view_transform(&vt))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.add_view_transform(&vt))?;
+            none(py)
+        })
     }
 );
 
@@ -1980,10 +2071,12 @@ static SET_DEFAULT_VIEW_TRANSFORM_NAME: Function = config_method!(
     "setDefaultViewTransformName",
     [Param::new("name", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let NonNullCharPtr(name) = arg_in!(a, 1, c, NonNullCharPtr);
-        n.config.set_default_view_transform_name(name);
-        none(py)
+        locked(move |n| {
+            n.config.set_default_view_transform_name(name);
+            none(py)
+        })
     }
 );
 
@@ -1998,12 +2091,12 @@ static GET_NAMED_TRANSFORM: Function = config_method!(
     "getNamedTransform",
     [Param::new("name", "str")],
     NAMED_TRANSFORM,
-    |py, n, a, c| {
+    |py, a, c| {
         let name = text(arg_in!(a, 1, c, CharPtr));
-        match n.named_transform_by_name(&name) {
+        locked(move |n| match n.named_transform_by_name(&name) {
             Some(nt) => out(py, NAMED_TRANSFORM, &nt),
             None => none(py),
-        }
+        })
     }
 );
 
@@ -2071,7 +2164,7 @@ static ADD_NAMED_TRANSFORM: Function = config_method!(
     "addNamedTransform",
     [Param::new("namedTransform", NAMED_TRANSFORM)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let Some(nt) = holder_arg::<NamedTransformNode>(&a[1], NAMED_TRANSFORM, c)? else {
             return Ok(None);
         };
@@ -2082,8 +2175,10 @@ static ADD_NAMED_TRANSFORM: Function = config_method!(
             ));
         };
         let nt = nt.lock().materialize()?;
-        py_result(py, n.config.add_named_transform(&nt))?;
-        none(py)
+        locked(move |n| {
+            py_result(py, n.config.add_named_transform(&nt))?;
+            none(py)
+        })
     }
 );
 
@@ -2109,15 +2204,17 @@ static SET_VIEWING_RULES: Function = config_method!(
     "setViewingRules",
     [Param::new("ViewingRules", VIEWING_RULES)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let rules = rules_arg::<ViewingRules, ConfigRules<ViewingRules>>(&a[1], VIEWING_RULES, c)?;
         let Some(rules) = rules else {
             return Ok(None);
         };
         let rules = rules.ok_or_else(|| null_object("Config.setViewingRules(ViewingRules)"))?;
         let copy = rules.read(ViewingRules::clone);
-        n.config.set_viewing_rules(&copy);
-        none(py)
+        locked(move |n| {
+            n.config.set_viewing_rules(&copy);
+            none(py)
+        })
     }
 );
 
@@ -2129,15 +2226,17 @@ static SET_FILE_RULES: Function = config_method!(
     "setFileRules",
     [Param::new("fileRules", FILE_RULES)],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let rules = rules_arg::<FileRules, ConfigRules<FileRules>>(&a[1], FILE_RULES, c)?;
         let Some(rules) = rules else {
             return Ok(None);
         };
         let rules = rules.ok_or_else(|| null_object("Config.setFileRules(fileRules)"))?;
         let copy = rules.read(FileRules::clone);
-        n.config.set_file_rules(&copy);
-        none(py)
+        locked(move |n| {
+            n.config.set_file_rules(&copy);
+            none(py)
+        })
     }
 );
 
@@ -2163,17 +2262,19 @@ static GET_COLOR_SPACE_FROM_FILEPATH: Function = config_method!(
     "getColorSpaceFromFilepath",
     [Param::new("filePath", "str")],
     "tuple",
-    |py, n, a, c| {
+    |py, a, c| {
         let StdString(path) = arg_in!(a, 1, c, StdString);
-        let (name, index) = py_result(
-            py,
-            n.config.color_space_from_filepath_with_index(c_str(&path)),
-        )?;
-        let items: [Bound<'_, PyAny>; 2] = [
-            std_string_to_py(py, &name)?.into_any(),
-            index.into_pyobject(py)?.into_any(),
-        ];
-        Ok(Some(PyTuple::new(py, items)?.into_any().unbind()))
+        locked(move |n| {
+            let (name, index) = py_result(
+                py,
+                n.config.color_space_from_filepath_with_index(c_str(&path)),
+            )?;
+            let items: [Bound<'_, PyAny>; 2] = [
+                std_string_to_py(py, &name)?.into_any(),
+                index.into_pyobject(py)?.into_any(),
+            ];
+            Ok(Some(PyTuple::new(py, items)?.into_any().unbind()))
+        })
     }
 );
 
@@ -2181,12 +2282,14 @@ static FILEPATH_ONLY_MATCHES_DEFAULT_RULE: Function = config_method!(
     "filepathOnlyMatchesDefaultRule",
     [Param::new("filePath", "str")],
     "bool",
-    |py, n, a, c| {
+    |py, a, c| {
         let path = text(arg_in!(a, 1, c, CharPtr));
-        ok(
-            py,
-            py_result(py, n.config.filepath_only_matches_default_rule(path))?,
-        )
+        locked(move |n| {
+            ok(
+                py,
+                py_result(py, n.config.filepath_only_matches_default_rule(path))?,
+            )
+        })
     }
 );
 
@@ -2637,13 +2740,15 @@ static SET_PROCESSOR_CACHE_FLAGS: Function = config_method!(
     "setProcessorCacheFlags",
     [Param::new("flags", PROCESSOR_CACHE_FLAGS)],
     "None",
-    |py, n, a, _| {
+    |py, a, _| {
         let Some(v) = crate::enums::enum_value(&a[1], PROCESSOR_CACHE_FLAGS)? else {
             return Ok(None);
         };
-        n.config
-            .set_processor_cache_flags(ocio::ProcessorCacheFlags(v as u32));
-        none(py)
+        locked(move |n| {
+            n.config
+                .set_processor_cache_flags(ocio::ProcessorCacheFlags(v as u32));
+            none(py)
+        })
     }
 );
 
@@ -2668,16 +2773,18 @@ static ARCHIVE: Function = config_method!(
     "archive",
     [Param::new("arg0", "str")],
     "None",
-    |py, n, a, c| {
+    |py, a, c| {
         let path = checked(arg_in!(a, 1, c, CharPtr), "Config.archive(arg0)")?;
         let file = crate::transforms::py_group_transform::open_binary_file(&path)?;
         let mut data = Vec::new();
-        let archived = n.config.archive(&mut data);
-        if let Some(mut file) = file {
-            let _ = std::io::Write::write_all(&mut file, &data);
-        }
-        py_result(py, archived)?;
-        none(py)
+        locked(move |n| {
+            let archived = n.config.archive(&mut data);
+            if let Some(mut file) = file {
+                let _ = std::io::Write::write_all(&mut file, &data);
+            }
+            py_result(py, archived)?;
+            none(py)
+        })
     }
 );
 

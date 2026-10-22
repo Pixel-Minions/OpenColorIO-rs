@@ -1487,3 +1487,50 @@ fn an_object_that_cant_be_written_back() {
         compare_except(&sc, &errors);
     }
 }
+
+/// Arguments whose casters run Python code that uses the config (an `__index__` or `__bool__`
+/// that is one of its bound methods: not a descriptor, it's called without the instance): the
+/// wheel loads them before the call, so the config is free to use then.
+fn argument_callbacks_script() -> Script {
+    let mut sc = Script::new();
+    let c = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    let class = |sc: &mut Script, name: &str, slot: &str, method: &str| {
+        let ty = sc.call(
+            n("type"),
+            vec![
+                s(name),
+                common::script::t(vec![]),
+                d(vec![
+                    (s("__module__"), s("probe")),
+                    (s(slot), ra(c, method)),
+                ]),
+            ],
+        );
+        sc.call(r(ty), vec![])
+    };
+    let major = class(&mut sc, "Major", "__index__", "getMajorVersion");
+    let strict = class(&mut sc, "Strict", "__bool__", "isStrictParsingEnabled");
+    call(&mut sc, c, "setMinorVersion", vec![r(major)]);
+    call(&mut sc, c, "getMinorVersion", vec![]);
+    call(&mut sc, c, "setVersion", vec![r(major), r(major)]);
+    call(&mut sc, c, "getMinorVersion", vec![]);
+    call(
+        &mut sc,
+        c,
+        "setDefaultLumaCoefs",
+        vec![l(vec![r(major), f(0.5), r(major)])],
+    );
+    call(&mut sc, c, "getDefaultLumaCoefs", vec![]);
+    call(&mut sc, c, "setStrictParsingEnabled", vec![r(strict)]);
+    call(&mut sc, c, "isStrictParsingEnabled", vec![]);
+    call(&mut sc, c, "setDisplayTemporary", vec![s("x"), r(strict)]);
+    let names = call(&mut sc, c, "getColorSpaceNames", vec![]);
+    sc.raises(ra(names, "__getitem__"), vec![r(major)]);
+    sc
+}
+
+/// Python code an argument's caster runs may use the config, as in the wheel.
+#[test]
+fn arguments_load_before_the_config_is_locked() {
+    compare(&[argument_callbacks_script()]);
+}
