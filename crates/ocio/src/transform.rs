@@ -773,11 +773,21 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
             "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
         )),
         OpData::Lut3D(_) => create_lut3d_transform(group, op),
+        // `CreateGradingToneTransform` (src/OpenColorIO/ops/gradingtone/GradingToneOp.cpp:
+        // 217-230 @ v2.5.2) comes with `GradingToneTransform` (WP 5.5d).
+        OpData::GradingTone(_) => Err(Exception::new(
+            "CreateGradingToneTransform is not ported yet (WP 5.5d).",
+        )),
         // `CreateExposureContrastTransform` (src/OpenColorIO/ops/exposurecontrast/
         // ExposureContrastOp.cpp:197-210 @ v2.5.2) comes with `ExposureContrastTransform` (WP
         // 5.5a).
         OpData::ExposureContrast(_) => Err(Exception::new(
             "CreateExposureContrastTransform is not ported yet (WP 5.5a).",
+        )),
+        // `CreateGradingPrimaryTransform` (src/OpenColorIO/ops/gradingprimary/
+        // GradingPrimaryOp.cpp:223-236 @ v2.5.2) comes with `GradingPrimaryTransform` (WP 5.5b).
+        OpData::GradingPrimary(_) => Err(Exception::new(
+            "CreateGradingPrimaryTransform is not ported yet (WP 5.5b).",
         )),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.

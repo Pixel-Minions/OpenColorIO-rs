@@ -64,6 +64,8 @@ jobs:
         run: cargo xtask ci ${{ steps.mode.outputs.flags }}
       - name: Committed fixtures are identical on this platform
         run: cargo xtask oracle check-all
+      - name: The Python module (clippy and tests of ocio-py's python feature, upstream's Python suite)
+        run: cargo xtask py-check
 
   windows-tests:
     name: Windows tests (${{ matrix.shard }})
@@ -135,6 +137,7 @@ jobs:
             cargo clippy --workspace --all-targets
             cargo xtask ci ${{ steps.mode.outputs.flags }}
             cargo xtask oracle check-all
+            cargo xtask py-check
           '
 
   rocky9-tests:

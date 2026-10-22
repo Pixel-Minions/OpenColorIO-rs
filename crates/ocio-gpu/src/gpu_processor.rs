@@ -29,7 +29,9 @@ use crate::ops::exponent::exponent_op_gpu::get_exponent_gpu_shader_program;
 use crate::ops::exposurecontrast::exposure_contrast_op_gpu::get_exposure_contrast_gpu_shader_program;
 use crate::ops::fixedfunction::fixed_function_op_gpu::get_fixed_function_gpu_shader_program;
 use crate::ops::gamma::gamma_op_gpu::get_gamma_gpu_shader_program;
+use crate::ops::gradingprimary::grading_primary_op_gpu::get_grading_primary_gpu_shader_program;
 use crate::ops::gradingrgbcurve::grading_rgb_curve_op_gpu::get_grading_rgb_curve_gpu_shader_program;
+use crate::ops::gradingtone::grading_tone_op_gpu::get_grading_tone_gpu_shader_program;
 use crate::ops::log::log_op_gpu::get_log_gpu_shader_program;
 use crate::ops::lut1d::lut1d_op_gpu::extract_lut1d_gpu_shader_info;
 use crate::ops::lut3d::lut3d_op_gpu::extract_lut3d_gpu_shader_info;
@@ -135,11 +137,19 @@ pub(crate) fn extract_op_gpu_shader_info(
         OpData::Gamma(data) => get_gamma_gpu_shader_program(shader_creator, data),
         OpData::Log(data) => get_log_gpu_shader_program(shader_creator, data),
         OpData::FixedFunction(data) => get_fixed_function_gpu_shader_program(shader_creator, data),
+        // `GradingToneOp::extractGpuShaderInfo` (src/OpenColorIO/ops/gradingtone/
+        // GradingToneOp.cpp:187-191 @ v2.5.2).
+        OpData::GradingTone(data) => get_grading_tone_gpu_shader_program(shader_creator, data),
         OpData::GradingRgbCurve(data) => {
             get_grading_rgb_curve_gpu_shader_program(shader_creator, data)
         }
         OpData::ExposureContrast(data) => {
             get_exposure_contrast_gpu_shader_program(shader_creator, data)
+        }
+        // `GradingPrimaryOp::extractGpuShaderInfo` (src/OpenColorIO/ops/gradingprimary/
+        // GradingPrimaryOp.cpp:193-197 @ v2.5.2).
+        OpData::GradingPrimary(data) => {
+            get_grading_primary_gpu_shader_program(shader_creator, data)
         }
         OpData::Lut1D(data) => extract_lut1d_gpu_shader_info(shader_creator, data),
         OpData::Lut3D(data) => extract_lut3d_gpu_shader_info(shader_creator, data),

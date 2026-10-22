@@ -6,6 +6,7 @@ members = [
     "crates/ocio-gpu",
     "crates/ocio",
     "crates/ocio-py",
+    "crates/ocio-py/ffi",
     "crates/ocio-tools",
     "crates/ocio-testkit",
     "xtask",
@@ -37,6 +38,8 @@ ocio-formats = { path = "crates/ocio-formats" }
 ocio-gpu = { path = "crates/ocio-gpu" }
 ocio = { path = "crates/ocio" }
 ocio-testkit = { path = "crates/ocio-testkit" }
+# The Python binding's C API calls that need `unsafe` (its only unsafe code, PLAN.md D8).
+ocio-py-ffi = { path = "crates/ocio-py/ffi" }
 
 # Third-party dependencies are pinned to exact versions: a dependency update is a reviewed change.
 half = "=2.7.1"
@@ -51,9 +54,16 @@ zerocopy = "=0.8.59"
 # Deflate for `.ocioz` config archives, whose zip container is a port of minizip-ng (owner
 # decision 2026-10-17): raw inflate and deflate on the zlib-rs backend, a port of zlib.
 flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs"] }
+# The Python module `PyOpenColorIO` (Phase 6, owner decision P6-1, 2026-10-17): PyO3, the
+# latest 0.29 patch, for CPython 3.13 (cp313, not abi3, P6-5). Only `ocio-py` uses it, behind
+# its `python` feature.
+pyo3 = "=0.29.3"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+# Every target of every crate and xtask: `unsafe` only in the files guards.rs allows, each
+# with `#![allow(unsafe_code)]` (PLAN.md D8).
+unsafe_code = "deny"
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 

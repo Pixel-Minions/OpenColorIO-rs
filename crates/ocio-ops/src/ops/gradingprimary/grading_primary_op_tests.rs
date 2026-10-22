@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! Port of tests/cpu/ops/gradingprimary/GradingPrimaryOp_tests.cpp @ v2.5.2. Its
+//! `create_transform` and `build_ops` need the `GradingPrimaryTransform` (5.5b).
+
+use super::*;
+use crate::open_color_types::GradingStyle;
+
+/// Port of `OCIO_ADD_TEST(GradingPrimaryOp, create)` @ v2.5.2. Upstream's ops share the data
+/// it changes after making the first op; here each op gets the data passed (a copy), and the
+/// second one the data made dynamic.
+#[test]
+fn create() {
+    let direction = TransformDirection::Forward;
+    let data = GradingPrimaryOpData::new(GradingStyle::Log);
+    let mut ops = OpVec::new();
+
+    create_grading_primary_op(&mut ops, data.clone(), direction);
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].get_info(), "<GradingPrimaryOp>");
+    assert!(ops[0].is_identity().unwrap());
+    assert!(ops[0].is_no_op().unwrap());
+
+    data.get_dynamic_property_internal().make_dynamic();
+    create_grading_primary_op(&mut ops, data, direction);
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[1].get_info(), "<GradingPrimaryOp>");
+    assert!(!ops[1].is_identity().unwrap());
+    assert!(!ops[1].is_no_op().unwrap());
+}

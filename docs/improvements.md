@@ -1849,6 +1849,75 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** the repr its values give, like the other grading classes'.
 - **Status:** to be matched in Phase 6 (D13).
 
+### I-223. Python makes enum values that no enumerator has
+
+- **Upstream:** pybind11 constructs an enum from any integer its underlying type holds
+  (`OCIO.TransformDirection(5)`, `OCIO.BitDepth(99)`): `static_cast` of a value outside an
+  unscoped enum's range, undefined in C++17 for an enum without a fixed type, which both
+  wheels keep as the integer. The value reads as `???` (`<TransformDirection.???: 5>`), and
+  the string-conversion functions give what their last line gives
+  (`ParseUtils.cpp:113-519` @ v2.5.2): `TransformDirectionToString` "inverse",
+  `GetInverseTransformDirection` `TRANSFORM_DIR_FORWARD`, `CombineTransformDirections`
+  `TRANSFORM_DIR_INVERSE`, `BitDepthToString` "unknown", `BitDepthToInt` 0, `CDLStyleToString`
+  "asc", `RangeStyleToString` "Clamp"; `GpuLanguageToString`, `FixedFunctionStyleToString`,
+  `GradingStyleToString`, `ExposureContrastStyleToString` and `NegativeStyleToString` raise
+  (seen through the wheel in `conversions_oracle.rs`).
+- **Who notices:** Python code that makes an enum from a number outside its values.
+- **A fix:** refuse the number when the enum is constructed, as a `ValueError`.
+- **Status:** matched in `p6-core` (6.2b); `enums_oracle.rs`, `conversions_oracle.rs`. I-31
+  is one consequence of it.
+
+### I-225. Python takes negative values for an enum on Windows only
+
+- **Upstream:** OCIO's enums without a fixed type (all but `OptimizationFlags`,
+  `ProcessorCacheFlags` and `GpuShaderCreator.TextureDimensions`) have no negative
+  enumerators, so their underlying type is the compiler's choice: MSVC's is `int`, GCC's
+  `unsigned int`. pybind11 converts the `int` passed to an enum's constructor (`__init__`,
+  `__setstate__`) to that type, so `OCIO.LoggingLevel(-1)` makes a value (`???`, -1) in the
+  Windows wheel and raises the constructor's TypeError in the Linux one, and
+  `OCIO.LoggingLevel(4294967295)` the other way round (seen through both wheels in
+  `enums_oracle.rs`).
+- **Who notices:** Python code that makes an enum from a number outside its values (I-223)
+  and runs on both platforms.
+- **A fix:** refuse every number that isn't one of the enum's values (I-223's fix), which
+  removes the difference.
+- **Status:** matched in `p6-core` (6.2b follow-up); `enums_oracle.rs`.
+
+### I-236. A huge `len()` makes a list argument fail with the C++ runtime's texts
+
+- **Upstream:** pybind11's `std::vector` caster reserves the sequence's `len()` elements before
+  reading any (`list_caster::reserve_maybe`), and its `std::array` caster reserves a second
+  `len()` for its items. Through the wheels, a sequence whose `__len__` returns more than the
+  vector's `max_size()` makes the call raise `ValueError` "vector too long" on Windows (MSVC's
+  STL) and "vector::reserve" on Linux (libstdc++); one the allocator can't serve raises
+  `MemoryError` "bad allocation" or "std::bad_alloc"; and on Windows only, a size within 47
+  bytes of the address space raises `MemoryError` "bad array new length" (MSVC adds 47 bytes
+  of alignment to large allocations). The limits differ too: MSVC's `max_size()` is
+  `SIZE_MAX / sizeof(T)` capped at `PTRDIFF_MAX`, libstdc++'s `PTRDIFF_MAX / sizeof(T)`, so
+  `2**61` floats are "vector::reserve" on Linux and "bad allocation" on Windows (seen through
+  the wheel in `dispatch_oracle.rs`).
+- **Who notices:** Python code that passes a sequence whose `__len__` lies (or is huge) to a
+  function taking a list.
+- **A fix:** read the items without reserving, or refuse a `len()` beyond the items read, with
+  one text on both platforms.
+- **Status:** matched in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `reserve`, which reserves
+  the same bytes through the same allocator and raises the platform's texts);
+  `dispatch_oracle.rs`, `vectors_load_sequences_as_the_wheels`,
+  `arrays_load_sequences_as_the_wheels`.
+
+### I-237. A NUL in an argument's `repr()` cuts pybind11's error short
+
+- **Upstream:** pybind11's dispatcher builds the TypeError of a call no overload takes as a C++
+  string ("... Invoked with: " and each argument's `repr()`, each keyword's name) and sets it
+  with `PyErr_SetString`, which reads it up to its first NUL: through the wheel,
+  `GetEnvVariable(x)` with a `repr(x)` of `'a\x00b'` says "Invoked with: a", and
+  `GetEnvVariable(**{'a\x00b': 1})` "Invoked with: kwargs: a" (`dispatch_oracle.rs`).
+- **Who notices:** Python code that reads the error of a refused call whose arguments' reprs or
+  keyword names hold a NUL.
+- **A fix:** set the whole message.
+- **Status:** matched in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `incompatible`);
+  `dispatch_oracle.rs`, `module_functions_answer_as_the_wheels`.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."
@@ -2191,6 +2260,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-readers` (4.7b, `lround` in
   `crates/ocio/src/fileformats/file_format_icc.rs`, checked against the platform's `lroundf`);
   checked against the wheel on both (`crates/ocio/tests/file_format_icc_oracle.rs`).
+
+### I-224. `GetEnvVariable` of an empty name returns the previous call's value
+
+- **Upstream:** `GetEnvVariable` (`Platform.cpp:23-28` @ v2.5.2) returns a `thread_local`
+  string that `Platform::Getenv` fills, and `Getenv` returns before touching it when the name
+  is null or empty (`Platform.cpp:50-53`). So `GetEnvVariable(nullptr)` or `("")` returns what
+  the last call on that thread returned: in Python, `OCIO.GetEnvVariable(None)` right after
+  `OCIO.GetEnvVariable("X")` gives the value of `X` (seen through the wheel in
+  `dispatch_oracle.rs`).
+- **Who notices:** code that asks for an empty variable name, such as a name read from
+  somewhere that turned out empty.
+- **A fix:** clear the string first, so an empty name gives "".
+- **Status:** matched in `p6-core` (6.2b follow-up); `dispatch_oracle.rs`.
 
 ## File formats
 
@@ -3103,6 +3185,125 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   fails.
 - **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`);
   `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows, against the wheel).
+
+### I-226. An infinite or NaN alpha makes a GradingPrimary's colors NaN
+
+- **Upstream:** with a saturation other than 1, the GradingPrimary renderers compute the luma
+  as the dot product of all four lanes of the pixel with the weights `{0.2126, 0.7152,
+  0.0722, 0.0}` (`ops/gradingprimary/GradingPrimaryOpCPU.cpp:155-170` @ v2.5.2). Alpha's
+  weight is 0, but an infinite or NaN alpha (after the steps before the saturation, which
+  alpha's lane goes through with identity values) times 0 is NaN, so the luma, and every
+  color channel, become NaN. Alpha itself is restored. The scalar code (without SSE2) sums the
+  three color channels only.
+- **Who notices:** images with infinite or NaN alpha through a GradingPrimaryTransform with
+  saturation: the colors of those pixels become NaN (and then the black clamp, I-227).
+- **A fix:** a weight of 0 that leaves alpha out of the sum (mask alpha's lane before the
+  sums), which changes those pixels' colors to the graded values.
+- **Status:** matched in `p5-primary` (5.2b, 5.2c); the battery's probes with infinite and NaN
+  alphas check it.
+
+### I-227. A GradingPrimary turns NaN colors into -Inf
+
+- **Upstream:** the GradingPrimary renderers end (forward) or start (inverse) with
+  `ApplyClamp`, `_mm_min_ps(_mm_max_ps(pix, blackClamp), whiteClamp)`
+  (`ops/gradingprimary/GradingPrimaryOpCPU.cpp:172-175` @ v2.5.2), whose `maxps` returns its
+  second operand for a NaN first one. Without a clamp, the black clamp is `NoClampBlack`,
+  `-DBL_MAX`, which is -Inf as a float: a NaN color becomes -Inf (or the black clamp when there
+  is one), whenever the op isn't an identity. The scalar code (`std::max`) keeps the NaN; its
+  comment says that the default values that should not clamp change clamping.
+- **Who notices:** images with NaN colors through a GradingPrimaryTransform that changes
+  anything: the NaN become -Inf, or the black clamp, in forward; in inverse the clamp comes
+  first, and the -Inf goes through the rest.
+- **A fix:** a clamp that keeps NaN (the operands of `maxps` swapped), which keeps NaN pixels
+  NaN.
+- **Status:** matched in `p5-primary` (5.2b, 5.2c); the battery's NaN probes check it.
+
+### I-228. A GradingPrimary's NaN pixels can give zeros of another sign on Linux
+
+- **Upstream:** the forward GradingPrimary renderers start with `_mm_add_ps(pixel, offset)`
+  (or `brightness`; `ops/gradingprimary/GradingPrimaryOpCPU.cpp:304, 655, 999` and the other
+  loops @ v2.5.2). MSVC computes `pixel + offset`, GCC `offset + pixel` (`tools/wheel-inspect`:
+  Windows `GradingPrimaryLinFwdOpCPU::apply` 0x1801d4730, Linux 0x3a8500, and the log and video
+  ones), so where a NaN pixel meets a NaN offset (an offset whose master and channel are +Inf
+  and -Inf), Windows keeps the pixel's NaN and Linux the offset's. The linear style's contrast
+  then keeps the NaN's sign while `ssePower` makes it 0 (`ApplyLinContrast`, 135-142): the
+  output is a zero whose sign differs between the platforms.
+- **Who notices:** NaN pixels through a linear GradingPrimaryTransform with infinite offsets
+  of opposite signs, compared between a Windows and a Linux machine.
+- **A fix:** one operand order on every platform, which changes those zeros' signs on one.
+- **Status:** matched in `p5-primary` (5.2b, 5.2c:
+  `crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs`, `LoopOrders`); the
+  battery's infinite-sum cases with NaN probes check it on both platforms.
+
+### I-241. A channel's inverse midtones above the curve use the line below it
+
+- **Upstream:** the inverse midtones of the red, green or blue component
+  (`GradingToneRevOpCPU::mids`, `ops/gradingtone/GradingToneOpCPU.cpp:381-384` @ v2.5.2) give a
+  value at or above the curve's top, `t >= y5`, `x0 + (t - y0) / m0`: the line below the curve's
+  bottom, where the forward curve continues above its top with `y5 + (t - x5) * m5`, and the
+  master component's code uses the top line (`outR4 = x5 + (t - y5) / m5`, 441). The
+  pre-render makes `y0 = x0` and `m0 = m5 = 1`, so the bottom line gives the value back
+  unchanged, the top line `t - y5 + x5`; the curve's area-preserving slopes make `y5` equal to
+  `x5` only up to their rounding, so a value above the top comes back off by that rounding
+  (or exactly, where it rounds to nothing).
+- **Who notices:** nobody visibly: inverting a GradingToneTransform with a red, green or blue
+  midtones value other than 1, on values above the curve's top, gives the last bits of the
+  bottom line's answer.
+- **A fix:** `x5 + (t - y5) / m5`, as the master component's code.
+- **Status:** matched in `p5-tone` (5.3b, `crates/ocio-ops/src/ops/gradingtone/
+  grading_tone_op_cpu.rs`, `mids_rev_scalar`); the battery's midtones cases, inverse, with
+  values above 1 (`crates/ocio-ops/tests/grading_tone_oracle.rs`).
+
+### I-242. A channel and the master component take different midtones segments on a knot
+
+- **Upstream:** the forward midtones of the red, green or blue component choose the segment
+  with strict comparisons (`if (t > x2) res = fR;`, `GradingToneOpCPU.cpp:310-315` @ v2.5.2),
+  the master component's code with `setOnLimit` (`t < x2 ? res : fR`, 337-342): a value on
+  the knot `x2`, `x3` or `x4` takes the segment below it in the first, above it in the second
+  (the same value, up to the segments' rounding), and a NaN takes the middle segment `fM` in the
+  first and the line above the top in the second. The inverse midtones differ the same way
+  (an if/else chain on `t >= y5, y4, ...` for the components, `setOnLimit` for the master).
+- **Who notices:** nobody visibly: the segments meet at the knots, so only the last bits and a
+  NaN's payload differ.
+- **A fix:** one choice of segment for both.
+- **Status:** matched in `p5-tone` (5.3b, `grading_tone_op_cpu.rs`, `mids_fwd_scalar`,
+  `mids_fwd_f3`, `mids_rev_scalar`, `mids_rev_f3`); the battery probes the knots' neighbourhoods
+  (`breakpoints`).
+
+### I-243. A GradingTone's NaN pixels and NaN coefficients differ between Windows and Linux
+
+- **Upstream:** the log and video renderers (`GradingToneOpCPU.cpp:269-1061` @ v2.5.2) are
+  scalar `float` templates instantiated for a `float` and a `float3`, which the two wheels
+  compile with different operand orders: per platform, per instantiation, and with GCC per
+  lane of the `float3` (Windows `sub_1801f38f0` to `sub_1801f9b10`, Linux `ComputeHSFwd<float>`
+  and its siblings, read with `tools/wheel-inspect`). MSVC also computes some roots as `x0 -
+  ((c + c) / (d + b)) * w` for the source's `((-2.f * c) / (d + b)) * w + x0`. Where two NaNs
+  meet (a pixel's NaN and a NaN control point, which starts and widths that overflow a `float`
+  give, or the default NaN of an infinity's arithmetic and a control point the pre-render
+  negated), the result keeps a different NaN on each platform, and between the red, green,
+  blue and the master component on one.
+- **Who notices:** anyone comparing a GradingToneTransform with extreme starts or widths on NaN
+  or infinite pixels between a Windows and a Linux machine.
+- **A fix:** one operand order on every platform, which changes NaN bits on at least one.
+- **Status:** matched in `p5-tone` (5.3b, `grading_tone_op_cpu.rs`, the `HS_FWD` ... `SC_REV`
+  tables); the battery's overflowing cases with the distinct-NaN probes check it on both
+  platforms.
+
+### I-244. The linear GradingTone converts alpha to its log space and back
+
+- **Upstream:** the linear style's renderers grade in a log space: `LinLog` before the tones,
+  `LogLin` after (`ops/gradingtone/GradingToneOpCPU.cpp:1086-1145, 1147-1259` @ v2.5.2). Their
+  `OCIO_USE_SSE2` branches, which every x86-64 wheel compiles, load and store the whole
+  pixel, so alpha goes through both conversions too: `LogLin(LinLog(alpha))`, with OCIO's
+  `sseLog2` and `ssePower` approximations, which gives alpha back only approximately (and a
+  NaN alpha as the line's NaN, an infinite one as whatever the approximations make of it).
+  The scalar branch (`#else`) copies alpha, as the log and video styles leave it.
+- **Who notices:** anyone relying on a linear GradingToneTransform to keep alpha exactly,
+  such as a compositing pipeline comparing alphas.
+- **A fix:** keep the input's alpha, as the other grading renderers do (`out[3] = in[3]`).
+- **Status:** matched in `p5-tone` (5.3c, `crates/ocio-ops/src/ops/gradingtone/
+  grading_tone_op_cpu.rs`, `lin_log_pixel`, `log_lin_pixel`); the battery compares alpha bit
+  for bit for the linear style (`crates/ocio-ops/tests/grading_tone_oracle.rs`).
 
 ## Undefined behaviour upstream
 
@@ -4205,3 +4406,128 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs`,
   `compute_knots_and_coefs_for_hue_curve`); `crates/ocio-ops/tests/hue_curve_knots_oracle.rs`,
   `draw_curve_only_identities_past_the_full_arrays_are_refused` (the port only).
+
+### U-86. An enum instance no constructor constructed reads uninitialized memory
+
+- **Upstream:** `OCIO.TransformDirection.__new__(OCIO.TransformDirection)` allocates an
+  instance whose value pybind11 never initializes (no `__init__` or `__setstate__` runs), and
+  its methods read it: through the wheel, `int(t)` gave 3 and `repr(t)` printed whatever the
+  memory held (the verifier's probes of p6-core).
+- **Who notices:** Python code that calls `__new__` of an enum directly, without `__init__`.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises RuntimeError "PyOpenColorIO.PyOpenColorIO.ViewType: the instance
+  was never constructed (...)" from every method that reads the value, in `p6-core`
+  (`crates/ocio-py/src/pybind11.rs`, `read_value`); `constructors_oracle.rs`,
+  `undefined_behaviour_raises_the_ports_errors` (the port only).
+
+### U-87. Constructing `pybind11_object` itself aborts the process
+
+- **Upstream:** `pybind11_builtins.pybind11_object()` makes an instance of a type pybind11 never
+  registered, and the wheel's process aborts (pybind11 fails with "instance allocation failed:
+  new instance has no pybind11-registered base types" where no C++ exception may leave), as
+  does an instance of a Python class deriving from `pybind11_object` only (p6-core-2's
+  probes). `OCIO.TRANSFORM_DIR_INVERSE.__reduce__()` does the same: copyreg's `_reduce_ex`
+  calls the first base whose `__new__` is its own, `pybind11_object` (the verifier's probes of
+  p6-core).
+- **Who notices:** Python code that pickles an enum with protocol 0 or 1, or calls
+  `__reduce__()` (protocol 2 and up, `copy` and `pickle`'s default, work).
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises TypeError "pybind11_builtins.pybind11_object: pybind11 makes no
+  instance of a class without a class of the module among its bases (the wheel's process
+  aborts)" (the class's C name first), in `p6-core`
+  (`crates/ocio-py/src/pybind11.rs`, `Pybind11Object::new`); `constructors_oracle.rs`,
+  `undefined_behaviour_raises_the_ports_errors` (the port only).
+
+### U-96. A sequence whose third `len()` raises is read with the exception set
+
+- **Upstream:** pybind11's `std::array` caster calls the sequence's `len()` three times: to
+  check the size, to reserve, and for the end of its index loop (`sequence::end()`, which
+  doesn't check `PySequence_Size`'s error). When the third raises, it reads the items with
+  that exception still set, which CPython doesn't allow: through the wheel,
+  `MatrixTransform().setOffset(x)` raised `SystemError` "<method 'append' of 'list' objects>
+  returned a result with an exception set" from whatever the item's `__getitem__` called
+  first (the p6-core-2 probes).
+- **Who notices:** Python code that passes a sequence whose `__len__` raises on its third call
+  to a function taking a fixed-size array.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises RuntimeError "the sequence's third len() raised, and pybind11
+  reads its items with that exception set (...)", the `len()` error as its cause, in
+  `p6-core` (`crates/ocio-py/src/dispatch.rs`, the `[T; N]` caster); `dispatch_oracle.rs`,
+  `arrays_refuse_what_the_wheel_reads_undefined` (the port only).
+
+### U-97. A sequence whose third `len()` shrinks leaves an array partly unread
+
+- **Upstream:** the same caster reads the items up to the third `len()` into a vector and then
+  copies the array's `N` values from it (`vector_to_array`), whether or not it holds `N`: a
+  third `len()` under `N` copies memory the vector reserved but never initialized (through
+  the wheel, `setOffset` of a sequence whose `len()`s were 4, 4, 2 gave `[0.0, 1.0, 0.0,
+  0.0]`, the last two whatever the memory held).
+- **Who notices:** Python code that passes a sequence whose `__len__` changes between calls to
+  a function taking a fixed-size array.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises RuntimeError "the sequence's third len() gave 2, and pybind11
+  reads the 4 values of the array from memory it didn't initialize (...)", in `p6-core`
+  (`crates/ocio-py/src/dispatch.rs`, the `[T; N]` caster); `dispatch_oracle.rs`,
+  `arrays_refuse_what_the_wheel_reads_undefined` (the port only).
+
+### U-98. pybind11's function record aborts the process when Python makes, initializes or fails to pickle one
+
+- **Upstream:** the type of every function's `__self__`, pybind11's function record
+  (`pybind11_builtins.pybind11_detail_function_record_v1_...`), has a `__new__` and an
+  `__init__` that pybind11 never means Python to call: `type(OCIO.GetVersion.__self__)()`,
+  `type(r).__new__(type(r))` and `r.__init__()` abort the wheel's process (exit 127 on
+  Windows). Its `__reduce_ex__` raises nothing Python can catch either: when the module's
+  `__module__` or `__name__` isn't a str (`"..." + 5`), or `eval` is gone from the builtins,
+  the Python error leaves the C function as a C++ exception and the process aborts (the
+  verifier's probes of p6-core, and p6-core-2's).
+- **Who notices:** Python code that instantiates the type of a function's `__self__`, or
+  pickles a module function after renaming its module to something that isn't a str.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises TypeError "<record type>: pybind11's function records are made
+  (initialized) by pybind11 only (the wheel's process aborts; ...)", and "<record type>:
+  pickling a function record raised an error, which aborts the wheel's process (...)" with
+  the error as its cause, in `p6-core` (`crates/ocio-py/src/pybind11.rs`, `FunctionRecord`);
+  `constructors_oracle.rs`, `undefined_behaviour_raises_the_ports_errors` (the port only).
+
+### U-99. A keyword name that isn't UTF-8 in a refused call aborts the process
+
+- **Upstream:** when no overload takes a call, pybind11's dispatcher writes each keyword's name
+  into its error (`"{}=".format(name)` made a C++ string) outside the `try` that guards the
+  arguments' reprs, so the exception a name with a lone surrogate raises leaves the C
+  function: `OCIO.GetEnvVariable(**{chr(0xd800): 1})` aborts the wheel's process (exit 127
+  on Windows; the verifier's probes of p6-core).
+- **Who notices:** Python code that passes a keyword argument whose name holds a lone surrogate
+  to a call no overload takes.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises TypeError "GetEnvVariable(): a keyword argument's name pybind11
+  can't write in its error (the wheel's process aborts; ...)", the formatting error as its
+  cause, in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `incompatible`);
+  `constructors_oracle.rs`, `undefined_behaviour_raises_the_ports_errors` (the port only).
+
+### U-100. Replacing or deleting an enum's `value` property corrupts the heap
+
+- **Upstream:** pybind11 makes each enum's `value` property (`def_property_readonly`, its
+  getter a function without a scope), and freeing that getter corrupts the wheel's heap:
+  `OCIO.TransformDirection.value = 3`, `del OCIO.TransformDirection.value`,
+  `type(OCIO.TransformDirection).__setattr__(OCIO.TransformDirection, 'value', 3)`,
+  `OCIO.Interpolation.value = 3`, or another enum's `value` property put in its place, end the
+  wheel's process: on Windows with 0xC0000374 (heap corruption), on Linux with glibc's abort
+  "free(): invalid pointer" (a pointer the heap never gave out freed); at once, or, while
+  another reference keeps the property or its getter alive, when that reference goes (at the
+  latest when the interpreter exits). Re-initializing the property
+  (`OCIO.TransformDirection.__dict__['value'].__init__(None)`) frees the getter too. The
+  enums' other properties and methods survive being replaced or deleted (the verifier's
+  probes of p6-core round 3, and the implementer's, on both platforms).
+- **Who notices:** Python code that monkeypatches or deletes an enum class's `value`.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises RuntimeError "PyOpenColorIO.PyOpenColorIO.TransformDirection:
+  replacing or deleting an enum's `value` property frees its getter, which corrupts the
+  wheel's heap (docs/improvements.md, U-100)" from the metatype's `__setattr__` and
+  `__delattr__` (`setattr`, `del`, `type(cls).__setattr__`, a `str` subclass's name too) when
+  the class's own dictionary holds the property and the new value isn't the property itself,
+  in `p6-core` (`crates/ocio-py/src/pybind11.rs`, `frees_value_getter`);
+  `metatype_oracle.rs`, `replacing_an_enum_value_property_raises_the_ports_error` (the port
+  only). What doesn't go through the metatype the port can't refuse, and returns normally:
+  `type.__setattr__(cls, 'value', ...)` (which the wheel refuses, D-7) and the property's own
+  `__init__`. It also refuses a replacement the wheel survives, when the property stays
+  reachable for the rest of the process (under another name of the class, say).

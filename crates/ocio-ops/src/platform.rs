@@ -459,12 +459,29 @@ pub fn is_env_present(name: impl AsRef<[u8]>) -> bool {
     getenv(name).is_some()
 }
 
-/// The value of the environment variable `name`, or empty if it isn't set.
+thread_local! {
+    /// `GetEnvVariable`'s `thread_local std::string value`.
+    static GET_ENV_VARIABLE_VALUE: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The value of the environment variable `name`, or empty if it isn't set. For an empty
+/// `name` (or one that starts with a NUL), the value this function last returned on this
+/// thread: upstream's `Getenv` leaves its output alone then, and `GetEnvVariable` returns its
+/// thread-local string (docs/improvements.md, I-224).
 ///
 /// Port of `GetEnvVariable` (src/OpenColorIO/Platform.cpp:23-28 @ v2.5.2).
 #[doc(alias = "GetEnvVariable")]
 pub fn get_env_variable(name: impl AsRef<[u8]>) -> Vec<u8> {
-    getenv(name).unwrap_or_default()
+    let name = c_str(name.as_ref());
+    GET_ENV_VARIABLE_VALUE.with(|value| {
+        let mut value = value.borrow_mut();
+        // Platform::Getenv (Platform.cpp:50-53) returns before writing `value` for an empty
+        // name; otherwise it writes the variable's value, or clears it (85-89, 93).
+        if !name.is_empty() {
+            *value = getenv(name).unwrap_or_default();
+        }
+        value.clone()
+    })
 }
 
 /// Sets the environment variable `name` to `value` (`None` is upstream's null pointer, the

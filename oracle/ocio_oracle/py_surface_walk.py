@@ -75,22 +75,33 @@ def _value(v):
     return out
 
 
+def _qualname(f):
+    """A callable's __qualname__ (a builtin function's names the type of its __self__), or
+    None when it has none."""
+    q = getattr(f, "__qualname__", None)
+    return _text(q) if isinstance(q, str) else None
+
+
 def _function(v):
-    """A function, method, static method or property: its kind and docstrings."""
+    """A function, method, static method or property: its kind, docstrings and qualified
+    names."""
     out = {"kind": type(v).__name__}
     if isinstance(v, property):
         out["doc"] = _doc(v)
         out["getter"] = v.fget is not None
         out["setter"] = v.fset is not None
         out["deleter"] = v.fdel is not None
-        for name, f in (("getter_doc", v.fget), ("setter_doc", v.fset)):
+        for name, f in (("getter", v.fget), ("setter", v.fset)):
             if f is not None:
-                out[name] = _doc(f)
+                out[name + "_doc"] = _doc(f)
+                out[name + "_qualname"] = _qualname(f)
     elif isinstance(v, (staticmethod, classmethod)):
         out["function_kind"] = type(v.__func__).__name__
         out["doc"] = _doc(v.__func__)
+        out["qualname"] = _qualname(v.__func__)
     else:
         out["doc"] = _doc(v)
+        out["qualname"] = _qualname(v)
     return out
 
 

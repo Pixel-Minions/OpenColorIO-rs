@@ -270,6 +270,17 @@ pub(crate) fn ported_markers() -> Result<BTreeMap<(&'static str, String), Vec<St
 struct Ratchet {
     ported_cpu: usize,
     ported_gpu: usize,
+    /// Upstream Python test functions listed as passing (`py-port/passing.txt`); absent from
+    /// a docs/ratchet.toml older than the list.
+    #[serde(default)]
+    passing_python: usize,
+}
+
+/// Whether any count of `now` is below `base`'s.
+fn went_down(now: &Ratchet, base: &Ratchet) -> bool {
+    now.ported_cpu < base.ported_cpu
+        || now.ported_gpu < base.ported_gpu
+        || now.passing_python < base.passing_python
 }
 
 struct Counts {
@@ -277,6 +288,49 @@ struct Counts {
     ported: BTreeSet<(&'static str, String)>,
     not_applicable: BTreeSet<String>,
     unknown_markers: Vec<String>,
+    /// The upstream Python test functions `py-port/passing.txt` lists.
+    passing_python: BTreeSet<String>,
+}
+
+/// The list of upstream Python test functions that pass against the port's module, run
+/// unmodified (`cargo xtask py-suite` checks it and `--update` writes it): one
+/// "File.py::Class.test_name" per line, sorted, as `cargo xtask upstream-tests` names them.
+pub(crate) const PASSING_PYTHON: &str = "py-port/passing.txt";
+
+/// The functions `py-port/passing.txt` lists, and its lines that aren't upstream test
+/// functions, or are out of order or repeated.
+pub(crate) fn passing_python() -> Result<(BTreeSet<String>, Vec<String>), String> {
+    let path = paths::workspace_root().join(PASSING_PYTHON);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{PASSING_PYTHON}: {e}")),
+    };
+    let known: BTreeSet<String> = upstream_python_tests().into_iter().collect();
+    Ok(check_passing_list(&text, &known))
+}
+
+/// [`passing_python`] of the list's `text`, against the upstream functions `known`.
+fn check_passing_list(text: &str, known: &BTreeSet<String>) -> (BTreeSet<String>, Vec<String>) {
+    let mut listed = BTreeSet::new();
+    let mut problems = Vec::new();
+    let mut previous: Option<&str> = None;
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if !known.contains(line) {
+            problems.push(format!(
+                "python test {line:?} in {PASSING_PYTHON} is not an upstream test function"
+            ));
+        } else if previous.is_some_and(|p| p >= line) {
+            problems.push(format!(
+                "{PASSING_PYTHON}: {line:?} is out of order or repeated (the list is sorted)"
+            ));
+        } else {
+            listed.insert(line.to_string());
+            previous = Some(line);
+        }
+    }
+    (listed, problems)
 }
 
 fn counts() -> Result<Counts, String> {
@@ -301,11 +355,14 @@ fn counts() -> Result<Counts, String> {
         .iter()
         .map(|n| n.test.clone())
         .collect();
+    let (passing_python, problems) = passing_python()?;
+    unknown_markers.extend(problems);
     Ok(Counts {
         upstream,
         ported,
         not_applicable,
         unknown_markers,
+        passing_python,
     })
 }
 
@@ -387,6 +444,7 @@ pub(crate) fn ratchet(mode: RatchetMode, baseline: &Baseline) -> Result<(), Stri
     let now = Ratchet {
         ported_cpu: c.ported.iter().filter(|(s, _)| *s == "cpu").count(),
         ported_gpu: c.ported.iter().filter(|(s, _)| *s == "gpu").count(),
+        passing_python: c.passing_python.len(),
     };
     // What this checkout commits: `--main` requires it current, and `--update` rewrites it.
     let committed: Option<Ratchet> = match std::fs::read_to_string(ratchet_path()) {
@@ -398,10 +456,16 @@ pub(crate) fn ratchet(mode: RatchetMode, baseline: &Baseline) -> Result<(), Stri
         (Baseline::Committed, RatchetMode::Update, None) => (Ratchet::default(), "none".into()),
         _ => baseline.load()?,
     };
-    if now.ported_cpu < base.ported_cpu || now.ported_gpu < base.ported_gpu {
+    if went_down(&now, &base) {
         return Err(format!(
-            "ported upstream tests went down: cpu {} -> {}, gpu {} -> {} (baseline: {from})",
-            base.ported_cpu, now.ported_cpu, base.ported_gpu, now.ported_gpu
+            "ported upstream tests went down: cpu {} -> {}, gpu {} -> {}, python {} -> {} \
+             (baseline: {from})",
+            base.ported_cpu,
+            now.ported_cpu,
+            base.ported_gpu,
+            now.ported_gpu,
+            base.passing_python,
+            now.passing_python
         ));
     }
     match mode {
@@ -416,9 +480,15 @@ pub(crate) fn ratchet(mode: RatchetMode, baseline: &Baseline) -> Result<(), Stri
             Some(committed) if committed == now => {}
             Some(committed) => {
                 return Err(format!(
-                    "docs/ratchet.toml is stale: it records cpu {}, gpu {}; cpu {}, gpu {} are \
-                     ported. Run `cargo xtask ratchet --update` (`cargo xtask land` does)",
-                    committed.ported_cpu, committed.ported_gpu, now.ported_cpu, now.ported_gpu
+                    "docs/ratchet.toml is stale: it records cpu {}, gpu {}, python {}; cpu {}, \
+                     gpu {}, python {} are ported. Run `cargo xtask ratchet --update` \
+                     (`cargo xtask land` does)",
+                    committed.ported_cpu,
+                    committed.ported_gpu,
+                    committed.passing_python,
+                    now.ported_cpu,
+                    now.ported_gpu,
+                    now.passing_python
                 ));
             }
             None => return Err("docs/ratchet.toml is missing".into()),
@@ -436,8 +506,14 @@ pub(crate) fn ratchet(mode: RatchetMode, baseline: &Baseline) -> Result<(), Stri
         }
     }
     println!(
-        "ratchet: cpu {} (baseline {}), gpu {} (baseline {}); baseline: {from}",
-        now.ported_cpu, base.ported_cpu, now.ported_gpu, base.ported_gpu
+        "ratchet: cpu {} (baseline {}), gpu {} (baseline {}), python {} (baseline {}); \
+         baseline: {from}",
+        now.ported_cpu,
+        base.ported_cpu,
+        now.ported_gpu,
+        base.ported_gpu,
+        now.passing_python,
+        base.passing_python
     );
     Ok(())
 }
@@ -495,7 +571,8 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     );
     let _ = writeln!(
         md,
-        "| Upstream Python tests passing (run unmodified) | 0 | 0 | {} |",
+        "| Upstream Python tests passing (run unmodified) | {} | 0 | {} |",
+        c.passing_python.len(),
         python.len()
     );
     let files_done = map.files.iter().filter(|e| e.status == "done").count();
@@ -544,11 +621,12 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     std::fs::create_dir_all(path.parent().expect("docs dir")).map_err(|e| e.to_string())?;
     std::fs::write(&path, md).map_err(|e| e.to_string())?;
     println!(
-        "parity: cpu {}/{}, gpu {}/{}, python 0/{}",
+        "parity: cpu {}/{}, gpu {}/{}, python {}/{}",
         ported("cpu"),
         total("cpu"),
         ported("gpu"),
         total("gpu"),
+        c.passing_python.len(),
         python.len()
     );
     Ok(())
@@ -557,6 +635,41 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ratchet_goes_down_when_any_count_does() {
+        let r = |cpu, gpu, python| Ratchet {
+            ported_cpu: cpu,
+            ported_gpu: gpu,
+            passing_python: python,
+        };
+        let base = r(10, 5, 2);
+        assert!(!went_down(&r(10, 5, 2), &base));
+        assert!(!went_down(&r(11, 6, 3), &base));
+        assert!(went_down(&r(9, 5, 2), &base));
+        assert!(went_down(&r(10, 4, 2), &base));
+        assert!(went_down(&r(10, 5, 1), &base));
+    }
+
+    #[test]
+    fn the_passing_python_list_names_upstream_functions_in_order() {
+        let known: BTreeSet<String> = ["A.py::A.test_a", "A.py::A.test_b", "B.py::B.test_c"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let (listed, problems) = check_passing_list("A.py::A.test_a\r\nB.py::B.test_c\n", &known);
+        assert_eq!(listed.len(), 2);
+        assert!(problems.is_empty(), "{problems:?}");
+        let (listed, problems) = check_passing_list(
+            "A.py::A.test_b\nA.py::A.test_a\nA.py::A.test_b\nX.py::X.test_x\n",
+            &known,
+        );
+        assert_eq!(listed, BTreeSet::from(["A.py::A.test_b".to_string()]));
+        assert_eq!(problems.len(), 3, "{problems:?}");
+        assert!(problems[0].contains("A.py::A.test_a") && problems[0].contains("order"));
+        assert!(problems[1].contains("A.py::A.test_b") && problems[1].contains("order"));
+        assert!(problems[2].contains("X.py::X.test_x") && problems[2].contains("not an upstream"));
+    }
 
     #[test]
     fn preprocess_skips_disabled_code() {

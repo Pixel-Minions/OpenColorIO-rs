@@ -244,8 +244,10 @@ fn pair_identity_replacement(op1: &Op, op2: &Op) -> Result<Op> {
         | OpData::Matrix(_)
         | OpData::Range(_)
         | OpData::Exponent(_)
+        | OpData::GradingTone(_)
         | OpData::GradingRgbCurve(_)
         | OpData::ExposureContrast(_)
+        | OpData::GradingPrimary(_)
         | OpData::Lut3D(_)
         | OpData::Reference(_)
         | OpData::NoOp(_) => op1.get_identity_replacement(),
@@ -414,8 +416,10 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> Result<i32> {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
+            | OpData::GradingPrimary(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => None,
         };
@@ -478,8 +482,10 @@ fn is_forward_lut1d(op: &Op) -> bool {
         | OpData::Matrix(_)
         | OpData::Range(_)
         | OpData::Exponent(_)
+        | OpData::GradingTone(_)
         | OpData::GradingRgbCurve(_)
         | OpData::ExposureContrast(_)
+        | OpData::GradingPrimary(_)
         | OpData::Lut3D(_)
         | OpData::Reference(_)
         | OpData::NoOp(_) => false,
