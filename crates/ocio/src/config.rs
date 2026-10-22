@@ -290,6 +290,13 @@ enum InactiveType {
 pub struct CurrentContext(Arc<RwLock<Arc<Context>>>);
 
 impl CurrentContext {
+    /// Whether both handles share one context: the Python module's identity of the context
+    /// object upstream's `getCurrentContext` returns.
+    #[doc(hidden)]
+    pub fn ptr_eq(&self, other: &CurrentContext) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     fn new(context: Arc<Context>) -> CurrentContext {
         CurrentContext(Arc::new(RwLock::new(context)))
     }
@@ -344,6 +351,14 @@ impl<T> Clone for ConfigRules<T> {
 }
 
 impl<T: Clone> ConfigRules<T> {
+    /// Whether both handles share one rules object (a config's `setFileRules` and
+    /// `setViewingRules` give it a new one): the Python module's identity of the object
+    /// upstream's `getFileRules` and `getViewingRules` return.
+    #[doc(hidden)]
+    pub fn ptr_eq(&self, other: &ConfigRules<T>) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     fn new(rules: T) -> ConfigRules<T> {
         ConfigRules(Arc::new(RwLock::new(Arc::new(rules))))
     }
@@ -514,13 +529,13 @@ pub struct Config {
     /// `m_activeViewsEnvOverride`: the views of `OCIO_ACTIVE_VIEWS`.
     active_views_env_override: StringVec,
     /// `m_looksList`.
-    looks_list: Vec<Look>,
+    looks_list: Vec<Arc<Look>>,
     /// `m_viewTransforms`.
-    view_transforms: Vec<ViewTransform>,
+    view_transforms: Vec<Arc<ViewTransform>>,
     /// `m_defaultViewTransform`: the name of the default view transform.
     default_view_transform: Vec<u8>,
     /// `m_allNamedTransforms`: all the named transforms, active or not.
-    all_named_transforms: Vec<NamedTransform>,
+    all_named_transforms: Vec<Arc<NamedTransform>>,
     /// `m_activeNamedTransformNames`.
     active_named_transform_names: StringVec,
     /// `m_inactiveNamedTransformNames`.
@@ -565,10 +580,10 @@ impl Clone for Config {
             inactive_color_space_names_env: self.inactive_color_space_names_env.clone(),
             inactive_color_space_names_conf: self.inactive_color_space_names_conf.clone(),
             roles: self.roles.clone(),
-            looks_list: self.looks_list.clone(),
-            view_transforms: self.view_transforms.clone(),
+            looks_list: deep_copy(&self.looks_list),
+            view_transforms: deep_copy(&self.view_transforms),
             default_view_transform: self.default_view_transform.clone(),
-            all_named_transforms: self.all_named_transforms.clone(),
+            all_named_transforms: deep_copy(&self.all_named_transforms),
             active_named_transform_names: self.active_named_transform_names.clone(),
             inactive_named_transform_names: self.inactive_named_transform_names.clone(),
             displays: self.displays.clone(),
@@ -595,6 +610,26 @@ impl Clone for Config {
         );
         config
     }
+}
+
+/// The pointer of `held` that `obj` is the object of.
+fn arc_of<T>(held: &[Arc<T>], obj: &T) -> Option<Arc<T>> {
+    held.iter().find(|h| std::ptr::eq(&***h, obj)).cloned()
+}
+
+/// Replaces the object of `held` behind `old` with `new`, in its place: the new pointer, or
+/// `None` when `held` no longer holds `old`.
+fn replace_as_is<T>(held: &mut [Arc<T>], old: &Arc<T>, new: T) -> Option<Arc<T>> {
+    let slot = held.iter_mut().find(|h| Arc::ptr_eq(h, old))?;
+    *slot = Arc::new(new);
+    Some(slot.clone())
+}
+
+/// Copies of `held`, each behind a pointer of its own (`createEditableCopy` of each, as
+/// `Config::Impl::operator=` copies the looks, view transforms and named transforms,
+/// Config.cpp:401-438 @ v2.5.2).
+fn deep_copy<T: Clone>(held: &[Arc<T>]) -> Vec<Arc<T>> {
+    held.iter().map(|t| Arc::new((**t).clone())).collect()
 }
 
 /// The C library's `strerror` of an I/O error: its text without Rust's " (os error N)".
@@ -1451,6 +1486,7 @@ impl Config {
     fn impl_named_transform(&self, name: &[u8]) -> Option<&NamedTransform> {
         self.all_named_transforms
             .get(self.impl_named_transform_index(name))
+            .map(|nt| &**nt)
     }
 
     /// The index of the named transform whose name, or else one of whose aliases, is `name`,
@@ -3930,7 +3966,7 @@ impl Config {
             NamedTransformVisibility::All => self
                 .all_named_transforms
                 .get(index)
-                .map_or(&[], NamedTransform::name),
+                .map_or(&[], |nt| nt.name()),
             NamedTransformVisibility::Active => self
                 .active_named_transform_names
                 .get(index)
@@ -4154,9 +4190,9 @@ impl Config {
                     .concat(),
                 ));
             }
-            self.all_named_transforms[replace_idx] = nt.clone();
+            self.all_named_transforms[replace_idx] = Arc::new(nt.clone());
         } else {
-            self.all_named_transforms.push(nt.clone());
+            self.all_named_transforms.push(Arc::new(nt.clone()));
         }
 
         self.reset_cache_ids();
@@ -4213,6 +4249,7 @@ impl Config {
         self.looks_list
             .iter()
             .find(|look| lower(look.name()) == namelower)
+            .map(|look| &**look)
     }
 
     /// Port of `Config::getNumLooks` (src/OpenColorIO/Config.cpp:4478-4481 @ v2.5.2).
@@ -4229,7 +4266,7 @@ impl Config {
         usize::try_from(index)
             .ok()
             .and_then(|i| self.looks_list.get(i))
-            .map_or(&[], Look::name)
+            .map_or(&[], |l| l.name())
     }
 
     /// Adds a copy of `look`, or replaces the look of the same name (ignoring case).
@@ -4250,9 +4287,9 @@ impl Config {
             .iter()
             .position(|l| lower(l.name()) == namelower)
         {
-            Some(i) => self.looks_list[i] = look.clone(),
+            Some(i) => self.looks_list[i] = Arc::new(look.clone()),
             // Otherwise, add it
-            None => self.looks_list.push(look.clone()),
+            None => self.looks_list.push(Arc::new(look.clone())),
         }
 
         self.reset_cache_ids();
@@ -4286,6 +4323,7 @@ impl Config {
         self.view_transforms
             .iter()
             .find(|vt| lower(vt.name()) == namelower)
+            .map(|vt| &**vt)
     }
 
     /// The name of the view transform at `index`; `""` outside them.
@@ -4297,7 +4335,7 @@ impl Config {
         usize::try_from(index)
             .ok()
             .and_then(|i| self.view_transforms.get(i))
-            .map_or(&[], ViewTransform::name)
+            .map_or(&[], |vt| vt.name())
     }
 
     /// The default view transform from the scene reference space to the display one: the
@@ -4321,6 +4359,7 @@ impl Config {
         self.view_transforms
             .iter()
             .find(|vt| vt.reference_space_type() == ReferenceSpaceType::Scene)
+            .map(|vt| &**vt)
     }
 
     /// Port of `Config::getDefaultViewTransformName` (src/OpenColorIO/Config.cpp:4579-4582 @
@@ -4377,9 +4416,9 @@ impl Config {
             .iter()
             .position(|vt| lower(vt.name()) == namelower)
         {
-            Some(i) => self.view_transforms[i] = view_transform.clone(),
+            Some(i) => self.view_transforms[i] = Arc::new(view_transform.clone()),
             // Otherwise, add it.
-            None => self.view_transforms.push(view_transform.clone()),
+            None => self.view_transforms.push(Arc::new(view_transform.clone())),
         }
 
         self.reset_cache_ids();
@@ -4392,6 +4431,93 @@ impl Config {
         self.view_transforms.clear();
 
         self.reset_cache_ids();
+    }
+
+    // The objects the config holds, as the Python module shares them /////////////////////////
+
+    /// The pointer the config holds `cs` behind, when `cs` is one of its color spaces (a
+    /// reference [`Config::color_space`] or another of its getters gave): its identity, as
+    /// upstream's `ColorSpaceRcPtr`.
+    ///
+    /// For the Python module: upstream's getters return the config's own objects, which a
+    /// Python caller can change (`config.getColorSpace(name).setDescription(...)` changes the
+    /// config); the module keeps an object of its own for each one Python holds and writes it
+    /// back with [`Config::replace_color_space_as_is`].
+    #[doc(hidden)]
+    pub fn color_space_arc(&self, cs: &ColorSpace) -> Option<Arc<ColorSpace>> {
+        self.all_color_spaces.arc_of(cs)
+    }
+
+    /// Replaces the color space `old` (by identity) with `new` in its place, as a change
+    /// through upstream's pointer to it does: none of what the config computed from it
+    /// changes (its cache IDs, its processors, its validation, the lists of active and
+    /// inactive names). The new color space's pointer, or `None` when the config no longer
+    /// holds `old`. For the Python module (see [`Config::color_space_arc`]).
+    #[doc(hidden)]
+    pub fn replace_color_space_as_is(
+        &mut self,
+        old: &Arc<ColorSpace>,
+        new: ColorSpace,
+    ) -> Option<Arc<ColorSpace>> {
+        self.all_color_spaces.replace_as_is(old, new)
+    }
+
+    /// [`Config::color_space_arc`] of a look the config holds.
+    #[doc(hidden)]
+    pub fn look_arc(&self, look: &Look) -> Option<Arc<Look>> {
+        arc_of(&self.looks_list, look)
+    }
+
+    /// [`Config::replace_color_space_as_is`] of a look.
+    #[doc(hidden)]
+    pub fn replace_look_as_is(&mut self, old: &Arc<Look>, new: Look) -> Option<Arc<Look>> {
+        replace_as_is(&mut self.looks_list, old, new)
+    }
+
+    /// [`Config::color_space_arc`] of a view transform the config holds.
+    #[doc(hidden)]
+    pub fn view_transform_arc(&self, vt: &ViewTransform) -> Option<Arc<ViewTransform>> {
+        arc_of(&self.view_transforms, vt)
+    }
+
+    /// [`Config::replace_color_space_as_is`] of a view transform.
+    #[doc(hidden)]
+    pub fn replace_view_transform_as_is(
+        &mut self,
+        old: &Arc<ViewTransform>,
+        new: ViewTransform,
+    ) -> Option<Arc<ViewTransform>> {
+        replace_as_is(&mut self.view_transforms, old, new)
+    }
+
+    /// [`Config::color_space_arc`] of a named transform the config holds.
+    #[doc(hidden)]
+    pub fn named_transform_arc(&self, nt: &NamedTransform) -> Option<Arc<NamedTransform>> {
+        arc_of(&self.all_named_transforms, nt)
+    }
+
+    /// [`Config::replace_color_space_as_is`] of a named transform.
+    #[doc(hidden)]
+    pub fn replace_named_transform_as_is(
+        &mut self,
+        old: &Arc<NamedTransform>,
+        new: NamedTransform,
+    ) -> Option<Arc<NamedTransform>> {
+        replace_as_is(&mut self.all_named_transforms, old, new)
+    }
+
+    /// A copy of the config as it is: [`Config`]'s `Clone` (`createEditableCopy`), whose
+    /// context keeps the environment mode (which `Context::createEditableCopy` resets, I-111).
+    ///
+    /// For the Python module, which holds the process's current config and the configs a Rust
+    /// application hands it as copies of its own (owner decision 2026-10-22: an `Arc<Config>`
+    /// can't be changed through Python, so the module's config is a snapshot of it).
+    #[doc(hidden)]
+    pub fn clone_as_is(&self) -> Config {
+        let copy = self.clone();
+        let mode = self.shared_context.get().environment_mode();
+        copy.shared_context.update(|c| c.set_environment_mode(mode));
+        copy
     }
 
     // File rules //////////////////////////////////////////////////////////////////////////////
@@ -6316,3 +6442,163 @@ impl Config {
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod python_identity_tests {
+    //! The hidden API of the objects a config holds, for the Python module: their identity,
+    //! their replacement as they are, the copies of the config and of its color space set.
+
+    use super::*;
+
+    fn config_with_objects() -> Config {
+        let mut config =
+            Arc::try_unwrap(Config::create_raw().unwrap()).unwrap_or_else(|a| (*a).clone());
+        let mut look = Look::new();
+        look.set_name("look");
+        look.set_process_space("raw");
+        config.add_look(&look).unwrap();
+        config
+    }
+
+    #[test]
+    fn a_held_color_space_has_an_identity_until_it_is_replaced_or_removed() {
+        let mut config = config_with_objects();
+        let held = config.color_space("raw").unwrap();
+        let arc = config.color_space_arc(held).unwrap();
+        assert!(std::ptr::eq(&*arc, held));
+        // A copy is no object of the config.
+        let copy = held.clone();
+        assert!(config.color_space_arc(&copy).is_none());
+
+        let cache_id = config.cache_id().unwrap();
+        let mut renamed = (*arc).clone();
+        renamed.set_description("changed");
+        let new = config.replace_color_space_as_is(&arc, renamed).unwrap();
+        assert!(!Arc::ptr_eq(&new, &arc));
+        assert_eq!(config.color_space("raw").unwrap().description(), b"changed");
+        // Nothing the config computed is reset: the same cache ID, the old pointer gone.
+        assert_eq!(config.cache_id().unwrap(), cache_id);
+        assert!(
+            config
+                .replace_color_space_as_is(&arc, (*new).clone())
+                .is_none()
+        );
+        config.remove_color_space("raw");
+        assert!(
+            config
+                .replace_color_space_as_is(&new, (*new).clone())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_rename_as_is_leaves_the_lists_of_names() {
+        let mut config = config_with_objects();
+        let arc = config
+            .color_space_arc(config.color_space("raw").unwrap())
+            .unwrap();
+        let mut renamed = (*arc).clone();
+        renamed.set_name("renamed");
+        config.replace_color_space_as_is(&arc, renamed).unwrap();
+        // The active names stay as they were computed (upstream: m_activeColorSpaceNames).
+        assert_eq!(config.color_space_name_by_index(0), b"raw");
+        assert!(config.color_space("renamed").is_some());
+    }
+
+    #[test]
+    fn looks_view_and_named_transforms_have_identities() {
+        let mut config = config_with_objects();
+        let look = config.look_arc(config.look("look").unwrap()).unwrap();
+        let mut changed = (*look).clone();
+        changed.set_description("d");
+        let new = config.replace_look_as_is(&look, changed).unwrap();
+        assert_eq!(config.look("look").unwrap().description(), b"d");
+        assert!(config.look_arc(&new).is_some());
+        assert!(config.look_arc(&Look::new()).is_none());
+
+        let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+        vt.set_name("vt");
+        vt.set_transform(
+            Some(&Transform::Matrix(Default::default())),
+            ocio_ops::open_color_types::ViewTransformDirection::ToReference,
+        )
+        .unwrap();
+        config.add_view_transform(&vt).unwrap();
+        let held = config
+            .view_transform_arc(config.view_transform("vt").unwrap())
+            .unwrap();
+        assert!(
+            config
+                .replace_view_transform_as_is(&held, vt.clone())
+                .is_some()
+        );
+        assert!(config.view_transform_arc(&vt).is_none());
+
+        let mut nt = NamedTransform::new();
+        nt.set_name("nt");
+        nt.set_transform(
+            Some(&Transform::Matrix(Default::default())),
+            TransformDirection::Forward,
+        )
+        .unwrap();
+        config.add_named_transform(&nt).unwrap();
+        let held = config
+            .named_transform_arc(config.named_transform("nt").unwrap())
+            .unwrap();
+        assert!(
+            config
+                .replace_named_transform_as_is(&held, nt.clone())
+                .is_some()
+        );
+        config.clear_named_transforms();
+        assert!(config.replace_named_transform_as_is(&held, nt).is_none());
+    }
+
+    #[test]
+    fn copies_hold_objects_of_their_own() {
+        let config = config_with_objects();
+        let copy = config.clone();
+        let cs = copy.color_space("raw").unwrap();
+        assert!(config.color_space_arc(cs).is_none());
+        assert!(copy.color_space_arc(cs).is_some());
+        let look = copy.look("look").unwrap();
+        assert!(config.look_arc(look).is_none());
+        let set = ColorSpaceSet::clone(&config.color_spaces(""));
+        assert!(
+            config
+                .color_space_arc(set.color_space_by_index(0).unwrap())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_copy_as_is_keeps_the_environment_mode() {
+        let mut config = config_with_objects();
+        config.set_environment_mode(EnvironmentMode::LoadAll);
+        assert_eq!(
+            config.clone_as_is().environment_mode(),
+            EnvironmentMode::LoadAll
+        );
+        assert!(
+            !config
+                .clone_as_is()
+                .current_context()
+                .ptr_eq(&config.current_context())
+        );
+    }
+
+    #[test]
+    fn rules_and_contexts_have_identities() {
+        let mut config = config_with_objects();
+        let rules = config.file_rules();
+        assert!(rules.ptr_eq(&config.file_rules()));
+        let copy = (*rules.get()).clone();
+        config.set_file_rules(&copy);
+        assert!(!rules.ptr_eq(&config.file_rules()));
+        let vr = config.viewing_rules();
+        assert!(vr.ptr_eq(&config.viewing_rules()));
+        let ctx = config.current_context();
+        assert!(ctx.ptr_eq(&config.current_context()));
+        assert!(!ctx.ptr_eq(&config.clone().current_context()));
+    }
+}
