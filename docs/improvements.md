@@ -3809,7 +3809,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (the dynamic property's `precompute`, building the op data) fails there.
 - **Status:** matched in `p2-rgbcurve` (2.6b), `grading_b_spline_curve.rs`; the GradingRGBCurve
   battery (2.6d) doesn't vary x coordinates (only y and the slopes), so it never sends
-  such a curve to the wheel; `grading_b_spline_curve_tests.rs` checks the error.
+  such a curve to the wheel; `grading_b_spline_curve_tests.rs` checks the error. `p5-transforms`
+  (5.5c): a GradingRGBCurveTransform's `setValue` and its YAML loader refuse such curves with
+  the same error; `tests/grading_rgb_curve_transform_oracle.rs` checks it, and its oracle
+  cases (and the YAML ones) leave NaN x coordinates out.
 
 ### U-45. The working directory when `_getcwd` fails
 

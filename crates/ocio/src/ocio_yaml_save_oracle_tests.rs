@@ -487,3 +487,48 @@ fn grading_primary_transforms_are_refused_in_version_1() {
         ],
     );
 }
+
+/// The GradingRGBCurveTransform's saver: a flow map when every curve is the default, a block
+/// map otherwise; the bypass; the curves that aren't the default or whose slopes aren't, as
+/// floats; special values and coordinates with more digits than the writer's precision.
+#[test]
+fn grading_rgb_curve_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2",
+        &[
+            "!<GradingRGBCurveTransform> {style: log}",
+            "!<GradingRGBCurveTransform> {style: linear, lintolog_bypass: true, direction: \
+             inverse, name: gc}",
+            "!<GradingRGBCurveTransform> {style: video, red: {control_points: [0, 0, 0.5, 0.5, \
+             1, 1.123456]}}",
+            "!<GradingRGBCurveTransform> {style: linear, red: {control_points: [-7, -7, 0, 0, 7, \
+             7], slopes: [1, 1, 1]}}",
+            "!<GradingRGBCurveTransform> {style: log, red: {control_points: [-0.2, 0, 0.5, 0.5, \
+             1.2, 1.5]}, green: {control_points: [0, 0, 0.2, 0.5, 1, 1.5]}, blue: \
+             {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1]}, master: \
+             {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}, direction: inverse}",
+            "!<GradingRGBCurveTransform> {style: log, green: {control_points: [0, .nan, 1, \
+             .inf], slopes: [-0.0, 1e-30]}}",
+            "!<GradingRGBCurveTransform> {style: log, green: {control_points: [0, \
+             1.1754944e-38, 0.30000001, 0.123456789, 1, 3.4028234e38], slopes: [1.0000001, \
+             0.99999994, 1e-45]}}",
+            "!<GradingRGBCurveTransform> {style: video, master: {control_points: [0, 0, 1, 1], \
+             slopes: [0, -0.0]}}",
+            "!<GroupTransform> {children: [!<GradingRGBCurveTransform> {style: log}, \
+             !<GradingRGBCurveTransform> {style: video, red: {control_points: [0, 0, 1, 2]}}]}",
+        ],
+    );
+}
+
+/// Version 1 configs refuse a GradingRGBCurveTransform (`checkVersionConsistency`), in a
+/// group too.
+#[test]
+fn grading_rgb_curve_transforms_are_refused_in_version_1() {
+    check_refused_v(
+        "1",
+        &[
+            "!<GradingRGBCurveTransform> {style: log}",
+            "!<GroupTransform> {children: [!<GradingRGBCurveTransform> {style: video}]}",
+        ],
+    );
+}

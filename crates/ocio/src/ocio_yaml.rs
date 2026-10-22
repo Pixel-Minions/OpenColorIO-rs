@@ -43,6 +43,10 @@ use ocio_ops::open_color_types::{
 use ocio_ops::open_color_types::{GradingStyle, grading_style_to_string};
 use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
 use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
+use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::GradingBSplineCurve;
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::{
+    GradingRgbCurve, default_curve, default_lin_curve,
+};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::grading_style_from_string;
 use ocio_ops::parse_utils::{
@@ -73,6 +77,7 @@ use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
 use crate::transforms::file_transform::FileTransform;
 use crate::transforms::fixed_function_transform::FixedFunctionTransform;
 use crate::transforms::grading_primary_transform::GradingPrimaryTransform;
+use crate::transforms::grading_rgb_curve_transform::GradingRgbCurveTransform;
 use crate::transforms::group_transform::GroupTransform;
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
@@ -1413,6 +1418,145 @@ fn load_grading_primary(node: &Node) -> LoadResult<GradingPrimaryTransform> {
     Ok(t)
 }
 
+/// A B-spline curve, the value of the key `parent`: a map of `control_points` (pairs of floats,
+/// required) and `slopes` (one float per control point read so far), read into `sc`. An
+/// unknown key is a warning naming the tag of the transform, `parent`'s.
+///
+/// Port of `load(const YAML::Node&, const YAML::Node&, GradingBSplineCurveRcPtr&)`
+/// (OCIOYaml.cpp:1929-1991 @ v2.5.2).
+fn load_b_spline_curve(parent: &Node, node: &Node, sc: &mut GradingBSplineCurve) -> LoadResult<()> {
+    if node.node_type()? == NodeType::Map {
+        let mut cp_ok = false;
+        for iter in node.iter() {
+            let key = iter.first.as_::<Vec<u8>>()?;
+            if iter.second.is_null()? || !iter.second.is_defined() {
+                continue;
+            }
+            match key.as_slice() {
+                b"control_points" => {
+                    let vals = load_vec_f32(&iter.second)?;
+                    let num_vals = vals.len();
+                    if num_vals % 2 != 0 {
+                        return Err(throw_value_error(
+                            node.tag()?,
+                            &iter.first,
+                            b"An even number of float values is required.",
+                        ));
+                    }
+                    let num_ct_pts = num_vals / 2;
+                    sc.set_num_control_points(num_ct_pts);
+                    for c in 0..num_ct_pts {
+                        let pt = sc.control_point_mut(c)?;
+                        pt.x = vals[2 * c];
+                        pt.y = vals[2 * c + 1];
+                    }
+                    cp_ok = true;
+                }
+                b"slopes" => {
+                    let vals = load_vec_f32(&iter.second)?;
+                    let num_vals = vals.len();
+                    let num_ct_pts = sc.num_control_points();
+                    if num_vals != num_ct_pts {
+                        return Err(throw_value_error(
+                            node.tag()?,
+                            &iter.first,
+                            b"Number of slopes must match number of control points.",
+                        ));
+                    }
+                    for (i, &val) in vals.iter().enumerate() {
+                        sc.set_slope(i, val)?;
+                    }
+                }
+                _ => log_unknown_key_warning(parent, &iter.first)?,
+            }
+        }
+
+        if !cp_ok {
+            return Err(throw_value_error_key(
+                parent,
+                b"control_points is required.",
+            ));
+        }
+        Ok(())
+    } else {
+        Err(throw_value_error_key(
+            parent,
+            b"The value needs to be a map.",
+        ))
+    }
+}
+
+/// A `GradingRGBCurveTransform`: `style`, `direction`, `lintolog_bypass`, the curves `red`,
+/// `green`, `blue` and `master`, and `name`. A curve not given is the default curve of the
+/// style the transform has at the end; the transform takes the curves, validated and fitted.
+/// An unknown key is a warning, "Unknown key in GradingRGBCurveTransform: 'key'.".
+///
+/// Port of `load(const YAML::Node&, GradingRGBCurveTransformRcPtr&)` (OCIOYaml.cpp:1993-2070
+/// @ v2.5.2).
+fn load_grading_rgb_curve(node: &Node) -> LoadResult<GradingRgbCurveTransform> {
+    check_duplicates(node)?;
+
+    let mut t = GradingRgbCurveTransform::new(GradingStyle::Log);
+
+    let mut red: Option<GradingBSplineCurve> = None;
+    let mut green: Option<GradingBSplineCurve> = None;
+    let mut blue: Option<GradingBSplineCurve> = None;
+    let mut master: Option<GradingBSplineCurve> = None;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        let curve = match key.as_slice() {
+            b"style" => {
+                let style = load_string(value)?;
+                t.set_style(grading_style_from_string(Some(c_str(&style)))?);
+                continue;
+            }
+            b"direction" => {
+                t.set_direction(load_direction(value)?);
+                continue;
+            }
+            b"lintolog_bypass" => {
+                t.set_bypass_lin_to_log(load_bool(value)?);
+                continue;
+            }
+            b"red" => &mut red,
+            b"green" => &mut green,
+            b"blue" => &mut blue,
+            b"master" => &mut master,
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+                continue;
+            }
+            _ => {
+                log_unknown_key_warning_in(node.tag()?, &iter.first)?;
+                continue;
+            }
+        };
+        let sc = curve.insert(GradingBSplineCurve::new(0));
+        load_b_spline_curve(&iter.first, value, sc)?;
+    }
+
+    let def_curve = if t.style() == GradingStyle::Lin {
+        default_lin_curve()
+    } else {
+        default_curve()
+    };
+
+    let red = red.unwrap_or_else(|| def_curve.clone());
+    let green = green.unwrap_or_else(|| def_curve.clone());
+    let blue = blue.unwrap_or_else(|| def_curve.clone());
+    let master = master.unwrap_or_else(|| def_curve.clone());
+    let curves = GradingRgbCurve::with_curves(&red, &green, &blue, &master);
+
+    t.set_value(&curves)?;
+    Ok(t)
+}
+
 /// A `FileTransform`: `src`, `cccid`, `cdl_style`, `interpolation`, `direction`.
 ///
 /// Port of `load(const YAML::Node&, FileTransformRcPtr&)` (OCIOYaml.cpp:1336-1382 @ v2.5.2).
@@ -1532,7 +1676,8 @@ fn load_leaf(node: &Node) -> LoadResult<Transform> {
         b"LogCameraTransform" => load_log_camera(node)?.into(),
         b"ExposureContrastTransform" => load_exposure_contrast(node)?.into(),
         b"GradingPrimaryTransform" => load_grading_primary(node)?.into(),
-        b"GradingRGBCurveTransform" | b"GradingToneTransform" | b"GradingHueCurveTransform" => {
+        b"GradingRGBCurveTransform" => load_grading_rgb_curve(node)?.into(),
+        b"GradingToneTransform" | b"GradingHueCurveTransform" => {
             return Err(not_ported_yet(&ty, "Phase 5"));
         }
         b"FixedFunctionTransform" => load_fixed_function(node)?.into(),
@@ -3346,6 +3491,73 @@ fn save_grading_primary(out: &mut Emitter, t: &GradingPrimaryTransform) {
     out.put(EndMap);
 }
 
+/// A B-spline curve as `param_name`'s flow map: its control points as floats, and its slopes
+/// unless they are the defaults.
+///
+/// Port of `save(YAML::Emitter&, const char*, const ConstGradingBSplineCurveRcPtr&)`
+/// (OCIOYaml.cpp:2072-2098 @ v2.5.2).
+fn save_b_spline_curve(out: &mut Emitter, param_name: &str, curve: &GradingBSplineCurve) {
+    let ct_pts: Vec<f32> = curve
+        .control_points()
+        .iter()
+        .flat_map(|pt| [pt.x, pt.y])
+        .collect();
+    out.put(Key).put(param_name);
+    out.put(Flow).put(BeginMap);
+    out.put(Key)
+        .put("control_points")
+        .put(Value)
+        .put(&ct_pts[..]);
+    if !curve.slopes_are_default() {
+        // (Number of slopes is always the same as control points.)
+        let slopes: Vec<f32> = curve.slopes().to_vec();
+        out.put(Key).put("slopes").put(Value).put(&slopes[..]);
+    }
+    out.put(EndMap);
+}
+
+/// A flow map when every curve is the style's default curve, else a block map: the name, the
+/// style, `lintolog_bypass` when set, each curve that isn't the default or whose slopes aren't.
+///
+/// Port of `save(YAML::Emitter&, ConstGradingRGBCurveTransformRcPtr)` (OCIOYaml.cpp:2100-2144
+/// @ v2.5.2).
+fn save_grading_rgb_curve(out: &mut Emitter, t: &GradingRgbCurveTransform) {
+    let vals = t.value();
+    let def_curve = if t.style() == GradingStyle::Lin {
+        default_lin_curve()
+    } else {
+        default_curve()
+    };
+    let use_line_breaks = vals.curves().iter().any(|curve| *curve != def_curve);
+
+    out.put(verbatim_tag("GradingRGBCurveTransform"));
+    if !use_line_breaks {
+        out.put(Flow);
+    }
+    out.put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    let style = t.style();
+    out.put(Key).put("style");
+    out.put(Value).put(Flow).put(grading_style_to_string(style));
+
+    if t.bypass_lin_to_log() {
+        out.put(Key).put("lintolog_bypass");
+        out.put(Value).put(Flow).put(true);
+    }
+
+    const CURVE_NAMES: [&str; 4] = ["red", "green", "blue", "master"];
+    for (curve, name) in vals.curves().iter().zip(CURVE_NAMES) {
+        if (*curve != def_curve) || !curve.slopes_are_default() {
+            save_b_spline_curve(out, name, curve);
+        }
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
 /// A block map: the name from version 2, the direction, then the children. It recurses once
 /// per nested group, in a small frame, as printing and validating do (U-60).
 ///
@@ -3567,6 +3779,7 @@ pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u3
         Transform::ExposureContrast(t) => save_exposure_contrast(out, t),
         Transform::FixedFunction(t) => save_fixed_function(out, t)?,
         Transform::GradingPrimary(t) => save_grading_primary(out, t),
+        Transform::GradingRgbCurve(t) => save_grading_rgb_curve(out, t),
         Transform::Group(t) => save_group(out, t, major_version)?,
         Transform::LogAffine(t) => save_log_affine(out, t),
         Transform::LogCamera(t) => save_log_camera(out, t),

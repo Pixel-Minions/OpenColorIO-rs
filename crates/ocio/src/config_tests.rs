@@ -8370,3 +8370,70 @@ fn grading_primary_serialization() {
         "'clamp' failed: At least one of the clamp values must be provided",
     );
 }
+
+/// Port of `OCIO_ADD_TEST(Config, grading_rgbcurve_serialization)` @ v2.5.2.
+#[test]
+fn grading_rgbcurve_serialization() {
+    let _env = EnvGuard::new();
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingRGBCurveTransform> {style: log}\n",
+            "        - !<GradingRGBCurveTransform> {style: log, direction: inverse}\n",
+            "        - !<GradingRGBCurveTransform> {style: linear, lintolog_bypass: true}\n",
+            "        - !<GradingRGBCurveTransform> {style: linear, direction: inverse}\n",
+            "        - !<GradingRGBCurveTransform> {name: test, style: video}\n",
+            "        - !<GradingRGBCurveTransform> {style: video, direction: inverse}\n",
+        );
+
+        // Write the config.
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingRGBCurveTransform>\n",
+            "          style: log\n",
+            "          red: {control_points: [0, 0, 0.5, 0.5, 1, 1.123456]}\n",
+            "        - !<GradingRGBCurveTransform>\n",
+            "          style: log\n",
+            "          red: {control_points: [0, 0, 0.5, 0.5, 1, 1.5]}\n",
+            "          green: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}\n",
+            "          direction: inverse\n",
+            "        - !<GradingRGBCurveTransform>\n",
+            "          style: linear\n",
+            "          lintolog_bypass: true\n",
+            "          red: {control_points: [0, 0, 0.1, 0.2, 0.5, 0.5, 0.7, 0.6, 1, 1.5]}\n",
+            "          master: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}\n",
+            "        - !<GradingRGBCurveTransform>\n",
+            "          style: video\n",
+            "          red: {control_points: [-0.2, 0, 0.5, 0.5, 1.2, 1.5]}\n",
+            "          green: {control_points: [0, 0, 0.2, 0.5, 1, 1.5]}\n",
+            "          blue: {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1]}\n",
+            "          master: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}\n",
+            "          direction: inverse\n",
+        );
+
+        // Write the config.
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<GradingRGBCurveTransform>\n",
+            "          style: log\n",
+            "          blue: {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1, 1]}\n",
+        );
+        let str = profile_v2_start() + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Number of slopes must match number of control points",
+        );
+    }
+}

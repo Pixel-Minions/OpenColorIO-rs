@@ -21,6 +21,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use ocio::{BSplineType, GradingBSplineCurve, GradingRgbCurve, RgbCurveType};
 use ocio::{
     Config, ExposureContrastStyle, FixedFunctionStyle, FormatMetadata, GroupTransform,
     Interpolation, Lut1DHueAdjust, NegativeStyle, OptimizationFlags, Processor, RangeStyle,
@@ -772,6 +773,18 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("isDynamic", Dumped::Bool(t.is_dynamic()));
             "GradingPrimaryTransform"
         }
+        Transform::GradingRgbCurve(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_GRADING_RGB_CURVE"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getStyle", dumped_enum(grading_style_name(t.style())));
+            put("getValue", dump_grading_rgb_curve(&t.value()));
+            put("getBypassLinToLog", Dumped::Bool(t.bypass_lin_to_log()));
+            put("isDynamic", Dumped::Bool(t.is_dynamic()));
+            "GradingRGBCurveTransform"
+        }
         other => panic!("no dump for {other:?}"),
     };
     (class.to_string(), getters)
@@ -1004,6 +1017,74 @@ pub(crate) fn dump_grading_primary(v: &GradingPrimary) -> Dumped {
             ("pivotBlack", Dumped::F64(v.pivot_black)),
             ("pivotWhite", Dumped::F64(v.pivot_white)),
             ("saturation", Dumped::F64(v.saturation)),
+        ],
+    )
+}
+
+/// A B-spline type, as PyOpenColorIO names it.
+pub(crate) fn b_spline_type_name(t: BSplineType) -> &'static str {
+    match t {
+        BSplineType::BSpline => "B_SPLINE",
+        BSplineType::DiagonalBSpline => "DIAGONAL_B_SPLINE",
+        BSplineType::HueHueBSpline => "HUE_HUE_B_SPLINE",
+        BSplineType::Periodic1BSpline => "PERIODIC_1_B_SPLINE",
+        BSplineType::Periodic0BSpline => "PERIODIC_0_B_SPLINE",
+        BSplineType::Horizontal1BSpline => "HORIZONTAL1_B_SPLINE",
+    }
+}
+
+/// A `GradingBSplineCurve`, as `checks.dump` writes it out: its control points (each a
+/// `GradingControlPoint` of properties `x` and `y`, floats the binding widens), its slopes and
+/// its spline type.
+pub(crate) fn dump_b_spline_curve(c: &GradingBSplineCurve) -> Dumped {
+    let points = c
+        .control_points()
+        .iter()
+        .map(|p| {
+            dumped_object(
+                "GradingControlPoint",
+                &[],
+                &[
+                    ("x", Dumped::F64(f64::from(p.x))),
+                    ("y", Dumped::F64(f64::from(p.y))),
+                ],
+            )
+        })
+        .collect();
+    dumped_object(
+        "GradingBSplineCurve",
+        &[
+            ("getControlPoints", Dumped::List(points)),
+            (
+                "getSlopes",
+                Dumped::List(
+                    c.slopes()
+                        .iter()
+                        .map(|&s| Dumped::F64(f64::from(s)))
+                        .collect(),
+                ),
+            ),
+            (
+                "getSplineType",
+                dumped_enum(b_spline_type_name(c.spline_type())),
+            ),
+        ],
+        &[],
+    )
+}
+
+/// A `GradingRGBCurve`, as `checks.dump` writes it out: `isIdentity`, and its four curves as
+/// properties.
+pub(crate) fn dump_grading_rgb_curve(v: &GradingRgbCurve) -> Dumped {
+    let c = |t| dump_b_spline_curve(v.curve(t).expect("an RGB curve type"));
+    dumped_object(
+        "GradingRGBCurve",
+        &[("isIdentity", Dumped::Bool(v.is_identity()))],
+        &[
+            ("blue", c(RgbCurveType::Blue)),
+            ("green", c(RgbCurveType::Green)),
+            ("master", c(RgbCurveType::Master)),
+            ("red", c(RgbCurveType::Red)),
         ],
     )
 }

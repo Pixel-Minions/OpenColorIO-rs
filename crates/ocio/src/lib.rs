@@ -88,6 +88,7 @@ pub use transforms::exposure_contrast_transform::ExposureContrastTransform;
 pub use transforms::file_transform::FileTransform;
 pub use transforms::fixed_function_transform::FixedFunctionTransform;
 pub use transforms::grading_primary_transform::GradingPrimaryTransform;
+pub use transforms::grading_rgb_curve_transform::GradingRgbCurveTransform;
 pub use transforms::group_transform::GroupTransform;
 pub use transforms::log_affine_transform::LogAffineTransform;
 pub use transforms::log_camera_transform::LogCameraTransform;

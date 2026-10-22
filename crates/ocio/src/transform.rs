@@ -46,6 +46,9 @@ use crate::transforms::fixed_function_transform::{
 use crate::transforms::grading_primary_transform::{
     GradingPrimaryTransform, build_grading_primary_op, create_grading_primary_transform,
 };
+use crate::transforms::grading_rgb_curve_transform::{
+    GradingRgbCurveTransform, build_grading_rgb_curve_op, create_grading_rgb_curve_transform,
+};
 use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
@@ -144,6 +147,8 @@ pub enum Transform {
     FixedFunction(FixedFunctionTransform),
     /// `GradingPrimaryTransform`.
     GradingPrimary(GradingPrimaryTransform),
+    /// `GradingRGBCurveTransform`.
+    GradingRgbCurve(GradingRgbCurveTransform),
     /// `GroupTransform`.
     Group(GroupTransform),
     /// `LogAffineTransform`.
@@ -227,6 +232,12 @@ impl From<FixedFunctionTransform> for Transform {
 impl From<GradingPrimaryTransform> for Transform {
     fn from(t: GradingPrimaryTransform) -> Transform {
         Transform::GradingPrimary(t)
+    }
+}
+
+impl From<GradingRgbCurveTransform> for Transform {
+    fn from(t: GradingRgbCurveTransform) -> Transform {
+        Transform::GradingRgbCurve(t)
     }
 }
 
@@ -319,6 +330,7 @@ impl Transform {
             Transform::File(_) => TransformType::File,
             Transform::FixedFunction(_) => TransformType::FixedFunction,
             Transform::GradingPrimary(_) => TransformType::GradingPrimary,
+            Transform::GradingRgbCurve(_) => TransformType::GradingRgbCurve,
             Transform::Group(_) => TransformType::Group,
             Transform::LogAffine(_) => TransformType::LogAffine,
             Transform::LogCamera(_) => TransformType::LogCamera,
@@ -347,6 +359,7 @@ impl Transform {
             Transform::File(t) => t.direction(),
             Transform::FixedFunction(t) => t.direction(),
             Transform::GradingPrimary(t) => t.direction(),
+            Transform::GradingRgbCurve(t) => t.direction(),
             Transform::Group(t) => t.direction(),
             Transform::LogAffine(t) => t.direction(),
             Transform::LogCamera(t) => t.direction(),
@@ -375,6 +388,7 @@ impl Transform {
             Transform::File(t) => t.set_direction(dir),
             Transform::FixedFunction(t) => t.set_direction(dir),
             Transform::GradingPrimary(t) => t.set_direction(dir),
+            Transform::GradingRgbCurve(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
             Transform::LogAffine(t) => t.set_direction(dir),
             Transform::LogCamera(t) => t.set_direction(dir),
@@ -404,6 +418,7 @@ impl Transform {
             Transform::File(t) => t.validate(),
             Transform::FixedFunction(t) => t.validate(),
             Transform::GradingPrimary(t) => t.validate(),
+            Transform::GradingRgbCurve(t) => t.validate(),
             Transform::Group(t) => t.validate(),
             Transform::LogAffine(t) => t.validate(),
             Transform::LogCamera(t) => t.validate(),
@@ -485,6 +500,7 @@ impl Transform {
             Transform::File(t) => t.write_text(os),
             Transform::FixedFunction(t) => t.write_text(os),
             Transform::GradingPrimary(t) => t.write_text(os),
+            Transform::GradingRgbCurve(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
             Transform::LogAffine(t) => t.write_text(os),
             Transform::LogCamera(t) => t.write_text(os),
@@ -765,6 +781,7 @@ fn build_leaf_ops(
         Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::GradingPrimary(t) => build_grading_primary_op(ops, t, dir),
+        Transform::GradingRgbCurve(t) => build_grading_rgb_curve_op(ops, t, dir),
         Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
         Transform::Lut3D(lut_transform) => build_lut3d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
@@ -802,12 +819,7 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::Cdl(_) => create_cdl_transform(group, op),
         OpData::Lut1D(_) => create_lut1d_transform(group, op),
         OpData::FixedFunction(_) => create_fixed_function_transform(group, op),
-        // `CreateGradingRGBCurveTransform` (src/OpenColorIO/ops/gradingrgbcurve/
-        // GradingRGBCurveOp.cpp:219-233 @ v2.5.2) comes with `GradingRGBCurveTransform`
-        // (Phase 3, WP 3.1).
-        OpData::GradingRgbCurve(_) => Err(Exception::new(
-            "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
-        )),
+        OpData::GradingRgbCurve(_) => create_grading_rgb_curve_transform(group, op),
         OpData::Lut3D(_) => create_lut3d_transform(group, op),
         // `CreateGradingHueCurveTransform` (src/OpenColorIO/ops/gradinghuecurve/
         // GradingHueCurveOp.cpp:219-232 @ v2.5.2) comes with `GradingHueCurveTransform` (WP

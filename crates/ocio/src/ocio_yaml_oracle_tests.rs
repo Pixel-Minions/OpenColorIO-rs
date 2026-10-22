@@ -361,6 +361,19 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("isDynamic", json!(t.is_dynamic())));
             out.push(name(t.format_metadata()));
         }
+        Transform::GradingRgbCurve(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    GradingStyle::Log => "GRADING_LOG",
+                    GradingStyle::Lin => "GRADING_LIN",
+                    GradingStyle::Video => "GRADING_VIDEO",
+                }}),
+            ));
+            out.push(("getBypassLinToLog", json!(t.bypass_lin_to_log())));
+            out.push(("isDynamic", json!(t.is_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
         Transform::LogAffine(t) => {
             out.push(("getBase", f64_out(t.base())));
             out.push(("getLogSideSlopeValue", f64s(&t.log_side_slope_value())));
@@ -550,6 +563,7 @@ fn class_name(t: &Transform) -> &'static str {
         Transform::File(_) => "File",
         Transform::FixedFunction(_) => "FixedFunction",
         Transform::GradingPrimary(_) => "GradingPrimary",
+        Transform::GradingRgbCurve(_) => "GradingRGBCurve",
         Transform::Group(_) => "Group",
         Transform::LogAffine(_) => "LogAffine",
         Transform::LogCamera(_) => "LogCamera",
@@ -1251,5 +1265,58 @@ fn grading_primary_transforms_load_as_in_the_wheel() {
         b"!<GradingPrimaryTransform> {direction: foo}",
         b"!<GradingPrimaryTransform>\n      style: linear\n      offset:\n        rgb: [0.1, 0, \
           0]\n        master: 0.1\n        other: 1",
+    ]);
+}
+
+/// The GradingRGBCurveTransform's keys: the styles, the bypass, each curve with its control
+/// points and slopes (defaults for the curves not given, of the style at the end), refused
+/// curves, unknown keys at each level, and the errors of each key. The coordinates with more
+/// digits than the text's 6 are compared through the saver's text
+/// (`ocio_yaml_save_oracle_tests.rs`). No NaN x coordinate: the wheel reads past the control
+/// points fitting it (docs/improvements.md, U-35).
+#[test]
+fn grading_rgb_curve_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<GradingRGBCurveTransform> {}",
+        b"!<GradingRGBCurveTransform> {style: LINEAR, lintolog_bypass: true}",
+        b"!<GradingRGBCurveTransform> {style: linear, lintolog_bypass: false}",
+        b"!<GradingRGBCurveTransform> {direction: inverse, style: video}",
+        b"!<GradingRGBCurveTransform> {style: lin}",
+        b"!<GradingRGBCurveTransform> {lintolog_bypass: yes}",
+        b"!<GradingRGBCurveTransform> {lintolog_bypass: 1}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 0.5, 0.5, 1, \
+          1.123456]}}",
+        b"!<GradingRGBCurveTransform> {red: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, \
+          1.1]}, style: linear}",
+        b"!<GradingRGBCurveTransform> {style: video, blue: {control_points: [0, 0, 0.1, 0.5, 1, \
+          1.5], slopes: [0, 1, 1.1]}, master: {control_points: [0, 0, 1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, green: {slopes: [], control_points: [0, 0, \
+          1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, green: {control_points: [0, 0, 1, 1], \
+          slopes: [1, 2]}}",
+        b"!<GradingRGBCurveTransform> {style: log, green: {control_points: [0, .nan, 1, .inf], \
+          slopes: [-0.0, 1e-30]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 0.5, 0.2, 0.2, \
+          0.7, 1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: []}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 1, 1], slopes: \
+          [1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {slopes: [1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: [0, 0, 1, 1]}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [a, 0, 1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: 1}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 1, 1], foo: \
+          1}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: ~}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 1, 1], \
+          control_points: [0, 0, 2, 2]}}",
+        b"!<GradingRGBCurveTransform> {name: gc, style: log, foo: 1}",
+        b"!<GradingRGBCurveTransform> {style: log, style: video}",
+        b"!<GradingRGBCurveTransform> {direction: foo}",
+        b"!<GradingRGBCurveTransform>\n      style: video\n      red:\n        control_points: \
+          [0, 0, 1, 1]\n        other: 1",
     ]);
 }

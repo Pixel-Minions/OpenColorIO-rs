@@ -212,6 +212,7 @@ pub(crate) fn collect_context_variables(
         | Transform::ExponentWithLinear(_)
         | Transform::ExposureContrast(_)
         | Transform::FixedFunction(_)
+        | Transform::GradingRgbCurve(_)
         | Transform::GradingPrimary(_)
         | Transform::LogAffine(_)
         | Transform::LogCamera(_)
