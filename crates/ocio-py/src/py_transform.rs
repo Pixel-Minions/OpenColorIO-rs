@@ -681,14 +681,16 @@ pub(crate) fn def(cls: &Bound<'_, PyType>, f: &'static Function) -> PyResult<()>
     cls.setattr(f.name, pybind11::method(cls.py(), f)?)
 }
 
-/// `cls.def_static(name, ...)`: `staticmethod` of the function.
+/// `cls.def_static(name, ...)`: `staticmethod` of the function, as pybind11 makes it with
+/// `PyStaticMethod_New`, which (unlike calling `staticmethod`, whose `__init__` copies the
+/// function's `__doc__`, `__name__`, `__module__` and `__qualname__` into it) leaves its
+/// `__dict__` empty: its `__doc__` is then the type's.
 pub(crate) fn def_static(cls: &Bound<'_, PyType>, f: &'static Function) -> PyResult<()> {
     let py = cls.py();
     let staticmethod = py.import("builtins")?.getattr("staticmethod")?;
-    cls.setattr(
-        f.name,
-        staticmethod.call1((pybind11::builtin(py, f, true)?,))?,
-    )
+    let sm = staticmethod.call1((pybind11::builtin(py, f, true)?,))?;
+    sm.getattr("__dict__")?.call_method0("clear")?;
+    cls.setattr(f.name, sm)
 }
 
 /// The module's class `qualified`.
