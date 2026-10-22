@@ -13,21 +13,24 @@ mod gate;
 mod guards;
 mod land;
 mod links;
+mod metadata;
 mod parity;
 mod register_merge;
 mod registers;
 mod scratch;
+mod shards;
 mod upstream;
 
 const USAGE: &str = "\
 cargo xtask <command>
 
 Checking and landing chunks:
-  gate [--staged] [--crates a,b] [--release] [--rocky] [--quick|--full]
+  gate [--staged] [--crates a,b | --touched] [--release] [--rocky] [--quick|--full]
                               fmt, clippy, ci and tests, stopping at the first failure;
                               logs in target/gate-logs/ (`cargo xtask gate --help`)
   land <branch> [--no-rocky]  replay <branch> onto phase0 gating every commit (debug, this
-                              platform), merge it with --no-ff, regenerate the generated
+                              platform, the tests of the packages it changes: gate
+                              --touched), merge it with --no-ff, regenerate the generated
                               files, gate the result fully (release, Rocky Linux 9) and
                               fast-forward phase0; never pushes
                               (`cargo xtask land --help`)
@@ -39,6 +42,9 @@ Checking and landing chunks:
                               --unlabelled: also unlabelled volumes no checkout still uses;
                               links (symlinks, junctions) inside what it deletes are
                               unlinked first, never followed
+  test-shard <shard> [--dry-run] | --list
+                              one CI test job's share of `cargo test --workspace`
+                              (.github/workflows/ci.yml; `cargo xtask test-shard --help`)
   merge-register <base> <ours> <theirs>
                               git's merge driver for docs/improvements.md (.gitattributes:
                               merge=ocio-register): merges it entry by entry into <ours>, an
@@ -96,6 +102,11 @@ fn main() -> ExitCode {
             land::parse(rest).and_then(|(branch, rocky)| land::run(&branch, rocky))
         }
         ["clean-scratch", rest @ ..] => scratch::run(rest),
+        ["test-shard", "--help" | "-h"] => {
+            print!("{}", shards::USAGE);
+            Ok(())
+        }
+        ["test-shard", rest @ ..] => shards::run(rest),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),

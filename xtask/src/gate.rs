@@ -14,8 +14,8 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) const USAGE: &str = "\
-cargo xtask gate [--staged] [--crates a,b] [--release] [--rocky] [--quick|--full] [--main]
-                 [--auto]
+cargo xtask gate [--staged] [--crates a,b | --touched] [--release] [--rocky] [--quick|--full]
+                 [--main] [--auto]
 
 Runs, in order, stopping at the first failure:
   fmt            cargo fmt --all --check
@@ -31,6 +31,14 @@ Runs, in order, stopping at the first failure:
                  in target/gate-staged/wt (kept, with its logs, until the next --staged run)
   --crates a,b   run the test steps for these packages only (fmt, clippy and ci always cover
                  the workspace)
+  --touched      run the test steps only for the packages whose files the HEAD commit
+                 changes (with --staged: the staged changes); `xtask land` gates each
+                 replayed commit so. The whole workspace when it changes oracle/, fixtures/,
+                 upstream/, corpus/, .cargo/, crates/ocio-testkit/, a Cargo.toml, Cargo.lock,
+                 rust-toolchain.toml, waivers.toml, .gitattributes or a file outside these
+                 rules; xtask for upstream-map.toml and scripts/; no test step when it
+                 changes only docs/, .github/, tools/, Markdown, deny.toml, rustfmt.toml,
+                 LICENSE or NOTICE
   --quick        tests run the quick tier (OCIO_RS_TIER=quick): the default, per chunk
   --full         tests run the full tier (OCIO_RS_TIER=full), as `xtask land` does
   --main         check what `main` requires: the ci step also checks that
@@ -51,6 +59,8 @@ Logs: target/gate-logs/<UTC time>/<step>.log (the Rocky steps in .../rocky/).
 pub(crate) struct Options {
     /// Packages the test steps are limited to (empty: the whole workspace).
     pub(crate) crates: Vec<String>,
+    /// Limit the test steps to the packages the HEAD commit changes (`touched_tests`).
+    pub(crate) touched: bool,
     pub(crate) release: bool,
     pub(crate) rocky: bool,
     /// The full test tier instead of the quick one.
@@ -94,6 +104,7 @@ pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
             "--rocky" => opts.rocky = true,
             "--main" => opts.main = true,
             "--auto" => opts.auto = true,
+            "--touched" => opts.touched = true,
             "--staged" => opts.staged = true,
             "--quick" | "--full" => {
                 if tier.is_some_and(|t| t != arg) {
@@ -120,6 +131,9 @@ pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
             _ => return Err(format!("unknown gate option `{arg}`\n\n{USAGE}")),
         }
     }
+    if opts.touched && !opts.crates.is_empty() {
+        return Err("--crates and --touched are exclusive".into());
+    }
     Ok(opts)
 }
 
@@ -140,6 +154,11 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     let nested = opts.log_dir.is_some();
     if opts.auto {
         resolve_auto(&root, &mut opts)?;
+    }
+    // Whether the test steps run: not when --touched finds nothing they test.
+    let mut tests = true;
+    if opts.touched {
+        tests = resolve_touched(&root, &mut opts.crates)?;
     }
     // cargo-deny is CI's third check; the Rocky image doesn't have it, and CI runs it once.
     let deny = opts.main && !nested;
@@ -211,12 +230,19 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         )?;
     }
     let tier = if opts.full { "full" } else { "quick" };
-    runner.step(
-        "test",
-        test_command(&root, &opts.crates, false, tier),
-        Kind::Tests,
-    )?;
-    if opts.release {
+    if tests {
+        runner.step(
+            "test",
+            test_command(&root, &opts.crates, false, tier),
+            Kind::Tests,
+        )?;
+    } else {
+        let steps = if opts.release { 2 } else { 1 };
+        for name in ["test", "test-release"].iter().take(steps) {
+            println!("{}: {name:<NAME_WIDTH$} skipped (--touched)", runner.label);
+        }
+    }
+    if opts.release && tests {
         runner.step(
             "test-release",
             test_command(&root, &opts.crates, true, tier),
@@ -228,7 +254,10 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         rocky
             .current_dir(&root)
             .args(["scripts/rocky9.sh", "cargo", "xtask", "gate"]);
-        if !opts.crates.is_empty() {
+        if opts.touched {
+            // The Rocky pass reads the same HEAD, in the same checkout.
+            rocky.arg("--touched");
+        } else if !opts.crates.is_empty() {
             rocky.args(["--crates", &opts.crates.join(",")]);
         }
         if opts.release {
@@ -375,9 +404,9 @@ fn save_ratchet_base(root: &Path, log_dir: &Path) -> Result<Option<PathBuf>, Str
     Ok(None)
 }
 
-/// Sets `release`, and keeps `rocky`, only when HEAD touches platform-sensitive files.
-fn resolve_auto(root: &Path, opts: &mut Options) -> Result<(), String> {
-    let files = crate::git(
+/// The files the HEAD commit changes (from its first parent; all of them for a root commit).
+fn head_files(root: &Path) -> Result<String, String> {
+    crate::git(
         root,
         &[
             "diff-tree",
@@ -389,7 +418,127 @@ fn resolve_auto(root: &Path, opts: &mut Options) -> Result<(), String> {
             "--first-parent",
             "HEAD",
         ],
-    )?;
+    )
+}
+
+/// `--touched`: sets `crates` to the packages whose tests the HEAD commit's changes call for
+/// (empty: the whole workspace); false when it calls for none.
+fn resolve_touched(root: &Path, crates: &mut Vec<String>) -> Result<bool, String> {
+    let files = head_files(root)?;
+    let files: Vec<&str> = files.lines().filter(|f| !f.is_empty()).collect();
+    let packages = crate::metadata::workspace(root)?;
+    let subject = crate::git(root, &["log", "-1", "--format=%h %s", "HEAD"])?;
+    let (tests, why) = match touched_tests(&files, &packages) {
+        Touched::Nothing => (false, "no test step".to_string()),
+        Touched::Workspace(file) => (true, format!("the whole workspace's tests ({file})")),
+        Touched::Packages(names) => {
+            let why = format!("the tests of {}", names.join(", "));
+            *crates = names;
+            (true, why)
+        }
+    };
+    println!(
+        "gate: --touched: {} changes {} file(s): {why}",
+        subject.trim(),
+        files.len()
+    );
+    Ok(tests)
+}
+
+/// What the test steps cover for a commit's changed files (`gate --touched`).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Touched {
+    /// No test step: documentation, CI and tooling files only.
+    Nothing,
+    /// Every package's tests, because of this file.
+    Workspace(String),
+    /// These packages' tests, in workspace order.
+    Packages(Vec<String>),
+}
+
+/// The tests a commit that changes `files` (paths from the root, `/`-separated) calls for.
+/// Each file, by the first rule that matches it:
+///
+/// 1. inputs of every package's tests, or of the build itself: the whole workspace;
+/// 2. a file in a package's directory: that package (the deepest, for nested packages);
+/// 3. files that xtask reads: xtask;
+/// 4. documentation, CI and tooling outside the workspace: nothing (fmt, clippy and
+///    `xtask ci` still run; cargo-deny, release and Rocky Linux 9 run on land's merge);
+/// 5. anything else: the whole workspace, to be safe.
+///
+/// Packages that depend on a changed one aren't added: clippy builds them, and land's merge
+/// commit runs every test.
+pub(crate) fn touched_tests(files: &[&str], packages: &[crate::metadata::Package]) -> Touched {
+    /// Inputs of every package's tests: the oracle and its data, the upstream sources and
+    /// test files, the test kit and its waivers, the build's configuration.
+    const WORKSPACE_DIRS: &[&str] = &[
+        "oracle/",
+        "fixtures/",
+        "upstream/",
+        "corpus/",
+        ".cargo/",
+        "crates/ocio-testkit/",
+    ];
+    const WORKSPACE_FILES: &[&str] = &[
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        "waivers.toml",
+        ".gitattributes",
+    ];
+    const XTASK_DIRS: &[&str] = &["scripts/"];
+    const XTASK_FILES: &[&str] = &["upstream-map.toml"];
+    const QUIET_DIRS: &[&str] = &["docs/", ".github/", "tools/"];
+    const QUIET_FILES: &[&str] = &["deny.toml", "rustfmt.toml", "LICENSE", "NOTICE"];
+
+    let mut names: Vec<&str> = Vec::new();
+    for &file in files {
+        let workspace = WORKSPACE_DIRS.iter().any(|d| file.starts_with(d))
+            || WORKSPACE_FILES.contains(&file)
+            || file == "Cargo.toml"
+            || file.ends_with("/Cargo.toml");
+        if workspace {
+            return Touched::Workspace(file.to_string());
+        }
+        let owner = packages
+            .iter()
+            .filter(|p| {
+                !p.dir.is_empty()
+                    && file
+                        .strip_prefix(p.dir.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+            .max_by_key(|p| p.dir.len());
+        let name = if let Some(package) = owner {
+            package.name.as_str()
+        } else if XTASK_DIRS.iter().any(|d| file.starts_with(d)) || XTASK_FILES.contains(&file) {
+            "xtask"
+        } else if QUIET_DIRS.iter().any(|d| file.starts_with(d))
+            || QUIET_FILES.contains(&file)
+            || file.ends_with(".md")
+        {
+            continue;
+        } else {
+            return Touched::Workspace(file.to_string());
+        };
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    if names.is_empty() {
+        return Touched::Nothing;
+    }
+    Touched::Packages(
+        packages
+            .iter()
+            .filter(|p| names.contains(&p.name.as_str()))
+            .map(|p| p.name.clone())
+            .collect(),
+    )
+}
+
+/// Sets `release`, and keeps `rocky`, only when HEAD touches platform-sensitive files.
+fn resolve_auto(root: &Path, opts: &mut Options) -> Result<(), String> {
+    let files = head_files(root)?;
     let subject = crate::git(root, &["log", "-1", "--format=%h %s", "HEAD"])?;
     let sensitive: Vec<&str> = files
         .lines()
@@ -908,6 +1057,143 @@ mod tests {
         assert!(parse(&["--quick", "--full"]).is_err());
         assert!(parse(&["--crates"]).is_err());
         assert!(parse(&["--bogus"]).is_err());
+        let o = parse(&["--staged", "--touched"]).unwrap();
+        assert!(o.staged && o.touched && o.crates.is_empty());
+        assert_eq!(o.others, ["--touched"]);
+        assert!(parse(&["--touched", "--crates", "xtask"]).is_err());
+    }
+
+    fn package(name: &str, dir: &str) -> crate::metadata::Package {
+        crate::metadata::Package {
+            name: name.into(),
+            dir: dir.into(),
+            targets: Vec::new(),
+        }
+    }
+
+    /// This workspace's layout.
+    fn packages() -> Vec<crate::metadata::Package> {
+        vec![
+            package("ocio-ops", "crates/ocio-ops"),
+            package("ocio-testkit", "crates/ocio-testkit"),
+            package("ocio-formats", "crates/ocio-formats"),
+            package("ocio-gpu", "crates/ocio-gpu"),
+            package("ocio", "crates/ocio"),
+            package("ocio-py", "crates/ocio-py"),
+            package("ocio-tools", "crates/ocio-tools"),
+            package("xtask", "xtask"),
+        ]
+    }
+
+    fn touched(files: &[&str]) -> Touched {
+        touched_tests(files, &packages())
+    }
+
+    fn only(names: &[&str]) -> Touched {
+        Touched::Packages(names.iter().map(|n| n.to_string()).collect())
+    }
+
+    #[test]
+    fn touched_packages() {
+        assert_eq!(
+            touched(&["crates/ocio-ops/src/ops/log/log_op_cpu.rs"]),
+            only(&["ocio-ops"])
+        );
+        // Workspace order, once each; documentation alongside adds nothing.
+        assert_eq!(
+            touched(&[
+                "crates/ocio/src/config.rs",
+                "docs/improvements.md",
+                "crates/ocio-ops/tests/log_oracle.rs",
+                "crates/ocio/tests/config_oracle.rs",
+                "upstream-map.toml",
+            ]),
+            only(&["ocio-ops", "ocio", "xtask"])
+        );
+        assert_eq!(touched(&["xtask/src/land.rs"]), only(&["xtask"]));
+        assert_eq!(touched(&["scripts/rocky9.sh"]), only(&["xtask"]));
+        // Markdown inside a package is that package's (include_str!, doctests).
+        assert_eq!(touched(&["crates/ocio-py/README.md"]), only(&["ocio-py"]));
+        // A directory whose name only starts like a package's.
+        assert_eq!(
+            touched(&["crates/ocio-opsx/src/lib.rs"]),
+            Touched::Workspace("crates/ocio-opsx/src/lib.rs".into())
+        );
+        // The deepest package owns a file of a nested one.
+        let mut nested = packages();
+        nested.push(package("ocio-ops-macros", "crates/ocio-ops/macros"));
+        assert_eq!(
+            touched_tests(&["crates/ocio-ops/macros/src/lib.rs"], &nested),
+            only(&["ocio-ops-macros"])
+        );
+    }
+
+    #[test]
+    fn touched_whole_workspace() {
+        for file in [
+            "oracle/ocio_oracle/text.py",
+            "oracle/uv.lock",
+            "fixtures/MANIFEST.toml",
+            "upstream/OpenColorIO",
+            "corpus/README.md",
+            ".cargo/config.toml",
+            "crates/ocio-testkit/src/battery.rs",
+            "crates/ocio-testkit/README.md",
+            "Cargo.toml",
+            "Cargo.lock",
+            "crates/ocio-gpu/Cargo.toml",
+            "rust-toolchain.toml",
+            "waivers.toml",
+            ".gitattributes",
+            "docker/rocky9/Dockerfile",
+            "some-new-file.txt",
+        ] {
+            assert_eq!(
+                touched(&["crates/ocio/src/lib.rs", file, "docs/plan.md"]),
+                Touched::Workspace(file.into()),
+                "{file}"
+            );
+        }
+    }
+
+    #[test]
+    fn touched_nothing() {
+        assert_eq!(
+            touched(&[
+                "docs/improvements.md",
+                "docs/cards/ci-speed.md",
+                "README.md",
+                "CLAUDE.md",
+                "PLAN.md",
+                "THIRD-PARTY-NOTICES.md",
+                ".github/workflows/ci.yml",
+                "tools/wheel-inspect/src/wheel_inspect/cli.py",
+                "deny.toml",
+                "rustfmt.toml",
+                "LICENSE",
+                "NOTICE",
+            ]),
+            Touched::Nothing
+        );
+        // An empty commit.
+        assert_eq!(touched(&[]), Touched::Nothing);
+    }
+
+    /// Every package of this workspace maps its own files to itself, but the test kit, whose
+    /// changes test everything.
+    #[test]
+    fn touched_this_workspace() {
+        let packages = crate::metadata::workspace(&crate::root()).unwrap();
+        assert!(packages.len() >= 8);
+        for p in &packages {
+            let file = format!("{}/src/x.rs", p.dir);
+            let want = if p.name == "ocio-testkit" {
+                Touched::Workspace(file.clone())
+            } else {
+                Touched::Packages(vec![p.name.clone()])
+            };
+            assert_eq!(touched_tests(&[&file], &packages), want);
+        }
     }
 
     #[test]
