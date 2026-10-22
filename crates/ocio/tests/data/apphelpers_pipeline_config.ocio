@@ -1,0 +1,91 @@
+ocio_profile_version: 2.1
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  color_timing: log
+  default: raw
+  scene_linear: lin
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+shared_views:
+  - !<View> {name: shared_vt, view_transform: vt_scene, display_colorspace: <USE_DISPLAY_NAME>, looks: +grade}
+
+displays:
+  d_srgb:
+    - !<View> {name: plain, colorspace: srgb}
+    - !<View> {name: graded, colorspace: srgb, looks: "+grade, -contrast"}
+    - !<View> {name: fallback, colorspace: srgb, looks: missing|grade}
+    - !<View> {name: noop_look, colorspace: srgb, looks: noop}
+    - !<View> {name: vt, view_transform: vt_scene, display_colorspace: d_srgb, looks: contrast}
+    - !<View> {name: named, colorspace: nt_view}
+    - !<View> {name: data, colorspace: raw, looks: grade}
+    - !<Views> [shared_vt]
+  d_other:
+    - !<View> {name: plain, colorspace: log}
+    - !<Views> [shared_vt]
+
+active_displays: []
+active_views: []
+
+looks:
+  - !<Look>
+    name: grade
+    process_space: log
+    transform: !<CDLTransform> {slope: [1.1, 1, 0.9], offset: [0.01, 0, -0.02], power: [1, 1.2, 1]}
+
+  - !<Look>
+    name: contrast
+    process_space: lin
+    transform: !<ExponentTransform> {value: [1.2, 1.2, 1.2, 1]}
+    inverse_transform: !<ExponentTransform> {value: [1.3, 1.3, 1.3, 1]}
+
+  - !<Look>
+    name: noop
+    process_space: srgb
+
+view_transforms:
+  - !<ViewTransform>
+    name: vt_scene
+    from_scene_reference: !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1], direction: inverse}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: d_srgb
+    from_display_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1], direction: inverse}
+
+  - !<ColorSpace>
+    name: d_other
+    from_display_reference: !<MatrixTransform> {offset: [0.05, 0, 0, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+
+  - !<ColorSpace>
+    name: lin
+
+  - !<ColorSpace>
+    name: log
+    to_scene_reference: !<LogTransform> {base: 2, direction: inverse}
+
+  - !<ColorSpace>
+    name: srgb
+    from_scene_reference: !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1], direction: inverse}
+
+  - !<ColorSpace>
+    name: cam
+    isdata: false
+    to_scene_reference: !<MatrixTransform> {matrix: [0.9, 0.1, 0, 0, 0.05, 0.9, 0.05, 0, 0, 0.1, 0.9, 0, 0, 0, 0, 1]}
+
+named_transforms:
+  - !<NamedTransform>
+    name: nt_view
+    transform: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}

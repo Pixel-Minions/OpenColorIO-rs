@@ -17,9 +17,9 @@ note = "build system"
 [[file]]
 path = "include/OpenColorIO/OpenColorAppHelpers.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio/src/apphelpers/color_space_helpers.rs", "crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio/src/apphelpers/color_space_helpers.rs", "crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs", "crates/ocio/src/apphelpers/display_view_helpers.rs"]
 status = "partial"
-note = "p5-helpers-1 5.7b: ColorSpaceMenuParameters, ColorSpaceMenuHelper and ColorSpaceHelpers::AddColorSpace (15-293) in apphelpers/color_space_helpers.rs, re-exported by lib.rs (operator<< as to_bytes); p5-helpers-2 5.7d: LegacyViewingPipeline (350-432) in apphelpers/legacy_viewing_pipeline.rs, re-exported by lib.rs (operator<< as to_bytes and Display; getProcessor overloads as processor(config, Option<&Context>), owner decision 2026-10-22)"
+note = "p5-helpers-1 5.7b: ColorSpaceMenuParameters, ColorSpaceMenuHelper and ColorSpaceHelpers::AddColorSpace (15-293) in apphelpers/color_space_helpers.rs, re-exported by lib.rs (operator<< as to_bytes); p5-helpers-2 5.7d: LegacyViewingPipeline (350-432) in apphelpers/legacy_viewing_pipeline.rs, re-exported by lib.rs (operator<< as to_bytes and Display; getProcessor overloads as processor(config, Option<&Context>), owner decision 2026-10-22); p5-helpers-2 5.7c: DisplayViewHelpers (295-348) as the module apphelpers/display_view_helpers.rs (processor with context: Option<&Context>, identity_processor, add_display_view, remove_display_view), re-exported by lib.rs"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
@@ -677,7 +677,7 @@ status = "done"
 path = "src/OpenColorIO/apphelpers/DisplayViewHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/display_view_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/LegacyViewingPipeline.cpp"
@@ -4623,8 +4623,8 @@ status = "done"
 [[file]]
 path = "tests/cpu/apphelpers/DisplayViewHelpers_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/apphelpers/display_view_helpers_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/apphelpers/display_view_helpers_tests.rs", "crates/ocio/tests/display_view_helpers_oracle.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/apphelpers/LegacyViewingPipeline_tests.cpp"

@@ -11,33 +11,27 @@
 //! channel view and the looks override, then compares the pipeline's text, `getProcessor`'s
 //! processor (cache ID, flags, metadata, `createGroupTransform()`) or exception, the log, and
 //! the pixels of its default CPU processor and of its CPU processor without optimization, at
-//! extreme values.
-//!
-//! The pixels go through the binding's `applyRGBA(list)`, which converts each value from and
-//! to a Python float: signalling NaNs can't pass that way unchanged, so the probe values have
-//! quiet NaNs only (each with a payload of its own).
+//! extreme values (`common::app_helpers`), with the dynamic exposure, contrast and gamma it has
+//! set away from their defaults.
 //!
 //! The results depend on the CPU (the processors' kernels): this target is in the
 //! `cpu-tests` alias.
 
 mod common;
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use common::transforms::compare_processor;
+use common::app_helpers::{
+    DynamicSet, EXPOSURE_CONTRAST_GAMMA, Reached, Rng, apply_calls, capture,
+    compare_processor_call, f, fs, report, text,
+};
 use ocio::{
     BuiltinConfigRegistry, CdlTransform, Config, Context, DisplayViewTransform, ExponentTransform,
     ExposureContrastStyle, ExposureContrastTransform, FixedFunctionStyle, FixedFunctionTransform,
-    LegacyViewingPipeline, LogTransform, MatrixTransform, OptimizationFlags, Processor, Transform,
-    TransformDirection,
+    LegacyViewingPipeline, LogTransform, MatrixTransform, Processor, Transform, TransformDirection,
 };
-use ocio_ops::image_desc::PackedImageDesc;
-use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
 use ocio_testkit::Oracle;
-use ocio_testkit::oracle::Response;
-use ocio_testkit::oracle_values::{bytes, log};
-use ocio_testkit::processor_ops::ProcessorOpsReply;
+use ocio_testkit::oracle_values::bytes;
 use serde_json::{Value, json};
 
 // ---------------------------------------------------------------------------------------------
@@ -51,98 +45,7 @@ const CATEGORY_TEST_CONFIG: &str = include_str!("data/apphelpers_category_test_c
 /// display's own (`<USE_DISPLAY_NAME>`), a view with a view transform, a view of a named
 /// transform, views of a data color space and of no color space, views with looks (one with a
 /// fall-back, one with a look of no transform), and the scene-linear and color timing roles.
-const PIPELINE_CONFIG: &str = r#"ocio_profile_version: 2.1
-
-environment:
-  {}
-search_path: ""
-strictparsing: true
-luma: [0.2126, 0.7152, 0.0722]
-
-roles:
-  color_timing: log
-  default: raw
-  scene_linear: lin
-
-file_rules:
-  - !<Rule> {name: Default, colorspace: default}
-
-shared_views:
-  - !<View> {name: shared_vt, view_transform: vt_scene, display_colorspace: <USE_DISPLAY_NAME>, looks: +grade}
-
-displays:
-  d_srgb:
-    - !<View> {name: plain, colorspace: srgb}
-    - !<View> {name: graded, colorspace: srgb, looks: "+grade, -contrast"}
-    - !<View> {name: fallback, colorspace: srgb, looks: missing|grade}
-    - !<View> {name: noop_look, colorspace: srgb, looks: noop}
-    - !<View> {name: vt, view_transform: vt_scene, display_colorspace: d_srgb, looks: contrast}
-    - !<View> {name: named, colorspace: nt_view}
-    - !<View> {name: data, colorspace: raw, looks: grade}
-    - !<Views> [shared_vt]
-  d_other:
-    - !<View> {name: plain, colorspace: log}
-    - !<Views> [shared_vt]
-
-active_displays: []
-active_views: []
-
-looks:
-  - !<Look>
-    name: grade
-    process_space: log
-    transform: !<CDLTransform> {slope: [1.1, 1, 0.9], offset: [0.01, 0, -0.02], power: [1, 1.2, 1]}
-
-  - !<Look>
-    name: contrast
-    process_space: lin
-    transform: !<ExponentTransform> {value: [1.2, 1.2, 1.2, 1]}
-    inverse_transform: !<ExponentTransform> {value: [1.3, 1.3, 1.3, 1]}
-
-  - !<Look>
-    name: noop
-    process_space: srgb
-
-view_transforms:
-  - !<ViewTransform>
-    name: vt_scene
-    from_scene_reference: !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1], direction: inverse}
-
-display_colorspaces:
-  - !<ColorSpace>
-    name: d_srgb
-    from_display_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1], direction: inverse}
-
-  - !<ColorSpace>
-    name: d_other
-    from_display_reference: !<MatrixTransform> {offset: [0.05, 0, 0, 0]}
-
-colorspaces:
-  - !<ColorSpace>
-    name: raw
-    isdata: true
-
-  - !<ColorSpace>
-    name: lin
-
-  - !<ColorSpace>
-    name: log
-    to_scene_reference: !<LogTransform> {base: 2, direction: inverse}
-
-  - !<ColorSpace>
-    name: srgb
-    from_scene_reference: !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1], direction: inverse}
-
-  - !<ColorSpace>
-    name: cam
-    isdata: false
-    to_scene_reference: !<MatrixTransform> {matrix: [0.9, 0.1, 0, 0, 0.05, 0.9, 0.05, 0, 0, 0.1, 0.9, 0, 0, 0, 0, 1]}
-
-named_transforms:
-  - !<NamedTransform>
-    name: nt_view
-    transform: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}
-"#;
+const PIPELINE_CONFIG: &str = include_str!("data/apphelpers_pipeline_config.ocio");
 
 /// Where a config comes from, on both sides.
 #[derive(Clone)]
@@ -189,14 +92,6 @@ struct Tr {
     label: &'static str,
     spec: Value,
     port: Transform,
-}
-
-fn f(v: f64) -> Value {
-    json!({"f64": v.to_bits()})
-}
-
-fn fs(values: &[f64]) -> Value {
-    values.iter().map(|&v| f(v)).collect()
 }
 
 fn dir_name(dir: TransformDirection) -> &'static str {
@@ -393,35 +288,6 @@ fn channel_views() -> Vec<Tr> {
 // ---------------------------------------------------------------------------------------------
 // Cases
 
-/// A small deterministic generator (xorshift64*), so the cases never change unnoticed.
-struct Rng(u64);
-
-impl Rng {
-    fn next(&mut self) -> u64 {
-        self.0 ^= self.0 >> 12;
-        self.0 ^= self.0 << 25;
-        self.0 ^= self.0 >> 27;
-        self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
-    }
-
-    fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
-    }
-
-    fn pick<T: Clone>(&mut self, list: &[T]) -> T {
-        list[self.below(list.len())].clone()
-    }
-
-    fn maybe(&mut self, n: usize, of: usize) -> Option<usize> {
-        // Present one time in `of`, else one of `n`.
-        if self.below(of) == 0 {
-            None
-        } else {
-            Some(self.below(n))
-        }
-    }
-}
-
 /// A pipeline's settings.
 #[derive(Debug, Clone)]
 struct Case {
@@ -445,10 +311,6 @@ struct Tokens {
     sources: Vec<String>,
     display_views: Vec<(String, String)>,
     looks: Vec<String>,
-}
-
-fn text(v: &[u8]) -> String {
-    String::from_utf8(v.to_vec()).expect("UTF-8 names")
 }
 
 fn tokens(config: &Config) -> Tokens {
@@ -534,91 +396,6 @@ fn cases(tokens: &Tokens, seed: u64, n: usize) -> Vec<Case> {
 
 // ---------------------------------------------------------------------------------------------
 // The port's side
-
-/// The port's log while `f` runs: OCIO's logging function is the process's, so the cases of
-/// this file log one at a time.
-static LOGGING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn capture<T>(f: impl FnOnce() -> T) -> (T, Vec<Vec<u8>>) {
-    let _lock = LOGGING.lock().unwrap_or_else(|e| e.into_inner());
-    let me = std::thread::current().id();
-    let messages = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let sink = Arc::clone(&messages);
-    set_logging_function(Some(Arc::new(move |m: &[u8]| {
-        if std::thread::current().id() == me {
-            sink.lock().unwrap().push(m.to_vec());
-        } else {
-            eprint!("{}", String::from_utf8_lossy(m));
-        }
-    })))
-    .unwrap();
-    let out = f();
-    reset_to_default_logging_function();
-    let log = messages.lock().unwrap().clone();
-    (out, log)
-}
-
-/// The probe pixels, packed RGBA: zeros, ordinary values, mid grey, the extremes of `f32`,
-/// subnormals, the infinities and quiet NaNs with payloads of their own, each in every
-/// channel.
-fn pixels() -> Vec<f32> {
-    let specials: Vec<f32> = vec![
-        0.0,
-        -0.0,
-        0.18,
-        1.0,
-        -1.0,
-        0.5,
-        2.0,
-        100.0,
-        65504.0,
-        -0.25,
-        f32::from_bits(1),
-        -1e-40,
-        f32::MAX,
-        -f32::MAX,
-        f32::MIN_POSITIVE,
-        f32::INFINITY,
-        f32::NEG_INFINITY,
-        f32::from_bits(0x7fc0_0001),
-        f32::from_bits(0xffc0_0002),
-        f32::from_bits(0x7fe0_1003),
-        1e20,
-        3.4,
-        0.001,
-    ];
-    let n = specials.len();
-    let mut out = Vec::new();
-    for i in 0..n {
-        out.extend([
-            specials[i],
-            specials[(i + 5) % n],
-            specials[(i + 11) % n],
-            specials[(i + 3) % n],
-        ]);
-    }
-    // Every special as a grey too, alpha 1.
-    for &v in &specials {
-        out.extend([v, v, v, 1.0]);
-    }
-    out
-}
-
-/// `cpu.applyRGBA(list)`: the binding's list overload applies a packed RGBA image in place.
-fn apply_rgba(proc: &Processor, flags: Option<OptimizationFlags>) -> ocio::Result<Vec<f32>> {
-    let cpu = match flags {
-        None => proc.default_cpu_processor()?,
-        Some(flags) => proc.optimized_cpu_processor(flags)?,
-    };
-    let mut data = pixels();
-    let width = data.len() / 4;
-    {
-        let mut img = PackedImageDesc::new(&mut data[..], width, 1, 4)?;
-        cpu.apply(&mut img)?;
-    }
-    Ok(data)
-}
-
 /// The port's pipeline of `case`.
 fn port_pipeline(case: &Case) -> LegacyViewingPipeline {
     let ccs = ccs();
@@ -682,32 +459,32 @@ fn wheel_pipeline(case: &Case, vp: &str) -> Vec<Value> {
 // ---------------------------------------------------------------------------------------------
 // Comparison
 
-/// What the cases of a run reached.
-#[derive(Default)]
-struct Reached {
-    made: usize,
-    refused: usize,
-    messages: BTreeSet<String>,
-    groups: BTreeSet<Vec<String>>,
-    with_context: usize,
-    pixels: usize,
-}
-
 /// The context variables a request sets on a copy of the config's context, for the cases
 /// whose `context` is `Some(1)`.
 const CONTEXT_VARS: [(&str, &str); 2] = [("CCCID", "look-01"), ("SHOT", "shot2")];
 
+/// The dynamic properties of `proc`'s CPU processor, set away from their defaults before the
+/// pixels are applied.
+fn dynamic_sets(proc: &Processor) -> Vec<DynamicSet> {
+    EXPOSURE_CONTRAST_GAMMA
+        .iter()
+        .copied()
+        .filter(|(t, _, _)| proc.has_dynamic_property(*t))
+        .collect()
+}
+
 /// Runs `cases` on the config of `source`, `per_request` cases a request, and compares them;
-/// the mismatches go to `failures`.
+/// the mismatches go to `failures`. Returns what they reached, and the number of cases with a
+/// context.
 fn check(
     test: &str,
     source: &Source,
     cases: &[Case],
     per_request: usize,
     failures: &mut Vec<String>,
-) -> Reached {
+) -> (Reached, usize) {
     let mut reached = Reached::default();
-    let pixel_values: Vec<Value> = pixels().iter().map(|&v| f(f64::from(v))).collect();
+    let mut with_context = 0;
     for (chunk_index, chunk) in cases.chunks(per_request).enumerate() {
         let label = format!("{test} #{chunk_index}");
         // A config per request, as the wheel's (its processor cache starts empty).
@@ -738,7 +515,7 @@ fn check(
                 "as": proc});
             if let Some(c) = case.context {
                 get["kwargs"] = json!({"context": {"ref": format!("ctx{c}")}});
-                reached.with_context += 1;
+                with_context += 1;
             }
             let proc_at = calls.len();
             calls.push(get);
@@ -752,24 +529,10 @@ fn check(
                 }
             });
             let (made, port_log) = capture(|| pipeline.processor(&config, context));
-            let mut applies = Vec::new();
-            if let Ok(made) = &made {
-                for (cpu, flags, extra) in [
-                    ("getDefaultCPUProcessor", None, json!([])),
-                    (
-                        "getOptimizedCPUProcessor",
-                        Some(OptimizationFlags::NONE),
-                        json!([{"enum": "OPTIMIZATION_NONE"}]),
-                    ),
-                ] {
-                    let cpu_name = format!("{proc}_{cpu}");
-                    calls.push(json!({"call": cpu, "on": proc, "args": extra, "as": cpu_name}));
-                    let apply_at = calls.len();
-                    calls.push(json!({"call": "applyRGBA", "on": cpu_name,
-                        "args": [pixel_values.clone()]}));
-                    applies.push((cpu, apply_at, capture(|| apply_rgba(made, flags))));
-                }
-            }
+            let applies = match &made {
+                Ok(p) => apply_calls(&mut calls, &proc, p, &dynamic_sets(p)),
+                Err(_) => Vec::new(),
+            };
             plan.push((
                 k,
                 case,
@@ -816,149 +579,24 @@ fn check(
                 ));
             }
 
-            // The processor, or the exception.
-            let wheel = &results[proc_at];
-            match (wheel.get("exception"), &made) {
-                (Some(e), Err(port)) => {
-                    reached.refused += 1;
-                    let message = bytes(&e["message"]);
-                    reached
-                        .messages
-                        .insert(String::from_utf8_lossy(&message).into_owned());
-                    if message != port.what() {
-                        problems.push(format!(
-                            "messages {:?} != {:?}",
-                            String::from_utf8_lossy(&message),
-                            String::from_utf8_lossy(port.what())
-                        ));
-                    }
-                }
-                (None, Ok(port)) => {
-                    reached.made += 1;
-                    let dump = &wheel["result"]["processor"];
-                    if dump.is_null() {
-                        problems.push(format!("the wheel gave {wheel}"));
-                    } else {
-                        let reply = ProcessorOpsReply::from_response(Response {
-                            result: json!({"processor": dump}),
-                            blobs: response.blobs.clone(),
-                        });
-                        reached.groups.insert(
-                            reply
-                                .processor()
-                                .classes()
-                                .into_iter()
-                                .map(String::from)
-                                .collect(),
-                        );
-                        let group = port.create_group_transform().unwrap();
-                        if let Err(e) = compare_processor(reply.processor(), port, &group) {
-                            problems.push(format!("processor: {e}"));
-                        }
-                    }
-                }
-                (wheel_e, port) => problems.push(format!(
-                    "wheel {} {wheel}, port {:?}",
-                    if wheel_e.is_some() { "raised" } else { "made" },
-                    port.as_ref()
-                        .map(|_| "a processor")
-                        .map_err(|e| e.message())
-                )),
-            }
-            let wheel_log = log(&wheel["log"]);
-            if wheel_log != port_log {
-                problems.push(format!(
-                    "log {:?} != {:?}",
-                    wheel_log
-                        .iter()
-                        .map(|m| String::from_utf8_lossy(m))
-                        .collect::<Vec<_>>(),
-                    port_log
-                        .iter()
-                        .map(|m| String::from_utf8_lossy(m))
-                        .collect::<Vec<_>>()
-                ));
-            }
-
-            // The pixels.
-            for (cpu, apply_at, (port_pixels, apply_log)) in applies {
-                let mut wheel_apply_log = log(&results[apply_at - 1]["log"]);
-                wheel_apply_log.extend(log(&results[apply_at]["log"]));
-                if wheel_apply_log != apply_log {
-                    problems.push(format!("{cpu} log {wheel_apply_log:?} != {apply_log:?}"));
-                }
-                let wheel_pixels = &results[apply_at];
-                let port_pixels = match port_pixels {
-                    Ok(p) => p,
-                    Err(e) => {
-                        problems.push(format!(
-                            "{cpu}: the port raised {e:?}, wheel {wheel_pixels}"
-                        ));
-                        continue;
-                    }
-                };
-                let Some(list) = wheel_pixels["result"].as_array() else {
-                    problems.push(format!("{cpu}: the wheel gave {wheel_pixels}"));
-                    continue;
-                };
-                let wheel_bits: Vec<u64> = list
-                    .iter()
-                    .map(|v| v["f64"].as_u64().expect("an f64"))
-                    .collect();
-                let port_bits: Vec<u64> = port_pixels
-                    .iter()
-                    .map(|&v| f64::from(v).to_bits())
-                    .collect();
-                assert_eq!(port_bits.len(), pixels().len());
-                if wheel_bits != port_bits {
-                    let diffs: Vec<String> = wheel_bits
-                        .iter()
-                        .zip(&port_bits)
-                        .enumerate()
-                        .filter(|(_, (w, p))| w != p)
-                        .take(8)
-                        .map(|(i, (w, p))| {
-                            format!(
-                                "[{i}] in {:?}: wheel {:?} ({w:#x}), port {:?} ({p:#x})",
-                                pixels()[i],
-                                f64::from_bits(*w),
-                                f64::from_bits(*p)
-                            )
-                        })
-                        .collect();
-                    problems.push(format!("{cpu} pixels: {}", diffs.join("; ")));
-                } else {
-                    reached.pixels += 1;
-                }
-            }
+            // The processor or the exception, the log, and the pixels.
+            compare_processor_call(
+                &response,
+                results,
+                proc_at,
+                &made,
+                &port_log,
+                applies,
+                &mut reached,
+                &mut problems,
+            );
 
             if !problems.is_empty() {
                 failures.push(format!("{name}: {}", problems.join("\n    ")));
             }
         }
     }
-    reached
-}
-
-/// Writes `failures` to a file under the target directory and fails with their number and
-/// the first few.
-fn report(test: &str, failures: &[String]) {
-    if failures.is_empty() {
-        return;
-    }
-    let path = ocio_testkit::paths::target_dir().join(format!("{test}-failures.txt"));
-    std::fs::write(&path, failures.join("\n\n")).unwrap();
-    panic!(
-        "{} mismatches (all in {}):\n{}",
-        failures.len(),
-        path.display(),
-        failures
-            .iter()
-            .take(5)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    );
+    (reached, with_context)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -970,6 +608,7 @@ fn report(test: &str, failures: &[String]) {
 fn pipelines_match_the_wheel() {
     let mut failures = Vec::new();
     let mut all = Reached::default();
+    let mut all_with_context = 0;
     for (test, source, seed, n, min_made) in [
         (
             "category",
@@ -995,7 +634,7 @@ fn pipelines_match_the_wheel() {
         ("raw", Source::Raw, 0x1e9a_0004, 80, 2),
     ] {
         let config = source.port();
-        let r = check(
+        let (r, with_context) = check(
             test,
             &source,
             &cases(&tokens(&config), seed, n),
@@ -1008,12 +647,8 @@ fn pipelines_match_the_wheel() {
             r.made,
             r.refused
         );
-        all.made += r.made;
-        all.refused += r.refused;
-        all.messages.extend(r.messages);
-        all.groups.extend(r.groups);
-        all.with_context += r.with_context;
-        all.pixels += r.pixels;
+        all.add(r);
+        all_with_context += with_context;
     }
     report("legacy_viewing_pipeline", &failures);
 
@@ -1035,9 +670,8 @@ fn pipelines_match_the_wheel() {
     }
     assert!(all.groups.len() >= 60, "{} group shapes", all.groups.len());
     assert!(
-        all.with_context >= 200,
-        "{} cases with a context",
-        all.with_context
+        all_with_context >= 200,
+        "{all_with_context} cases with a context"
     );
     assert_eq!(all.pixels, 2 * all.made, "pixels compared");
 }
@@ -1052,7 +686,7 @@ fn builtin_config_pipelines_match_the_wheel() {
         let name = text(registry.builtin_config_name(i).unwrap());
         let source = Source::Builtin(name.clone());
         let config = source.port();
-        let r = check(
+        let (r, _) = check(
             &name,
             &source,
             &cases(&tokens(&config), 0x1e9a_0100 + i as u64, 40),

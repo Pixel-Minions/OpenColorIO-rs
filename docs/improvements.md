@@ -3530,6 +3530,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   not checked against the wheel: the oracle refuses to set it per request (it is read once per
   process), and no command runs menus in a child process of their own.
 
+### I-336. `AddDisplayView` keeps what it changed before an error
+
+- **Upstream:** `DisplayViewHelpers::AddDisplayView` adds the display and view to the config's
+  active lists, then adds the color space, then the (display, view) pair
+  (`DisplayViewHelpers.cpp:437-448` @ v2.5.2), with nothing undone when a later step throws:
+  a color space name `Config::addColorSpace` refuses (empty), or a pair `addDisplayView`
+  refuses (a shared view of that name), leaves the active lists changed, and the color space
+  added in the second case. `RemoveDisplayView` likewise removes the pair before it checks the
+  environment that controls the active lists, so "Forbidden to remove an active display as
+  'OCIO_ACTIVE_DISPLAYS' controls the active list." comes after the pair is gone.
+- **Who notices:** an application that recovers from the exception and goes on with the config
+  (and saves it).
+- **A fix:** check every step's preconditions before the first change, or work on a copy and
+  swap it in at the end.
+- **Status:** ported as upstream in `p5-helpers-2` (5.7c, `apphelpers/display_view_helpers.rs`,
+  `add_display_view`, `remove_display_view`); `display_view_helpers_oracle.rs`
+  (`edits_match_the_wheel`) compares the config's text after every case, failed ones too.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
