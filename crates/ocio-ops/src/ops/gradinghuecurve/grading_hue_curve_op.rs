@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use super::grading_hue_curve_op_cpu::get_grading_hue_curve_cpu_renderer;
 use super::grading_hue_curve_op_data::GradingHueCurveOpData;
 use crate::dynamic_property::DynamicPropertyRcPtr;
 use crate::exception::{Exception, Result};
@@ -139,12 +140,9 @@ impl GradingHueCurveOpData {
 
     /// The renderer of the data, whatever the fast-math setting.
     ///
-    /// Port of `GradingHueCurveOp::getCPUOp` (GradingHueCurveOp.cpp:188-192 @ v2.5.2). The
-    /// renderers come with chunk 5.4b.
+    /// Port of `GradingHueCurveOp::getCPUOp` (GradingHueCurveOp.cpp:188-192 @ v2.5.2).
     pub(crate) fn get_cpu_op(&self) -> Result<Arc<dyn CpuOp>> {
-        Err(Exception::new(
-            "GetGradingHueCurveCPURenderer is not ported yet (WP 5.4b).",
-        ))
+        get_grading_hue_curve_cpu_renderer(self)
     }
 }
 

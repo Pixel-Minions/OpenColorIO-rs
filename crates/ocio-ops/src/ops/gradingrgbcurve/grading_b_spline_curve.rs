@@ -628,6 +628,131 @@ impl KnotsCoefs {
             }
         }
     }
+
+    /// The inverse of hue curve `c`, the hue-hue curve (0) or the hue-fx curve (7), at `y`:
+    /// `y` for an identity curve; otherwise `y` is wrapped by whole periods into the curve's
+    /// range of outputs (for the hue-fx curve, of the input plus its output: the curve's
+    /// output is a hue delta), and the segment's quadratic solved (the hue-fx curve's with the
+    /// diagonal added). The caller wraps the result into [0, 1).
+    ///
+    /// Port of `KnotsCoefs::evalCurveRevHue` (GradingBSplineCurve.cpp:1385-1460 @ v2.5.2), in
+    /// the operand orders and operations of each wheel's machine code:
+    /// - Windows (`sub_1801e8bc0`, which `GradingHueCurveRevOpCPU::apply` calls): `knStartY +
+    ///   knStart`, `knEndY = ((t * A) + B) * t + C`, `curve_y + knot`, and the roots `kn - C0 /
+    ///   B` and `kn - (C0 + C0) / denom`, for upstream's `kn + (-C0 / B)` and `kn + (-2.f * C0)
+    ///   / denom`;
+    /// - Linux (`0x3bcd20`): `knStart + knStartY`, `knEndY = ((A * t) + B) * t + C`, `knot +
+    ///   curve_y`, and the roots `kn + (-C0) / B` and `kn + (C0 * -2) / denom`.
+    ///
+    /// Both compute `knEndY + knEnd`, `C + kn`, `B + 1`, `4.f * A` as `A * 4`, `y +
+    /// ceil(knStartY - y)` and `y - ceil(y - knEndY)` (Windows calls `ceilf`, Linux inlines
+    /// it: the same values). These orders don't change a result: `knStartY`, `knEndY` and
+    /// `curve_y` only meet `y` in comparisons, and in the wraps that a true comparison (no NaN)
+    /// enters; and where the root divides by `B`, `C0` and `B` are finite (a NaN or infinite
+    /// `C0` makes `denom` NaN or infinite). They are kept as the wheels compile them.
+    /// Upstream's unqualified `sqrt` of a `float` is `sqrtss` in both wheels (and `sqrtf` for
+    /// a negative argument, for `errno`): the same `float`.
+    #[doc(alias = "evalCurveRevHue")]
+    pub fn eval_curve_rev_hue(&self, c: usize, y: f32) -> f32 {
+        // This function is specifically to invert the HueFX and Hue-Hue curve types.
+        //
+        // The output of the HueFX curve is a "delta hue" signal that is added on to the
+        // incoming hue: HueOut = HueIn + HueFX(HueIn). The input to this function should be
+        // the HueOut, in other words, the sum of the HueIn and delta hue. It returns HueIn.
+        let coefs_sets = self.coefs_offsets[2 * c + 1] / 3;
+        if coefs_sets == 0 {
+            return y;
+        }
+        let coefs_offs = self.coefs_offsets[2 * c];
+        let knots_cnt = self.knots_offsets[2 * c + 1];
+        let knots_offs = self.knots_offsets[2 * c];
+        let knot = |i: i32| self.knots[(knots_offs + i) as usize];
+        let coef = |i: i32| self.coefs[(coefs_offs + i) as usize];
+        // `a + b` of a knot and a coefficient, in each wheel's order.
+        let coef_plus_knot = |coef: f32, knot: f32| {
+            if WINDOWS {
+                sse_add(coef, knot)
+            } else {
+                sse_add(knot, coef)
+            }
+        };
+
+        let kn_start = knot(0);
+        let kn_end = knot(knots_cnt - 1);
+        let mut kn_start_y = coef(coefs_sets * 2);
+        let is_hfx = c == 7;
+        if is_hfx {
+            kn_start_y = coef_plus_knot(kn_start_y, kn_start);
+        }
+        let kn_end_y = {
+            let a = coef(coefs_sets - 1);
+            let b = coef(coefs_sets * 2 - 1);
+            let c = coef(coefs_sets * 3 - 1);
+            let kn = knot(knots_cnt - 2);
+            let t = kn_end - kn;
+            let at = if WINDOWS {
+                sse_mul(t, a)
+            } else {
+                sse_mul(a, t)
+            };
+            let kn_end_y = sse_add(sse_mul(sse_add(at, b), t), c);
+            if is_hfx {
+                sse_add(kn_end_y, kn_end)
+            } else {
+                kn_end_y
+            }
+        };
+
+        let mut y = y;
+        if y < kn_start_y {
+            // Wrap up into the valid hue range.
+            y = sse_add(y, (kn_start_y - y).ceil());
+        } else if y > kn_end_y {
+            // Wrap down into the valid hue range.
+            y -= (y - kn_end_y).ceil();
+        }
+
+        let mut i = 0;
+        while i < knots_cnt - 2 {
+            let mut curve_y = coef(coefs_sets * 2 + i + 1);
+            if is_hfx {
+                curve_y = coef_plus_knot(curve_y, knot(i + 1));
+            }
+            if y < curve_y {
+                break;
+            }
+            i += 1;
+        }
+        let a = coef(i);
+        let mut b = coef(coefs_sets + i);
+        let mut c = coef(coefs_sets * 2 + i);
+        let kn = knot(i);
+        if is_hfx {
+            // Shift curve up so left edge is on the main diagonal.
+            c = sse_add(c, kn);
+            // Add diagonal line.
+            b = sse_add(b, 1.0);
+        }
+        let c0 = c - y;
+        let discrim = sse_sub(sse_mul(b, b), sse_mul(sse_mul(a, 4.0), c0)).sqrt();
+        let denom = sse_add(discrim, b);
+        if denom.abs() < 1e-5 {
+            // A~=0, B<0: linear segment with negative slope; use linear inverse.
+            return if b.abs() < 1e-5 {
+                kn
+            } else if WINDOWS {
+                kn - c0 / b
+            } else {
+                sse_add(kn, -c0 / b)
+            };
+        }
+        if WINDOWS {
+            kn - sse_add(c0, c0) / denom
+        } else {
+            sse_add(kn, sse_mul(c0, -2.0) / denom)
+        }
+        // Note: The caller should wrap to ensure the output is a hue on [0,1).
+    }
 }
 
 /// Whether this is the Windows build, whose wheel's machine code orders some operands

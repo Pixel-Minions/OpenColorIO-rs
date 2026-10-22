@@ -1481,7 +1481,7 @@ path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradinghuecurve/grading_hue_curve_op.rs"]
 status = "partial"
-note = "p5-huecurve 5.4a: the op and CreateGradingHueCurveOp; getCPUOp with the renderers (5.4b); extractGpuShaderInfo with 5.4c (ocio-gpu gpu_processor.rs); CreateGradingHueCurveTransform and BuildGradingHueCurveOp with 5.5e"
+note = "p5-huecurve 5.4a: the op and CreateGradingHueCurveOp; 5.4b: getCPUOp; extractGpuShaderInfo with 5.4c (ocio-gpu gpu_processor.rs); CreateGradingHueCurveTransform and BuildGradingHueCurveOp with 5.5e"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOp.h"
@@ -1494,13 +1494,14 @@ note = "p5-huecurve 5.4a: CreateGradingHueCurveOp; CreateGradingHueCurveTransfor
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradinghuecurve/grading_hue_curve_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "p5-huecurve 5.4b: the draw, forward and reverse renderers, LinLog/LogLin, in each wheel's operand order where two NaNs meet; checked bit for bit against the wheel by the battery (tests/grading_hue_curve_oracle.rs), with dynamic sets and decoupling"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradinghuecurve/grading_hue_curve_op_cpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOpData.cpp"
@@ -1600,7 +1601,7 @@ path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs", "crates/ocio-gpu/src/ops/gradingrgbcurve/grading_rgb_curve_op_gpu.rs"]
 status = "partial"
-note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; 2.6b: the RGB curves' fitting (EstimateRGBSlopes, FitRGBSpline, AdjustRGBSlopes with U-35's guard, computeKnotsAndCoefsForRGBCurve), KnotsCoefs and evalCurve/evalCurveRev, the fitting and the evaluation in each wheel's operand order (I-91); 2.6e: AddShaderEvalFwd/Rev, in ocio-gpu's grading_rgb_curve_op_gpu.rs; p5-values 5.0d: the hue curves' fitting (PrepHueCurveData, CalcKsi, FitHueSpline, EstimateHueSlopes, computeKnotsAndCoefsForHueCurve with drawCurveOnly's identity knots) and the Create overloads with a HueCurveType (with_hue_curve_type, with_points_and_hue_curve_type), checked bit for bit against the uniforms of the wheel's dynamic GradingHueCurve op on Windows (tests/hue_curve_knots_oracle.rs); left: evalCurveRevHue and AddShaderEvalRevHue, with the hue curve renderers (5.4), which compare their NaN results with each wheel"
+note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; 2.6b: the RGB curves' fitting (EstimateRGBSlopes, FitRGBSpline, AdjustRGBSlopes with U-35's guard, computeKnotsAndCoefsForRGBCurve), KnotsCoefs and evalCurve/evalCurveRev, the fitting and the evaluation in each wheel's operand order (I-91); 2.6e: AddShaderEvalFwd/Rev, in ocio-gpu's grading_rgb_curve_op_gpu.rs; p5-values 5.0d: the hue curves' fitting (PrepHueCurveData, CalcKsi, FitHueSpline, EstimateHueSlopes, computeKnotsAndCoefsForHueCurve with drawCurveOnly's identity knots) and the Create overloads with a HueCurveType (with_hue_curve_type, with_points_and_hue_curve_type), checked bit for bit against the uniforms of the wheel's dynamic GradingHueCurve op on Windows (tests/hue_curve_knots_oracle.rs); p5-huecurve 5.4b: KnotsCoefs::evalCurveRevHue (1385-1460) in each wheel's operand order, checked through the hue curve renderers' battery; left: AddShaderEvalRevHue (5.4c)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.h"
@@ -4870,7 +4871,7 @@ note = "1.3g3: 3 of 4 tests; p1-transforms-fam2 (1.8d): create_transform, in exp
 path = "tests/cpu/ops/gradinghuecurve/GradingHueCurveOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradinghuecurve/grading_hue_curve_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradinghuecurve/GradingHueCurveOpData_tests.cpp"

@@ -3341,6 +3341,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   the renderer and the shader come with 5.4b and 5.4c); checked against the wheel
   (`crates/ocio-ops/tests/grading_hue_curve_op_data_oracle.rs`).
 
+### I-273. A GradingHueCurve's NaN pixels differ between Windows and Linux
+
+- **Upstream:** the linear style's forward renderer scales luma by its two gains, `out[2] *
+  hueLumGain * satLumGain` (`ops/gradinghuecurve/GradingHueCurveOpCPU.cpp:266-267` @ v2.5.2).
+  The hue-lum gain is NaN where an infinite hue-lum gain meets a saturation of 0, or an
+  infinite hue-sat gain a lum-sat gain of 0 (x86's default NaN); a NaN pixel's luma is NaN
+  too. When both are, the result is the first operand's NaN, and the wheels order the
+  operands differently: MSVC computes `(lum * hueLumGain) * satLumGain` (the pixel's NaN),
+  GCC `satLumGain * (hueLumGain * lum)` (the default NaN). The other sites where two NaNs can
+  meet, the log and video styles' luma shift and the hue effect, are compiled alike (both as
+  `shift + lum` and `HueFX(hue) + hue`, against the source's order), as are the curves'
+  evaluations the renderers share with the RGB curves (I-91).
+- **Who notices:** a linear GradingHueCurveTransform whose curves overflow to infinite gains,
+  applied to NaN pixels: the NaNs' sign and payload differ between the platforms.
+- **A fix:** one operand order on both platforms (the source's).
+- **Status:** matched in `p5-huecurve` (5.4b, `crates/ocio-ops/src/ops/gradinghuecurve/
+  grading_hue_curve_op_cpu.rs`, `apply_fwd`); the battery
+  (`crates/ocio-ops/tests/grading_hue_curve_oracle.rs`) compares them bit for bit on both
+  platforms.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
