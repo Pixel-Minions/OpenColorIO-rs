@@ -613,41 +613,14 @@ static ENTRIES: Mutex<Entries> = Mutex::new(BTreeMap::new());
 static IS_CACHE_ENABLED: LazyLock<bool> =
     LazyLock::new(|| !is_env_variable_present(OCIO_DISABLE_ALL_CACHES));
 
-/// An item of a menu, or the null item upstream adds for a role whose color space it doesn't
-/// find among the roles (docs/improvements.md, U-142), with that role's name.
-#[derive(Debug)]
-enum Entry {
-    Item(ColorSpaceInfo),
-    Null(Vec<u8>),
-}
-
-impl Entry {
-    /// The item; for the null item, the error the port returns where upstream reads through
-    /// the null pointer, and its process dies (docs/improvements.md, U-142).
-    fn get(&self) -> Result<&ColorSpaceInfo> {
-        match self {
-            Entry::Item(info) => Ok(info),
-            Entry::Null(role) => Err(Exception::new(
-                [
-                    b"ColorSpaceMenuHelper: the menu item of the role '".as_slice(),
-                    role,
-                    b"' is null (the role refers to no color space): OCIO 2.5.2 reads through \
-                      a null pointer there, and its process dies (docs/improvements.md, U-142).",
-                ]
-                .concat(),
-            )),
-        }
-    }
-}
-
 /// A menu: the items of a config that a [`ColorSpaceMenuParameters`] selects (its
 /// algorithm, `OpenColorAppHelpers.h:19-103`), each with its name, UI name, family,
 /// description and hierarchy levels (the family split by the config's family separator). In
 /// order: the color spaces, the named transforms, the roles, then the added color spaces.
 ///
-/// With the roles included, a role set to `""` gives a null item, as upstream's: the menu
-/// counts it, and the calls that would read it (its getters, the lookups that reach it, the
-/// menu's text) return an error where upstream's process dies (docs/improvements.md, U-142).
+/// With the roles included, a role set to `""` makes upstream build a menu with a null item,
+/// and its process dies when that item is read; the port refuses to make that menu
+/// (docs/improvements.md, U-142).
 ///
 /// Port of `ColorSpaceMenuHelper` (include/OpenColorIO/OpenColorAppHelpers.h:201-276) and
 /// `ColorSpaceMenuHelperImpl` (src/OpenColorIO/apphelpers/ColorSpaceHelpers.h:140-180,
@@ -657,7 +630,7 @@ pub struct ColorSpaceMenuHelper {
     /// `m_parameters`: a copy of the parameters the menu was made with.
     parameters: ColorSpaceMenuParameters,
     /// `m_entries`: the items, the added color spaces included.
-    entries: Vec<Entry>,
+    entries: Vec<ColorSpaceInfo>,
 }
 
 impl ColorSpaceMenuHelper {
@@ -675,7 +648,9 @@ impl ColorSpaceMenuHelper {
     /// An added color space that is neither a color space nor a named transform of the config
     /// fails ("Element '<name>' is neither a color space not a named transform."). A role that
     /// names a missing color space fails, where upstream's process dies (docs/improvements.md,
-    /// U-141), and so do added color spaces checked against a null item (U-142).
+    /// U-141), and so does a role set to the empty name with the roles included, where
+    /// upstream makes a menu with a null item and its process dies when that item is read
+    /// (U-142).
     ///
     /// Port of `ColorSpaceMenuHelper::Create` (ColorSpaceHelpers.cpp:378-450 @ v2.5.2).
     #[doc(alias = "Create")]
@@ -760,7 +735,7 @@ impl ColorSpaceMenuHelper {
         if !params.role.is_empty() && config.has_role(&params.role) {
             let info = ColorSpaceInfo::create_from_single_role(config, &params.role)?
                 .expect("the config has the role");
-            self.entries.push(Entry::Item(info));
+            self.entries.push(info);
             return Ok(());
         }
 
@@ -786,7 +761,7 @@ impl ColorSpaceMenuHelper {
                 &all_encodings,
                 params.color_space_type,
             );
-            self.entries = infos.into_iter().map(Entry::Item).collect();
+            self.entries = infos;
         }
 
         // 4) Include roles if requested.
@@ -794,10 +769,22 @@ impl ColorSpaceMenuHelper {
         if params.include_roles {
             for idx in 0..config.num_roles() {
                 let role = config.role_name(idx);
-                // A role set to "" gives a null item (docs/improvements.md, U-142).
-                let info = ColorSpaceInfo::create_from_role(config, role, Some(b"Roles"))?;
-                self.entries
-                    .push(info.map_or_else(|| Entry::Null(role.to_vec()), Entry::Item));
+                // A role set to "" gives a null item upstream, and its process dies when that
+                // item is read: the port refuses (docs/improvements.md, U-142).
+                let Some(info) = ColorSpaceInfo::create_from_role(config, role, Some(b"Roles"))?
+                else {
+                    return Err(Exception::new(
+                        [
+                            b"ColorSpaceMenuHelper: the menu item of the role '".as_slice(),
+                            role,
+                            b"' is null (the role refers to no color space): OCIO 2.5.2 makes a \
+                              menu with a null item there, and its process dies when the item \
+                              is read (docs/improvements.md, U-142).",
+                        ]
+                        .concat(),
+                    ));
+                };
+                self.entries.push(info);
             }
         }
 
@@ -805,25 +792,20 @@ impl ColorSpaceMenuHelper {
 
         let mut additional_color_spaces = Infos::new();
         for name in &params.additional_color_spaces {
-            // Whether an item, or an added one, is already named `item_name`: upstream reads
-            // the items in order until one is (docs/improvements.md, U-142, for a null one).
-            let already_there = |item_name: &[u8], added: &Infos| -> Result<bool> {
-                for entry in &self.entries {
-                    if string_utils::compare(c_str(item_name), entry.get()?.name()) {
-                        return Ok(true);
-                    }
-                }
-                Ok(added
+            // Whether an item, or an added one, is already named `item_name`.
+            let already_there = |item_name: &[u8], added: &Infos| -> bool {
+                self.entries
                     .iter()
-                    .any(|added| string_utils::compare(c_str(item_name), added.name())))
+                    .chain(added.iter())
+                    .any(|entry| string_utils::compare(c_str(item_name), entry.name()))
             };
             if let Some(cs) = config.color_space(name) {
-                if !already_there(cs.name(), &additional_color_spaces)? {
+                if !already_there(cs.name(), &additional_color_spaces) {
                     let cs_info = ColorSpaceInfo::from_color_space(config, cs);
                     additional_color_spaces.push(cs_info);
                 }
             } else if let Some(nt) = config.named_transform(name) {
-                if !already_there(nt.name(), &additional_color_spaces)? {
+                if !already_there(nt.name(), &additional_color_spaces) {
                     let cs_info = ColorSpaceInfo::from_named_transform(config, nt);
                     additional_color_spaces.push(cs_info);
                 }
@@ -839,14 +821,13 @@ impl ColorSpaceMenuHelper {
             }
         }
 
-        self.entries
-            .extend(additional_color_spaces.into_iter().map(Entry::Item));
+        self.entries.extend(additional_color_spaces);
         Ok(())
     }
 
-    /// The item at `idx`, `None` outside the items; the error of the null item (U-142).
-    fn item(&self, idx: usize) -> Result<Option<&ColorSpaceInfo>> {
-        self.entries.get(idx).map(Entry::get).transpose()
+    /// The item at `idx`, `None` outside the items.
+    fn item(&self, idx: usize) -> Option<&ColorSpaceInfo> {
+        self.entries.get(idx)
     }
 
     /// The number of items.
@@ -859,147 +840,134 @@ impl ColorSpaceMenuHelper {
     }
 
     /// The config's name of the item at `idx` (a role's color space for a menu of a role, a
-    /// role for the roles included); `""` outside the items. An error for a null item, where
-    /// upstream's process dies (docs/improvements.md, U-142).
+    /// role for the roles included); `""` outside the items.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getName` (ColorSpaceHelpers.cpp:595-602 @ v2.5.2).
     #[doc(alias = "getName")]
-    pub fn name(&self, idx: usize) -> Result<&[u8]> {
-        Ok(self.item(idx)?.map_or(&[], ColorSpaceInfo::name))
+    pub fn name(&self, idx: usize) -> &[u8] {
+        self.item(idx).map_or(&[], ColorSpaceInfo::name)
     }
 
     /// The name to show for the item at `idx` (`"<role> (<color space>)"` for a role, the
-    /// name otherwise); `""` outside the items. An error for a null item (U-142).
+    /// name otherwise); `""` outside the items.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getUIName` (ColorSpaceHelpers.cpp:604-611 @ v2.5.2).
     #[doc(alias = "getUIName")]
-    pub fn ui_name(&self, idx: usize) -> Result<&[u8]> {
-        Ok(self.item(idx)?.map_or(&[], ColorSpaceInfo::ui_name))
+    pub fn ui_name(&self, idx: usize) -> &[u8] {
+        self.item(idx).map_or(&[], ColorSpaceInfo::ui_name)
     }
 
     /// The index of the first item named `name` (ignoring case); `usize::MAX` (upstream's
-    /// `(size_t)-1`) for none, or an empty name. An error when the search reaches a null item
-    /// (U-142).
+    /// `(size_t)-1`) for none, or an empty name.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getIndexFromName` (ColorSpaceHelpers.cpp:613-627 @
     /// v2.5.2).
     #[doc(alias = "getIndexFromName")]
-    pub fn index_from_name(&self, name: impl AsRef<[u8]>) -> Result<usize> {
+    pub fn index_from_name(&self, name: impl AsRef<[u8]>) -> usize {
         let cs_name = c_str(name.as_ref());
         if !cs_name.is_empty() {
             for (idx, entry) in self.entries.iter().enumerate() {
-                if string_utils::compare(entry.get()?.name(), cs_name) {
-                    return Ok(idx);
+                if string_utils::compare(entry.name(), cs_name) {
+                    return idx;
                 }
             }
         }
-        Ok(usize::MAX)
+        usize::MAX
     }
 
     /// The index of the first item whose UI name is `name` (ignoring case); `usize::MAX`
-    /// (upstream's `(size_t)-1`) for none, or an empty name. An error when the search reaches
-    /// a null item (U-142).
+    /// (upstream's `(size_t)-1`) for none, or an empty name.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getIndexFromUIName` (ColorSpaceHelpers.cpp:629-643 @
     /// v2.5.2).
     #[doc(alias = "getIndexFromUIName")]
-    pub fn index_from_ui_name(&self, name: impl AsRef<[u8]>) -> Result<usize> {
+    pub fn index_from_ui_name(&self, name: impl AsRef<[u8]>) -> usize {
         let cs_name = c_str(name.as_ref());
         if !cs_name.is_empty() {
             for (idx, entry) in self.entries.iter().enumerate() {
-                if string_utils::compare(entry.get()?.ui_name(), cs_name) {
-                    return Ok(idx);
+                if string_utils::compare(entry.ui_name(), cs_name) {
+                    return idx;
                 }
             }
         }
-        Ok(usize::MAX)
+        usize::MAX
     }
 
-    /// The family of the item at `idx`; `""` outside the items. An error for a null item
-    /// (U-142).
+    /// The family of the item at `idx`; `""` outside the items.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getFamily` (ColorSpaceHelpers.cpp:645-652 @ v2.5.2).
     #[doc(alias = "getFamily")]
-    pub fn family(&self, idx: usize) -> Result<&[u8]> {
-        Ok(self.item(idx)?.map_or(&[], ColorSpaceInfo::family))
+    pub fn family(&self, idx: usize) -> &[u8] {
+        self.item(idx).map_or(&[], ColorSpaceInfo::family)
     }
 
-    /// The description of the item at `idx`; `""` outside the items. An error for a null item
-    /// (U-142).
+    /// The description of the item at `idx`; `""` outside the items.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getDescription` (ColorSpaceHelpers.cpp:654-661 @
     /// v2.5.2).
     #[doc(alias = "getDescription")]
-    pub fn description(&self, idx: usize) -> Result<&[u8]> {
-        Ok(self.item(idx)?.map_or(&[], ColorSpaceInfo::description))
+    pub fn description(&self, idx: usize) -> &[u8] {
+        self.item(idx).map_or(&[], ColorSpaceInfo::description)
     }
 
     /// The number of hierarchy levels of the item at `idx` (its family split by the config's
     /// family separator, each level trimmed, the empty ones left out); 0 outside the items.
-    /// An error for a null item (U-142).
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getNumHierarchyLevels` (ColorSpaceHelpers.cpp:
     /// 663-670 @ v2.5.2).
     #[doc(alias = "getNumHierarchyLevels")]
-    pub fn num_hierarchy_levels(&self, idx: usize) -> Result<usize> {
-        Ok(self
-            .item(idx)?
-            .map_or(0, ColorSpaceInfo::num_hierarchy_levels))
+    pub fn num_hierarchy_levels(&self, idx: usize) -> usize {
+        self.item(idx)
+            .map_or(0, ColorSpaceInfo::num_hierarchy_levels)
     }
 
-    /// The hierarchy level `i` of the item at `idx`; `""` outside them. An error for a null
-    /// item (U-142).
+    /// The hierarchy level `i` of the item at `idx`; `""` outside them.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getHierarchyLevel` (ColorSpaceHelpers.cpp:672-679 @
     /// v2.5.2).
     #[doc(alias = "getHierarchyLevel")]
-    pub fn hierarchy_level(&self, idx: usize, i: usize) -> Result<&[u8]> {
-        Ok(self
-            .item(idx)?
-            .map_or(&[], |entry| entry.hierarchy_level(i)))
+    pub fn hierarchy_level(&self, idx: usize, i: usize) -> &[u8] {
+        self.item(idx).map_or(&[], |entry| entry.hierarchy_level(i))
     }
 
     /// The name of the first item whose UI name is `ui_name` (ignoring case); `""` for none,
-    /// or an empty UI name. An error when the search reaches a null item (U-142).
+    /// or an empty UI name.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getNameFromUIName` (ColorSpaceHelpers.cpp:681-694 @
     /// v2.5.2).
     #[doc(alias = "getNameFromUIName")]
-    pub fn name_from_ui_name(&self, ui_name: impl AsRef<[u8]>) -> Result<&[u8]> {
+    pub fn name_from_ui_name(&self, ui_name: impl AsRef<[u8]>) -> &[u8] {
         let ui_name = c_str(ui_name.as_ref());
         if !ui_name.is_empty() {
             for entry in &self.entries {
-                let entry = entry.get()?;
                 if string_utils::compare(ui_name, entry.ui_name()) {
-                    return Ok(entry.name());
+                    return entry.name();
                 }
             }
         }
-        Ok(&[])
+        &[]
     }
 
     /// The UI name of the first item named `name` (ignoring case); `""` for none, or an empty
-    /// name. An error when the search reaches a null item (U-142).
+    /// name.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::getUINameFromName` (ColorSpaceHelpers.cpp:696-709 @
     /// v2.5.2).
     #[doc(alias = "getUINameFromName")]
-    pub fn ui_name_from_name(&self, name: impl AsRef<[u8]>) -> Result<&[u8]> {
+    pub fn ui_name_from_name(&self, name: impl AsRef<[u8]>) -> &[u8] {
         let name = c_str(name.as_ref());
         if !name.is_empty() {
             for entry in &self.entries {
-                let entry = entry.get()?;
                 if string_utils::compare(name, entry.name()) {
-                    return Ok(entry.ui_name());
+                    return entry.ui_name();
                 }
             }
         }
-        Ok(&[])
+        &[]
     }
 
     /// The menu's text, as Python's `repr()` prints it: its parameters' text
-    /// ([`ColorSpaceMenuParameters::to_bytes`]), then `, color spaces = [<names>]`. An error
-    /// for a menu with a null item (U-142).
+    /// ([`ColorSpaceMenuParameters::to_bytes`]), then `, color spaces = [<names>]`.
     ///
     /// Port of `ColorSpaceMenuHelperImpl::serialize` and `operator<<(std::ostream &, const
     /// ColorSpaceMenuHelper &)` (ColorSpaceHelpers.cpp:711-734 @ v2.5.2).
@@ -1011,7 +979,7 @@ impl ColorSpaceMenuHelper {
             if !first {
                 os.extend_from_slice(b", ");
             }
-            os.extend_from_slice(cs.get()?.name());
+            os.extend_from_slice(cs.name());
             first = false;
         }
         os.extend_from_slice(b"]");

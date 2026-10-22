@@ -472,14 +472,14 @@ fn menu_calls(run: &mut Run, params: &ColorSpaceMenuParameters, p: &str, m: &str
     // return.
     let mut probes = Vec::new();
     for i in 0..=n {
-        let levels: Vec<Value> = (0..helper.num_hierarchy_levels(i).unwrap())
-            .map(|l| s(helper.hierarchy_level(i, l).unwrap()))
+        let levels: Vec<Value> = (0..helper.num_hierarchy_levels(i))
+            .map(|l| s(helper.hierarchy_level(i, l)))
             .collect();
         for (getter, value) in [
-            ("getName", s(helper.name(i).unwrap())),
-            ("getUIName", s(helper.ui_name(i).unwrap())),
-            ("getFamily", s(helper.family(i).unwrap())),
-            ("getDescription", s(helper.description(i).unwrap())),
+            ("getName", s(helper.name(i))),
+            ("getUIName", s(helper.ui_name(i))),
+            ("getFamily", s(helper.family(i))),
+            ("getDescription", s(helper.description(i))),
             ("getHierarchyLevels", json!(levels)),
         ] {
             run.push(
@@ -489,30 +489,21 @@ fn menu_calls(run: &mut Run, params: &ColorSpaceMenuParameters, p: &str, m: &str
                 Vec::new(),
             );
         }
-        probes.push(string_utils::upper(helper.name(i).unwrap()));
-        probes.push(string_utils::lower(helper.ui_name(i).unwrap()));
+        probes.push(string_utils::upper(helper.name(i)));
+        probes.push(string_utils::lower(helper.ui_name(i)));
     }
     probes.push(b"unknown".to_vec());
     probes.sort();
     probes.dedup();
     for probe in &probes {
         for (getter, value) in [
-            (
-                "getIndexFromName",
-                json!(helper.index_from_name(probe).unwrap()),
-            ),
+            ("getIndexFromName", json!(helper.index_from_name(probe))),
             (
                 "getIndexFromUIName",
-                json!(helper.index_from_ui_name(probe).unwrap()),
+                json!(helper.index_from_ui_name(probe)),
             ),
-            (
-                "getNameFromUIName",
-                s(helper.name_from_ui_name(probe).unwrap()),
-            ),
-            (
-                "getUINameFromName",
-                s(helper.ui_name_from_name(probe).unwrap()),
-            ),
+            ("getNameFromUIName", s(helper.name_from_ui_name(probe))),
+            ("getUINameFromName", s(helper.ui_name_from_name(probe))),
         ] {
             run.push(
                 format!("{m}.{getter}({})", String::from_utf8_lossy(probe)),
@@ -878,17 +869,17 @@ fn roles_naming_a_missing_color_space_are_refused() {
     assert!(ColorSpaceMenuHelper::new(&params).is_ok());
 }
 
-/// A role set to `""`, with the roles included: the menu holds a null item, as the wheel's,
-/// and what reads it is an error in the port, where the wheel's process dies
+/// A role set to `""`, with the roles included: the wheel makes a menu with a null item and
+/// its process dies when that item is read, and the port refuses to make it
 /// (docs/improvements.md, U-142).
 ///
 /// The wheel can't be asked about that menu through the oracle: writing the menu out calls its
 /// getters without arguments, and pybind11's TypeError message holds the menu's `repr`, which
 /// reads the null item (the oracle's process died, 2026-10-22). What doesn't make that menu is
-/// compared: the parameters, and an added color space the config doesn't have, which fails
-/// before the items are read.
+/// compared with the wheel: the same config without the roles included (the menus, their
+/// items and lookups), and an added color space the config doesn't have.
 #[test]
-fn a_role_set_to_the_empty_name_gives_a_null_item() {
+fn a_role_set_to_the_empty_name_is_refused_when_the_menu_is_made() {
     let mut failures = Vec::new();
     let tag = "U-142";
     let mut config =
@@ -918,84 +909,66 @@ fn a_role_set_to_the_empty_name_gives_a_null_item() {
         again: false,
     };
 
-    // The port's menu: one null item (the role's), whose getters fail; the other items, and
-    // the lookups that stop before it, return.
-    let mut scratch = Run::new();
-    let params = parameters(&mut scratch, &config, &case, "p");
-    let helper = ColorSpaceMenuHelper::new(&params).unwrap();
-    let n = helper.num_color_spaces();
-    let nulls: Vec<usize> = (0..n).filter(|&i| helper.name(i).is_err()).collect();
-    assert_eq!(nulls.len(), 1, "{nulls:?}");
-    let null = nulls[0];
-    for check in [
-        helper.ui_name(null).err(),
-        helper.family(null).err(),
-        helper.description(null).err(),
-        helper.num_hierarchy_levels(null).err(),
-        helper.hierarchy_level(null, 0).err(),
-        helper.to_bytes().err(),
-        helper.index_from_name("unknown").err(),
-        helper.index_from_ui_name("unknown").err(),
-        helper.name_from_ui_name("unknown").err(),
-        helper.ui_name_from_name("unknown").err(),
+    // The port refuses the menu with the roles included, with or without added color spaces
+    // (the refusal comes before they are read), naming the role.
+    for added in [
+        Vec::new(),
+        vec![b"IN_1".to_vec()],
+        vec![b"lin_1".to_vec()],
+        vec![b"doesNotExist".to_vec()],
     ] {
-        let error = check.expect("an error");
-        assert!(error.to_string().contains("U-142"), "{error}");
-    }
-    assert!(null >= 3);
-    for i in (0..=n).filter(|&i| i != null) {
-        assert!(helper.name(i).is_ok() && helper.hierarchy_level(i, 0).is_ok());
-    }
-    for i in 0..null {
-        let name = string_utils::upper(helper.name(i).unwrap());
-        let ui_name = string_utils::upper(helper.ui_name(i).unwrap());
-        assert_eq!(helper.index_from_name(&name).unwrap(), i);
-        assert_eq!(helper.index_from_ui_name(&ui_name).unwrap(), i);
+        let mut scratch = Run::new();
+        let with_added = Case {
+            added: added.clone(),
+            ..case.clone()
+        };
+        let params = parameters(&mut scratch, &config, &with_added, "p");
+        let error = ColorSpaceMenuHelper::new(&params).err().unwrap_or_else(|| {
+            panic!("the menu with the roles and {added:?} added is made");
+        });
+        let text = error.to_string();
+        assert!(
+            text.contains("U-142") && text.contains("the menu item of the role 'emptyrole'"),
+            "{text}"
+        );
     }
 
-    // Added color spaces: one the config doesn't have fails before the items are read, as the
-    // wheel's (compared); one the search finds before the null item makes the menu; one it
-    // doesn't find before it is an error.
+    // The same config and parameters without the roles: no null item, the wheel makes the menu
+    // and the port compares item by item; and an added color space the config doesn't have
+    // fails on both.
     let mut run = Run::new();
+    let without_roles = Case {
+        include_roles: false,
+        ..case.clone()
+    };
+    let p = parameters(&mut run, &config, &without_roles, "p");
+    assert!(ColorSpaceMenuHelper::new(&p).is_ok());
+    menu_calls(&mut run, &p, "p", "m");
     let missing = Case {
         added: vec![b"doesNotExist".to_vec()],
-        ..case.clone()
+        ..without_roles.clone()
     };
     let q = parameters(&mut run, &config, &missing, "q");
     let (made, made_log) = capture(|| ColorSpaceMenuHelper::new(&q));
     let error = made.unwrap_err();
+    assert!(!error.to_string().contains("U-142"), "{error}");
     run.push(
         "ColorSpaceMenuHelper(q)".to_string(),
-        json!({"new": "ColorSpaceMenuHelper", "args": [{"ref": "q"}], "as": "m"}),
+        json!({"new": "ColorSpaceMenuHelper", "args": [{"ref": "q"}], "as": "n"}),
         json!({"exception": {"message": bytes_arg(error.what())}}),
         made_log,
     );
     compare(tag, &source, &setup, None, &run, &mut failures);
     assert!(
         failures.is_empty(),
-        "{} mismatches:\n{}",
+        "{} mismatches:
+{}",
         failures.len(),
-        failures.join("\n")
+        failures.join(
+            "
+"
+        )
     );
-
-    for (added, refused) in [(&b"IN_1"[..], false), (b"lin_1", true)] {
-        let mut scratch = Run::new();
-        let with_added = Case {
-            added: vec![added.to_vec()],
-            ..case.clone()
-        };
-        let q = parameters(&mut scratch, &config, &with_added, "q");
-        match ColorSpaceMenuHelper::new(&q) {
-            Ok(menu) => {
-                assert!(!refused);
-                assert_eq!(menu.num_color_spaces(), n);
-            }
-            Err(error) => {
-                assert!(refused, "{error}");
-                assert!(error.to_string().contains("U-142"), "{error}");
-            }
-        }
-    }
 }
 
 /// The arguments of `AddColorSpace` after the config.

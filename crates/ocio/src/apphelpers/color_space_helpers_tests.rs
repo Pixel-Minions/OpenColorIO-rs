@@ -306,43 +306,40 @@ fn color_space_menu_helper_categories() {
 
     assert_eq!(menu_helper.num_color_spaces(), 8);
 
-    assert_eq!(menu_helper.name(0).unwrap(), b"raw");
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_1");
-    assert_eq!(menu_helper.name(2).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(3).unwrap(), b"in_3");
-    assert_eq!(menu_helper.name(4).unwrap(), b"view_1");
-    assert_eq!(menu_helper.name(5).unwrap(), b"lut_input_3");
-    assert_eq!(menu_helper.name(6).unwrap(), b"nt2");
-    assert_eq!(menu_helper.name(7).unwrap(), b"nt3");
-    assert_eq!(menu_helper.name(8).unwrap(), b"");
+    assert_eq!(menu_helper.name(0), b"raw");
+    assert_eq!(menu_helper.name(1), b"in_1");
+    assert_eq!(menu_helper.name(2), b"in_2");
+    assert_eq!(menu_helper.name(3), b"in_3");
+    assert_eq!(menu_helper.name(4), b"view_1");
+    assert_eq!(menu_helper.name(5), b"lut_input_3");
+    assert_eq!(menu_helper.name(6), b"nt2");
+    assert_eq!(menu_helper.name(7), b"nt3");
+    assert_eq!(menu_helper.name(8), b"");
 
-    assert_eq!(menu_helper.ui_name(0).unwrap(), b"raw");
-    assert_eq!(menu_helper.ui_name(1).unwrap(), b"in_1");
-    assert_eq!(menu_helper.ui_name(2).unwrap(), b"in_2");
-    assert_eq!(menu_helper.ui_name(3).unwrap(), b"in_3");
-    assert_eq!(menu_helper.ui_name(4).unwrap(), b"view_1");
-    assert_eq!(menu_helper.ui_name(5).unwrap(), b"lut_input_3");
-    assert_eq!(menu_helper.ui_name(6).unwrap(), b"nt2");
-    assert_eq!(menu_helper.ui_name(7).unwrap(), b"nt3");
-    assert_eq!(menu_helper.ui_name(8).unwrap(), b"");
+    assert_eq!(menu_helper.ui_name(0), b"raw");
+    assert_eq!(menu_helper.ui_name(1), b"in_1");
+    assert_eq!(menu_helper.ui_name(2), b"in_2");
+    assert_eq!(menu_helper.ui_name(3), b"in_3");
+    assert_eq!(menu_helper.ui_name(4), b"view_1");
+    assert_eq!(menu_helper.ui_name(5), b"lut_input_3");
+    assert_eq!(menu_helper.ui_name(6), b"nt2");
+    assert_eq!(menu_helper.ui_name(7), b"nt3");
+    assert_eq!(menu_helper.ui_name(8), b"");
 
-    assert_eq!(menu_helper.num_hierarchy_levels(0).unwrap(), 1);
-    assert_eq!(menu_helper.num_hierarchy_levels(1).unwrap(), 3);
-    assert_eq!(menu_helper.num_hierarchy_levels(2).unwrap(), 0);
-    assert_eq!(menu_helper.num_hierarchy_levels(3).unwrap(), 0);
-    assert_eq!(menu_helper.num_hierarchy_levels(4).unwrap(), 0);
-    assert_eq!(menu_helper.num_hierarchy_levels(5).unwrap(), 0);
-    assert_eq!(menu_helper.num_hierarchy_levels(6).unwrap(), 0);
-    assert_eq!(menu_helper.num_hierarchy_levels(7).unwrap(), 1);
-    assert_eq!(menu_helper.num_hierarchy_levels(8).unwrap(), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(0), 1);
+    assert_eq!(menu_helper.num_hierarchy_levels(1), 3);
+    assert_eq!(menu_helper.num_hierarchy_levels(2), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(3), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(4), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(5), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(6), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(7), 1);
+    assert_eq!(menu_helper.num_hierarchy_levels(8), 0);
 
-    assert_eq!(menu_helper.hierarchy_level(1, 0).unwrap(), b"Input");
-    assert_eq!(menu_helper.hierarchy_level(1, 1).unwrap(), b"Camera");
-    assert_eq!(menu_helper.hierarchy_level(1, 2).unwrap(), b"Acme");
-    assert_eq!(
-        menu_helper.hierarchy_level(7, 0).unwrap(),
-        b"NamedTransforms"
-    );
+    assert_eq!(menu_helper.hierarchy_level(1, 0), b"Input");
+    assert_eq!(menu_helper.hierarchy_level(1, 1), b"Camera");
+    assert_eq!(menu_helper.hierarchy_level(1, 2), b"Acme");
+    assert_eq!(menu_helper.hierarchy_level(7, 0), b"NamedTransforms");
 
     // Use null categories.
 
@@ -380,74 +377,57 @@ fn color_space_menu_helper_categories() {
     menu_helper = menu(&params);
 
     assert_eq!(menu_helper.num_color_spaces(), 7);
-    assert_eq!(menu_helper.name(0).unwrap(), b"lut_input_1");
-    assert_eq!(menu_helper.name(1).unwrap(), b"lut_input_2");
-    assert_eq!(menu_helper.name(2).unwrap(), b"lut_input_3");
-    assert_eq!(menu_helper.name(3).unwrap(), b"default");
-    assert_eq!(menu_helper.name(4).unwrap(), b"reference");
-    assert_eq!(menu_helper.name(5).unwrap(), b"rendering");
-    assert_eq!(menu_helper.name(6).unwrap(), b"scene_linear");
-    assert_eq!(menu_helper.name(7).unwrap(), b"");
+    assert_eq!(menu_helper.name(0), b"lut_input_1");
+    assert_eq!(menu_helper.name(1), b"lut_input_2");
+    assert_eq!(menu_helper.name(2), b"lut_input_3");
+    assert_eq!(menu_helper.name(3), b"default");
+    assert_eq!(menu_helper.name(4), b"reference");
+    assert_eq!(menu_helper.name(5), b"rendering");
+    assert_eq!(menu_helper.name(6), b"scene_linear");
+    assert_eq!(menu_helper.name(7), b"");
 
-    assert_eq!(menu_helper.index_from_name("lut_input_1").unwrap(), 0);
-    assert_eq!(menu_helper.index_from_name("lut_input_2").unwrap(), 1);
-    assert_eq!(menu_helper.index_from_name("lut_input_3").unwrap(), 2);
-    assert_eq!(menu_helper.index_from_name("default").unwrap(), 3);
-    assert_eq!(menu_helper.index_from_name("reference").unwrap(), 4);
-    assert_eq!(menu_helper.index_from_name("rendering").unwrap(), 5);
-    assert_eq!(menu_helper.index_from_name("scene_linear").unwrap(), 6);
-    assert_eq!(
-        menu_helper.index_from_name("default (lin_1)").unwrap(),
-        usize::MAX
-    );
+    assert_eq!(menu_helper.index_from_name("lut_input_1"), 0);
+    assert_eq!(menu_helper.index_from_name("lut_input_2"), 1);
+    assert_eq!(menu_helper.index_from_name("lut_input_3"), 2);
+    assert_eq!(menu_helper.index_from_name("default"), 3);
+    assert_eq!(menu_helper.index_from_name("reference"), 4);
+    assert_eq!(menu_helper.index_from_name("rendering"), 5);
+    assert_eq!(menu_helper.index_from_name("scene_linear"), 6);
+    assert_eq!(menu_helper.index_from_name("default (lin_1)"), usize::MAX);
 
-    assert_eq!(menu_helper.ui_name(0).unwrap(), b"lut_input_1");
-    assert_eq!(menu_helper.ui_name(1).unwrap(), b"lut_input_2");
-    assert_eq!(menu_helper.ui_name(2).unwrap(), b"lut_input_3");
-    assert_eq!(menu_helper.ui_name(3).unwrap(), b"default (raw)");
-    assert_eq!(menu_helper.ui_name(4).unwrap(), b"reference (lin_1)");
-    assert_eq!(menu_helper.ui_name(5).unwrap(), b"rendering (lin_1)");
-    assert_eq!(menu_helper.ui_name(6).unwrap(), b"scene_linear (lin_1)");
-    assert_eq!(menu_helper.ui_name(7).unwrap(), b"");
+    assert_eq!(menu_helper.ui_name(0), b"lut_input_1");
+    assert_eq!(menu_helper.ui_name(1), b"lut_input_2");
+    assert_eq!(menu_helper.ui_name(2), b"lut_input_3");
+    assert_eq!(menu_helper.ui_name(3), b"default (raw)");
+    assert_eq!(menu_helper.ui_name(4), b"reference (lin_1)");
+    assert_eq!(menu_helper.ui_name(5), b"rendering (lin_1)");
+    assert_eq!(menu_helper.ui_name(6), b"scene_linear (lin_1)");
+    assert_eq!(menu_helper.ui_name(7), b"");
 
-    assert_eq!(menu_helper.index_from_ui_name("lut_input_1").unwrap(), 0);
-    assert_eq!(menu_helper.index_from_ui_name("lut_input_2").unwrap(), 1);
-    assert_eq!(menu_helper.index_from_ui_name("lut_input_3").unwrap(), 2);
-    assert_eq!(menu_helper.index_from_ui_name("default (raw)").unwrap(), 3);
-    assert_eq!(
-        menu_helper.index_from_ui_name("reference (lin_1)").unwrap(),
-        4
-    );
-    assert_eq!(
-        menu_helper.index_from_ui_name("rendering (lin_1)").unwrap(),
-        5
-    );
-    assert_eq!(
-        menu_helper
-            .index_from_ui_name("scene_linear (lin_1)")
-            .unwrap(),
-        6
-    );
-    assert_eq!(
-        menu_helper.index_from_ui_name("default").unwrap(),
-        usize::MAX
-    );
+    assert_eq!(menu_helper.index_from_ui_name("lut_input_1"), 0);
+    assert_eq!(menu_helper.index_from_ui_name("lut_input_2"), 1);
+    assert_eq!(menu_helper.index_from_ui_name("lut_input_3"), 2);
+    assert_eq!(menu_helper.index_from_ui_name("default (raw)"), 3);
+    assert_eq!(menu_helper.index_from_ui_name("reference (lin_1)"), 4);
+    assert_eq!(menu_helper.index_from_ui_name("rendering (lin_1)"), 5);
+    assert_eq!(menu_helper.index_from_ui_name("scene_linear (lin_1)"), 6);
+    assert_eq!(menu_helper.index_from_ui_name("default"), usize::MAX);
 
-    assert_eq!(menu_helper.num_hierarchy_levels(0).unwrap(), 0);
-    assert_eq!(menu_helper.num_hierarchy_levels(1).unwrap(), 0);
-    assert_eq!(menu_helper.num_hierarchy_levels(2).unwrap(), 0);
-    assert_eq!(menu_helper.num_hierarchy_levels(3).unwrap(), 1);
-    assert_eq!(menu_helper.num_hierarchy_levels(4).unwrap(), 1);
-    assert_eq!(menu_helper.num_hierarchy_levels(5).unwrap(), 1);
-    assert_eq!(menu_helper.num_hierarchy_levels(6).unwrap(), 1);
-    assert_eq!(menu_helper.num_hierarchy_levels(7).unwrap(), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(0), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(1), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(2), 0);
+    assert_eq!(menu_helper.num_hierarchy_levels(3), 1);
+    assert_eq!(menu_helper.num_hierarchy_levels(4), 1);
+    assert_eq!(menu_helper.num_hierarchy_levels(5), 1);
+    assert_eq!(menu_helper.num_hierarchy_levels(6), 1);
+    assert_eq!(menu_helper.num_hierarchy_levels(7), 0);
 
-    assert_eq!(menu_helper.hierarchy_level(3, 0).unwrap(), b"Roles");
-    assert_eq!(menu_helper.hierarchy_level(4, 0).unwrap(), b"Roles");
-    assert_eq!(menu_helper.hierarchy_level(5, 0).unwrap(), b"Roles");
-    assert_eq!(menu_helper.hierarchy_level(6, 0).unwrap(), b"Roles");
-    assert_eq!(menu_helper.hierarchy_level(7, 1).unwrap(), b"");
-    assert_eq!(menu_helper.hierarchy_level(6, 1).unwrap(), b"");
+    assert_eq!(menu_helper.hierarchy_level(3, 0), b"Roles");
+    assert_eq!(menu_helper.hierarchy_level(4, 0), b"Roles");
+    assert_eq!(menu_helper.hierarchy_level(5, 0), b"Roles");
+    assert_eq!(menu_helper.hierarchy_level(6, 0), b"Roles");
+    assert_eq!(menu_helper.hierarchy_level(7, 1), b"");
+    assert_eq!(menu_helper.hierarchy_level(6, 1), b"");
 
     // Use an arbitrary (but existing) category only used by a named transform.
 
@@ -458,7 +438,7 @@ fn color_space_menu_helper_categories() {
         params.set_user_categories("basic-3d");
         menu_helper = menu(&params);
         assert_eq!(menu_helper.num_color_spaces(), 1);
-        assert_eq!(menu_helper.ui_name(0).unwrap(), b"nt1");
+        assert_eq!(menu_helper.ui_name(0), b"nt1");
 
         // No color space is found, using all active color spaces and log a warning.
         params.set_include_named_transforms(false);
@@ -483,9 +463,9 @@ fn color_space_menu_helper_categories() {
 
     assert_eq!(menu_helper.num_color_spaces(), 1);
 
-    assert_eq!(menu_helper.name(0).unwrap(), b"lin_1");
-    assert_eq!(menu_helper.ui_name(0).unwrap(), b"rendering (lin_1)");
-    assert_eq!(menu_helper.family(0).unwrap(), b"");
+    assert_eq!(menu_helper.name(0), b"lin_1");
+    assert_eq!(menu_helper.ui_name(0), b"rendering (lin_1)");
+    assert_eq!(menu_helper.family(0), b"");
 
     // Use an existing role and app-oriented categories: categories are ignored.
 
@@ -494,9 +474,9 @@ fn color_space_menu_helper_categories() {
 
     assert_eq!(menu_helper.num_color_spaces(), 1);
 
-    assert_eq!(menu_helper.name(0).unwrap(), b"lin_1");
-    assert_eq!(menu_helper.ui_name(0).unwrap(), b"rendering (lin_1)");
-    assert_eq!(menu_helper.family(0).unwrap(), b"");
+    assert_eq!(menu_helper.name(0), b"lin_1");
+    assert_eq!(menu_helper.ui_name(0), b"rendering (lin_1)");
+    assert_eq!(menu_helper.family(0), b"");
 
     // Use an existing role and include roles: include roles is ignored.
 
@@ -507,9 +487,9 @@ fn color_space_menu_helper_categories() {
 
     assert_eq!(menu_helper.num_color_spaces(), 1);
 
-    assert_eq!(menu_helper.name(0).unwrap(), b"lin_1");
-    assert_eq!(menu_helper.ui_name(0).unwrap(), b"rendering (lin_1)");
-    assert_eq!(menu_helper.family(0).unwrap(), b"");
+    assert_eq!(menu_helper.name(0), b"lin_1");
+    assert_eq!(menu_helper.ui_name(0), b"rendering (lin_1)");
+    assert_eq!(menu_helper.family(0), b"");
 
     // Using an unknown category or role returns all the color spaces.
     {
@@ -590,7 +570,7 @@ fn color_space_menu_helper_user_categories() {
     params.set_user_categories("advanced-2d");
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 5);
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_2");
+    assert_eq!(menu_helper.name(1), b"in_2");
 
     // Intersection is used if non-empty, named transforms can be included.
 
@@ -599,7 +579,7 @@ fn color_space_menu_helper_user_categories() {
     params.set_user_categories("basic-3d");
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 4);
-    assert_eq!(menu_helper.name(2).unwrap(), b"nt1");
+    assert_eq!(menu_helper.name(2), b"nt1");
     params.set_include_named_transforms(false);
 
     // Intersection is empty. App-oriented categories are used as the fall-back.
@@ -648,14 +628,14 @@ fn color_space_menu_helper_encodings() {
     params.set_treat_no_category_as_any(true);
     let mut menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 3);
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_1");
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(2).unwrap(), b"view_1");
+    assert_eq!(menu_helper.name(0), b"in_1");
+    assert_eq!(menu_helper.name(1), b"in_2");
+    assert_eq!(menu_helper.name(2), b"view_1");
 
     params.set_include_named_transforms(true);
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 4);
-    assert_eq!(menu_helper.name(3).unwrap(), b"nt3");
+    assert_eq!(menu_helper.name(3), b"nt3");
     params.set_include_named_transforms(false);
 
     params.set_encodings("not found encoding");
@@ -685,7 +665,7 @@ fn color_space_menu_helper_encodings() {
           been ignored since they matched no color spaces.\n"
     );
     assert_eq!(menu_helper.num_color_spaces(), 1);
-    assert_eq!(menu_helper.name(0).unwrap(), b"nt1");
+    assert_eq!(menu_helper.name(0), b"nt1");
 
     // If intersection is empty (with and without encoding), user categories are ignored and
     // encodings are used.
@@ -704,9 +684,9 @@ fn color_space_menu_helper_encodings() {
           User categories have been ignored.\n"
     );
     assert_eq!(menu_helper.num_color_spaces(), 3);
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_1");
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(2).unwrap(), b"nt3");
+    assert_eq!(menu_helper.name(0), b"in_1");
+    assert_eq!(menu_helper.name(1), b"in_2");
+    assert_eq!(menu_helper.name(2), b"nt3");
 
     // Categories give no color space, all categories are ignored but encodings are used.
 
@@ -724,12 +704,12 @@ fn color_space_menu_helper_encodings() {
           have been ignored since they matched no color spaces.\n"
     );
     assert_eq!(menu_helper.num_color_spaces(), 6);
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_1");
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(2).unwrap(), b"view_1");
-    assert_eq!(menu_helper.name(3).unwrap(), b"display_lin_2");
-    assert_eq!(menu_helper.name(4).unwrap(), b"nt1");
-    assert_eq!(menu_helper.name(5).unwrap(), b"nt3");
+    assert_eq!(menu_helper.name(0), b"in_1");
+    assert_eq!(menu_helper.name(1), b"in_2");
+    assert_eq!(menu_helper.name(2), b"view_1");
+    assert_eq!(menu_helper.name(3), b"display_lin_2");
+    assert_eq!(menu_helper.name(4), b"nt1");
+    assert_eq!(menu_helper.name(5), b"nt3");
 
     // App-oriented categories is empty, but encodings are used. Intersection with user
     // categories.
@@ -788,15 +768,15 @@ colorspaces:
         let mut menu_helper = menu(&params);
         // The last color space doesn't show up, which may cause end-user confusion.
         assert_eq!(menu_helper.num_color_spaces(), 3);
-        assert_eq!(menu_helper.name(0).unwrap(), b"raw");
-        assert_eq!(menu_helper.name(1).unwrap(), b"test_1");
-        assert_eq!(menu_helper.name(2).unwrap(), b"test_2");
+        assert_eq!(menu_helper.name(0), b"raw");
+        assert_eq!(menu_helper.name(1), b"test_1");
+        assert_eq!(menu_helper.name(2), b"test_2");
 
         // Treating color spaces with no categories as having all categories solves the issue.
         params.set_treat_no_category_as_any(true);
         menu_helper = menu(&params);
         assert_eq!(menu_helper.num_color_spaces(), 4);
-        assert_eq!(menu_helper.name(3).unwrap(), b"test_3");
+        assert_eq!(menu_helper.name(3), b"test_3");
     }
 
     // Adding a color space with categories to a config that does not use them results
@@ -853,9 +833,9 @@ colorspaces:
         }
         // All three expected color spaces show up, as desired.
         assert_eq!(menu_helper.num_color_spaces(), 3);
-        assert_eq!(menu_helper.name(0).unwrap(), b"raw");
-        assert_eq!(menu_helper.name(1).unwrap(), b"test_1");
-        assert_eq!(menu_helper.name(2).unwrap(), b"test_2");
+        assert_eq!(menu_helper.name(0), b"raw");
+        assert_eq!(menu_helper.name(1), b"test_1");
+        assert_eq!(menu_helper.name(2), b"test_2");
 
         // Add test_3, which contains a category.
         config.set_inactive_color_spaces("");
@@ -868,7 +848,7 @@ colorspaces:
         params.set_treat_no_category_as_any(true);
         menu_helper = menu(&params);
         assert_eq!(menu_helper.num_color_spaces(), 4);
-        assert_eq!(menu_helper.name(3).unwrap(), b"test_3");
+        assert_eq!(menu_helper.name(3), b"test_3");
     }
 }
 
@@ -949,28 +929,28 @@ fn color_space_menu_helper_input_color_transformation() {
 
     assert_eq!(input_menu_helper.num_color_spaces(), 4);
 
-    assert_eq!(input_menu_helper.name(0).unwrap(), b"in_1");
-    assert_eq!(input_menu_helper.name(1).unwrap(), b"in_2");
-    assert_eq!(input_menu_helper.name(2).unwrap(), b"in_3");
-    assert_eq!(input_menu_helper.name(3).unwrap(), b"lut_input_3");
+    assert_eq!(input_menu_helper.name(0), b"in_1");
+    assert_eq!(input_menu_helper.name(1), b"in_2");
+    assert_eq!(input_menu_helper.name(2), b"in_3");
+    assert_eq!(input_menu_helper.name(3), b"lut_input_3");
 
     // Some extra validation.
 
     {
-        assert_eq!(input_menu_helper.num_hierarchy_levels(0).unwrap(), 3);
-        assert_eq!(input_menu_helper.hierarchy_level(0, 0).unwrap(), b"Input");
-        assert_eq!(input_menu_helper.hierarchy_level(0, 1).unwrap(), b"Camera");
-        assert_eq!(input_menu_helper.hierarchy_level(0, 2).unwrap(), b"Acme");
+        assert_eq!(input_menu_helper.num_hierarchy_levels(0), 3);
+        assert_eq!(input_menu_helper.hierarchy_level(0, 0), b"Input");
+        assert_eq!(input_menu_helper.hierarchy_level(0, 1), b"Camera");
+        assert_eq!(input_menu_helper.hierarchy_level(0, 2), b"Acme");
 
         assert_eq!(
-            input_menu_helper.description(0).unwrap(),
+            input_menu_helper.description(0),
             b"An input color space.\nFor the Acme camera."
         );
     }
 
     {
-        assert_eq!(input_menu_helper.num_hierarchy_levels(1).unwrap(), 0);
-        assert_eq!(input_menu_helper.description(1).unwrap(), b"");
+        assert_eq!(input_menu_helper.num_hierarchy_levels(1), 0);
+        assert_eq!(input_menu_helper.description(1), b"");
     }
 
     //
@@ -982,23 +962,20 @@ fn color_space_menu_helper_input_color_transformation() {
 
     assert_eq!(working_menu_helper.num_color_spaces(), 7);
 
-    assert_eq!(working_menu_helper.name(0).unwrap(), b"lin_1");
-    assert_eq!(working_menu_helper.name(1).unwrap(), b"lin_2");
-    assert_eq!(working_menu_helper.name(2).unwrap(), b"log_1");
-    assert_eq!(working_menu_helper.name(3).unwrap(), b"in_3");
-    assert_eq!(working_menu_helper.name(4).unwrap(), b"display_lin_1");
-    assert_eq!(working_menu_helper.name(5).unwrap(), b"display_lin_2");
-    assert_eq!(working_menu_helper.name(6).unwrap(), b"display_log_1");
+    assert_eq!(working_menu_helper.name(0), b"lin_1");
+    assert_eq!(working_menu_helper.name(1), b"lin_2");
+    assert_eq!(working_menu_helper.name(2), b"log_1");
+    assert_eq!(working_menu_helper.name(3), b"in_3");
+    assert_eq!(working_menu_helper.name(4), b"display_lin_1");
+    assert_eq!(working_menu_helper.name(5), b"display_lin_2");
+    assert_eq!(working_menu_helper.name(6), b"display_log_1");
 
     //
     // Step 3 - Validate the color transformation from in_1 to lin_2.
     //
 
     let processor = config
-        .processor_between(
-            input_menu_helper.name(0).unwrap(),
-            working_menu_helper.name(1).unwrap(),
-        )
+        .processor_between(input_menu_helper.name(0), working_menu_helper.name(1))
         .unwrap();
 
     let group_transform = processor.create_group_transform().unwrap();
@@ -1044,10 +1021,10 @@ fn color_space_menu_helper_additional_color_space() {
 
     assert_eq!(menu_helper.num_color_spaces(), 4);
 
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_1");
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(2).unwrap(), b"in_3");
-    assert_eq!(menu_helper.name(3).unwrap(), b"lut_input_3");
+    assert_eq!(menu_helper.name(0), b"in_1");
+    assert_eq!(menu_helper.name(1), b"in_2");
+    assert_eq!(menu_helper.name(2), b"in_3");
+    assert_eq!(menu_helper.name(3), b"lut_input_3");
 
     //
     // Add an additional color space to the menu.
@@ -1060,11 +1037,11 @@ fn color_space_menu_helper_additional_color_space() {
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 5);
 
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_1");
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(2).unwrap(), b"in_3");
-    assert_eq!(menu_helper.name(3).unwrap(), b"lut_input_3");
-    assert_eq!(menu_helper.name(4).unwrap(), b"lin_1");
+    assert_eq!(menu_helper.name(0), b"in_1");
+    assert_eq!(menu_helper.name(1), b"in_2");
+    assert_eq!(menu_helper.name(2), b"in_3");
+    assert_eq!(menu_helper.name(3), b"lut_input_3");
+    assert_eq!(menu_helper.name(4), b"lin_1");
 
     //
     // Add an additional color space that is already there: nothing gets added.
@@ -1087,11 +1064,11 @@ fn color_space_menu_helper_additional_color_space() {
 
     assert_eq!(menu_helper.num_color_spaces(), 4);
 
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_3");
-    assert_eq!(menu_helper.name(2).unwrap(), b"lut_input_3");
+    assert_eq!(menu_helper.name(0), b"in_2");
+    assert_eq!(menu_helper.name(1), b"in_3");
+    assert_eq!(menu_helper.name(2), b"lut_input_3");
     // And the additional color space is still present.
-    assert_eq!(menu_helper.name(3).unwrap(), b"lin_1");
+    assert_eq!(menu_helper.name(3), b"lin_1");
 
     // Additional color space are case insensitive.
     params.clear_added_color_spaces();
@@ -1120,7 +1097,7 @@ fn color_space_menu_helper_additional_color_space() {
     assert_eq!(params.num_added_color_spaces(), 2);
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 5);
-    assert_eq!(menu_helper.name(4).unwrap(), b"nt1");
+    assert_eq!(menu_helper.name(4), b"nt1");
 
     //
     // Add a role (first that refers to color space already there or not).
@@ -1135,7 +1112,7 @@ fn color_space_menu_helper_additional_color_space() {
     params.add_color_space("default");
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 6);
-    assert_eq!(menu_helper.name(5).unwrap(), b"raw");
+    assert_eq!(menu_helper.name(5), b"raw");
 
     //
     // Add inactive color space.
@@ -1145,21 +1122,21 @@ fn color_space_menu_helper_additional_color_space() {
     params.set_app_categories("file-io");
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 3);
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(1).unwrap(), b"in_3");
-    assert_eq!(menu_helper.name(2).unwrap(), b"lut_input_3");
+    assert_eq!(menu_helper.name(0), b"in_2");
+    assert_eq!(menu_helper.name(1), b"in_3");
+    assert_eq!(menu_helper.name(2), b"lut_input_3");
     cfg.set_inactive_color_spaces("in_3");
     params.set_config(Arc::new(cfg.clone()));
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 2);
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(1).unwrap(), b"lut_input_3");
+    assert_eq!(menu_helper.name(0), b"in_2");
+    assert_eq!(menu_helper.name(1), b"lut_input_3");
     params.add_color_space("in_3");
     menu_helper = menu(&params);
     assert_eq!(menu_helper.num_color_spaces(), 3);
-    assert_eq!(menu_helper.name(0).unwrap(), b"in_2");
-    assert_eq!(menu_helper.name(1).unwrap(), b"lut_input_3");
-    assert_eq!(menu_helper.name(2).unwrap(), b"in_3");
+    assert_eq!(menu_helper.name(0), b"in_2");
+    assert_eq!(menu_helper.name(1), b"lut_input_3");
+    assert_eq!(menu_helper.name(2), b"in_3");
 
     //
     // Add a color space that does not exist.

@@ -4978,11 +4978,14 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Who notices:** an application asking for a menu with the roles of a config that has a role
   set to the empty name.
 - **A fix:** skip the roles `CreateFromRole` gives nothing for.
-- **Status:** the port makes the menu as the wheel does, with the null item, and returns an
+- **Status:** the port refuses when the menu is made: `ColorSpaceMenuHelper::new` returns an
   error ("ColorSpaceMenuHelper: the menu item of the role '<role>' is null (the role refers to
-  no color space): ... (docs/improvements.md, U-142)") from each of the calls above where they
-  read it: the item getters and the lookups return `Result` for it, and so does
-  `ColorSpaceMenuHelper::new` for the added color spaces. In `p5-helpers-1` (5.7b,
-  `apphelpers/color_space_helpers.rs`, `Entry`); `color_space_menu_helper_oracle.rs`
-  (`a_role_set_to_the_empty_name_gives_a_null_item`, which compares with the wheel what
-  doesn't read the item).
+  no color space): ... (docs/improvements.md, U-142)"), before the added color spaces are read.
+  The wheel builds the menu and dies when the null item is read, so the port is stricter than
+  the wheel (owner-approved, 2026-10-22). The getters and lookups of a menu that exists are
+  plain values, as upstream's `OpenColorAppHelpers.h`. In `p5-helpers-1` (5.7b,
+  `apphelpers/color_space_helpers.rs`, `ColorSpaceMenuHelper::refresh`);
+  `color_space_menu_helper_oracle.rs`
+  (`a_role_set_to_the_empty_name_is_refused_when_the_menu_is_made`, which compares with the
+  wheel what doesn't build that menu: the same config without the roles included, and an added
+  color space the config doesn't have).
