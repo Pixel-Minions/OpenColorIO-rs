@@ -23,6 +23,9 @@
 //!   and a `str()` that raises, without a traceback or in a Python frame (the exceptions are
 //!   raised in a stdlib generator's frame by `copy.copy`, so the frames `what()` lists are the
 //!   same on both sides);
+//! - where the library catches a callback's exception (the file loader, `GroupTransform::write`,
+//!   `Config::serialize`) and where a proxy's LUT loader fails for an absolute path (the file
+//!   system's file, or its error);
 //! - D-9: a callback that uses the config the library is working on raises the port's
 //!   RuntimeError, where the wheel's reads it; another thread's calls on the config while a
 //!   callback of a call on it waits are the wheel's.
@@ -480,6 +483,121 @@ fn hash_script() -> Script {
     sc
 }
 
+/// A proxy config whose color space `lut` reads the file `SRC` (replaced by an absolute path).
+const ABSOLUTE_LUT_CONFIG: &str = "ocio_profile_version: 2\nroles: {default: raw}\n\
+     displays: {d: [!<View> {name: v, colorspace: raw}]}\n\
+     colorspaces:\n  - !<ColorSpace> {name: raw}\n  \
+     - !<ColorSpace> {name: lut, from_scene_reference: !<FileTransform> {src: 'SRC'}}\n";
+
+/// Where the library catches a callback's exception and goes on with its own (on the files of
+/// [`hash_script`]): a debug message the logging function (`int`, whose ValueError has no
+/// traceback) refuses while a LUT loads (`GetCachedFileAndFormat`'s catch) and while a group
+/// is written as CTF; the hash function refusing the LUT's path while the CTF writer resolves
+/// it (`GroupTransform::write`'s catch); a warning the logging function refuses while a config
+/// is serialized (`Config::serialize`'s); a proxy whose LUT loader raises for an absolute path,
+/// which the library then reads from the file system (`getLutData`'s fallback), there or
+/// missing.
+fn catches_script() -> Script {
+    let mut sc = Script::new();
+    let c = sc.call(n("OCIO.Config.CreateFromFile"), vec![s("config.ocio")]);
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    sc.call(
+        n("OCIO.SetLoggingLevel"),
+        vec![n("OCIO.LOGGING_LEVEL_DEBUG")],
+    );
+    sc.call(n("OCIO.SetLoggingFunction"), vec![n("int")]);
+    sc.raises(ra(c, "getProcessor"), vec![s("lin"), s("lut")]);
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    let g = sc.call(n("OCIO.GroupTransform"), vec![]);
+    let ft = sc.call(n("OCIO.FileTransform"), vec![s("lut.spi1d")]);
+    sc.call(ra(g, "appendTransform"), vec![r(ft)]);
+    sc.call_kw(
+        ra(g, "write"),
+        vec![],
+        vec![
+            ("formatName", s("Color Transform Format")),
+            ("config", r(c)),
+        ],
+        Expect::Raised,
+    );
+    sc.call(
+        n("OCIO.SetLoggingLevel"),
+        vec![n("OCIO.LOGGING_LEVEL_INFO")],
+    );
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    // The hash function (`int`) refusing the LUT's path while the writer resolves it, outside
+    // the file loader.
+    // (A config whose context hasn't resolved the file yet.)
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    let fresh = sc.call(n("OCIO.Config.CreateFromFile"), vec![s("config.ocio")]);
+    sc.call(n("OCIO.SetComputeHashFunction"), vec![n("int")]);
+    sc.call_kw(
+        ra(g, "write"),
+        vec![],
+        vec![
+            ("formatName", s("Color Transform Format")),
+            ("config", r(fresh)),
+        ],
+        Expect::Raised,
+    );
+    sc.call(n("OCIO.ResetComputeHashFunction"), vec![]);
+    // A config of version 2.4 whose fixed function style is deprecated there: its writer warns.
+    let c2 = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    sc.call(ra(c2, "setVersion"), vec![i(2), i(4)]);
+    let cs = sc.call_kw(
+        n("OCIO.ColorSpace"),
+        vec![],
+        vec![("name", s("ff"))],
+        Expect::Value,
+    );
+    let ff = sc.call(
+        n("OCIO.FixedFunctionTransform"),
+        vec![
+            n("OCIO.FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20"),
+            common::script::fl(&[100.0, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]),
+        ],
+    );
+    sc.call(
+        ra(cs, "setTransform"),
+        vec![r(ff), n("OCIO.COLORSPACE_DIR_TO_REFERENCE")],
+    );
+    sc.call(ra(c2, "addColorSpace"), vec![r(cs)]);
+    sc.call(n("OCIO.SetLoggingFunction"), vec![n("int")]);
+    sc.raises(ra(c2, "serialize"), vec![]);
+    sc.raises(n("str"), vec![r(c2)]);
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    // The proxy's absolute paths (the config file's directory, "/" joined), the failures
+    // above forgotten.
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    let dir = sc.call(ra(c, "getWorkingDir"), vec![]);
+    for (file, expect) in [
+        ("/luts/lut.spi1d", Expect::Value),
+        ("/luts/missing.spi1d", Expect::Raised),
+    ] {
+        let path = sc.call(n("str.__add__"), vec![r(dir), s(file)]);
+        let text = sc.call(
+            n("str.replace"),
+            vec![s(ABSOLUTE_LUT_CONFIG), s("SRC"), r(path)],
+        );
+        let data = sc.call(n("iter"), vec![common::script::l(vec![r(text)])]);
+        let lut = ra_lit(&mut sc, "x", "__mul__");
+        let p = proxy(
+            &mut sc,
+            vec![
+                ("getConfigData", ra(data, "__next__")),
+                ("getLutData", lut),
+                ("getFastLutFileHash", n("str")),
+            ],
+        );
+        let c3 = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(p)]);
+        sc.step(
+            json!({ "call": ra(c3, "getProcessor"), "args": [s("raw"), s("lut")] }),
+            expect,
+        );
+    }
+    sc
+}
+
 fn d9_script() -> Script {
     let mut sc = Script::new();
     let c = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(LOGGING_CONFIG)]);
@@ -635,7 +753,7 @@ fn callbacks_as_the_wheels() {
         ("config.ocio", CONFIG.as_bytes().to_vec()),
         ("luts/lut.spi1d", LUT.to_vec()),
     ];
-    let scripts = [hash_script()];
+    let scripts = [hash_script(), catches_script()];
     let json: Vec<Value> = scripts.iter().map(Script::json).collect();
     let theirs = common::wheel_with_files(&json, &files);
     let dir = std::env::temp_dir().join(format!("ocio-py-callbacks-{}", std::process::id()));
@@ -651,6 +769,32 @@ fn callbacks_as_the_wheels() {
         .map(|sc| common::restore_dir(&common::port(&sc.json()), &dir))
         .collect();
     compare_reports(&scripts, &ours, &theirs);
+    // The library's catches are reached, in the wheel (the port's are equal): its own
+    // exceptions with the callback's what() in them, the proxy's fallback reading the file.
+    let raised: Vec<(String, String)> = theirs[1]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|st| st.get("raised").is_some())
+        .map(|st| {
+            (
+                st["raised"]["type"].as_str().unwrap().to_string(),
+                message(st),
+            )
+        })
+        .collect();
+    assert_eq!(raised.len(), 6, "{}", theirs[1]);
+    for ((ty, m), prefix) in raised.iter().zip([
+        "ValueError: invalid literal for int() with base 10: '[OpenColorIO Debug]",
+        "Error writing format 'Color Transform Format': ValueError: invalid literal",
+        "Error writing format 'Color Transform Format': ValueError: invalid literal",
+        "Error building YAML: ValueError: invalid literal",
+        "Error building YAML: ValueError: invalid literal",
+        "The specified transform file '$FILES",
+    ]) {
+        assert_eq!(ty, "PyOpenColorIO.PyOpenColorIO.Exception", "{m}");
+        assert!(m.starts_with(prefix), "{prefix:?} in {m:?}");
+    }
     std::env::set_current_dir(std::env::temp_dir()).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 
