@@ -3859,13 +3859,15 @@ status = "todo"
 path = "src/bindings/python/PyLook.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_look.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3e"
 
 [[file]]
 path = "src/bindings/python/PyNamedTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_named_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3e"
 
 [[file]]
 path = "src/bindings/python/PyOpenColorIO.cpp"
@@ -3957,7 +3959,8 @@ note = "p6-transforms 6.3a: PyIterator (40-61); defRepr (17-35) is py_transform.
 path = "src/bindings/python/PyViewTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_view_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3e"
 
 [[file]]
 path = "src/bindings/python/PyViewingRules.cpp"

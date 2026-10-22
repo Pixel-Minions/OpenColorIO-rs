@@ -39,6 +39,10 @@ pub(crate) mod py_format_metadata;
 #[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
 #[cfg(feature = "python")]
+pub(crate) mod py_look;
+#[cfg(feature = "python")]
+pub(crate) mod py_named_transform;
+#[cfg(feature = "python")]
 pub mod py_open_color_io;
 #[cfg(feature = "python")]
 pub(crate) mod py_processor_metadata;
@@ -52,6 +56,8 @@ pub use py_transform::{RegistryStats, registry_stats};
 pub(crate) mod py_types;
 #[cfg(feature = "python")]
 pub(crate) mod py_utils;
+#[cfg(feature = "python")]
+pub(crate) mod py_view_transform;
 #[cfg(feature = "python")]
 pub(crate) mod py_viewing_rules;
 #[cfg(feature = "python")]

@@ -4839,23 +4839,26 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (6.3d, `crates/ocio-py/src/py_context.rs`, `null_string`, `py_processor_metadata.rs`,
   `py_viewing_rules.rs`); `context_oracle.rs`, `rules_oracle.rs`.
 
-### U-124. `None` for a color space set or a color space that upstream dereferences
+### U-124. `None` for a color space set, a color space or a transform that upstream dereferences
 
 - **Upstream:** the bindings take a `ColorSpaceSetRcPtr`, `ColorSpaceRcPtr` or
   `TransformRcPtr` argument through pybind11's holder caster, which passes `None` as a null
   pointer, and these functions dereference it: `ColorSpaceSet.addColorSpace`, `addColorSpaces`
   and `removeColorSpaces`, the operators `|` and `&`, and `-` when the left set holds a color
-  space (`ColorSpaceSet.cpp:118-204, 314-355` @ v2.5.2). The wheel's process dies (probed on
-  Windows,
+  space (`ColorSpaceSet.cpp:118-204, 314-355` @ v2.5.2); `Look.setTransform` and
+  `setInverseTransform` (`transform->createEditableCopy()`, Look.cpp:111-125; the library's
+  U-50); and
+  `NamedTransform.GetTransform` of a named transform with neither transform, which copies the
+  null one (NamedTransform.cpp:182-221). The wheel's process dies (probed on Windows,
   2026-10-22). Also `css.removeColorSpaces(css)` on a set that holds a color space: upstream loops
   over the set's own vector while it erases from it (`ColorSpaceSet::Impl::remove(const Impl &)`,
   ColorSpaceSet.cpp:198-204), with iterators the erase invalidated.
 - **Who notices:** Python code that passes `None` there, or a set to its own
   `removeColorSpaces`.
-- **A fix:** check the pointers, and copy
+- **A fix:** check the pointers (as `GetTransform` checks the named transform itself), and copy
   the other set's names before erasing.
 - **Status:** the port raises ValueError "<call>: None, a null pointer the wheel dereferences
   (its process dies; docs/improvements.md, U-124)" (or the error naming the case), where the
   wheel's process dies; `ColorSpaceSet() - None`, which reads nothing of the null set, returns
-  an empty set as the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`);
-  `color_space_oracle.rs`.
+  an empty set as the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
+  `py_look.rs`, `py_named_transform.rs`); `color_space_oracle.rs`, `look_view_named_oracle.rs`.
