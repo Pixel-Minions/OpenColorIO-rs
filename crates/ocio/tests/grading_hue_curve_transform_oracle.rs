@@ -318,6 +318,7 @@ fn value_cases() -> (Vec<Case>, Vec<Refused>) {
 #[test]
 fn text_and_validation_match_the_wheel() {
     let (mut cases, _) = value_cases();
+    cases.extend(non_dynamic_cases());
     let matrix = Case::new(
         "matrix",
         json!({"class": "MatrixTransform"}),
@@ -363,6 +364,33 @@ fn set_value_and_set_slope_refusals_match_the_wheel() {
     setter_errors(&checks);
 }
 
+/// Transforms made non-dynamic with `makeNonDynamic()` after the setters (the binding binds
+/// it, PyGradingHueCurveTransform.cpp @ v2.5.2): each style in both directions, dynamic with the
+/// defaults and with the typical curves, and one that was never dynamic.
+fn non_dynamic_cases() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for style in [Log, Lin, Video] {
+        for dir in [Forward, Inverse] {
+            for (dynamic, values) in [
+                (true, None),
+                (true, Some(typical())),
+                (false, Some(typical())),
+            ] {
+                let label = format!("{style:?} dynamic {dynamic} {dir:?} then makeNonDynamic");
+                let (mut spec, port) = build(style, dynamic, dir, false, values.as_ref());
+                let mut port = port.expect("valid curves");
+                spec["calls"]
+                    .as_array_mut()
+                    .expect("the calls")
+                    .push(json!(["makeNonDynamic"]));
+                port.make_non_dynamic();
+                cases.push(Case::new(label, spec, port));
+            }
+        }
+    }
+    cases
+}
+
 /// The processors' cases: each style's defaults and typical curves, dynamic or not, in both
 /// directions, with and without the RGB to HSY conversion; and a transform and its inverse in
 /// a group.
@@ -387,6 +415,7 @@ fn processor_cases() -> Vec<Case> {
             ));
         }
     }
+    cases.extend(non_dynamic_cases());
     cases
 }
 
