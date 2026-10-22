@@ -13,6 +13,7 @@ use ocio_ops::utils::string_utils::c_str;
 use pyo3::prelude::*;
 
 use crate::dispatch::{Function, NonNullCharPtr, Overload, Param, StdString};
+use crate::py_format_metadata::Shape;
 use crate::py_open_color_io::py_result;
 use crate::py_transform::{
     DIRECTION_DEFAULT, FLOAT, TransformRc, class, construct, def, def_static, default, enum_out,
@@ -328,12 +329,38 @@ static SET_FIRST_SOP_DESCRIPTION: Function = method_def!(
     |py, o, a, convert| {
         let rc = this_rc!(o, a);
         let NonNullCharPtr(description) = crate::arg!(a, 1, convert, NonNullCharPtr);
-        with(&rc, |t: &mut CdlTransform| {
-            t.set_first_sop_description(&description)
-        })?;
+        set_first_sop_description(&rc, &description)?;
         none(py)
     }
 );
+
+/// Port of `METADATA_SOP_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:19 @ v2.5.2).
+const METADATA_SOP_DESCRIPTION: &[u8] = b"SOPDescription";
+
+/// `setFirstSOPDescription` of the node, and what it does to the wheel's buffer of the
+/// metadata's child elements (`CDLTransformImpl::setFirstSOPDescription`, CDLTransform.cpp:
+/// 345-367 @ v2.5.2): a description added (`emplace_back`), or the first one erased.
+fn set_first_sop_description(rc: &TransformRc, description: &[u8]) -> PyResult<()> {
+    let mut node = rc.lock();
+    let node = &mut *node;
+    let Transform::Cdl(t) = &mut node.transform else {
+        return Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "the instance holds another transform class",
+        ));
+    };
+    let before = Shape::of(t.format_metadata());
+    let first = t
+        .format_metadata()
+        .get_first_child_index(METADATA_SOP_DESCRIPTION);
+    t.set_first_sop_description(description);
+    let len = t.format_metadata().get_children_elements().len();
+    match (len.cmp(&before.num_children()), first) {
+        (std::cmp::Ordering::Greater, _) => node.metadata_heap.push(&[], before.num_children()),
+        (std::cmp::Ordering::Less, Some(index)) => node.metadata_heap.erase(&[], index, &before),
+        _ => {}
+    }
+    Ok(())
+}
 
 static REPR: Function = crate::repr_def!(SELF);
 

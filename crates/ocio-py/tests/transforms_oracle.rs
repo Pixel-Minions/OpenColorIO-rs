@@ -297,9 +297,6 @@ fn matrix_script() -> Script {
     // getFormatMetadata: the same object while it lives.
     let md = sc.call(ra(m, "getFormatMetadata"), vec![]);
     let md2 = sc.call(ra(m, "getFormatMetadata"), vec![]);
-    // FormatMetadata's repr comes with its class (6.3d).
-    sc.unrepr(md);
-    sc.unrepr(md2);
     sc.call(n("operator.is_"), vec![r(md), r(md2)]);
     sc.call(n("type"), vec![r(md)]);
     // The base class has no constructor; a Python subclass.
@@ -665,8 +662,7 @@ fn group_script() -> Script {
     // getFormatMetadata: the same object while it lives.
     let md = sc.call(ra(g, "getFormatMetadata"), vec![]);
     let md2 = sc.call(ra(g, "getFormatMetadata"), vec![]);
-    sc.unrepr(md);
-    sc.unrepr(md2);
+    sc.call(n("operator.is_"), vec![r(md), r(md2)]);
     // The write formats.
     let wf = sc.call(n("OCIO.GroupTransform.GetWriteFormats"), vec![]);
     sc.call(n("type"), vec![r(wf)]);
@@ -1118,9 +1114,7 @@ fn dictionaries_doubles_and_lifetimes_are_the_wheels() {
         ],
     );
     let ns = sc.call(r(ns_class), vec![]);
-    // FormatMetadata's repr: chunk 6.3d.
-    let fm = sc.call(ra(ns, "x.getFormatMetadata"), vec![]);
-    sc.unrepr(fm);
+    sc.call(ra(ns, "x.getFormatMetadata"), vec![]);
     sc.eval(r(alive), &[]);
     // A transform no FormatMetadata holds dies at once (the probe's control).
     sc.call(ra(ns, "x.validate"), vec![]);

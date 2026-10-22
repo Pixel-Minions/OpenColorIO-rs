@@ -2414,7 +2414,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   edit. The Python binding gives new objects too (`p6-transforms` 6.3c,
   `crates/ocio-py/src/transforms/py_cdl_transform.rs`): a second `CreateFromFile` of the same
   CDL is another Python object, where the wheel gives the first again; `cdl_files_oracle.rs`
-  pins the difference against the wheel.
+  pins the difference against the wheel. Their metadata's vectors of child elements are a copy's,
+  as large as they hold (`p6-objects` 6.3d, U-121), where the wheel's are the file reader's,
+  which may hold spare room: an `addChildElement` on such a CDL may reallocate (and give new
+  child objects) in the port where the wheel's doesn't.
 
 ### I-175. The CDL reader drops content in four places
 
@@ -4765,3 +4768,33 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   file; on Linux it writes the file under the bytes, as the wheel; in `p6-transforms` (6.3a,
   `crates/ocio-py/src/transforms/py_group_transform.rs`, `open_text_file`);
   `group_write_oracle.rs`.
+
+### U-121. A `FormatMetadata` reference into memory the wheel freed
+
+- **Upstream:** every `FormatMetadata` Python object is a C++ reference: `getFormatMetadata`
+  returns one into the transform (`reference_internal`), the child element iterators' `__getitem__`
+  and `__next__` one into the parent's `std::vector<FormatMetadataImpl>` of children
+  (`reference_internal`, which keeps the iterator alive, not the transform), and each iterator
+  (`__iter__`, `getAttributes`, `getChildElements`) holds a plain reference to its element
+  (PyFormatMetadata.cpp:21-201 @ v2.5.2). The reference dangles once the vector reallocates
+  (`addChildElement`, the CDL's `setFirstSOPDescription`; the elements are copied, so their own
+  children's vectors are new too), once `clear` or the CDL's erased description destroys the
+  element (`FormatMetadata.cpp:367-379`, `CDLTransform.cpp:345-367`), or once the transform
+  dies; the wheel then reads and writes freed memory. pybind11 finds a returned element's Python
+  object by its address, so when the allocator puts a later buffer where a freed one was, a
+  lookup there returns the stale object.
+- **Who notices:** Python code that keeps a child element (or an iterator) across
+  `addChildElement` or `clear` of its parent, or past its transform's life.
+- **A fix:** return copies, or keep each element in a stable allocation (a `std::deque`, or
+  `std::vector<std::unique_ptr<...>>`), and keep the transform alive from the iterators.
+- **Status:** the binding names each reference as the wheel's pointer does (the transform's
+  metadata, or a slot of a children vector's buffer), and follows the buffers as the wheels'
+  C++ runtimes allocate them (MSVC's STL grows a full vector by half, libstdc++ doubles it; a
+  copy is as large as it holds; copy-assignment of an element as each runtime's `operator=`).
+  So a child is the same Python object exactly while the wheel's vector keeps its buffer, and a
+  slot `clear` emptied and a later child filled reads that child, as in the wheel. Where the
+  wheel's reference dangles the port raises RuntimeError "the FormatMetadata element was freed
+  (its transform freed, or the vector of child elements holding it reallocated, cleared or
+  shortened), and the wheel reads its memory anyway (docs/improvements.md, U-121)"; a lookup
+  never returns a stale object. In `p6-objects` (6.3d,
+  `crates/ocio-py/src/py_format_metadata.rs`, `MetadataHeap`); `format_metadata_oracle.rs`.

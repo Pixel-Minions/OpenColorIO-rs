@@ -68,6 +68,9 @@ pub(crate) struct Node {
     /// (`OCIO.TransformDirection(5)`, I-223); the library's direction is forward for 0 and
     /// inverse otherwise, as upstream's `TransformDirectionToString` and `operator<<` read it.
     pub(crate) direction: i64,
+    /// Where the wheel's vectors of the metadata's child elements live, for the references
+    /// Python holds into them ([`crate::py_format_metadata`]).
+    pub(crate) metadata_heap: crate::py_format_metadata::MetadataHeap,
 }
 
 impl TransformRc {
@@ -94,6 +97,7 @@ impl TransformRc {
             transform,
             children,
             direction,
+            metadata_heap: Default::default(),
         })))
     }
 
@@ -106,8 +110,14 @@ impl TransformRc {
     }
 
     /// The node's address, which pybind11's registry keys an instance by.
-    fn key(&self) -> usize {
+    pub(crate) fn key(&self) -> usize {
         Arc::as_ptr(&self.0) as usize
+    }
+
+    /// A reference to the node that doesn't keep it alive (a C++ reference into the transform,
+    /// which upstream's `shared_ptr` doesn't count).
+    pub(crate) fn downgrade(&self) -> WeakTransformRc {
+        WeakTransformRc(Arc::downgrade(&self.0))
     }
 
     /// Whether `self` and `other` are the same node.
@@ -202,6 +212,17 @@ impl TransformRc {
     }
 }
 
+/// A [`TransformRc`] that doesn't keep its node alive.
+#[derive(Debug, Clone)]
+pub(crate) struct WeakTransformRc(std::sync::Weak<Mutex<Node>>);
+
+impl WeakTransformRc {
+    /// The node, while something else keeps it alive.
+    pub(crate) fn upgrade(&self) -> Option<TransformRc> {
+        self.0.upgrade().map(TransformRc)
+    }
+}
+
 /// What [`TransformRc::materialize_with`] puts for a null child or a cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Holes {
@@ -259,11 +280,11 @@ pub(crate) struct Registry<K> {
     /// The weak references by key.
     by_key: HashMap<K, Vec<Py<PyWeakrefReference>>>,
     /// Each weak reference's key, by the weak reference's address.
-    keys: HashMap<usize, K>,
+    pub(crate) keys: HashMap<usize, K>,
 }
 
 impl<K: Eq + Hash + Clone> Registry<K> {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Registry {
             by_key: HashMap::new(),
             keys: HashMap::new(),
@@ -271,7 +292,7 @@ impl<K: Eq + Hash + Clone> Registry<K> {
     }
 
     /// The first object registered under `key` that lives.
-    fn find<'py>(&self, py: Python<'py>, key: &K) -> Option<Bound<'py, PyAny>> {
+    pub(crate) fn find<'py>(&self, py: Python<'py>, key: &K) -> Option<Bound<'py, PyAny>> {
         self.by_key.get(key)?.iter().find_map(|wr| {
             EXAMINED.fetch_add(1, Ordering::Relaxed);
             wr.bind(py).upgrade()
@@ -297,7 +318,9 @@ impl<K: Eq + Hash + Clone> Registry<K> {
 }
 
 /// A registry, locked.
-fn lock<K>(registry: &'static LazyLock<Mutex<Registry<K>>>) -> MutexGuard<'static, Registry<K>> {
+pub(crate) fn lock<K>(
+    registry: &'static LazyLock<Mutex<Registry<K>>>,
+) -> MutexGuard<'static, Registry<K>> {
     registry
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -305,7 +328,7 @@ fn lock<K>(registry: &'static LazyLock<Mutex<Registry<K>>>) -> MutexGuard<'stati
 
 /// Registers `obj` under `key` in `registry`, by a weak reference whose callback (`callback`,
 /// made once) removes it when `obj` dies.
-fn register_in<K: Eq + Hash + Clone + Send + 'static>(
+pub(crate) fn register_in<K: Eq + Hash + Clone + Send + 'static>(
     registry: &'static LazyLock<Mutex<Registry<K>>>,
     callback: &'static PyOnceLock<Py<PyCFunction>>,
     obj: &Bound<'_, PyAny>,
@@ -345,7 +368,7 @@ pub struct RegistryStats {
 pub fn registry_stats() -> RegistryStats {
     RegistryStats {
         transforms: lock(&INSTANCES).keys.len(),
-        format_metadata: lock(&METADATA_INSTANCES).keys.len(),
+        format_metadata: crate::py_format_metadata::registered_count(),
         examined: EXAMINED.load(Ordering::Relaxed),
     }
 }
@@ -738,6 +761,7 @@ pub(crate) fn create_editable_copy(py: Python<'_>, rc: &TransformRc) -> PyResult
         transform,
         children: node.children.clone(),
         direction: node.direction,
+        metadata_heap: Default::default(),
     }))))
 }
 
@@ -1127,91 +1151,6 @@ macro_rules! file_bit_depths {
 
 pub(crate) const FORMAT_METADATA: &str = q!("FormatMetadata");
 
-/// The value of a `FormatMetadata` object that `getFormatMetadata` returns: a reference into the
-/// transform's metadata (pybind11's `return_value_policy::reference_internal`), which keeps the
-/// transform's Python object alive (`keep_alive<0, 1>`) and sees every change of the
-/// transform's metadata, and makes its own seen by the transform. `path` leads from the
-/// transform's metadata to the element through child indices (empty: the metadata itself).
-#[pyclass(frozen, module = "pybind11_builtins", name = "_format_metadata_ref")]
-#[derive(Debug)]
-#[expect(dead_code, reason = "FormatMetadata's methods (6.3d) read it")]
-pub(crate) struct FormatMetadataRef {
-    /// The Python object `getFormatMetadata` was called on.
-    pub(crate) parent: Py<PyAny>,
-    /// Its node.
-    pub(crate) node: TransformRc,
-    /// The element's child indices.
-    pub(crate) path: Vec<usize>,
-}
-
-impl FormatMetadataRef {
-    #[expect(dead_code, reason = "FormatMetadata's methods (6.3d) call it")]
-    /// `f` of the element: the port's error when the transform no longer holds it.
-    pub(crate) fn with<R>(&self, f: impl FnOnce(&mut ocio::FormatMetadata) -> R) -> PyResult<R> {
-        let mut node = self.node.lock();
-        let mut md = metadata_mut(&mut node.transform).ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err("the transform holds no format metadata")
-        })?;
-        for &i in &self.path {
-            md = md.get_children_elements_mut().get_mut(i).ok_or_else(|| {
-                pyo3::exceptions::PyRuntimeError::new_err(
-                    "the format metadata no longer holds the element",
-                )
-            })?;
-        }
-        Ok(f(md))
-    }
-}
-
-/// The metadata of a transform class that has some.
-#[expect(dead_code, reason = "FormatMetadata's methods (6.3d) call it")]
-pub(crate) fn metadata_mut(t: &mut Transform) -> Option<&mut ocio::FormatMetadata> {
-    Some(match t {
-        Transform::Cdl(t) => t.format_metadata_mut(),
-        Transform::Exponent(t) => t.format_metadata_mut(),
-        Transform::ExponentWithLinear(t) => t.format_metadata_mut(),
-        Transform::FixedFunction(t) => t.format_metadata_mut(),
-        Transform::Group(t) => t.format_metadata_mut(),
-        Transform::LogAffine(t) => t.format_metadata_mut(),
-        Transform::LogCamera(t) => t.format_metadata_mut(),
-        Transform::Log(t) => t.format_metadata_mut(),
-        Transform::Lut1D(t) => t.format_metadata_mut(),
-        Transform::Lut3D(t) => t.format_metadata_mut(),
-        Transform::Matrix(t) => t.format_metadata_mut(),
-        Transform::Range(t) => t.format_metadata_mut(),
-        _ => return None,
-    })
-}
-
-/// The registered `FormatMetadata` objects, by node and path ([`Registry`]).
-type MetadataKey = (usize, Vec<usize>);
-static METADATA_INSTANCES: LazyLock<Mutex<Registry<MetadataKey>>> =
-    LazyLock::new(|| Mutex::new(Registry::new()));
-static METADATA_CALLBACK: PyOnceLock<Py<PyCFunction>> = PyOnceLock::new();
-
-/// `getFormatMetadata()` of the instance `this` holding `rc`, as pybind11 returns the reference:
-/// the `FormatMetadata` object registered for the element while it lives, else a new one.
-pub(crate) fn format_metadata_out(
-    py: Python<'_>,
-    this: &Bound<'_, PyAny>,
-    rc: &TransformRc,
-) -> Out {
-    let key = (rc.key(), Vec::new());
-    if let Some(obj) = lock(&METADATA_INSTANCES).find(py, &key) {
-        return Ok(Some(obj.unbind()));
-    }
-    let cls = class(py, FORMAT_METADATA)?;
-    let obj = cls.call_method1("__new__", (&cls,))?;
-    let value = FormatMetadataRef {
-        parent: this.clone().unbind(),
-        node: rc.clone(),
-        path: Vec::new(),
-    };
-    pybind11::set_value(&obj, FORMAT_METADATA, Bound::new(py, value)?.into_any())?;
-    register_in(&METADATA_INSTANCES, &METADATA_CALLBACK, &obj, key)?;
-    Ok(Some(obj.unbind()))
-}
-
 /// `getFormatMetadata(self) -> FormatMetadata` of the class whose `self` parameter is `$self`.
 #[macro_export]
 macro_rules! format_metadata_def {
@@ -1222,7 +1161,7 @@ macro_rules! format_metadata_def {
             $crate::py_transform::FORMAT_METADATA,
             |py, o, a, _| {
                 let rc = $crate::this_rc!(o, a);
-                $crate::py_transform::format_metadata_out(py, &a[0], &rc)
+                $crate::py_format_metadata::transform_metadata_out(py, &a[0], &rc)
             }
         )
     };

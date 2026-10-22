@@ -3805,7 +3805,8 @@ status = "todo"
 path = "src/bindings/python/PyFormatMetadata.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_format_metadata.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3d; the wheel's buffers of child elements followed per platform (U-121)"
 
 [[file]]
 path = "src/bindings/python/PyGPUProcessor.cpp"
