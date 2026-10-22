@@ -75,5 +75,41 @@ fn an_embedded_interpreter_imports_the_module_and_shares_the_process() {
             caught,
             [("Exception".to_string(), "from python".to_string())]
         );
+
+        // A Rust config in Python is a copy; a Python config in Rust is a snapshot, with the
+        // edits Python made through the config's own objects.
+        let mut config = ocio::Config::create_raw().unwrap().as_ref().clone();
+        config.set_name("from rust");
+        let obj = ocio_py::embed::config_to_python(py, &config).unwrap();
+        let globals = PyDict::new(py);
+        globals.set_item("c", &obj).unwrap();
+        globals
+            .set_item("OCIO", py.import("PyOpenColorIO").unwrap())
+            .unwrap();
+        py.run(
+            c"name = c.getName()\nc.setName('from python')\n\
+              c.getColorSpace('raw').setDescription('edited in python')\n",
+            Some(&globals),
+            None,
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        let name: String = globals
+            .get_item("name")
+            .unwrap()
+            .unwrap()
+            .extract()
+            .unwrap();
+        assert_eq!(name, "from rust");
+        assert_eq!(config.name(), b"from rust");
+        let snapshot = ocio_py::embed::config_from_python(obj.bind(py)).unwrap();
+        assert_eq!(snapshot.name(), b"from python");
+        assert_eq!(
+            snapshot.color_space("raw").unwrap().description(),
+            b"edited in python"
+        );
+        py.run(c"c.setName('later')", Some(&globals), None).unwrap();
+        assert_eq!(snapshot.name(), b"from python");
+        let not_config = py.eval(c"1", None, None).unwrap();
+        assert!(ocio_py::embed::config_from_python(&not_config).is_err());
     });
 }

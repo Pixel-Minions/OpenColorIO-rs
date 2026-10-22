@@ -8,7 +8,12 @@
 //!
 //! The conversions of the shared Rust objects (`Arc<Config>`, processors, transforms) to
 //! Python objects and back come with the chunks that bind each class (WP 6.3 to 6.7): each
-//! adds them here, sharing the Rust object rather than copying it.
+//! adds them here, sharing the Rust object rather than copying it where it can.
+//!
+//! A config can't be shared (owner decision 2026-10-22, P6-8 Q1 = A): Python edits a config in
+//! place, as the wheel does, through the objects its getters return, which the library's
+//! `Arc<Config>` can't follow. [`config_to_python`] gives Python a copy of a Rust config, and
+//! [`config_from_python`] gives Rust a snapshot of a Python one, as it is at that moment.
 
 /// The Python `PyOpenColorIO.CPUProcessor` of `cpu`, sharing it: the object the module made for
 /// that processor while it lives, else a new one (as pybind11 returns a `CPUProcessorRcPtr`).
@@ -71,6 +76,41 @@ pub fn transform_from_python(
 /// If an interpreter is already running in this process.
 pub fn append_to_inittab() {
     pyo3::append_to_inittab!(py_open_color_io);
+}
+
+/// A Python `PyOpenColorIO.Config` holding a copy of `config` (its caches as they are): a
+/// change Python makes to it is not `config`'s, nor the other way round.
+///
+/// # Errors
+///
+/// A Python error making the object.
+#[cfg(feature = "python")]
+pub fn config_to_python(
+    py: pyo3::Python<'_>,
+    config: &ocio::Config,
+) -> pyo3::PyResult<pyo3::Py<pyo3::PyAny>> {
+    crate::py_config::config_out(py, config.clone_as_is())
+        .map(|o| o.expect("a config's Python object"))
+}
+
+/// A snapshot of the Python `PyOpenColorIO.Config` `obj`: a copy of its config as it is now,
+/// with what Python changed through the objects it got from it. A later change Python makes
+/// isn't the snapshot's.
+///
+/// # Errors
+///
+/// TypeError when `obj` isn't a `Config`; the port's D-9 RuntimeError when the library is
+/// working on that config (from one of its callbacks).
+#[cfg(feature = "python")]
+pub fn config_from_python(
+    obj: &pyo3::Bound<'_, pyo3::PyAny>,
+) -> pyo3::PyResult<std::sync::Arc<ocio::Config>> {
+    let Some(Some(rc)) = crate::py_config::config_arg(obj, false)? else {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "config_from_python: not a PyOpenColorIO.Config",
+        ));
+    };
+    crate::py_config::with_config(&rc, |n| Ok(std::sync::Arc::new(n.config.clone_as_is())))
 }
 
 use crate::py_open_color_io::py_open_color_io;
