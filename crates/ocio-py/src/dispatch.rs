@@ -17,7 +17,11 @@
 //!   argument fills the parameter of its name not filled positionally; a parameter left over
 //!   takes its default. An overload whose parameters can't be filled that way (too many
 //!   positional arguments, an unknown keyword, a keyword naming a parameter given positionally,
-//!   a missing argument without a default) is skipped.
+//!   a missing argument without a default) is skipped. An overload bound without argument
+//!   names (neither `py::arg` nor `py::pos_only`: its signature names its parameters `self`,
+//!   `arg0`, `arg1`, ...; [`unnamed`]) has no keywords: pybind11 keeps no argument records for
+//!   it, so any keyword argument, `self=` included, skips it, and its arguments are all
+//!   positional.
 //! - **Two passes.** A function with one overload is called once, its casters allowed to
 //!   convert. With several, each is first tried without conversions, in definition order; then
 //!   those whose arguments bound (and that have a positional parameter besides `self`) again,
@@ -140,15 +144,37 @@ pub fn docstring(f: &Function) -> String {
     }
 }
 
-/// Binds `args` and `kwargs` to `o`'s parameters: one value per parameter, or `None` when they
-/// don't fit.
+/// Whether `o` was bound without argument names: no `py::pos_only()`, and each parameter (after
+/// a method's `self`) named as pybind11 names one it has no record of, `arg` and its position
+/// among them (`cpp_function::initialize_generic`'s signature). pybind11 keeps argument records
+/// only for an overload given `py::arg`s (one for each parameter; a method's `self` gets its
+/// own) or `py::pos_only()`, and its dispatcher's step 3 skips an overload without records
+/// that a keyword argument was given to, since no record consumed it.
+pub fn unnamed(o: &Overload, method: bool) -> bool {
+    let skip = usize::from(method);
+    o.pos_only == 0
+        && o.params.iter().enumerate().skip(skip).all(|(k, p)| {
+            p.name
+                .strip_prefix("arg")
+                .is_some_and(|n| n == (k - skip).to_string())
+        })
+}
+
+/// Binds `args` and `kwargs` to `o`'s parameters (of a method, `method`): one value per
+/// parameter, or `None` when they don't fit.
 fn bind<'py>(
     py: Python<'py>,
     o: &Overload,
+    method: bool,
     args: &Bound<'py, PyTuple>,
     kwargs: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<Option<Vec<Bound<'py, PyAny>>>> {
     if args.len() > o.params.len() {
+        return Ok(None);
+    }
+    // An overload without argument names takes no keyword (pybind11 skips it whatever the
+    // keyword names, `self` and `arg0` included).
+    if kwargs.is_some_and(|k| !k.is_empty()) && unnamed(o, method) {
         return Ok(None);
     }
     let mut values: Vec<Bound<'py, PyAny>> = args.iter().collect();
@@ -203,7 +229,7 @@ pub fn dispatch<'py>(
     let overloaded = f.overloads.len() > 1;
     let mut second_pass = Vec::new();
     for o in f.overloads {
-        let Some(values) = bind(py, o, args, kwargs)? else {
+        let Some(values) = bind(py, o, f.method, args, kwargs)? else {
             continue;
         };
         if let Some(result) = (o.call)(py, o, &values, !overloaded)? {
