@@ -3331,12 +3331,13 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   every R, G and B comes out 1. But `isIdentity` ignores the mode
   (`GradingHueCurveOpData.cpp:103-108`, `GradingHueCurve.cpp:206-216`), so the optimizer
   removes the op, and the processor gives the pixels back unchanged; without optimization it
-  gives the drawn curve. The GPU shader of a non-dynamic op of identity curves is empty too
-  (`GradingHueCurveOpGPU.cpp:604-612`), drawing nothing.
+  gives the drawn curve. The GPU follows: in draw mode the identity curves still get knots,
+  so the op's local bypass is false and its shader does draw (with the optimization off the
+  GPU draws, like the CPU); the shader of the optimized processor is empty only because the
+  optimizer removed the op.
 - **Who notices:** a user interface drawing the default (or any identity) hue-sat curve with
   an optimized processor.
-- **A fix:** make a draw-curve-only op never an identity, and write its shader whatever the
-  local bypass.
+- **A fix:** make a draw-curve-only op never an identity.
 - **Status:** matched in `p5-huecurve` (5.4a, `grading_hue_curve_op_data.rs`, `is_identity`;
   the renderer and the shader come with 5.4b and 5.4c); checked against the wheel
   (`crates/ocio-ops/tests/grading_hue_curve_op_data_oracle.rs`).
@@ -3377,6 +3378,27 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p5-huecurve` (5.4c, `crates/ocio-gpu/src/ops/gradinghuecurve/
   grading_hue_curve_op_gpu.rs`, `add_gc_forward_shader`, `add_gc_inverse_shader`); the shader
   text is checked byte for byte against the wheel
+  (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`).
+
+### I-275. The hue-fx curve's reverse evaluation differs between the GPU and the CPU
+
+- **Upstream:** the CPU's `evalCurveRevHue` adds the curve's first knot to `knStartY` for the
+  hue-fx curve (curve 7), `knStartY = isHfx ? knStartY + knStart : knStartY`
+  (`ops/gradingrgbcurve/GradingBSplineCurve.cpp:1404-1408` @ v2.5.2). The GPU's
+  `AddShaderEvalRevHue` sets the shader's `knStartY` to the coefficient alone
+  (`float knStartY = coefs[coefsOffs + coefsSets * 2];`, `GradingBSplineCurve.cpp:1190-1192`),
+  declares `knStart` and never uses it (it does add `knEnd` to `knEndY` for curve 7, `:1202-1203`).
+  For hues between `knStartY` and `knStartY + knStart` the shader wraps the hue up one period
+  (`x = x + ceil(knStartY - x)`, `:1205-1207`) where the CPU doesn't. Example: upstream's test
+  curves in the log style, hue-fx `knStart` -0.01 and `knStartY` -0.02: 3 of 2001 hues in
+  [-0.5, 1.5] differ; at h = -0.024 the CPU gives 0.9243853 and the GPU 0.92438525.
+- **Who notices:** a GradingHueCurveTransform in the inverse direction with a hue-fx curve
+  whose first knot isn't 0, compared between a CPU and a GPU render, for the few hues in that
+  window.
+- **A fix:** add `knStart` to `knStartY` in the shader for the hue-fx curve, as the CPU does.
+- **Status:** ported as upstream in `p5-huecurve` (5.4c,
+  `crates/ocio-gpu/src/ops/gradinghuecurve/grading_hue_curve_op_gpu.rs`, the shader text is
+  copied exactly); checked byte for byte against the wheel
   (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`).
 
 ## Undefined behaviour upstream
