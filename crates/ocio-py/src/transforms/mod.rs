@@ -5,8 +5,12 @@
 //! its `bindPy<Class>`.
 
 pub(crate) mod py_allocation_transform;
+pub(crate) mod py_builtin_transform;
+pub(crate) mod py_cdl_transform;
 pub(crate) mod py_exponent_transform;
 pub(crate) mod py_exponent_with_linear_transform;
+pub(crate) mod py_file_transform;
+pub(crate) mod py_fixed_function_transform;
 pub(crate) mod py_group_transform;
 pub(crate) mod py_log_affine_transform;
 pub(crate) mod py_log_camera_transform;

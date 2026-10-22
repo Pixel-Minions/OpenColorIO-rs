@@ -3737,13 +3737,15 @@ status = "todo"
 path = "src/bindings/python/PyBuiltinTransformRegistry.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_builtin_transform_registry.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3c"
 
 [[file]]
 path = "src/bindings/python/PyBuiltinTransformRegistry.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_builtin_transform_registry.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3c"
 
 [[file]]
 path = "src/bindings/python/PyCPUProcessor.cpp"
@@ -3915,7 +3917,7 @@ path = "src/bindings/python/PyTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_transform.rs"]
 status = "partial"
-note = "p6-transforms 6.3a-b: the base class and the subclasses bound so far (Allocation, Exponent, ExponentWithLinear, Group, Log, LogAffine, LogCamera, Matrix, Range)"
+note = "p6-transforms 6.3a-c: the base class and the subclasses bound so far (Allocation, Builtin, CDL, Exponent, ExponentWithLinear, File, FixedFunction, Group, Log, LogAffine, LogCamera, Matrix, Range); the others come with their cards"
 
 [[file]]
 path = "src/bindings/python/PyTransform.h"
@@ -4011,13 +4013,15 @@ note = "p6-transforms 6.3a"
 path = "src/bindings/python/transforms/PyBuiltinTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_builtin_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3c"
 
 [[file]]
 path = "src/bindings/python/transforms/PyCDLTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_cdl_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3c"
 
 [[file]]
 path = "src/bindings/python/transforms/PyColorSpaceTransform.cpp"
@@ -4055,13 +4059,15 @@ status = "todo"
 path = "src/bindings/python/transforms/PyFileTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_file_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3c"
 
 [[file]]
 path = "src/bindings/python/transforms/PyFixedFunctionTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_fixed_function_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-transforms 6.3c"
 
 [[file]]
 path = "src/bindings/python/transforms/PyGradingHueCurveTransform.cpp"

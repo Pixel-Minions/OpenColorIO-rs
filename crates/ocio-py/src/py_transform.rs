@@ -888,8 +888,12 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     crate::transforms::py_allocation_transform::bind(m)?;
+    crate::transforms::py_builtin_transform::bind(m)?;
+    crate::transforms::py_cdl_transform::bind(m)?;
     crate::transforms::py_exponent_transform::bind(m)?;
     crate::transforms::py_exponent_with_linear_transform::bind(m)?;
+    crate::transforms::py_file_transform::bind(m)?;
+    crate::transforms::py_fixed_function_transform::bind(m)?;
     crate::transforms::py_group_transform::bind(m)?;
     crate::transforms::py_log_affine_transform::bind(m)?;
     crate::transforms::py_log_camera_transform::bind(m)?;

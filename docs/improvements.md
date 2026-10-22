@@ -2389,7 +2389,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   whether its objects share the cached ones.
 - **Status:** not reproduced: the port gives copies (`p4-cdl` 4.4e,
   `crates/ocio/src/transforms/cdl_transform.rs`), which differs from the wheel after such an
-  edit.
+  edit. The Python binding gives new objects too (`p6-transforms` 6.3c,
+  `crates/ocio-py/src/transforms/py_cdl_transform.rs`): a second `CreateFromFile` of the same
+  CDL is another Python object, where the wheel gives the first again; `cdl_files_oracle.rs`
+  pins the difference against the wheel.
 
 ### I-175. The CDL reader drops content in four places
 

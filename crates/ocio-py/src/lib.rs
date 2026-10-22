@@ -25,6 +25,8 @@ pub mod embed;
 #[cfg(feature = "python")]
 pub mod enums;
 #[cfg(feature = "python")]
+pub(crate) mod py_builtin_transform_registry;
+#[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
 #[cfg(feature = "python")]
 pub mod py_open_color_io;

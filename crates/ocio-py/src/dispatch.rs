@@ -536,6 +536,21 @@ impl<'py> Cast<'py> for CharPtr {
     }
 }
 
+/// A `const char *` parameter declared `.none(false)` (`"src"_a.none(false)`): as [`CharPtr`],
+/// but `None` is refused, also with conversions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonNullCharPtr(pub Vec<u8>);
+
+impl<'py> Cast<'py> for NonNullCharPtr {
+    const CPP_SIZE: usize = 8;
+
+    fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
+        if obj.is_none() {
+            return None;
+        }
+        CharPtr::load(obj, convert)?.0.map(NonNullCharPtr)
+    }
+}
 /// pybind11's `object_is_convertible_to_std_vector`: a sequence (`PySequence_Check`) that isn't
 /// a `str` or `bytes`; else a generator (`PyGen_Check`, its exact type), a set or frozenset (or
 /// a subclass), or an instance (not a class) of a type whose C name (`tp_name`) is
