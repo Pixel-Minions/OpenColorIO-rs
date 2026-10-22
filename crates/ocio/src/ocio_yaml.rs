@@ -4111,8 +4111,23 @@ fn save_range(out: &mut Emitter, t: &RangeTransform) {
 /// refused with "Unsupported Transform() type for serialization.".
 ///
 /// Port of `save(YAML::Emitter&, ConstTransformRcPtr, unsigned int)` (OCIOYaml.cpp:3353-3420 @
-/// v2.5.2).
+/// v2.5.2). It recurses once per nested group through [`save_group`]; the classes that don't
+/// recurse are saved out of line ([`save_leaf_transform`]), so that an optimizing build can't
+/// inline their savers into the recursion's frame (docs/improvements.md, U-60).
 pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u32) -> SaveResult {
+    match t {
+        Transform::Group(t) => save_group(out, t, major_version),
+        _ => save_leaf_transform(out, t, major_version),
+    }
+}
+
+/// A transform of a class other than a group: the arms of [`save_transform`] that don't
+/// recurse, out of line so that its frame stays small (docs/improvements.md, U-60).
+///
+/// Part of the port of `save(YAML::Emitter&, ConstTransformRcPtr, unsigned int)`
+/// (OCIOYaml.cpp:3353-3420 @ v2.5.2).
+#[inline(never)]
+fn save_leaf_transform(out: &mut Emitter, t: &Transform, major_version: u32) -> SaveResult {
     match t {
         Transform::Allocation(t) => save_allocation_transform(out, t),
         Transform::Builtin(t) => save_builtin(out, t),
@@ -4128,7 +4143,7 @@ pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u3
         Transform::GradingRgbCurve(t) => save_grading_rgb_curve(out, t),
         Transform::GradingTone(t) => save_grading_tone(out, t),
         Transform::GradingHueCurve(t) => save_grading_hue_curve(out, t),
-        Transform::Group(t) => save_group(out, t, major_version)?,
+        Transform::Group(_) => unreachable!("save_transform saves the groups"),
         Transform::LogAffine(t) => save_log_affine(out, t),
         Transform::LogCamera(t) => save_log_camera(out, t),
         Transform::Log(t) => save_log(out, t, major_version),
