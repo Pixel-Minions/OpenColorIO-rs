@@ -3782,8 +3782,8 @@ note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the 
 path = "src/bindings/python/PyConfigIOProxy.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_config_io_proxy.rs"]
-status = "partial"
-note = "p6-config 6.6a: vector_of_uint8_t, PyConfigIOProxy from Python; the library calling it to come"
+status = "done"
+note = "p6-config 6.6a: vector_of_uint8_t, PyConfigIOProxy from Python, and the library calling it (PyProxy, through crate::callback)"
 
 [[file]]
 path = "src/bindings/python/PyContext.cpp"
@@ -3883,7 +3883,7 @@ path = "src/bindings/python/PyOpenColorIO.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs"]
 status = "partial"
-note = "6.1a: the module, its attributes, the two exceptions, the global functions on versions, caches and environment variables; the logging level, logging and hash callbacks and the bindPy* calls come with WP 6.2-6.7"
+note = "6.1a: the module, its attributes, the two exceptions, the global functions on versions, caches and environment variables; p6-config 6.6a: the logging level, LogMessage, the logging and hash callbacks (crate::callback); the bindPy* calls come with WP 6.2-6.7"
 
 [[file]]
 path = "src/bindings/python/PyOpenColorIO.h"

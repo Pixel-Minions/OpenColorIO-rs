@@ -19,6 +19,8 @@
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "python")]
+pub(crate) mod callback;
+#[cfg(feature = "python")]
 pub mod dispatch;
 #[cfg(feature = "python")]
 pub mod embed;

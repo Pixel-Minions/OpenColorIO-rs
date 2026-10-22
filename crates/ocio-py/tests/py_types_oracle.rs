@@ -70,14 +70,11 @@ const COMPLETE: [&str; 35] = [
 const OWN_CLASSES: [&str; 2] = ["vector_of_uint8_t", "PyConfigIOProxy"];
 
 /// The declared classes bound but for members a later card binds: each compares with the
-/// wheel's entry for entry but for those members, which are exactly these (chunk 6.6a: the
-/// I/O proxy; chunk 6.8a: `ConfigUtils`).
+/// wheel's entry for entry but for those members, which are exactly these (chunk 6.8a:
+/// `ConfigUtils`).
 const PARTIAL: [(&str, &[&str]); 1] = [(
     "Config",
     &[
-        "CreateFromConfigIOProxy",
-        "getConfigIOProxy",
-        "setConfigIOProxy",
         "IdentifyBuiltinColorSpace",
         "IdentifyInterchangeSpace",
         "GetProcessorToBuiltinColorSpace",
@@ -85,13 +82,6 @@ const PARTIAL: [(&str, &[&str]); 1] = [(
         "GetProcessorFromConfigs",
     ],
 )];
-
-/// The stand-ins `common::start_python` adds to the port's module until WP 6.6 binds them.
-const STAND_INS: [&str; 3] = [
-    "SetLoggingFunction",
-    "ResetToDefaultLoggingFunction",
-    "ResetComputeHashFunction",
-];
 
 fn entry_name(e: &Value) -> String {
     String::from_utf8(bytes(&e["name"])).unwrap()
@@ -103,8 +93,7 @@ fn wheel_members() -> Vec<Value> {
     report["module"]["members"].as_array().unwrap().clone()
 }
 
-/// The port's module members, as py_surface_walk.py's `_members` reports them, without the
-/// stand-ins.
+/// The port's module members, as py_surface_walk.py's `_members` reports them.
 fn port_members() -> Vec<Value> {
     common::start_python();
     Python::attach(|py| {
@@ -117,13 +106,9 @@ fn port_members() -> Vec<Value> {
             .call1((&module,))
             .unwrap();
         let namespace = py
-            .eval(
-                c"lambda m, skip: {k: v for k, v in vars(m).items() if k not in skip}",
-                None,
-                None,
-            )
+            .eval(c"lambda m: dict(vars(m))", None, None)
             .unwrap()
-            .call1((&module, STAND_INS.to_vec()))
+            .call1((&module,))
             .unwrap();
         let skip = walk.getattr("RUNTIME_NAMES").unwrap();
         let skip = py

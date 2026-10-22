@@ -14,8 +14,8 @@
 //! C++ runtime gives the vector, so that an iterator of it knows when the wheel's iterator
 //! would read memory the vector freed (U-133).
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
 use pyo3::types::{
@@ -1211,4 +1211,146 @@ pub(crate) fn bind_py_config_io_proxy(m: &Bound<'_, PyModule>) -> PyResult<()> {
 fn module_local_record(py: Python<'_>) -> PyResult<Bound<'_, PyCapsule>> {
     // `PyCapsule::new_with_value` requires a name; pybind11's capsule has none.
     PyCapsule::new(py, 0usize, None)
+}
+
+// ---------------------------------------------------------------------------------------------
+// The library's side of a Python proxy
+
+/// The library's `ConfigIoProxy` of a Python one: the trampoline `PyConfigIOProxy`
+/// (PyConfigIOProxy.cpp:18-50 @ v2.5.2), which finds the Python object registered for its node
+/// (none once that object died: a pure virtual function), calls its override with the GIL taken
+/// (`PYBIND11_OVERRIDE_PURE`), and throws what goes wrong through the library
+/// ([`crate::callback`]).
+struct PyProxy {
+    node: Shared<ProxyNode>,
+}
+
+/// The library's proxies made for Python ones, by their node: the same node gives the same
+/// proxy (one `shared_ptr` upstream), and `getConfigIOProxy` finds the node of a proxy again.
+static PROXIES: Mutex<Vec<(std::sync::Weak<PyProxy>, usize)>> = Mutex::new(Vec::new());
+
+/// A call of the override `name` of the proxy `node`, its result cast by `cast`.
+fn call_override<R>(
+    node: &Shared<ProxyNode>,
+    name: &'static str,
+    arg: Option<&[u8]>,
+    cast: impl FnOnce(&Bound<'_, PyAny>) -> PyResult<R>,
+) -> R {
+    use crate::callback::{CallbackError, throw};
+    Python::attach(|py| {
+        let outcome = (|| -> Result<R, CallbackError> {
+            let Some(this) = crate::shared::registered(py, PROXY, node.key()) else {
+                return Err(CallbackError::Cpp(pure_virtual(name)));
+            };
+            let f = get_override(&this, name)
+                .map_err(CallbackError::Cpp)?
+                .ok_or_else(|| CallbackError::Cpp(pure_virtual(name)))?;
+            let result = match arg {
+                Some(path) => {
+                    let path = crate::dispatch::char_ptr_to_py(py, Some(path))
+                        .map_err(CallbackError::Python)?;
+                    f.call1((path,))
+                }
+                None => f.call0(),
+            }
+            .map_err(CallbackError::Python)?;
+            cast(&result).map_err(CallbackError::Cpp)
+        })();
+        match outcome {
+            Ok(r) => r,
+            Err(e) => throw(py, e),
+        }
+    })
+}
+
+impl ocio::config_io_proxy::ConfigIoProxy for PyProxy {
+    fn lut_data(&self, filepath: &[u8]) -> ocio::Result<Vec<u8>> {
+        Ok(call_override(
+            &self.node,
+            "getLutData",
+            Some(filepath),
+            |r| cast_vector(r).map(|v| v.data),
+        ))
+    }
+
+    fn config_data(&self) -> ocio::Result<Vec<u8>> {
+        Ok(call_override(
+            &self.node,
+            "getConfigData",
+            None,
+            cast_string,
+        ))
+    }
+
+    fn fast_lut_file_hash(&self, filepath: &[u8]) -> ocio::Result<Vec<u8>> {
+        Ok(call_override(
+            &self.node,
+            "getFastLutFileHash",
+            Some(filepath),
+            cast_string,
+        ))
+    }
+}
+
+/// The library's proxy of the Python proxy `node`, made once while it lives.
+fn library_proxy(node: Shared<ProxyNode>) -> Arc<dyn ocio::config_io_proxy::ConfigIoProxy> {
+    let mut proxies = PROXIES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    proxies.retain(|(w, _)| w.strong_count() > 0);
+    if let Some(p) = proxies
+        .iter()
+        .find(|(_, k)| *k == node.key())
+        .and_then(|(w, _)| w.upgrade())
+    {
+        return p;
+    }
+    let key = node.key();
+    let proxy = Arc::new(PyProxy { node });
+    proxies.push((Arc::downgrade(&proxy), key));
+    proxy
+}
+
+/// A `std::shared_ptr<ConfigIOProxy>` argument (pybind11's holder caster): an instance of
+/// `PyConfigIOProxy`; with conversions, also `None`. `Ok(None)`: refused.
+pub(crate) fn proxy_arg(
+    obj: &Bound<'_, PyAny>,
+    convert: bool,
+) -> PyResult<Option<Option<Arc<dyn ocio::config_io_proxy::ConfigIoProxy>>>> {
+    if obj.is_none() {
+        return Ok(convert.then_some(None));
+    }
+    Ok(holder::<ProxyNode>(obj, PROXY)?.map(|node| Some(library_proxy(node))))
+}
+
+/// The port's error for `None` where upstream dereferences the null proxy (U-124).
+pub(crate) fn null_proxy(what: &str) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(format!(
+        "{what}: None, a null pointer the wheel dereferences (its process dies; \
+         docs/improvements.md, U-124)"
+    ))
+}
+
+/// A returned proxy: the Python object of the proxy's node (made anew, of the class
+/// `PyConfigIOProxy`, when the one Python made died), or None. A proxy no Python object made
+/// (an application's, in an embedding host) has none: None.
+pub(crate) fn proxy_out(
+    py: Python<'_>,
+    proxy: Option<Arc<dyn ocio::config_io_proxy::ConfigIoProxy>>,
+) -> PyResult<Option<Py<PyAny>>> {
+    let Some(proxy) = proxy else {
+        return none(py);
+    };
+    let address = Arc::as_ptr(&proxy) as *const u8 as usize;
+    let node = PROXIES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .filter_map(|(w, _)| w.upgrade())
+        .find(|p| Arc::as_ptr(p) as *const u8 as usize == address)
+        .map(|p| p.node.clone());
+    match node {
+        Some(node) => crate::shared::out(py, PROXY, &node),
+        None => none(py),
+    }
 }

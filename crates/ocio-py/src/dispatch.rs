@@ -252,6 +252,21 @@ fn bind<'py>(
     Ok(Some(values))
 }
 
+/// `o`'s call, where pybind11's dispatcher catches C++ exceptions: a Python callback's,
+/// which the library carries as a `ForeignException`, is its Python exception again
+/// (`error_already_set::restore`, chunk 6.6a).
+fn call<'py>(
+    py: Python<'py>,
+    o: &Overload,
+    values: &[Bound<'py, PyAny>],
+    convert: bool,
+) -> PyResult<Option<Py<PyAny>>> {
+    match ocio_ops::foreign_exception::try_foreign(|| (o.call)(py, o, values, convert)) {
+        Ok(result) => result,
+        Err(e) => Err(crate::callback::into_py_err(e)),
+    }
+}
+
 /// Calls `f` as pybind11's dispatcher does (see the module's documentation).
 pub fn dispatch<'py>(
     py: Python<'py>,
@@ -284,7 +299,7 @@ pub fn dispatch<'py>(
         let Some(values) = bind(py, o, f.method, args, kwargs)? else {
             continue;
         };
-        if let Some(result) = (o.call)(py, o, &values, !overloaded)? {
+        if let Some(result) = call(py, o, &values, !overloaded)? {
             return Ok(result);
         }
         // pybind11 tries again, with conversions, an overload with a positional parameter
@@ -294,7 +309,7 @@ pub fn dispatch<'py>(
         }
     }
     for (o, values) in second_pass {
-        if let Some(result) = (o.call)(py, o, &values, true)? {
+        if let Some(result) = call(py, o, &values, true)? {
             return Ok(result);
         }
     }

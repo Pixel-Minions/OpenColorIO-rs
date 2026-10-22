@@ -1,0 +1,508 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! The Python callables the library calls (chunk 6.6a) against the wheel, through the same step
+//! scripts on both sides (the step interpreter defines no functions: the callables are bound
+//! methods of builtins, such as `list.append`, `"h%.0s".__mod__`, `"x".__mul__`, and builtins
+//! such as `int`, `len`, `str`):
+//! - the logging level, `SetLoggingFunction`, `ResetToDefaultLoggingFunction` and `LogMessage`:
+//!   the messages a logging function receives, the exceptions it raises passed through the
+//!   library (from `LogMessage` and from `Config.validate`), the library usable after them;
+//! - `SetComputeHashFunction` and `ResetComputeHashFunction`, on a config read from files: the
+//!   cache IDs and processors the hashes give, a result pybind11 can't cast, an exception, the
+//!   empty function (`None`: `std::bad_function_call`, whose text is each C++ runtime's), the
+//!   library usable after them;
+//! - a `PyConfigIOProxy` the library calls (`CreateFromConfigIOProxy`, `getConfigIOProxy`,
+//!   `setConfigIOProxy`): its config, its LUT data and hashes, the errors of its overrides as
+//!   the library reports them (`error_already_set::what()` in the LUT loader's message, with
+//!   the frames of an exception raised in Python code: the same up to the port's outermost
+//!   frame, `run`, where the wheel's step interpreter has its script's `main` and `<module>`
+//!   too);
+//! - D-9: a callback that uses the config the library is working on raises the port's
+//!   RuntimeError, where the wheel's reads it.
+//!
+//! And, without the wheel, where its process dies or it keeps a value outside an enum: `None`
+//! for the proxy (U-124), for `LogMessage`'s message (U-123), a logging level outside the
+//! enumerators (U-112).
+//!
+//! The logging and hash functions are the process's: one test runs every script in turn.
+#![cfg(feature = "python")]
+
+mod common;
+
+use common::script::{Expect, Script, by, compare, compare_reports, d, i, n, none, r, ra, s, t};
+use pyo3::prelude::*;
+use pyo3::types::PyDict;
+use serde_json::{Value, json};
+
+/// A config whose color space `lut` reads `lut.spi1d` from its search path.
+const CONFIG: &str = r#"ocio_profile_version: 2.1
+search_path: luts
+roles:
+  default: raw
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace> {name: raw, isdata: true}
+  - !<ColorSpace> {name: lin}
+  - !<ColorSpace>
+    name: lut
+    from_scene_reference: !<FileTransform> {src: lut.spi1d}
+"#;
+
+const LUT: &[u8] = b"Version 1\nFrom 0 1\nLength 2\nComponents 1\n{\n0\n0.5\n}\n";
+
+/// A config of version 2.3 without the roles 2.2 requires: its validation logs errors.
+const LOGGING_CONFIG: &str = r#"ocio_profile_version: 2.3
+roles:
+  default: raw
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace> {name: raw}
+"#;
+
+fn logging_script() -> Script {
+    let mut sc = Script::new();
+    let level = sc.call(n("OCIO.GetLoggingLevel"), vec![]);
+    for l in ["NONE", "WARNING", "INFO", "DEBUG", "UNKNOWN"] {
+        sc.call(
+            n("OCIO.SetLoggingLevel"),
+            vec![n(&format!("OCIO.LOGGING_LEVEL_{l}"))],
+        );
+        sc.call(n("OCIO.GetLoggingLevel"), vec![]);
+    }
+    sc.raises(n("OCIO.SetLoggingLevel"), vec![i(1)]);
+    sc.raises(n("OCIO.SetLoggingLevel"), vec![none()]);
+    sc.call_kw(
+        n("OCIO.SetLoggingLevel"),
+        vec![],
+        vec![("level", n("OCIO.LOGGING_LEVEL_INFO"))],
+        Expect::Value,
+    );
+    // The messages a logging function receives, at each level.
+    let got = sc.call(n("list"), vec![]);
+    sc.call(n("OCIO.SetLoggingFunction"), vec![ra(got, "append")]);
+    for (l, m) in [
+        ("WARNING", "w"),
+        ("INFO", "i"),
+        ("DEBUG", "d"),
+        ("WARNING", "two\nlines"),
+        ("WARNING", "ends\n"),
+        ("WARNING", ""),
+        ("INFO", "caf\u{e9}"),
+        ("NONE", "n"),
+    ] {
+        sc.call(
+            n("OCIO.LogMessage"),
+            vec![n(&format!("OCIO.LOGGING_LEVEL_{l}")), s(m)],
+        );
+    }
+    sc.raises(
+        n("OCIO.LogMessage"),
+        vec![n("OCIO.LOGGING_LEVEL_UNKNOWN"), s("u")],
+    );
+    sc.call(
+        n("OCIO.SetLoggingLevel"),
+        vec![n("OCIO.LOGGING_LEVEL_DEBUG")],
+    );
+    sc.call(
+        n("OCIO.LogMessage"),
+        vec![n("OCIO.LOGGING_LEVEL_DEBUG"), s("d2")],
+    );
+    // A level outside the enumerators logs nothing.
+    let odd = sc.call(n("OCIO.LoggingLevel"), vec![i(7)]);
+    sc.call(n("OCIO.LogMessage"), vec![r(odd), s("odd")]);
+    sc.call_kw(
+        n("OCIO.LogMessage"),
+        vec![],
+        vec![
+            ("level", n("OCIO.LOGGING_LEVEL_WARNING")),
+            ("message", by(b"bytes")),
+        ],
+        Expect::Value,
+    );
+    sc.raises(n("OCIO.LogMessage"), vec![n("OCIO.LOGGING_LEVEL_WARNING")]);
+    sc.call(n("list"), vec![r(got)]);
+    sc.call(
+        n("OCIO.SetLoggingLevel"),
+        vec![n("OCIO.LOGGING_LEVEL_WARNING")],
+    );
+    // A logging function that raises: the exception passes through the library, which works
+    // afterwards.
+    sc.call(n("OCIO.SetLoggingFunction"), vec![n("int")]);
+    sc.raises(
+        n("OCIO.LogMessage"),
+        vec![n("OCIO.LOGGING_LEVEL_WARNING"), s("x")],
+    );
+    let c = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(LOGGING_CONFIG)]);
+    sc.raises(ra(c, "validate"), vec![]);
+    sc.call(n("OCIO.SetLoggingFunction"), vec![n("len")]);
+    sc.call(
+        n("OCIO.LogMessage"),
+        vec![n("OCIO.LOGGING_LEVEL_WARNING"), s("x")],
+    );
+    sc.raises(ra(c, "validate"), vec![]);
+    sc.call(n("OCIO.SetLoggingFunction"), vec![ra(got, "append")]);
+    sc.raises(ra(c, "validate"), vec![]);
+    sc.call(
+        n("OCIO.LogMessage"),
+        vec![n("OCIO.LOGGING_LEVEL_WARNING"), s("after")],
+    );
+    sc.call(n("list"), vec![r(got)]);
+    // What the caster refuses.
+    sc.raises(n("OCIO.SetLoggingFunction"), vec![none()]);
+    sc.raises(n("OCIO.SetLoggingFunction"), vec![i(5)]);
+    sc.raises(n("OCIO.SetLoggingFunction"), vec![]);
+    sc.call_kw(
+        n("OCIO.SetLoggingFunction"),
+        vec![],
+        vec![("logFunction", ra(got, "append"))],
+        Expect::Value,
+    );
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    sc.raises(n("OCIO.ResetToDefaultLoggingFunction"), vec![i(1)]);
+    sc.call(
+        n("OCIO.LogMessage"),
+        vec![n("OCIO.LOGGING_LEVEL_WARNING"), s("to stderr")],
+    );
+    sc.call(n("len"), vec![r(got)]);
+    sc.call(n("OCIO.SetLoggingLevel"), vec![r(level)]);
+    sc.call(n("OCIO.GetLoggingLevel"), vec![]);
+    sc
+}
+
+/// A subclass of `PyConfigIOProxy` and an instance of it whose overrides are the instance's
+/// own attributes `attrs`: the instance's step.
+fn proxy(sc: &mut Script, attrs: Vec<(&str, Value)>) -> usize {
+    let cls = sc.call(
+        n("type"),
+        vec![
+            s("P"),
+            t(vec![n("OCIO.PyConfigIOProxy")]),
+            d(vec![(s("__module__"), s("probe"))]),
+        ],
+    );
+    let obj = sc.call(r(cls), vec![]);
+    for (name, value) in attrs {
+        sc.call(n("setattr"), vec![r(obj), s(name), value]);
+    }
+    obj
+}
+
+/// `iter([text]).__next__`: a callable without arguments that returns `text` (once).
+fn returns(sc: &mut Script, text: &str) -> Value {
+    let it = sc.call(n("iter"), vec![common::script::l(vec![s(text)])]);
+    ra(it, "__next__")
+}
+
+/// A proxy whose LUT loader raises in a Python frame (`copy.replace`): `what()` lists the
+/// frames, from the deepest outwards. The script and its last step's index.
+fn frames_script() -> (Script, usize) {
+    let mut sc = Script::new();
+    let data = returns(&mut sc, CONFIG);
+    let hash = ra_lit(&mut sc, "h5%.0s", "__mod__");
+    let p5 = proxy(
+        &mut sc,
+        vec![
+            ("getConfigData", data),
+            ("getLutData", n("copy.replace")),
+            ("getFastLutFileHash", hash),
+        ],
+    );
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    let c5 = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(p5)]);
+    let k = sc.raises(ra(c5, "getProcessor"), vec![s("lin"), s("lut")]);
+    (sc, k)
+}
+
+fn proxy_script() -> Script {
+    let mut sc = Script::new();
+    // A proxy whose LUT loader raises (TypeError from `str.__mul__`, without a Python frame);
+    // its hash says the file is there.
+    let data = returns(&mut sc, CONFIG);
+    let (lut, hash) = (
+        ra_lit(&mut sc, "x", "__mul__"),
+        ra_lit(&mut sc, "h%.0s", "__mod__"),
+    );
+    let p = proxy(
+        &mut sc,
+        vec![
+            ("getConfigData", data),
+            ("getLutData", lut),
+            ("getFastLutFileHash", hash),
+        ],
+    );
+    let c = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(p)]);
+    sc.call(ra(c, "getConfigIOProxy"), vec![]);
+    sc.call(ra(c, "getCacheID"), vec![]);
+    sc.call(ra(c, "serialize"), vec![]);
+    sc.raises(ra(c, "getProcessor"), vec![s("lin"), s("lut")]);
+    // The file cache keeps the failure under the file's hash.
+    sc.raises(ra(c, "getProcessor"), vec![s("lin"), s("lut")]);
+    // LUT data pybind11 can't cast to a vector.
+    let data = returns(&mut sc, CONFIG);
+    let (lut, hash) = (
+        ra_lit(&mut sc, "", "__add__"),
+        ra_lit(&mut sc, "h2%.0s", "__mod__"),
+    );
+    let p2 = proxy(
+        &mut sc,
+        vec![
+            ("getConfigData", data),
+            ("getLutData", lut),
+            ("getFastLutFileHash", hash),
+        ],
+    );
+    // The file cache keeps the earlier proxies' LUTs under their paths.
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    let c2 = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(p2)]);
+    sc.raises(ra(c2, "getProcessor"), vec![s("lin"), s("lut")]);
+    // A hash that raises: the file isn't there.
+    let data = returns(&mut sc, CONFIG);
+    let (lut, hash) = (
+        ra_lit(&mut sc, "x", "__mul__"),
+        ra_lit(&mut sc, "x", "__mul__"),
+    );
+    let p3 = proxy(
+        &mut sc,
+        vec![
+            ("getConfigData", data),
+            ("getLutData", lut),
+            ("getFastLutFileHash", hash),
+        ],
+    );
+    // The file cache keeps the earlier proxies' LUTs under their paths.
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    let c3 = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(p3)]);
+    sc.call(ra(c3, "getCacheID"), vec![]);
+    sc.raises(ra(c3, "getProcessor"), vec![s("lin"), s("lut")]);
+    // The config's text: what the caster refuses, an exception, an empty one.
+    for (attr, expect) in [
+        (n("int"), Expect::Raised),
+        (n("str"), Expect::Raised),
+        (n("list"), Expect::Raised),
+        (n("bytes"), Expect::Raised),
+    ] {
+        let p = proxy(&mut sc, vec![("getConfigData", attr)]);
+        sc.step(
+            json!({ "call": n("OCIO.Config.CreateFromConfigIOProxy"), "args": [r(p)] }),
+            expect,
+        );
+    }
+    let mul = ra_lit(&mut sc, "x", "__mul__");
+    let p4 = proxy(&mut sc, vec![("getConfigData", mul)]);
+    sc.raises(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(p4)]);
+    let bare = sc.call(n("OCIO.PyConfigIOProxy"), vec![]);
+    sc.raises(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(bare)]);
+    sc.raises(n("OCIO.Config.CreateFromConfigIOProxy"), vec![i(1)]);
+    sc.call_kw(
+        n("OCIO.Config.CreateFromConfigIOProxy"),
+        vec![],
+        vec![("arg0", r(p))],
+        Expect::Raised,
+    );
+    // Setting and getting a config's proxy.
+    let raw = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    sc.call(ra(raw, "getConfigIOProxy"), vec![]);
+    sc.call(ra(raw, "setConfigIOProxy"), vec![r(p)]);
+    sc.call(ra(raw, "getConfigIOProxy"), vec![]);
+    sc.call(ra(raw, "setConfigIOProxy"), vec![none()]);
+    sc.call(ra(raw, "getConfigIOProxy"), vec![]);
+    sc.call(ra(raw, "setConfigIOProxy"), vec![r(bare)]);
+    sc.call(ra(raw, "getConfigIOProxy"), vec![]);
+    sc.raises(ra(raw, "setConfigIOProxy"), vec![i(1)]);
+    sc.call_kw(
+        ra(raw, "setConfigIOProxy"),
+        vec![],
+        vec![("ciop", r(p2))],
+        Expect::Value,
+    );
+    sc.call(ra(raw, "getConfigIOProxy"), vec![]);
+    sc
+}
+
+/// A bound method `m` of the `str` `text`: its expression (a step making the `str`).
+fn ra_lit(sc: &mut Script, text: &str, m: &str) -> Value {
+    let k = sc.call(n("str"), vec![s(text)]);
+    ra(k, m)
+}
+
+/// The steps of a config read from the files, under the hash function `hash` (or the default,
+/// `None`): its processor, then its cache ID (but the default's, which holds the file's path
+/// and time, different on the two sides); with `id_first`, the cache ID first. The library
+/// marks a file's hash as known before it calls the hash function, so a hash that fails is
+/// raised by the first use only, and later uses see an empty hash (a missing file).
+fn hash_steps(sc: &mut Script, hash: Option<Value>, processor: Expect, id_first: bool) {
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    let default = hash.is_none();
+    match hash {
+        Some(h) => sc.call(n("OCIO.SetComputeHashFunction"), vec![h]),
+        None => sc.call(n("OCIO.ResetComputeHashFunction"), vec![]),
+    };
+    let c = sc.call(n("OCIO.Config.CreateFromFile"), vec![s("config.ocio")]);
+    if id_first && !default {
+        sc.call(ra(c, "getCacheID"), vec![]);
+    }
+    sc.step(
+        json!({ "call": ra(c, "getProcessor"), "args": [s("lin"), s("lut")] }),
+        processor,
+    );
+    if !default {
+        sc.call(ra(c, "getCacheID"), vec![]);
+    }
+    sc.step(
+        json!({ "call": ra(c, "getProcessor"), "args": [s("lin"), s("lut")] }),
+        processor,
+    );
+}
+
+fn hash_script() -> Script {
+    let mut sc = Script::new();
+    for id_first in [false, true] {
+        let constant = ra_lit(&mut sc, "h%.0s", "__mod__");
+        hash_steps(&mut sc, Some(constant), Expect::Value, id_first);
+        // A result pybind11 can't cast to a std::string, an exception, the empty function
+        // (I-301).
+        hash_steps(&mut sc, Some(n("len")), Expect::Raised, id_first);
+        let mul = ra_lit(&mut sc, "x", "__mul__");
+        hash_steps(&mut sc, Some(mul), Expect::Raised, id_first);
+        hash_steps(&mut sc, Some(none()), Expect::Raised, id_first);
+    }
+    sc.raises(n("OCIO.SetComputeHashFunction"), vec![i(1)]);
+    sc.raises(n("OCIO.SetComputeHashFunction"), vec![]);
+    sc.raises(n("OCIO.ResetComputeHashFunction"), vec![i(1)]);
+    // The default again.
+    hash_steps(&mut sc, None, Expect::Value, false);
+    sc
+}
+
+fn d9_script() -> Script {
+    let mut sc = Script::new();
+    let c = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(LOGGING_CONFIG)]);
+    sc.call(n("OCIO.SetLoggingFunction"), vec![ra(c, "getColorSpace")]);
+    // The validation logs its errors and succeeds, in the wheel.
+    sc.call(ra(c, "validate"), vec![]);
+    let other = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(LOGGING_CONFIG)]);
+    sc.call(ra(other, "validate"), vec![]);
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    sc
+}
+
+/// The text of a report's exception message.
+fn message(step: &Value) -> String {
+    String::from_utf8(ocio_testkit::oracle_values::bytes(
+        &step["raised"]["message"],
+    ))
+    .unwrap()
+}
+
+/// The callbacks behave as the wheel's (see the module's documentation); D-9 where it differs.
+#[test]
+fn callbacks_as_the_wheels() {
+    compare(&[logging_script(), proxy_script()]);
+
+    // The frames of what(): the wheel's step interpreter runs as a script (`main`, `<module>`),
+    // the port's is called by this test (`run` is its outermost frame); the frames up to `run`
+    // are the same, and the wheel's has exactly those two more.
+    let (sc, k) = frames_script();
+    let theirs = common::wheel(&[sc.json()]).remove(0);
+    let ours = common::port(&sc.json());
+    for j in 0..k {
+        assert_eq!(theirs["steps"][j], ours["steps"][j], "step {j}");
+    }
+    let (wheel, port) = (message(&theirs["steps"][k]), message(&ours["steps"][k]));
+    assert!(
+        port.contains("\n\nAt:\n") && port.contains("copy.py("),
+        "{port}"
+    );
+    assert!(port.ends_with(": run\n"), "{port}");
+    let extra = wheel
+        .strip_prefix(port.as_str())
+        .unwrap_or_else(|| panic!("{wheel}\n{port}"));
+    let lines: Vec<&str> = extra.lines().collect();
+    assert_eq!(lines.len(), 2, "{extra}");
+    for (line, function) in lines.iter().zip(["main", "<module>"]) {
+        assert!(
+            line.starts_with("  ")
+                && line.contains("py_eval_steps.py(")
+                && line.ends_with(&format!("): {function}")),
+            "{line}"
+        );
+    }
+    assert_eq!(
+        theirs["steps"][k]["raised"]["type"],
+        ours["steps"][k]["raised"]["type"]
+    );
+
+    // The hash function, on files.
+    let files = [
+        ("config.ocio", CONFIG.as_bytes().to_vec()),
+        ("luts/lut.spi1d", LUT.to_vec()),
+    ];
+    let scripts = [hash_script()];
+    let json: Vec<Value> = scripts.iter().map(Script::json).collect();
+    let theirs = common::wheel_with_files(&json, &files);
+    let dir = std::env::temp_dir().join(format!("ocio-py-callbacks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    for (name, bytes) in &files {
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    std::env::set_current_dir(&dir).unwrap();
+    let ours: Vec<Value> = scripts
+        .iter()
+        .map(|sc| common::restore_dir(&common::port(&sc.json()), &dir))
+        .collect();
+    compare_reports(&scripts, &ours, &theirs);
+    std::env::set_current_dir(std::env::temp_dir()).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // D-9: the wheel's logging function reads the config during its validation, which logs its
+    // errors and succeeds; the port's raises its RuntimeError, which ends the validation.
+    let sc = d9_script();
+    let theirs = common::wheel(&[sc.json()]).remove(0);
+    let ours = common::port(&sc.json());
+    let (wheel, port) = (&theirs["steps"][2], &ours["steps"][2]);
+    assert_eq!(wheel["value"]["type"], "builtins.NoneType", "{wheel}");
+    assert_eq!(port["raised"]["type"], "builtins.RuntimeError", "{port}");
+    assert!(message(port).contains("docs/deviations.md, D-9"), "{port}");
+    // Another config is free to use, as the wheel's.
+    assert_eq!(theirs["steps"][4], ours["steps"][4]);
+    assert_eq!(theirs["steps"][5], ours["steps"][5]);
+}
+
+/// Where the wheel's process dies (U-123, U-124) or it keeps a level outside the enumerators
+/// (U-112), the port's error; the controls run.
+#[test]
+fn where_the_wheel_fails_the_port_raises() {
+    common::start_python();
+    Python::attach(|py| {
+        for (code, entry) in [
+            ("OCIO.Config.CreateFromConfigIOProxy(None)", "U-124"),
+            ("OCIO.LogMessage(OCIO.LOGGING_LEVEL_WARNING, None)", "U-123"),
+            ("OCIO.SetLoggingLevel(OCIO.LoggingLevel(7))", "U-112"),
+        ] {
+            let globals = PyDict::new(py);
+            let src =
+                std::ffi::CString::new(format!("import PyOpenColorIO as OCIO\n{code}")).unwrap();
+            let err = py.run(&src, Some(&globals), None).expect_err(code);
+            let text = err.to_string();
+            assert!(
+                text.starts_with("ValueError")
+                    && text.contains(&format!("docs/improvements.md, {entry})")),
+                "{code}: {text}"
+            );
+        }
+        let src = std::ffi::CString::new(
+            "import PyOpenColorIO as OCIO\nl = OCIO.GetLoggingLevel()\n\
+             OCIO.SetLoggingLevel(l)\nassert OCIO.GetLoggingLevel() == l\n\
+             OCIO.Config.CreateRaw().setConfigIOProxy(None)",
+        )
+        .unwrap();
+        py.run(&src, None, None).unwrap_or_else(|e| panic!("{e}"));
+    });
+}

@@ -25,9 +25,7 @@ use serde_json::{Value, json};
 static START: Once = Once::new();
 
 /// Starts the embedded interpreter once, with the module registered, the oracle's step
-/// interpreter importable, and target/py-port's site-packages (NumPy) on its path; and, until
-/// WP 6.6 binds them, stand-ins for the logging and hash functions the step interpreter sets
-/// and resets around each script (they do nothing: the scripts here log nothing).
+/// interpreter importable, and target/py-port's site-packages (NumPy) on its path.
 pub(crate) fn start_python() {
     START.call_once(|| {
         ocio_py::embed::append_to_inittab();
@@ -47,17 +45,6 @@ pub(crate) fn start_python() {
             path.insert(0, dir).unwrap();
             if let Some(site) = site_packages() {
                 path.append(site).unwrap();
-            }
-            let ocio = py.import("PyOpenColorIO").unwrap();
-            for name in [
-                "SetLoggingFunction",
-                "ResetToDefaultLoggingFunction",
-                "ResetComputeHashFunction",
-            ] {
-                if !ocio.hasattr(name).unwrap() {
-                    let noop = py.eval(c"lambda *args: None", None, None).unwrap();
-                    ocio.setattr(name, noop).unwrap();
-                }
             }
         });
     });
@@ -204,6 +191,50 @@ pub(crate) fn port_member(n: &str) -> Value {
             .unwrap();
         serde_json::from_str(&text).unwrap()
     })
+}
+
+/// `report` with each spelling of the directory `dir` in its text (the bytes of its
+/// {"bytes": hex} values) written as "$FILES", as the oracle's with_files writes the wheel's: as
+/// given, without Windows' verbatim prefix, and with "/" and with doubled backslashes for "\\".
+pub(crate) fn restore_dir(report: &Value, dir: &std::path::Path) -> Value {
+    let given = dir.to_string_lossy().to_string();
+    let plain = given.strip_prefix(r"\\?\").unwrap_or(&given).to_string();
+    let mut spellings = vec![given.clone(), plain.clone()];
+    if cfg!(windows) {
+        for p in [&given, &plain] {
+            spellings.push(p.replace('\\', "/"));
+            spellings.push(p.replace('\\', "\\\\"));
+        }
+    }
+    spellings.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    spellings.dedup();
+    fn walk(v: &Value, spellings: &[String]) -> Value {
+        match v {
+            Value::Array(items) => Value::Array(items.iter().map(|i| walk(i, spellings)).collect()),
+            Value::Object(o) if o.len() == 1 && o.get("bytes").is_some_and(Value::is_string) => {
+                let mut text = ocio_testkit::oracle_values::bytes(v);
+                for s in spellings {
+                    let mut out = Vec::new();
+                    let mut rest = &text[..];
+                    while let Some(at) = rest.windows(s.len()).position(|w| w == s.as_bytes()) {
+                        out.extend_from_slice(&rest[..at]);
+                        out.extend_from_slice(b"$FILES");
+                        rest = &rest[at + s.len()..];
+                    }
+                    out.extend_from_slice(rest);
+                    text = out;
+                }
+                json!({ "bytes": ocio_testkit::oracle_values::hex(&text) })
+            }
+            Value::Object(o) => Value::Object(
+                o.iter()
+                    .map(|(k, v)| (k.clone(), walk(v, spellings)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+    walk(report, &spellings)
 }
 
 /// The wheel's reports of `scripts`, each run in a directory holding `files` (relative path,

@@ -358,3 +358,13 @@ pub(crate) fn registered_keys() -> usize {
 pub(crate) fn registered_count() -> usize {
     lock(&INSTANCES).keys.len()
 }
+
+/// The Python object registered for the holder of the class `qualified` keyed `key`, while it
+/// lives (pybind11's `get_object_handle`).
+pub(crate) fn registered<'py>(
+    py: Python<'py>,
+    qualified: &'static str,
+    key: usize,
+) -> Option<Bound<'py, PyAny>> {
+    lock(&INSTANCES).find(py, &(qualified, key))
+}

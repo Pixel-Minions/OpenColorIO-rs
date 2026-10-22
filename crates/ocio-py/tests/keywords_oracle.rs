@@ -74,12 +74,8 @@ const NOT_RUN: [&str; 3] = [
     "instantiateDisplayFromMonitorName",
 ];
 
-/// Functions of the classes above that a later chunk binds (6.6a: the I/O proxy; 6.8a:
-/// `ConfigUtils`).
-const LATER: [&str; 8] = [
-    "Config.CreateFromConfigIOProxy",
-    "Config.getConfigIOProxy",
-    "Config.setConfigIOProxy",
+/// Functions of the classes above that a later chunk binds (6.8a: `ConfigUtils`).
+const LATER: [&str; 5] = [
     "Config.IdentifyBuiltinColorSpace",
     "Config.IdentifyInterchangeSpace",
     "Config.GetProcessorToBuiltinColorSpace",

@@ -1986,6 +1986,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `color_space_oracle.rs`, `color_spaces_behave_as_the_wheels` (`set_script`), against the
   wheel.
 
+### I-301. `SetComputeHashFunction(None)`: the empty function's error is each C++ runtime's
+
+- **Upstream:** the binding takes `None` for the hash function as an empty `std::function`
+  (pybind11's caster, with conversions), which `SetComputeHashFunction` stores
+  (PyOpenColorIO.cpp:57-58, OpenColorIO.cpp @ v2.5.2). Each later hash of a file calls it, and
+  the call throws `std::bad_function_call`, whose `what()` is the C++ runtime's: "bad function
+  call" with MSVC's STL (the Windows wheel), "bad_function_call" with libstdc++ (the Linux
+  wheel). Where the library passes the exception on, Python gets RuntimeError with that text;
+  where it catches it (the file loader, a config's cache ID), the text is in its message or
+  the hash is "? ".
+- **Who notices:** Python code that passes `None` to `SetComputeHashFunction`, on the two
+  platforms.
+- **A fix:** refuse `None` (or reset to the default hash for it).
+- **Status:** matched per platform in `p6-config` (6.6a, `crates/ocio-py/src/py_open_color_io.rs`,
+  `python_hash_function`); `callbacks_oracle.rs`, `callbacks_as_the_wheels` (`hash_script`).
+
 ### I-326. The buffer checks count entries in 32 bits on Windows
 
 - **Upstream:** the binding counts the entries an image needs in C++ `long`
@@ -5028,7 +5044,11 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `getNamedTransforms` and `getNamedTransformNames`, the view type of `getViews` and
   `getVirtualDisplayViews`, and the direction of `getProcessor`; in `p6-config` (6.3f, 6.3g,
   `crates/ocio-py/src/py_config.rs`, `enumerator`); `config_oracle.rs`,
-  `an_enum_value_outside_the_enumerators_is_the_ports_error`.
+  `an_enum_value_outside_the_enumerators_is_the_ports_error`. Also `SetLoggingLevel`, which
+  the wheel stores (`SetLoggingLevel(OCIO.LoggingLevel(7))` returns, probed 2026-10-22), in
+  `p6-config` (6.6a, `crates/ocio-py/src/py_open_color_io.rs`, `logging_level`);
+  `callbacks_oracle.rs`, `where_the_wheel_fails_the_port_raises`. `LogMessage` given such a
+  level logs nothing, as upstream's `switch` (Logging.cpp:131-160), matched.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -5127,7 +5147,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `isInactiveColorSpace`, `setActiveDisplays`, `setActiveViews` and `archive` given `None`
   (each probed in its own process on Windows, 2026-10-22: the wheel's process dies); in
   `p6-config` (6.3f, 6.3g, `crates/ocio-py/src/py_config.rs`, `checked`); `config_oracle.rs`,
-  `where_the_wheels_process_dies_the_port_raises`.
+  `where_the_wheels_process_dies_the_port_raises`. Also `LogMessage(level, None)`, in
+  `p6-config` (6.6a, `crates/ocio-py/src/py_open_color_io.rs`); `callbacks_oracle.rs`,
+  `where_the_wheel_fails_the_port_raises`.
 
 ### U-124. `None` for a color space set, a color space or a transform that upstream dereferences
 
@@ -5160,7 +5182,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `None`, and `getProcessor` of a named transform with neither transform (through
   `NamedTransform::GetTransform`), each probed in its own process on Windows (2026-10-22); in
   `p6-config` (6.3f, 6.3g, `crates/ocio-py/src/py_config.rs`, `null_object`);
-  `config_oracle.rs`, `where_the_wheels_process_dies_the_port_raises`.
+  `config_oracle.rs`, `where_the_wheels_process_dies_the_port_raises`. Also
+  `Config.CreateFromConfigIOProxy(None)`, in `p6-config` (6.6a,
+  `crates/ocio-py/src/py_config_io_proxy.rs`, `null_proxy`); `callbacks_oracle.rs`,
+  `where_the_wheel_fails_the_port_raises`.
 
 ### U-131. `ExtractOCIOZArchive` given `None` for a path
 

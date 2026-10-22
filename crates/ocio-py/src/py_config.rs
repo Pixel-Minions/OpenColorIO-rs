@@ -75,6 +75,9 @@ const VIEW_TYPE: &str = q!("ViewType");
 const REFERENCE_SPACE_TYPE: &str = q!("ReferenceSpaceType");
 const PROCESSOR_CACHE_FLAGS: &str = q!("ProcessorCacheFlags");
 const COLOR_SPACE_SET: &str = q!("ColorSpaceSet");
+/// The proxy's C++ type, as the signatures write it: `bindPyConfig` runs before
+/// `bindPyConfigIOProxy` registers the class.
+const CONFIG_IO_PROXY: &str = "OpenColorIO_v2_5::ConfigIOProxy";
 
 // ---------------------------------------------------------------------------------------------
 // The config as the binding holds it
@@ -529,6 +532,25 @@ static CREATE_FROM_BUILTIN_CONFIG: Function = static_def!(
     }
 );
 
+// .def_static("CreateFromConfigIOProxy", &Config::CreateFromConfigIOProxy): a
+// `std::shared_ptr<ConfigIOProxy>` without a name.
+static CREATE_FROM_CONFIG_IO_PROXY: Function = static_def!(
+    "CreateFromConfigIOProxy",
+    [Param::new("arg0", CONFIG_IO_PROXY)],
+    CONFIG,
+    |py, _, a, convert| {
+        let Some(proxy) = crate::py_config_io_proxy::proxy_arg(&a[0], convert)? else {
+            return Ok(None);
+        };
+        let Some(proxy) = proxy else {
+            return Err(crate::py_config_io_proxy::null_proxy(
+                "Config.CreateFromConfigIOProxy",
+            ));
+        };
+        arc_out(py, Config::create_from_config_io_proxy(proxy))
+    }
+);
+
 // ---------------------------------------------------------------------------------------------
 // Versions, names, serialization (PyConfig.cpp:217-262 @ v2.5.2)
 
@@ -846,6 +868,26 @@ static SET_WORKING_DIR: Function = config_method!(
     |py, n, a, c| {
         let dir = text(arg_in!(a, 1, c, CharPtr));
         n.config.set_working_dir(dir);
+        none(py)
+    }
+);
+
+// .def("getConfigIOProxy", &Config::getConfigIOProxy): the Python object of the proxy, or
+// None.
+static GET_CONFIG_IO_PROXY: Function =
+    config_method!("getConfigIOProxy", [], CONFIG_IO_PROXY, |py, n, _, _| {
+        crate::py_config_io_proxy::proxy_out(py, n.config.config_io_proxy())
+    });
+
+static SET_CONFIG_IO_PROXY: Function = config_method!(
+    "setConfigIOProxy",
+    [Param::new("ciop", CONFIG_IO_PROXY)],
+    "None",
+    |py, n, a, c| {
+        let Some(proxy) = crate::py_config_io_proxy::proxy_arg(&a[1], c)? else {
+            return Ok(None);
+        };
+        n.config.set_config_io_proxy(proxy);
         none(py)
     }
 );
@@ -3265,6 +3307,7 @@ pub(crate) fn bind_py_config(m: &Bound<'_, PyModule>) -> PyResult<()> {
         &CREATE_FROM_FILE,
         &CREATE_FROM_STREAM,
         &CREATE_FROM_BUILTIN_CONFIG,
+        &CREATE_FROM_CONFIG_IO_PROXY,
     ] {
         def_static(&cls, f)?;
     }
@@ -3299,6 +3342,8 @@ pub(crate) fn bind_py_config(m: &Bound<'_, PyModule>) -> PyResult<()> {
         &ADD_SEARCH_PATH,
         &GET_WORKING_DIR,
         &SET_WORKING_DIR,
+        &GET_CONFIG_IO_PROXY,
+        &SET_CONFIG_IO_PROXY,
         &GET_COLOR_SPACES,
         &GET_COLOR_SPACE,
         &GET_COLOR_SPACE_NAMES,

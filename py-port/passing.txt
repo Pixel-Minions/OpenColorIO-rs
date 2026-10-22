@@ -22,6 +22,7 @@ CDLTransformTest.py::CDLTransformTest.test_constructor_without_keyword
 CDLTransformTest.py::CDLTransformTest.test_constructor_without_parameter
 CDLTransformTest.py::CDLTransformTest.test_create_from_file_cc
 CDLTransformTest.py::CDLTransformTest.test_create_from_file_ccc
+CDLTransformTest.py::CDLTransformTest.test_create_from_file_cdl
 CDLTransformTest.py::CDLTransformTest.test_create_group_from_file
 CDLTransformTest.py::CDLTransformTest.test_description
 CDLTransformTest.py::CDLTransformTest.test_equality
@@ -65,6 +66,7 @@ ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_transform_type
 ConfigTest.py::ConfigTest.test_active__displayview_lists
 ConfigTest.py::ConfigTest.test_canonical_name
 ConfigTest.py::ConfigTest.test_copy
+ConfigTest.py::ConfigTest.test_create_builtin_config
 ConfigTest.py::ConfigTest.test_inactive_colorspaces
 ConfigTest.py::ConfigTest.test_inactive_named_transform
 ConfigTest.py::ConfigTest.test_named_transform
@@ -133,6 +135,7 @@ FileTransformTest.py::FileTransformTest.test_cdlstyle
 FileTransformTest.py::FileTransformTest.test_constructor_with_keyword
 FileTransformTest.py::FileTransformTest.test_constructor_with_positional
 FileTransformTest.py::FileTransformTest.test_constructor_wrong_parameter_type
+FileTransformTest.py::FileTransformTest.test_get_processor
 FileTransformTest.py::FileTransformTest.test_getformats
 FileTransformTest.py::FileTransformTest.test_interpolation
 FileTransformTest.py::FileTransformTest.test_is_format_extension_supported
