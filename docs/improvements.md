@@ -4678,8 +4678,11 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Upstream:** pybind11's holder caster takes `None` for a `TransformRcPtr` (with conversions),
   so `GroupTransform.appendTransform(None)`, `prependTransform(None)` and
   `GroupTransform([None])` put a null pointer among the children. `len()`, indexing (`None`)
-  and iteration work; `repr()`, `validate()` (and so a processor) and `write()` dereference
-  it.
+  and iteration work, and so does `write()` (a null transform builds no op, and the CDL
+  writers' cast refuses it). `validate()` (and so a processor) calls through the null pointer
+  and kills the process; `repr()` takes `typeid` of it, which in the Windows wheel throws
+  std::bad_typeid (RuntimeError "Attempted a typeid of nullptr pointer!") and in the Linux one
+  reads through it (SIGSEGV, probed in Rocky Linux 9).
 - **Who notices:** Python code that passes `None` as a group's transform.
 - **A fix:** refuse `None` (`"transform"_a.none(false)`).
 - **Status:** the port raises RuntimeError "the group holds a null transform (a None it was

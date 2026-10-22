@@ -639,9 +639,13 @@ fn group_script() -> Script {
     sc.call(n("len"), vec![r(holes)]);
     sc.call(ra(holes, "__getitem__"), vec![i(0)]);
     sc.call(n("list"), vec![r(holes)]);
-    // The copy's repr dereferences its null children: U-110.
-    let copy = sc.call(n("copy.deepcopy"), vec![r(holes)]);
-    sc.unrepr(copy);
+    // A copy, whose repr (which the step interpreter takes) dereferences its null children
+    // (U-110): the Windows wheel raises std::bad_typeid's RuntimeError there, the Linux one
+    // reads through the null pointer.
+    if cfg!(windows) {
+        let copy = sc.call(n("copy.deepcopy"), vec![r(holes)]);
+        sc.unrepr(copy);
+    }
     // A group that holds itself: what doesn't recurse through it (U-111 covers what does).
     let cyc = sc.call(n("OCIO.GroupTransform"), vec![]);
     sc.call(ra(cyc, "appendTransform"), vec![r(cyc)]);

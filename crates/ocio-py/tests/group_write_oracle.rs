@@ -93,7 +93,14 @@ fn script() -> Script {
             ra(g, "write"),
             vec![s("Color Transform Format"), s("caf\u{e9}.ctf")],
         );
-        read(&mut sc, "caf\u{e9}.ctf", Expect::Value);
+        // Read back by its bytes: the embedded interpreter of the port's side may encode a str
+        // path as ASCII (its file system encoding in a C locale), the wheel's runs in UTF-8 mode.
+        sc.call_kw(
+            n("numpy.fromfile"),
+            vec![by("caf\u{e9}.ctf".as_bytes())],
+            vec![("dtype", s("u1"))],
+            Expect::Value,
+        );
     }
     sc
 }
