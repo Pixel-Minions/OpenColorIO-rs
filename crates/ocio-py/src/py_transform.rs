@@ -935,6 +935,29 @@ pub(crate) fn outside_enumerators(qualified: &str, v: i64) -> PyErr {
     ))
 }
 
+/// The wheel's error for a style outside its enumerators that the library converts at once
+/// (and so never stores): `std::stringstream ss(initial); ss << style;` at the end of the
+/// conversion's `switch`, which writes the number over the start of `initial`
+/// (docs/improvements.md, I-262). The number is the enum's promotion, an `int`: the `int` the
+/// Windows wheel stores, and the `unsigned int` the Linux one stores (I-225) wrapped to an
+/// `int`.
+///
+/// Port of the end of `GammaOpData::ConvertStyleBasic` and `ConvertStyleMonCurve`
+/// (src/OpenColorIO/ops/gamma/GammaOpData.cpp:205-208, 238-241 @ v2.5.2),
+/// `FixedFunctionOpData::ConvertStyle(FixedFunctionStyle, TransformDirection)`
+/// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:488-491 @ v2.5.2) and
+/// `CDLOpData::ConvertStyle(CDLStyle, TransformDirection)` (src/OpenColorIO/ops/cdl/
+/// CDLOpData.cpp:102-105 @ v2.5.2).
+pub(crate) fn unknown_style(py: Python<'_>, initial: &str, v: i64) -> PyErr {
+    crate::py_open_color_io::to_py_err(
+        py,
+        &ocio::Exception::new(ocio_ops::ops::log::log_utils::overwritten(
+            initial,
+            &(v as i32).to_string(),
+        )),
+    )
+}
+
 /// The library's `BitDepth` of the C++ value `v` ([`outside_enumerators`]).
 pub(crate) fn bit_depth(v: i64) -> PyResult<ocio_ops::open_color_types::BitDepth> {
     use ocio_ops::open_color_types::BitDepth::*;
@@ -1123,11 +1146,15 @@ macro_rules! format_metadata_def {
 
 pub(crate) const NEGATIVE_STYLE: &str = q!("NegativeStyle");
 
-/// The library's `NegativeStyle` of the C++ value `v` ([`outside_enumerators`]).
-pub(crate) fn negative_style(v: i64) -> PyResult<ocio_ops::open_color_types::NegativeStyle> {
+/// The library's `NegativeStyle` of the C++ value `v`, which `setNegativeStyle` converts at
+/// once: the wheel's error for one outside the enumerators ([`unknown_style`]).
+pub(crate) fn negative_style(
+    py: Python<'_>,
+    v: i64,
+) -> PyResult<ocio_ops::open_color_types::NegativeStyle> {
     use ocio_ops::open_color_types::NegativeStyle::*;
     [Clamp, Mirror, PassThru, Linear]
         .into_iter()
         .find(|s| *s as i64 == v)
-        .ok_or_else(|| outside_enumerators(NEGATIVE_STYLE, v))
+        .ok_or_else(|| unknown_style(py, "Unknown negative extrapolation style: ", v))
 }

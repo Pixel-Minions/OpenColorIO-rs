@@ -12,7 +12,7 @@ use crate::dispatch::{Function, Overload, Param};
 use crate::py_open_color_io::py_result;
 use crate::py_transform::{
     DIRECTION_DEFAULT, TransformRc, class, construct, def, default, enum_out, none, ok,
-    outside_enumerators, set_direction, validate, with,
+    set_direction, unknown_style, validate, with,
 };
 use crate::{enum_param, method_def, q, ref_rc, this_rc};
 
@@ -21,8 +21,9 @@ const FIXED_FUNCTION_STYLE: &str = q!("FixedFunctionStyle");
 const SELF: Param = Param::new("self", FIXED_FUNCTION_TRANSFORM);
 const PARAMS: &str = "collections.abc.Sequence[typing.SupportsFloat]";
 
-/// The library's `FixedFunctionStyle` of the C++ value `v`.
-fn style(v: i64) -> PyResult<FixedFunctionStyle> {
+/// The library's `FixedFunctionStyle` of the C++ value `v`, which the constructor and `setStyle`
+/// convert at once: the wheel's error for one outside the enumerators ([`unknown_style`]).
+fn style(py: Python<'_>, v: i64) -> PyResult<FixedFunctionStyle> {
     use FixedFunctionStyle::*;
     [
         AcesRedMod03,
@@ -51,7 +52,7 @@ fn style(v: i64) -> PyResult<FixedFunctionStyle> {
     ]
     .into_iter()
     .find(|s| *s as i64 == v)
-    .ok_or_else(|| outside_enumerators(FIXED_FUNCTION_STYLE, v))
+    .ok_or_else(|| unknown_style(py, "Unknown FixedFunction transform style: ", v))
 }
 
 // .def(py::init([](style, params, dir) {...}), "style"_a, "params"_a =
@@ -79,7 +80,7 @@ static INIT: Function = Function {
             let dir = enum_param!(o, a, 3);
             let t = py_result(
                 py,
-                FixedFunctionTransform::new(style(style_value)?, &params),
+                FixedFunctionTransform::new(style(py, style_value)?, &params),
             )?;
             let rc = TransformRc::new(Transform::FixedFunction(t));
             set_direction(&rc, dir);
@@ -125,7 +126,7 @@ static SET_STYLE: Function = method_def!(
     "None",
     |py, o, a, _| {
         let rc = this_rc!(o, a);
-        let style = style(enum_param!(o, a, 1))?;
+        let style = style(py, enum_param!(o, a, 1))?;
         py_result(
             py,
             with(&rc, |t: &mut FixedFunctionTransform| t.set_style(style))?,

@@ -80,13 +80,19 @@ static INIT: Function = Function {
                 let vars = crate::arg!(a, 2, convert, Vec<f32>);
                 let dir = enum_param!(o, a, 3);
                 let rc = TransformRc::new(Transform::Allocation(AllocationTransform::new()));
-                let alloc = allocation(alloc)?;
-                with(&rc, |t: &mut AllocationTransform| t.set_allocation(alloc))?;
+                // The wheel stores an allocation outside the enumerators, which `validate` then
+                // refuses as it refuses ALLOCATION_UNKNOWN (AllocationTransform.cpp:98-115 @
+                // v2.5.2): the port validates `Unknown` in its place, so the wheel's errors come
+                // in the wheel's order, and the value is never stored.
+                let library_alloc = allocation(alloc);
+                let stored = *library_alloc.as_ref().unwrap_or(&Allocation::Unknown);
+                with(&rc, |t: &mut AllocationTransform| t.set_allocation(stored))?;
                 if !vars.is_empty() {
                     set_vars(py, &rc, &vars)?;
                 }
                 set_direction(&rc, dir);
                 validate(py, &rc)?;
+                library_alloc?;
                 construct(&a[0], o.params[0].ty, rc)?;
                 none(py)
             },

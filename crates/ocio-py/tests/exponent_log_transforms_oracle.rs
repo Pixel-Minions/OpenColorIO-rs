@@ -403,31 +403,3 @@ fn the_classes_behave_as_the_wheels() {
         log_camera_script(),
     ]);
 }
-
-/// A negative style outside the enumerators is the port's error (U-112).
-#[test]
-fn a_negative_style_outside_the_enumerators_is_the_ports_error() {
-    let mut sc = Script::new();
-    let style = sc.call(n("OCIO.NegativeStyle"), vec![i(9)]);
-    let mut refused = Vec::new();
-    for c in ["OCIO.ExponentTransform", "OCIO.ExponentWithLinearTransform"] {
-        let obj = sc.call(n(c), vec![]);
-        refused.push(sc.raises(ra(obj, "setNegativeStyle"), vec![r(style)]));
-        refused.push(sc.call_kw(
-            n(c),
-            vec![],
-            vec![("negativeStyle", r(style))],
-            Expect::Raised,
-        ));
-    }
-    let ours = common::port(&sc.json());
-    let steps = ours["steps"].as_array().unwrap();
-    assert_eq!(steps.len(), sc.steps.len());
-    for k in refused {
-        let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
-            &steps[k]["raised"]["message"],
-        ))
-        .unwrap();
-        assert!(message.contains("U-112"), "step {k}: {}", steps[k]);
-    }
-}

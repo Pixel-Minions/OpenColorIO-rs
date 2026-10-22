@@ -17,10 +17,15 @@
 //! - the group: its children shared with the Python objects given (identity and changes), in
 //!   order, a copy sharing them, its iterators (`len`, indexing, iteration to `StopIteration`),
 //!   the write formats, `write` to a string in each format and its errors, null children and a
-//!   group holding itself where the wheel survives them, a child's validation error.
+//!   group holding itself where the wheel survives them, a child's validation error;
+//! - a style outside its enumerators given to the classes that convert it at once (the
+//!   exponent, fixed function and CDL classes of chunks 6.3b and 6.3c): the wheel's error,
+//!   written over its own start (I-262); the constructors of `AllocationTransform` and
+//!   `FileTransform` given such a value, whose validation errors come first.
 //!
-//! And, without the wheel: an enum value outside its enumerators given to a setter is the port's
-//! error (the port's library can't hold it, U-112); so are a null child and a group holding
+//! And, without the wheel (which runs the same steps without an error): an enum value outside
+//! its enumerators given to a setter that stores it is the port's error (the port's library
+//! can't hold it, U-112); so are a null child and a group holding
 //! itself where the wheel dereferences or recurses (U-110, U-111).
 #![cfg(feature = "python")]
 
@@ -756,32 +761,67 @@ fn the_classes_behave_as_the_wheels() {
     ]);
 }
 
+/// `common`, numbers outside an enum's values that both wheels make an enum of, and the first
+/// `n` of those only this platform's wheel makes one of (I-225): the `int`'s most negative,
+/// -12345, -10 and -1 in the Windows wheel; in the Linux one, the `unsigned int`'s that are
+/// the same bits.
+fn with_platforms(common: &[i128], n: usize) -> Vec<i128> {
+    let negative = [-2147483648_i128, -12345, -10, -1];
+    let mut values = common.to_vec();
+    values.extend(negative.iter().take(n).map(
+        |&v| {
+            if cfg!(windows) { v } else { v + (1_i128 << 32) }
+        },
+    ));
+    values
+}
+
 /// An enum value outside its enumerators, which the wheel's setters store and the port's
-/// library can't hold, is the port's error (U-112).
+/// library can't hold, is the port's error (U-112): each setter that stores one, and
+/// `FileTransform`'s constructor once its validation passed. The wheel runs the same steps
+/// without an error, so each of them does store the value there.
 #[test]
 fn an_enum_value_outside_the_enumerators_is_the_ports_error() {
     let mut sc = Script::new();
+    let mut refused = Vec::new();
     let m = sc.call(n("OCIO.MatrixTransform"), vec![]);
     let bd = sc.call(n("OCIO.BitDepth"), vec![i(42)]);
-    sc.raises(ra(m, "setFileInputBitDepth"), vec![r(bd)]);
-    sc.raises(ra(m, "setFileOutputBitDepth"), vec![r(bd)]);
+    refused.push(sc.call(ra(m, "setFileInputBitDepth"), vec![r(bd)]));
+    refused.push(sc.call(ra(m, "setFileOutputBitDepth"), vec![r(bd)]));
     let rt = sc.call(n("OCIO.RangeTransform"), vec![]);
+    refused.push(sc.call(ra(rt, "setFileInputBitDepth"), vec![r(bd)]));
+    refused.push(sc.call(ra(rt, "setFileOutputBitDepth"), vec![r(bd)]));
     let st = sc.call(n("OCIO.RangeStyle"), vec![i(9)]);
-    sc.raises(ra(rt, "setStyle"), vec![r(st)]);
+    refused.push(sc.call(ra(rt, "setStyle"), vec![r(st)]));
     let a = sc.call(n("OCIO.AllocationTransform"), vec![]);
     let al = sc.call(n("OCIO.Allocation"), vec![i(7)]);
-    sc.raises(ra(a, "setAllocation"), vec![r(al)]);
-    sc.call_kw(
-        n("OCIO.AllocationTransform"),
-        vec![],
-        vec![("allocation", r(al)), ("vars", fl(&[0.0, 1.0]))],
-        Expect::Raised,
-    );
+    refused.push(sc.call(ra(a, "setAllocation"), vec![r(al)]));
+    let file = sc.call(n("OCIO.FileTransform"), vec![]);
+    for v in with_platforms(&[5, 99, 253, 256, 2147483647], 1) {
+        let interp = sc.call(n("OCIO.Interpolation"), vec![i(v)]);
+        refused.push(sc.call(ra(file, "setInterpolation"), vec![r(interp)]));
+        refused.push(sc.call_kw(
+            n("OCIO.FileTransform"),
+            vec![s("a.clf")],
+            vec![("interpolation", r(interp))],
+            Expect::Value,
+        ));
+    }
+    for v in with_platforms(&[2, 9, 2147483647], 1) {
+        let style = sc.call(n("OCIO.CDLStyle"), vec![i(v)]);
+        refused.push(sc.call(ra(file, "setCDLStyle"), vec![r(style)]));
+    }
+    assert_eq!(refused.len(), 22);
+    assert!(sc.expect.iter().all(|e| *e == Expect::Value));
+    let theirs = common::wheel(&[sc.json()]);
+    let theirs = theirs[0]["steps"].as_array().unwrap();
     let ours = common::port(&sc.json());
-    let steps = ours["steps"].as_array().unwrap();
-    assert_eq!(steps.len(), sc.steps.len());
-    for (k, step) in steps.iter().enumerate() {
-        if sc.expect[k] == Expect::Raised {
+    let ours = ours["steps"].as_array().unwrap();
+    assert_eq!(theirs.len(), sc.steps.len());
+    assert_eq!(ours.len(), sc.steps.len());
+    for (k, (step, wheel_step)) in ours.iter().zip(theirs).enumerate() {
+        assert!(wheel_step.get("value").is_some(), "step {k}: {wheel_step}");
+        if refused.contains(&k) {
             let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
                 &step["raised"]["message"],
             ))
@@ -792,6 +832,124 @@ fn an_enum_value_outside_the_enumerators_is_the_ports_error() {
             assert!(step.get("value").is_some(), "step {k}: {step}");
         }
     }
+}
+
+/// A style outside its enumerators that the wheel converts at once, and so never stores,
+/// raises the wheel's error, whose number the C++ stream writes over the start of the message
+/// (I-262): the exponent classes' negative style (constructor and `setNegativeStyle`), the
+/// fixed function's style (constructor and `setStyle`) and the CDL's (`setStyle`), with
+/// numbers of each width up to the `int`'s extremes, the object unchanged after. And the
+/// constructors that store one validate it as the wheel does: `AllocationTransform`'s
+/// validation refuses it, after the errors of its vars and its direction;
+/// `FileTransform`'s errors come before the port's refusal (U-112).
+#[test]
+fn a_style_outside_the_enumerators_raises_the_wheels_error() {
+    const INT_MAX: i128 = 2147483647;
+    let mut sc = Script::new();
+    let odd_dir = sc.call(n("OCIO.TransformDirection"), vec![i(5)]);
+    let inverse = n("OCIO.TRANSFORM_DIR_INVERSE");
+    for v in with_platforms(&[4, 9, 10, 99, 255, 1000000, INT_MAX], 4) {
+        let ns = sc.call(n("OCIO.NegativeStyle"), vec![i(v)]);
+        for class in ["ExponentTransform", "ExponentWithLinearTransform"] {
+            let class = format!("OCIO.{class}");
+            sc.call_kw(
+                n(&class),
+                vec![],
+                vec![("negativeStyle", r(ns))],
+                Expect::Raised,
+            );
+            sc.call_kw(
+                n(&class),
+                vec![],
+                vec![("negativeStyle", r(ns)), ("direction", r(odd_dir))],
+                Expect::Raised,
+            );
+            let obj = sc.call(n(&class), vec![]);
+            sc.raises(ra(obj, "setNegativeStyle"), vec![r(ns)]);
+            sc.call(ra(obj, "setDirection"), vec![inverse.clone()]);
+            sc.raises(ra(obj, "setNegativeStyle"), vec![r(ns)]);
+            sc.eval(r(obj), &["getNegativeStyle", "getDirection", "__repr__"]);
+        }
+    }
+    for v in with_platforms(&[23, 99, 100, 255, 1000000, INT_MAX], 4) {
+        let style = sc.call(n("OCIO.FixedFunctionStyle"), vec![i(v)]);
+        sc.raises(n("OCIO.FixedFunctionTransform"), vec![r(style)]);
+        sc.call_kw(
+            n("OCIO.FixedFunctionTransform"),
+            vec![r(style)],
+            vec![("params", fl(&[1.0, 2.0])), ("direction", r(odd_dir))],
+            Expect::Raised,
+        );
+        let obj = sc.call(
+            n("OCIO.FixedFunctionTransform"),
+            vec![n("OCIO.FIXED_FUNCTION_ACES_GLOW_03")],
+        );
+        sc.raises(ra(obj, "setStyle"), vec![r(style)]);
+        sc.call(ra(obj, "setDirection"), vec![inverse.clone()]);
+        sc.raises(ra(obj, "setStyle"), vec![r(style)]);
+        sc.eval(r(obj), &["getStyle", "getDirection", "__repr__"]);
+    }
+    for v in with_platforms(&[2, 9, 100, 1000000, INT_MAX], 4) {
+        let style = sc.call(n("OCIO.CDLStyle"), vec![i(v)]);
+        let obj = sc.call(n("OCIO.CDLTransform"), vec![]);
+        sc.raises(ra(obj, "setStyle"), vec![r(style)]);
+        sc.call(ra(obj, "setDirection"), vec![inverse.clone()]);
+        sc.raises(ra(obj, "setStyle"), vec![r(style)]);
+        sc.eval(r(obj), &["getStyle", "getDirection", "__repr__"]);
+    }
+    for v in with_platforms(&[3, 7, INT_MAX], 4) {
+        let al = sc.call(n("OCIO.Allocation"), vec![i(v)]);
+        sc.raises(n("OCIO.AllocationTransform"), vec![r(al)]);
+        for vars in [
+            &[1.0][..],
+            &[0.0, 1.0],
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0, 2.0, 3.0],
+        ] {
+            sc.call_kw(
+                n("OCIO.AllocationTransform"),
+                vec![r(al)],
+                vec![("vars", fl(vars))],
+                Expect::Raised,
+            );
+            sc.call_kw(
+                n("OCIO.AllocationTransform"),
+                vec![r(al)],
+                vec![("vars", fl(vars)), ("direction", r(odd_dir))],
+                Expect::Raised,
+            );
+        }
+        sc.call_kw(
+            n("OCIO.AllocationTransform"),
+            vec![],
+            vec![("allocation", r(al)), ("direction", r(odd_dir))],
+            Expect::Raised,
+        );
+    }
+    for v in with_platforms(&[5, 99, 253, 256, INT_MAX], 4) {
+        let interp = sc.call(n("OCIO.Interpolation"), vec![i(v)]);
+        sc.call_kw(
+            n("OCIO.FileTransform"),
+            vec![],
+            vec![("interpolation", r(interp))],
+            Expect::Raised,
+        );
+        sc.call_kw(
+            n("OCIO.FileTransform"),
+            vec![s("")],
+            vec![("interpolation", r(interp)), ("direction", r(odd_dir))],
+            Expect::Raised,
+        );
+        sc.call_kw(
+            n("OCIO.FileTransform"),
+            vec![s("a.clf"), s("id")],
+            vec![("interpolation", r(interp)), ("direction", r(odd_dir))],
+            Expect::Raised,
+        );
+    }
+    let raised = sc.expect.iter().filter(|e| **e == Expect::Raised).count();
+    assert_eq!(raised, 2 * 11 * 4 + 10 * 4 + 9 * 2 + 7 * 10 + 9 * 3);
+    compare(&[sc]);
 }
 
 /// What the wheel can't survive is the port's error: a null child where upstream dereferences

@@ -71,7 +71,7 @@ static INIT: Function = Function {
                 let mut t = Ewl::new();
                 t.set_gamma(&gamma);
                 t.set_offset(&offset);
-                py_result(py, t.set_negative_style(negative_style(style)?))?;
+                py_result(py, t.set_negative_style(negative_style(py, style)?))?;
                 let rc = TransformRc::new(Transform::ExponentWithLinear(t));
                 set_direction(&rc, dir);
                 validate(py, &rc)?;
@@ -154,7 +154,7 @@ static SET_NEGATIVE_STYLE: Function = method_def!(
     "None",
     |py, o, a, _| {
         let rc = this_rc!(o, a);
-        let style = negative_style(enum_param!(o, a, 1))?;
+        let style = negative_style(py, enum_param!(o, a, 1))?;
         py_result(py, with(&rc, |t: &mut Ewl| t.set_negative_style(style))?)?;
         none(py)
     }

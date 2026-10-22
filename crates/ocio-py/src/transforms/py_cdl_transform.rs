@@ -16,8 +16,7 @@ use crate::dispatch::{Function, NonNullCharPtr, Overload, Param, StdString};
 use crate::py_open_color_io::py_result;
 use crate::py_transform::{
     DIRECTION_DEFAULT, FLOAT, TransformRc, class, construct, def, def_static, default, enum_out,
-    float_list, none, ok, outside_enumerators, set_direction, string_out, transform_out, validate,
-    with,
+    float_list, none, ok, set_direction, string_out, transform_out, unknown_style, validate, with,
 };
 use crate::{enum_param, float_array, float_array_out, method_def, q, ref_rc, static_def, this_rc};
 
@@ -27,12 +26,11 @@ pub(crate) const CDL_STYLE: &str = q!("CDLStyle");
 const SELF: Param = Param::new("self", CDL_TRANSFORM);
 const ARRAY_3: &str = float_array!("3");
 
-/// The library's `CdlStyle` of the C++ value `v`.
-pub(crate) fn cdl_style(v: i64) -> PyResult<CdlStyle> {
+/// The library's `CdlStyle` of the C++ value `v`, if it is an enumerator.
+pub(crate) fn cdl_style(v: i64) -> Option<CdlStyle> {
     [CdlStyle::Asc, CdlStyle::NoClamp]
         .into_iter()
         .find(|s| *s as i64 == v)
-        .ok_or_else(|| outside_enumerators(CDL_STYLE, v))
 }
 
 const fn array3(name: &'static str, ones: bool) -> Param {
@@ -174,7 +172,11 @@ static SET_STYLE: Function = method_def!(
     "None",
     |py, o, a, _| {
         let rc = this_rc!(o, a);
-        let style = cdl_style(enum_param!(o, a, 1))?;
+        // The library converts it at once (`CDLTransformImpl::setStyle`, CDLTransform.cpp:182-186
+        // @ v2.5.2): the wheel's error for one outside the enumerators.
+        let v = enum_param!(o, a, 1);
+        let style =
+            cdl_style(v).ok_or_else(|| unknown_style(py, "Unknown CDL transform style: ", v))?;
         with(&rc, |t: &mut CdlTransform| t.set_style(style))?;
         none(py)
     }

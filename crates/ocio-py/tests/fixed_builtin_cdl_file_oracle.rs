@@ -11,8 +11,7 @@
 //! negative index, iteration to `StopIteration`), the format lists, and a direction outside the
 //! enumerators (I-261: the fixed function and the CDL flip; the others keep it).
 //!
-//! And, without the wheel (U-112): a style or an interpolation outside the enumerators is the
-//! port's error.
+//! Styles and interpolations outside the enumerators: `transforms_oracle.rs` (I-262, U-112).
 #![cfg(feature = "python")]
 
 mod common;
@@ -518,46 +517,4 @@ fn the_classes_behave_as_the_wheels() {
         cdl_script(),
         file_script(),
     ]);
-}
-
-/// A style or an interpolation outside the enumerators is the port's error (U-112).
-#[test]
-fn a_style_outside_the_enumerators_is_the_ports_error() {
-    let mut sc = Script::new();
-    let mut refused = Vec::new();
-    let ffs = sc.call(n("OCIO.FixedFunctionStyle"), vec![i(99)]);
-    let ff = sc.call(
-        n("OCIO.FixedFunctionTransform"),
-        vec![n("OCIO.FIXED_FUNCTION_ACES_RED_MOD_03")],
-    );
-    refused.push(sc.raises(ra(ff, "setStyle"), vec![r(ffs)]));
-    refused.push(sc.raises(n("OCIO.FixedFunctionTransform"), vec![r(ffs)]));
-    let cs = sc.call(n("OCIO.CDLStyle"), vec![i(7)]);
-    let c = sc.call(n("OCIO.CDLTransform"), vec![]);
-    refused.push(sc.raises(ra(c, "setStyle"), vec![r(cs)]));
-    let ft = sc.call(n("OCIO.FileTransform"), vec![]);
-    refused.push(sc.raises(ra(ft, "setCDLStyle"), vec![r(cs)]));
-    let interp = sc.call(n("OCIO.Interpolation"), vec![i(9)]);
-    refused.push(sc.raises(ra(ft, "setInterpolation"), vec![r(interp)]));
-    refused.push(sc.call_kw(
-        n("OCIO.FileTransform"),
-        vec![s("x.cube")],
-        vec![("interpolation", r(interp))],
-        Expect::Raised,
-    ));
-    let ours = common::port(&sc.json());
-    let steps = ours["steps"].as_array().unwrap();
-    assert_eq!(steps.len(), sc.steps.len());
-    assert_eq!(refused.len(), 6);
-    for (k, step) in steps.iter().enumerate() {
-        if refused.contains(&k) {
-            let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
-                &step["raised"]["message"],
-            ))
-            .unwrap();
-            assert!(message.contains("U-112"), "step {k}: {step}");
-        } else {
-            assert!(step.get("value").is_some(), "step {k}: {step}");
-        }
-    }
 }

@@ -886,7 +886,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   output shows it.
 - **Who notices:** nobody through the library; code calling the function directly.
 - **A fix:** `std::ostringstream ss; ss << "Unknown Log style: '" << str << "'.";`.
-- **Status:** matched in `p1-log` (1.3l1); `log_utils.rs`, `overwritten`.
+- **Status:** matched in `p1-log` (1.3l1); `log_utils.rs`, `overwritten` (which I-262 reuses).
 
 ### I-55. Exponents that differ past 7 digits share a cache ID
 
@@ -1940,6 +1940,28 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `set_direction`, `validate`, `invalid_direction`): the binding keeps the integer beside the
   library's transform, whose own direction is forward for 0 and inverse otherwise;
   `transforms_oracle.rs`.
+
+### I-262. A style outside the enumerators: its message is written over its own start
+
+- **Upstream:** the setters that convert a style to their op data's at once refuse a value
+  outside the enumerators (I-223) at the end of the conversion's `switch` with
+  `std::stringstream ss("Unknown ...: "); ss << style;`, which writes the number over the
+  start of the text, as I-52's: `GammaOpData::ConvertStyleBasic` and `ConvertStyleMonCurve`
+  (`ops/gamma/GammaOpData.cpp:205-208`, `238-241`), `FixedFunctionOpData::ConvertStyle`
+  (`ops/fixedfunction/FixedFunctionOpData.cpp:488-491`) and `CDLOpData::ConvertStyle`
+  (`ops/cdl/CDLOpData.cpp:102-105`). Python reaches them through `ExponentTransform` and
+  `ExponentWithLinearTransform` (constructor and `setNegativeStyle`), `FixedFunctionTransform`
+  (constructor and `setStyle`) and `CDLTransform.setStyle`: `OCIO.NegativeStyle(9)` gives
+  "9nknown negative extrapolation style: ", `-1` "-1known negative extrapolation style: ",
+  `2147483647` "2147483647gative extrapolation style: ", `OCIO.FixedFunctionStyle(99)` "99known
+  FixedFunction transform style: ", `OCIO.CDLStyle(9)` "9nknown CDL transform style: ". The
+  number is the enum's promotion, an `int`: in the Linux wheel, whose enums are `unsigned int`
+  (I-225), `OCIO.NegativeStyle(4294967295)` writes "-1".
+- **Who notices:** Python code that passes such a value and reads the message.
+- **A fix:** `std::ostringstream ss; ss << "Unknown ...: " << style;`.
+- **Status:** matched in `p6-transforms` (6.3b, 6.3c; `crates/ocio-py/src/py_transform.rs`,
+  `unknown_style`, through I-52's `overwritten`); `transforms_oracle.rs`,
+  `a_style_outside_the_enumerators_raises_the_wheels_error`, against both wheels.
 
 ## Platform, environment and paths
 
@@ -4706,22 +4728,27 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 ### U-112. A transform's setter given an enum value outside its enumerators
 
-- **Upstream:** Python can make an enum value outside its enumerators (I-223), and each setter
-  of a transform stores it: `setFileInputBitDepth(OCIO.BitDepth(42))`,
-  `setStyle(OCIO.RangeStyle(9))`, `setAllocation(OCIO.Allocation(7))`, and the constructors
-  that take one. Each later use then reads the integer through its own `switch` (the text
+- **Upstream:** Python can make an enum value outside its enumerators (I-223), and some setters
+  of a transform store it as it is: `setFileInputBitDepth(OCIO.BitDepth(42))` and
+  `setFileOutputBitDepth` (MatrixTransform, RangeTransform), `RangeTransform.setStyle`,
+  `AllocationTransform.setAllocation`, `FileTransform.setInterpolation` and
+  `FileTransform.setCDLStyle`, and `FileTransform`'s constructor (`interpolation`) when its
+  validation passes (`validate` doesn't read the interpolation, FileTransform.cpp:84-104 @
+  v2.5.2). Each later use then reads the integer through its own `switch` (the text
   `operator<<` writes, `validate`, building ops): a value C++17 leaves undefined for an enum
-  without a fixed type, which the port's library enums can't hold. The direction is the
-  exception, matched (I-261).
+  without a fixed type, which the port's library enums can't hold. Not here: the direction,
+  matched (I-261); the setters that convert the value at once and raise (the exponent
+  classes' negative style, the fixed function's and the CDL's style, I-262); and
+  `AllocationTransform`'s constructor, whose validation refuses the value (matched).
 - **Who notices:** Python code that passes such a value to a transform.
 - **A fix:** refuse the number when the enum is constructed (I-223's fix).
 - **Status:** the port raises ValueError "PyOpenColorIO.PyOpenColorIO.BitDepth(42): the wheel
   stores an enum value outside its enumerators, which the port's library can't hold
-  (docs/improvements.md, U-112)" from the setter (`outside_enumerators`,
-  `crates/ocio-py/src/py_transform.rs`), in `p6-transforms` (6.3a): `setFileInputBitDepth`,
-  `setFileOutputBitDepth` (MatrixTransform, RangeTransform), `RangeTransform.setStyle`,
-  `AllocationTransform.setAllocation` and its constructor; `transforms_oracle.rs`,
-  `an_enum_value_outside_the_enumerators_is_the_ports_error` (the port only).
+  (docs/improvements.md, U-112)" (`outside_enumerators`, `crates/ocio-py/src/py_transform.rs`)
+  from each of these setters, and from `FileTransform`'s constructor after its validation (so
+  its errors come first, as the wheel's), in `p6-transforms` (6.3a, 6.3c);
+  `transforms_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error` (the
+  same steps succeed in the wheel), `a_style_outside_the_enumerators_raises_the_wheels_error`.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 

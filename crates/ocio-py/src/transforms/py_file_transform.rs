@@ -23,13 +23,12 @@ const INTERPOLATION: &str = q!("Interpolation");
 const SELF: Param = Param::new("self", FILE_TRANSFORM);
 const IT_SELF: Param = Param::new("self", FORMAT_ITERATOR);
 
-/// The library's `Interpolation` of the C++ value `v`.
-fn interpolation(v: i64) -> PyResult<Interpolation> {
+/// The library's `Interpolation` of the C++ value `v`, if it is an enumerator.
+fn interpolation(v: i64) -> Option<Interpolation> {
     use Interpolation::*;
     [Unknown, Nearest, Linear, Tetrahedral, Cubic, Default, Best]
         .into_iter()
         .find(|i| *i as i64 == v)
-        .ok_or_else(|| outside_enumerators(INTERPOLATION, v))
 }
 
 const fn empty_string(name: &'static str) -> Param {
@@ -86,10 +85,19 @@ static INIT: Function = Function {
                 if !id.is_empty() {
                     t.set_ccc_id(c_str(&id));
                 }
-                t.set_interpolation(interpolation(interp)?);
+                // The wheel stores an interpolation outside the enumerators, which `validate`
+                // doesn't read (FileTransform.cpp:84-104 @ v2.5.2), so its errors come first:
+                // the port refuses the value (U-112) only once `validate` passed.
+                let library_interp = interpolation(interp);
+                if let Some(i) = library_interp {
+                    t.set_interpolation(i);
+                }
                 let rc = TransformRc::new(Transform::File(t));
                 set_direction(&rc, dir);
                 validate(py, &rc)?;
+                if library_interp.is_none() {
+                    return Err(outside_enumerators(INTERPOLATION, interp));
+                }
                 construct(&a[0], o.params[0].ty, rc)?;
                 none(py)
             },
@@ -158,7 +166,8 @@ static SET_CDL_STYLE: Function = method_def!(
     "None",
     |py, o, a, _| {
         let rc = this_rc!(o, a);
-        let style = cdl_style(enum_param!(o, a, 1))?;
+        let v = enum_param!(o, a, 1);
+        let style = cdl_style(v).ok_or_else(|| outside_enumerators(CDL_STYLE, v))?;
         with(&rc, |t: &mut FileTransform| t.set_cdl_style(style))?;
         none(py)
     }
@@ -179,7 +188,8 @@ static SET_INTERPOLATION: Function = method_def!(
     "None",
     |py, o, a, _| {
         let rc = this_rc!(o, a);
-        let interp = interpolation(enum_param!(o, a, 1))?;
+        let v = enum_param!(o, a, 1);
+        let interp = interpolation(v).ok_or_else(|| outside_enumerators(INTERPOLATION, v))?;
         with(&rc, |t: &mut FileTransform| t.set_interpolation(interp))?;
         none(py)
     }

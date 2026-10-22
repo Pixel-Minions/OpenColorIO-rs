@@ -79,8 +79,8 @@ pub const CAMERA_LOG_TO_LIN_STR: &str = "cameraLogToLin";
 
 /// What `std::stringstream ss(initial); ss << written;` holds: the stream starts writing at the
 /// beginning of its initial text, so `written` overwrites it, and the rest of it stays after
-/// (docs/improvements.md, I-52).
-fn overwritten(initial: &str, written: &str) -> Vec<u8> {
+/// (docs/improvements.md, I-52; the Python binding's style errors, I-262).
+pub fn overwritten(initial: &str, written: &str) -> Vec<u8> {
     let mut bytes = initial.as_bytes().to_vec();
     let written = written.as_bytes();
     let n = written.len().min(bytes.len());
