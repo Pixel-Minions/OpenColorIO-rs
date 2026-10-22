@@ -438,8 +438,10 @@ static REMOVE_COLOR_SPACES: Function = method_def!(
         };
         // Port of `ColorSpaceSet::Impl::remove(const Impl &)` (ColorSpaceSet.cpp:198-204 @
         // v2.5.2), whose loop over the other set's vector erases from it when it is the set
-        // itself (U-124).
-        if other.same(&rc) && !rc.lock().is_empty() {
+        // itself: with two or more color spaces it then reads past the vector's new end
+        // (U-124); with one, the loop's next step reaches the end it saved, and it stops with
+        // the set emptied, reading nothing more (I-281).
+        if other.same(&rc) && rc.lock().len() > 1 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "ColorSpaceSet.removeColorSpaces: the set itself, whose vector upstream erases \
                  from while it loops over it (docs/improvements.md, U-124)",

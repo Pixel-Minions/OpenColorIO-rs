@@ -12,13 +12,14 @@
 //!   direction outside the enumerators, `None`), copies;
 //! - `ColorSpaceSet`: adding copies (replacing by name, the alias conflicts), the set's own
 //!   color spaces returned (identity, changes seen by the set), names and aliases ignoring case,
-//!   removal, a set added to itself, the operators (`-`, `|`, `&`, `==`, `!=`, `NotImplemented`
-//!   for anything but a set, `None`'s cases the wheel survives), the iterators, copies.
+//!   removal (a set of one color space removing its own, I-281), a set added to itself, the
+//!   operators (`-`, `|`, `&`, `==`, `!=` between sets of different sizes, `NotImplemented` for
+//!   anything but a set, `None`'s cases the wheel survives), the iterators, copies.
 //!
 //! And, without the wheel: an enum value outside its enumerators that the wheel stores is the
 //! port's error (U-112; the wheel runs the same steps); `None` where the wheel dereferences a
-//! null set or color space, and a set removing its own color spaces, are the port's errors
-//! (U-124: the wheel's process dies).
+//! null set or color space, and a set of two or more removing its own color spaces, are the
+//! port's errors (U-124: the wheel's process dies).
 #![cfg(feature = "python")]
 
 mod common;
@@ -468,6 +469,17 @@ fn set_script() -> Script {
     let renamed = mk(&mut sc, "RENAMED", vec![]);
     sc.call(ra(same_names, "addColorSpace"), vec![r(renamed)]);
     sc.call(n("operator.eq"), vec![r(css), r(same_names)]);
+    // Sets of different sizes, each name of the smaller in the larger: on either side.
+    let subset = sc.call(n("OCIO.ColorSpaceSet"), vec![]);
+    let a_only = mk(&mut sc, "A", vec![]);
+    sc.call(ra(subset, "addColorSpace"), vec![r(a_only)]);
+    for (lhs, rhs) in [(css, subset), (subset, css)] {
+        for op in ["__eq__", "__ne__"] {
+            sc.call(ra(lhs, op), vec![r(rhs)]);
+        }
+        sc.call(n("operator.eq"), vec![r(lhs), r(rhs)]);
+        sc.call(n("operator.ne"), vec![r(lhs), r(rhs)]);
+    }
     // A set added to itself: each color space replaced by a copy.
     let before = sc.call(ra(css, "getColorSpace"), vec![s("A")]);
     sc.call(ra(css, "addColorSpaces"), vec![r(css)]);
@@ -489,6 +501,25 @@ fn set_script() -> Script {
     sc.call(ra(other, "clearColorSpaces"), vec![]);
     let left = sc.call(ra(other, "getColorSpaces"), vec![]);
     sc.call(n("len"), vec![r(left)]);
+    // A set of one color space removing its own (I-281; with more, U-124): emptied, with its
+    // color space held from Python and without.
+    for hold in [true, false] {
+        let single = sc.call(n("OCIO.ColorSpaceSet"), vec![]);
+        let only = mk(&mut sc, "Only", vec!["o1"]);
+        sc.call(ra(single, "addColorSpace"), vec![r(only)]);
+        let held = hold.then(|| sc.call(ra(single, "getColorSpace"), vec![s("only")]));
+        sc.call(ra(single, "removeColorSpaces"), vec![r(single)]);
+        let rest = sc.call(ra(single, "getColorSpaces"), vec![]);
+        sc.call(n("len"), vec![r(rest)]);
+        names_now(&mut sc, single);
+        sc.call(ra(single, "hasColorSpace"), vec![s("o1")]);
+        if let Some(held) = held {
+            sc.call(ra(held, "getName"), vec![]);
+        }
+        sc.call(ra(single, "removeColorSpaces"), vec![r(single)]);
+        sc.call(ra(single, "addColorSpace"), vec![r(only)]);
+        names_now(&mut sc, single);
+    }
     sc
 }
 

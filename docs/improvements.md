@@ -1963,6 +1963,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `unknown_style`, through I-52's `overwritten`); `transforms_oracle.rs`,
   `a_style_outside_the_enumerators_raises_the_wheels_error`, against both wheels.
 
+### I-281. A color space set of one color space removing its own empties itself
+
+- **Upstream:** `ColorSpaceSet::Impl::remove(const Impl & rhs)` loops over `rhs`'s vector with
+  a range-`for`, which saves the vector's end before the first step, and erases each color space
+  of that name from its own vector (ColorSpaceSet.cpp:180-204 @ v2.5.2). From Python the two
+  can be the same set (`css.removeColorSpaces(css)`). With one color space the erase empties the
+  vector, the iterator's next step reaches the saved end, and the loop stops having read
+  nothing more: the call returns and the set is empty. Stepping an iterator the erase
+  invalidated is undefined; both wheels step it as a pointer. With two or more the loop reads
+  past the vector's new end (U-124).
+- **Who notices:** Python code that passes a set of one color space to its own
+  `removeColorSpaces`.
+- **A fix:** copy the other set's names before erasing (U-124's fix), which gives the same
+  empty set.
+- **Status:** matched in `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
+  `REMOVE_COLOR_SPACES`): the set is emptied, the color space held from Python unchanged;
+  `color_space_oracle.rs`, `color_spaces_behave_as_the_wheels` (`set_script`), against the
+  wheel.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."
@@ -4756,6 +4775,17 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `environmentMode`, which the wheel stores and its cache ID writes as the integer), in
   `p6-objects` (6.3d, `crates/ocio-py/src/py_context.rs`, `environment_mode`);
   `context_oracle.rs`, `an_environment_mode_outside_the_enumerators_is_the_ports_error`.
+  Also the color space's reference space, bit depth and allocation
+  (`ColorSpace(referenceSpace=OCIO.ReferenceSpaceType(5))`, `bitDepth=OCIO.BitDepth(77)`,
+  `allocation=OCIO.Allocation(9)`, and `setBitDepth`, `setAllocation`) and the view transform's
+  reference space (`ViewTransform(referenceSpace=...)`), which the wheel stores: its getters
+  return `<ReferenceSpaceType.???: 5>`, `<BitDepth.???: 77>`, and the color space's repr writes
+  nothing for the reference space ("referenceSpaceType=name=x") and "bitDepth=unknown", where
+  the view transform's raises "Unknown reference type"; in `p6-objects` (6.3e,
+  `crates/ocio-py/src/py_color_space.rs`, `reference_space_type`, `py_view_transform.rs`, and
+  `bit_depth`, `allocation` of `py_transform.rs` and `transforms/py_allocation_transform.rs`);
+  `color_space_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error`,
+  `look_view_named_oracle.rs`, `a_reference_space_outside_the_enumerators_is_the_ports_error`.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -4850,15 +4880,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   U-50); and
   `NamedTransform.GetTransform` of a named transform with neither transform, which copies the
   null one (NamedTransform.cpp:182-221). The wheel's process dies (probed on Windows,
-  2026-10-22). Also `css.removeColorSpaces(css)` on a set that holds a color space: upstream loops
-  over the set's own vector while it erases from it (`ColorSpaceSet::Impl::remove(const Impl &)`,
-  ColorSpaceSet.cpp:198-204), with iterators the erase invalidated.
-- **Who notices:** Python code that passes `None` there, or a set to its own
-  `removeColorSpaces`.
+  2026-10-22). Also `css.removeColorSpaces(css)` on a set that holds two or more color spaces:
+  upstream loops over the set's own vector while it erases from it
+  (`ColorSpaceSet::Impl::remove(const Impl &)`, ColorSpaceSet.cpp:198-204), and its iterator,
+  which the erase invalidated, then reads past the vector's new end (with one color space it
+  stops at the end it saved: I-281).
+- **Who notices:** Python code that passes `None` there, or a set of two or more color spaces
+  to its own `removeColorSpaces`.
 - **A fix:** check the pointers (as `GetTransform` checks the named transform itself), and copy
   the other set's names before erasing.
 - **Status:** the port raises ValueError "<call>: None, a null pointer the wheel dereferences
   (its process dies; docs/improvements.md, U-124)" (or the error naming the case), where the
   wheel's process dies; `ColorSpaceSet() - None`, which reads nothing of the null set, returns
-  an empty set as the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
+  an empty set as the wheel's; a set of one color space or none removing its own returns, as
+  the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
   `py_look.rs`, `py_named_transform.rs`); `color_space_oracle.rs`, `look_view_named_oracle.rs`.
