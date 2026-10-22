@@ -4840,14 +4840,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`m_resultsCacheMutex`) while they call `usedContextVars->setStringVar` for each variable
   used, which locks the mutex of `usedContextVars` (Context.cpp:83-121, 288-329, 396-516 @
   v2.5.2). From Python the two can be the same context (`ctx.resolveStringVar('$A', ctx)`):
-  locking a `std::mutex` the thread holds is undefined, and the wheel's process dies (probed on
-  Windows, 2026-10-22).
+  locking a `std::mutex` the thread holds is undefined: the wheel's process dies (Windows,
+  probed 2026-10-22) or deadlocks (glibc, whose default mutex doesn't check its owner;
+  unverified).
 - **Who notices:** Python code that passes a context to its own `resolveStringVar` or
   `resolveFileLocation` to collect the variables used.
 - **A fix:** collect into a local context and add its variables once the lock is released, or
   use a recursive mutex.
 - **Status:** the port raises RuntimeError "the context records the variables it used into
-  itself, which locks its mutex twice: the wheel's process dies (docs/improvements.md, U-122)"
+  itself, which locks its mutex twice: the wheel's process dies (Windows) or deadlocks (glibc,
+  unverified) (docs/improvements.md, U-122)"
   when a variable is used; with none used, the call returns as the wheel's. In `p6-objects`
   (6.3d, `crates/ocio-py/src/py_context.rs`, `resolve`); `context_oracle.rs`.
 

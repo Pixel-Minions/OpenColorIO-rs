@@ -407,12 +407,14 @@ macro_rules! context_param {
 }
 
 /// The port's error where the wheel's context would record the variables it used into itself:
-/// `setStringVar` locks the context's `std::mutex`, which the resolution holds already, and the
-/// wheel's process dies (docs/improvements.md, U-122).
+/// `setStringVar` locks the context's `std::mutex`, which the resolution holds already: the
+/// wheel's process dies (Windows) or deadlocks (glibc, unverified) (docs/improvements.md,
+/// U-122).
 fn records_into_itself() -> PyErr {
     pyo3::exceptions::PyRuntimeError::new_err(
         "the context records the variables it used into itself, which locks its mutex twice: \
-         the wheel's process dies (docs/improvements.md, U-122)",
+         the wheel's process dies (Windows) or deadlocks (glibc, unverified) \
+         (docs/improvements.md, U-122)",
     )
 }
 
