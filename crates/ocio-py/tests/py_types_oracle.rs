@@ -69,6 +69,23 @@ const COMPLETE: [&str; 35] = [
 /// `py::bind_vector`): each compares with the wheel's entry for entry.
 const OWN_CLASSES: [&str; 2] = ["vector_of_uint8_t", "PyConfigIOProxy"];
 
+/// The declared classes bound but for members a later card binds: each compares with the
+/// wheel's entry for entry but for those members, which are exactly these (chunk 6.6a: the
+/// I/O proxy; chunk 6.8a: `ConfigUtils`).
+const PARTIAL: [(&str, &[&str]); 1] = [(
+    "Config",
+    &[
+        "CreateFromConfigIOProxy",
+        "getConfigIOProxy",
+        "setConfigIOProxy",
+        "IdentifyBuiltinColorSpace",
+        "IdentifyInterchangeSpace",
+        "GetProcessorToBuiltinColorSpace",
+        "GetProcessorFromBuiltinColorSpace",
+        "GetProcessorFromConfigs",
+    ],
+)];
+
 /// The stand-ins `common::start_python` adds to the port's module until WP 6.6 binds them.
 const STAND_INS: [&str; 3] = [
     "SetLoggingFunction",
@@ -163,6 +180,7 @@ fn the_module_members_report_as_the_wheels() {
     let ours = port_members();
     let (mut enums, mut classes, mut others, mut bound, mut complete) = (0, 0, 0, 0, 0);
     let mut own = 0;
+    let mut partial = 0;
     for our in &ours {
         let n = entry_name(our);
         let their = theirs.iter().find(|t| entry_name(t) == n).unwrap();
@@ -183,6 +201,20 @@ fn the_module_members_report_as_the_wheels() {
             continue;
         }
         classes += 1;
+        if let Some((_, missing)) = PARTIAL.iter().find(|(c, _)| *c == n) {
+            let without = |v: &Value| {
+                let mut v = v.clone();
+                let members = v["members"].as_array_mut().unwrap();
+                members.retain(|m| !missing.contains(&entry_name(m).as_str()));
+                v
+            };
+            let their_count = their["members"].as_array().unwrap().len();
+            let our_count = our["members"].as_array().unwrap().len();
+            assert_eq!(our_count + missing.len(), their_count, "{n}");
+            assert_eq!(*our, without(their), "{n}");
+            partial += 1;
+            continue;
+        }
         if COMPLETE.contains(&n.as_str()) {
             assert_eq!(our, their, "{n}");
             complete += 1;
@@ -219,6 +251,7 @@ fn the_module_members_report_as_the_wheels() {
     assert_eq!(classes, 63);
     assert_eq!(complete, COMPLETE.len());
     assert_eq!(own, OWN_CLASSES.len());
+    assert_eq!(partial, PARTIAL.len());
     assert_eq!(enums, 31);
     // The constants, the exported values and the functions of bindPyTypes and
     // PyOpenColorIO.cpp.

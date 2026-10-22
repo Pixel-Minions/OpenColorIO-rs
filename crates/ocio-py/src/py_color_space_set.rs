@@ -593,3 +593,13 @@ pub(crate) fn bind_py_color_space_set(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
     Ok(())
 }
+
+/// A returned set the library made (`Config.getColorSpaces(category)`: copies of the config's
+/// color spaces, each a node of its own).
+pub(crate) fn set_out(py: Python<'_>, set: &ocio::ColorSpaceSet) -> Out {
+    let nodes: Vec<ColorSpaceRc> = (0..set.num_color_spaces())
+        .filter_map(|i| set.color_space_by_index(i))
+        .map(|cs| Shared::new(ColorSpaceNode::from_library(cs)))
+        .collect();
+    out(py, COLOR_SPACE_SET, &Shared::new(nodes))
+}

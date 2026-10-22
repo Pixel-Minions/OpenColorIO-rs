@@ -61,6 +61,8 @@ pub(crate) mod py_packed_image_desc;
 #[cfg(feature = "python")]
 pub(crate) mod py_planar_image_desc;
 #[cfg(feature = "python")]
+pub(crate) mod py_processor;
+#[cfg(feature = "python")]
 pub(crate) mod py_processor_metadata;
 #[cfg(feature = "python")]
 pub(crate) mod py_transform;

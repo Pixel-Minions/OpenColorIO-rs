@@ -4,11 +4,13 @@
 //! `bindPyContext` (src/bindings/python/PyContext.cpp @ v2.5.2): the class `Context` and its
 //! three iterator classes (chunk 6.3d).
 //!
-//! A `Context` object holds its context as pybind11 holds a `ContextRcPtr` ([`Shared`]): its
-//! iterators share it, and `resolveStringVar` and `resolveFileLocation` write the variables they
-//! use into the one given.
+//! A `Context` object holds its context as pybind11 holds a `ContextRcPtr` ([`Held`]): its
+//! own ([`Shared`]), or a config's current context, which `Config.getCurrentContext` returns
+//! and changes made through Python reach (the library's `CurrentContext`); its iterators share
+//! it, and `resolveStringVar` and `resolveFileLocation` write the variables they use into the
+//! one given.
 
-use ocio::Context;
+use ocio::{Context, CurrentContext};
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::utils::string_utils::{c_str, compare};
 use pyo3::prelude::*;
@@ -21,8 +23,8 @@ use crate::py_transform::{
     INT, Out, class, def, enum_out, nested_class, none, ok, outside_enumerators, string_out,
 };
 use crate::py_utils::{check_index, new_iterator};
-use crate::shared::{Shared, construct, holder_arg, out};
-use crate::{enum_param, method_def, q, this_iter, this_shared};
+use crate::shared::{Held, Shared, construct, holder_of, out};
+use crate::{enum_param, method_def, q, this_held, this_iter};
 
 pub(crate) const CONTEXT: &str = q!("Context");
 const STRING_VAR_NAME_ITERATOR: &str = q!("Context.StringVarNameIterator");
@@ -31,12 +33,12 @@ const SEARCH_PATH_ITERATOR: &str = q!("Context.SearchPathIterator");
 const ENVIRONMENT_MODE: &str = q!("EnvironmentMode");
 const SELF: Param = Param::new("self", CONTEXT);
 
-/// A context shared by the Python objects that hold it.
-pub(crate) type ContextRc = Shared<Context>;
+/// A context shared by the Python objects that hold it: their own, or a config's.
+pub(crate) type ContextRc = Held<Context, CurrentContext>;
 
 /// The library's `EnvironmentMode` of the C++ value `v`: the wheel stores a value outside the
 /// enumerators, which the library can't hold (U-112).
-fn environment_mode(v: i64) -> PyResult<EnvironmentMode> {
+pub(crate) fn environment_mode(v: i64) -> PyResult<EnvironmentMode> {
     [
         EnvironmentMode::Unknown,
         EnvironmentMode::LoadPredefined,
@@ -67,7 +69,7 @@ static INIT: Function = Function {
             params: &[SELF],
             ret: "None",
             call: |py, o, a, _| {
-                construct(&a[0], CONTEXT, Shared::new(Context::new()))?;
+                construct(&a[0], CONTEXT, ContextRc::Own(Shared::new(Context::new())))?;
                 let _ = o;
                 none(py)
             },
@@ -131,7 +133,7 @@ static INIT: Function = Function {
                     p.set_string_var(c_str(name), Some(c_str(value)));
                 }
                 p.set_environment_mode(mode);
-                construct(&a[0], CONTEXT, Shared::new(p))?;
+                construct(&a[0], CONTEXT, ContextRc::Own(Shared::new(p)))?;
                 none(py)
             },
             pos_only: 0,
@@ -146,12 +148,12 @@ static DEEPCOPY: Function = method_def!(
     [SELF, Param::new("memo", "dict")],
     CONTEXT,
     |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         if !a[1].is_instance_of::<pyo3::types::PyDict>() {
             return Ok(None);
         }
-        let copy = rc.lock().clone();
-        out(py, CONTEXT, &Shared::new(copy))
+        let copy = rc.read(Context::clone);
+        out(py, CONTEXT, &ContextRc::Own(Shared::new(copy)))
     }
 );
 
@@ -162,7 +164,7 @@ static ITER: Function = method_def!(
     [SELF],
     STRING_VAR_NAME_ITERATOR,
     |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         Ok(Some(
             new_iterator(py, STRING_VAR_NAME_ITERATOR, Some(Box::new(rc)))?.unbind(),
         ))
@@ -171,8 +173,8 @@ static ITER: Function = method_def!(
 
 // .def("__len__", &Context::getNumStringVars) (PyContext.cpp:113-114 @ v2.5.2).
 static LEN: Function = method_def!("__len__", [SELF], "int", |py, o, a, _| {
-    let rc = this_shared!(o, a, Context);
-    let n = rc.lock().num_string_vars();
+    let rc = this_held!(o, a, Context, CurrentContext);
+    let n = rc.read(Context::num_string_vars);
     ok(py, n)
 });
 
@@ -190,12 +192,10 @@ static GETITEM: Function = method_def!(
     [SELF, Param::new("name", "str")],
     "str",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         let StdString(name) = crate::arg!(a, 1, convert, StdString);
-        let value = {
-            let ctx = rc.lock();
-            find_var(&ctx, &name).map(|_| ctx.string_var(c_str(&name)).to_vec())
-        };
+        let value =
+            rc.read(|ctx| find_var(ctx, &name).map(|_| ctx.string_var(c_str(&name)).to_vec()));
         match value {
             Some(value) => string_out(py, &value),
             None => {
@@ -211,7 +211,7 @@ static GETITEM: Function = method_def!(
 /// `setStringVar(name, value)`: a null name is ignored, a null value removes the variable.
 fn set_string_var(rc: &ContextRc, name: CharPtr, value: CharPtr) {
     if let Some(name) = name.0 {
-        rc.lock().set_string_var(name, value.0.as_deref());
+        rc.write(|c| c.set_string_var(name, value.0.as_deref()));
     }
 }
 
@@ -222,7 +222,7 @@ static SETITEM: Function = method_def!(
     [SELF, Param::new("name", "str"), Param::new("value", "str")],
     "None",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         let name = crate::arg!(a, 1, convert, CharPtr);
         let value = crate::arg!(a, 2, convert, CharPtr);
         set_string_var(&rc, name, value);
@@ -237,9 +237,9 @@ static CONTAINS: Function = method_def!(
     [SELF, Param::new("name", "str")],
     "bool",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         let StdString(name) = crate::arg!(a, 1, convert, StdString);
-        let found = find_var(&rc.lock(), &name).is_some();
+        let found = rc.read(|c| find_var(c, &name).is_some());
         ok(py, found)
     }
 );
@@ -248,8 +248,8 @@ static CONTAINS: Function = method_def!(
 macro_rules! text_getter {
     ($name:literal, $get:expr) => {
         method_def!($name, [SELF], "str", |py, o, a, _| {
-            let rc = this_shared!(o, a, Context);
-            let text: Vec<u8> = $get(&*rc.lock());
+            let rc = this_held!(o, a, Context, CurrentContext);
+            let text: Vec<u8> = rc.read(|c| $get(c));
             string_out(py, &text)
         })
     };
@@ -263,9 +263,9 @@ macro_rules! text_setter {
             [SELF, Param::new($param, "str")],
             "None",
             |py, o, a, convert| {
-                let rc = this_shared!(o, a, Context);
+                let rc = this_held!(o, a, Context, CurrentContext);
                 let s = or_empty(crate::arg!(a, 1, convert, CharPtr));
-                $set(&mut *rc.lock(), &s);
+                rc.write(|c| $set(c, &s));
                 none(py)
             }
         )
@@ -293,7 +293,7 @@ static GET_SEARCH_PATHS: Function = method_def!(
     [SELF],
     SEARCH_PATH_ITERATOR,
     |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         Ok(Some(
             new_iterator(py, SEARCH_PATH_ITERATOR, Some(Box::new(rc)))?.unbind(),
         ))
@@ -303,8 +303,8 @@ static GET_SEARCH_PATHS: Function = method_def!(
 // .def("clearSearchPaths", &Context::clearSearchPaths) (PyContext.cpp:158-159 @ v2.5.2).
 static CLEAR_SEARCH_PATHS: Function =
     method_def!("clearSearchPaths", [SELF], "None", |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
-        rc.lock().clear_search_paths();
+        let rc = this_held!(o, a, Context, CurrentContext);
+        rc.write(Context::clear_search_paths);
         none(py)
     });
 
@@ -331,7 +331,7 @@ static GET_STRING_VARS: Function = method_def!(
     [SELF],
     STRING_VAR_ITERATOR,
     |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         Ok(Some(
             new_iterator(py, STRING_VAR_ITERATOR, Some(Box::new(rc)))?.unbind(),
         ))
@@ -345,7 +345,7 @@ static SET_STRING_VAR: Function = method_def!(
     [SELF, Param::new("name", "str"), Param::new("value", "str")],
     "None",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         let name = crate::arg!(a, 1, convert, CharPtr);
         let value = crate::arg!(a, 2, convert, CharPtr);
         set_string_var(&rc, name, value);
@@ -356,8 +356,8 @@ static SET_STRING_VAR: Function = method_def!(
 // .def("clearStringVars", &Context::clearStringVars) (PyContext.cpp:172-173 @ v2.5.2).
 static CLEAR_STRING_VARS: Function =
     method_def!("clearStringVars", [SELF], "None", |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
-        rc.lock().clear_string_vars();
+        let rc = this_held!(o, a, Context, CurrentContext);
+        rc.write(Context::clear_string_vars);
         none(py)
     });
 
@@ -367,8 +367,8 @@ static GET_ENVIRONMENT_MODE: Function = method_def!(
     [SELF],
     ENVIRONMENT_MODE,
     |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
-        let mode = rc.lock().environment_mode();
+        let rc = this_held!(o, a, Context, CurrentContext);
+        let mode = rc.read(Context::environment_mode);
         enum_out(py, ENVIRONMENT_MODE, mode as i64)
     }
 );
@@ -380,9 +380,9 @@ static SET_ENVIRONMENT_MODE: Function = method_def!(
     [SELF, Param::new("mode", ENVIRONMENT_MODE)],
     "None",
     |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
+        let rc = this_held!(o, a, Context, CurrentContext);
         let mode = environment_mode(enum_param!(o, a, 1))?;
-        rc.lock().set_environment_mode(mode);
+        rc.write(|c| c.set_environment_mode(mode));
         none(py)
     }
 );
@@ -390,8 +390,8 @@ static SET_ENVIRONMENT_MODE: Function = method_def!(
 // .def("loadEnvironment", &Context::loadEnvironment) (PyContext.cpp:178-179 @ v2.5.2).
 static LOAD_ENVIRONMENT: Function =
     method_def!("loadEnvironment", [SELF], "None", |py, o, a, _| {
-        let rc = this_shared!(o, a, Context);
-        rc.lock().load_environment();
+        let rc = this_held!(o, a, Context, CurrentContext);
+        rc.write(Context::load_environment);
         none(py)
     });
 
@@ -399,11 +399,23 @@ static LOAD_ENVIRONMENT: Function =
 /// overload.
 macro_rules! context_param {
     ($a:expr, $i:expr, $convert:expr) => {
-        match holder_arg::<Context>(&$a[$i], CONTEXT, $convert)? {
+        match context_arg(&$a[$i], $convert)? {
             Some(rc) => rc,
             None => return Ok(None),
         }
     };
+}
+
+/// A `ContextRcPtr` argument (pybind11's holder caster): an instance of the class; with
+/// conversions, also `None`, a null pointer. `Ok(None)`: refused.
+pub(crate) fn context_arg(
+    obj: &Bound<'_, PyAny>,
+    convert: bool,
+) -> PyResult<Option<Option<ContextRc>>> {
+    if obj.is_none() {
+        return Ok(convert.then_some(None));
+    }
+    Ok(holder_of::<ContextRc>(obj, CONTEXT)?.map(Some))
 }
 
 /// The port's error where the wheel's context would record the variables it used into itself:
@@ -427,15 +439,15 @@ fn resolve<R>(
 ) -> PyResult<R> {
     let mut scratch = Context::new();
     match used {
-        None => Ok(resolve(&rc.lock(), &mut scratch)),
+        None => Ok(rc.read(|c| resolve(c, &mut scratch))),
         Some(used) if used.same(rc) => {
-            let result = resolve(&rc.lock(), &mut scratch);
+            let result = rc.read(|c| resolve(c, &mut scratch));
             if scratch.num_string_vars() > 0 {
                 return Err(records_into_itself());
             }
             Ok(result)
         }
-        Some(used) => Ok(resolve(&rc.lock(), &mut used.lock())),
+        Some(used) => Ok(rc.read(|c| used.write(|u| resolve(c, u)))),
     }
 }
 
@@ -473,9 +485,9 @@ static RESOLVE_STRING_VAR: Function = Function {
             params: &[SELF, Param::new("string", "str")],
             ret: "str",
             call: |py, o, a, convert| {
-                let rc = this_shared!(o, a, Context);
+                let rc = this_held!(o, a, Context, CurrentContext);
                 let s = or_empty(crate::arg!(a, 1, convert, CharPtr));
-                let resolved = rc.lock().resolve_string_var(&s);
+                let resolved = rc.read(|c| c.resolve_string_var(&s));
                 string_out(py, c_str(&resolved))
             },
             pos_only: 0,
@@ -488,7 +500,7 @@ static RESOLVE_STRING_VAR: Function = Function {
             ],
             ret: "str",
             call: |py, o, a, convert| {
-                let rc = this_shared!(o, a, Context);
+                let rc = this_held!(o, a, Context, CurrentContext);
                 let s = or_empty(crate::arg!(a, 1, convert, CharPtr));
                 let used = context_param!(a, 2, convert);
                 let resolved = resolve(&rc, used.as_ref(), |c, u| {
@@ -514,11 +526,11 @@ static RESOLVE_FILE_LOCATION: Function = Function {
             params: &[SELF, Param::new("filename", "str")],
             ret: "str",
             call: |py, o, a, convert| {
-                let rc = this_shared!(o, a, Context);
+                let rc = this_held!(o, a, Context, CurrentContext);
                 let Some(name) = crate::arg!(a, 1, convert, CharPtr).0 else {
                     return Err(null_string("resolveFileLocation(filename)"));
                 };
-                let resolved = py_result(py, rc.lock().resolve_file_location(&name))?;
+                let resolved = py_result(py, rc.read(|c| c.resolve_file_location(&name)))?;
                 string_out(py, c_str(&resolved))
             },
             pos_only: 0,
@@ -531,7 +543,7 @@ static RESOLVE_FILE_LOCATION: Function = Function {
             ],
             ret: "str",
             call: |py, o, a, convert| {
-                let rc = this_shared!(o, a, Context);
+                let rc = this_held!(o, a, Context, CurrentContext);
                 let name = crate::arg!(a, 1, convert, CharPtr);
                 let used = context_param!(a, 2, convert);
                 let Some(name) = name.0 else {
@@ -549,8 +561,8 @@ static RESOLVE_FILE_LOCATION: Function = Function {
 
 // defRepr(clsContext) (PyContext.cpp:201 @ v2.5.2).
 static REPR: Function = method_def!("__repr__", [SELF], "str", |py, o, a, _| {
-    let rc = this_shared!(o, a, Context);
-    let text = rc.lock().to_bytes();
+    let rc = this_held!(o, a, Context, CurrentContext);
+    let text = rc.read(Context::to_bytes);
     string_out(py, &text)
 });
 
@@ -572,12 +584,11 @@ macro_rules! iter_rc {
 
 /// `(name, getStringVar(name))` of the variable at `i`.
 fn string_var(py: Python<'_>, rc: &ContextRc, i: i32) -> Out {
-    let (name, value) = {
-        let ctx = rc.lock();
+    let (name, value) = rc.read(|ctx| {
         let name = c_str(ctx.string_var_name_by_index(i)).to_vec();
         let value = c_str(ctx.string_var(&name)).to_vec();
         (name, value)
-    };
+    });
     let tuple = PyTuple::new(
         py,
         [
@@ -589,21 +600,21 @@ fn string_var(py: Python<'_>, rc: &ContextRc, i: i32) -> Out {
 }
 
 fn var_name(py: Python<'_>, rc: &ContextRc, i: i32) -> Out {
-    let name = c_str(rc.lock().string_var_name_by_index(i)).to_vec();
+    let name = rc.read(|c| c_str(c.string_var_name_by_index(i)).to_vec());
     string_out(py, &name)
 }
 
 fn search_path(py: Python<'_>, rc: &ContextRc, i: i32) -> Out {
-    let path = c_str(rc.lock().search_path_with_index(i)).to_vec();
+    let path = rc.read(|c| c_str(c.search_path_with_index(i)).to_vec());
     string_out(py, &path)
 }
 
 fn num_vars(rc: &ContextRc) -> i32 {
-    rc.lock().num_string_vars()
+    rc.read(Context::num_string_vars)
 }
 
 fn num_paths(rc: &ContextRc) -> i32 {
-    rc.lock().num_search_paths()
+    rc.read(Context::num_search_paths)
 }
 
 /// The four methods of an iterator class: `__len__` (`$num`), `__getitem__` (index checked,

@@ -36,6 +36,23 @@ pub(crate) struct LookNode {
 }
 
 impl LookNode {
+    /// The node of a look the library holds (a config's): its transforms become nodes of their
+    /// own, which Python then shares with the config.
+    pub(crate) fn from_library(look: &Look) -> LookNode {
+        let transform = look.transform().map(|t| TransformRc::new(t.clone()));
+        let inverse = look
+            .inverse_transform()
+            .map(|t| TransformRc::new(t.clone()));
+        let mut bare = look.clone();
+        bare.set_transform_as_is(None);
+        bare.set_inverse_transform_as_is(None);
+        LookNode {
+            look: bare,
+            transform,
+            inverse,
+        }
+    }
+
     fn new() -> LookNode {
         LookNode {
             look: Look::new(),

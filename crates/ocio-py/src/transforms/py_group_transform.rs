@@ -7,8 +7,6 @@
 //! shares it, as upstream's `appendTransform` shares the `TransformRcPtr`, and the library sees
 //! a copy of the group with copies of its children ([`TransformRc::materialize`]).
 
-use std::sync::Arc;
-
 use ocio::transforms::file_format::{FILEFORMAT_CLF, FILEFORMAT_CTF};
 use ocio::{GroupTransform, Transform};
 use pyo3::prelude::*;
@@ -217,24 +215,12 @@ static PREPEND: Function = method_def!(
 );
 
 /// A `ConstConfigRcPtr` argument whose default is `nullptr`: `None` with conversions (the
-/// default's own conversion too: the dispatcher's first pass refuses it), or an instance of the
-/// class `Config`, whose value its card (6.3f) defines; until then no instance is constructed,
-/// and reading one is U-86's error.
+/// default's own conversion too: the dispatcher's first pass refuses it), or a config.
 fn config_arg(
     obj: &Bound<'_, PyAny>,
     convert: bool,
-) -> PyResult<Option<Option<Arc<ocio::Config>>>> {
-    if obj.is_none() {
-        return Ok(convert.then_some(None));
-    }
-    let Some(this) = crate::pybind11::instance_of(obj, CONFIG) else {
-        return Ok(None);
-    };
-    let value = crate::pybind11::read_value(&this, CONFIG)?;
-    Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-        "a Config value ({}) before its class is bound",
-        value.get_type().name()?
-    )))
+) -> PyResult<Option<Option<crate::py_config::ConfigRc>>> {
+    crate::py_config::config_arg(obj, convert)
 }
 
 /// The config `write` uses: the one given, else the current config (`GetCurrentConfig`).
@@ -242,11 +228,11 @@ fn config_arg(
 /// never gives (it throws instead).
 fn config_or_current(
     py: Python<'_>,
-    config: Option<Arc<ocio::Config>>,
-) -> PyResult<Arc<ocio::Config>> {
+    config: Option<crate::py_config::ConfigRc>,
+) -> PyResult<crate::py_config::ConfigRc> {
     match config {
         Some(config) => Ok(config),
-        None => py_result(py, ocio::config::get_current_config()),
+        None => crate::py_config::current_config(py),
     }
 }
 
@@ -278,12 +264,19 @@ fn write_to(
     py_result(py, group.write(config, format_name, os))
 }
 
+/// `std::ofstream f(path, std::ofstream::out | std::ofstream::binary)`: the file, created or
+/// truncated, or nothing when it can't be opened; a name that isn't ASCII is U-113's error on
+/// Windows, as [`open_text_file`]'s.
+pub(crate) fn open_binary_file(file_name: &[u8]) -> PyResult<Option<std::fs::File>> {
+    open_text_file(file_name)
+}
+
 /// `std::ofstream f(fileName.c_str())`: the file, created or truncated, in text mode (on
 /// Windows, each line end written as CR LF), or nothing when it can't be opened (writes to a
 /// stream that failed to open are lost, and `write` doesn't look). On Windows the C runtime
 /// reads a narrow name in the ANSI code page: a name that isn't ASCII is the port's error
 /// (U-113).
-fn open_text_file(file_name: &[u8]) -> PyResult<Option<std::fs::File>> {
+pub(crate) fn open_text_file(file_name: &[u8]) -> PyResult<Option<std::fs::File>> {
     let name = ocio_ops::utils::string_utils::c_str(file_name);
     #[cfg(windows)]
     let path = {
@@ -338,7 +331,9 @@ static WRITE: Function = Function {
                 let config = config_or_current(py, config)?;
                 let file = open_text_file(&file_name)?;
                 let mut text = Vec::new();
-                let written = write_to(py, &rc, &config, &format_name, &mut text);
+                let written = crate::py_config::with_config(&config, |n| {
+                    write_to(py, &rc, &n.config, &format_name, &mut text)
+                });
                 if let Some(mut file) = file {
                     let text = if cfg!(windows) { crlf(&text) } else { text };
                     let _ = std::io::Write::write_all(&mut file, &text);
@@ -370,7 +365,9 @@ static WRITE: Function = Function {
                 };
                 let config = config_or_current(py, config)?;
                 let mut text = Vec::new();
-                write_to(py, &rc, &config, &format_name, &mut text)?;
+                crate::py_config::with_config(&config, |n| {
+                    write_to(py, &rc, &n.config, &format_name, &mut text)
+                })?;
                 string_out(py, &text)
             },
             pos_only: 0,
@@ -379,7 +376,7 @@ static WRITE: Function = Function {
 };
 
 /// The bytes a text-mode stream of MSVC's C runtime writes for `text`: each LF as CR LF.
-fn crlf(text: &[u8]) -> Vec<u8> {
+pub(crate) fn crlf(text: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     for &b in text {
         if b == b'\n' {

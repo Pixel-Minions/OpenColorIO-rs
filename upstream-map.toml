@@ -3775,7 +3775,8 @@ note = "p6-objects 6.3e"
 path = "src/bindings/python/PyConfig.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_config.rs"]
-status = "todo"
+status = "partial"
+note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. Later: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (6.8a)"
 
 [[file]]
 path = "src/bindings/python/PyConfigIOProxy.cpp"
@@ -3909,7 +3910,8 @@ note = "p6-buffers 6.5a: getBufferData (12-18) checked from the last plane to th
 path = "src/bindings/python/PyProcessor.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_processor.rs"]
-status = "todo"
+status = "partial"
+note = "p6-config 6.3g: the holder of the processors Config.getProcessor returns (the library's Arc, one Python object per processor while it lives); the methods with 6.3h"
 
 [[file]]
 path = "src/bindings/python/PyProcessorMetadata.cpp"

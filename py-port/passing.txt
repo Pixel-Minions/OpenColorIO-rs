@@ -20,6 +20,7 @@ BuiltinTransformTest.py::BuiltinTransformTest.test_transform_type
 CDLTransformTest.py::CDLTransformTest.test_constructor_with_keyword
 CDLTransformTest.py::CDLTransformTest.test_constructor_without_keyword
 CDLTransformTest.py::CDLTransformTest.test_constructor_without_parameter
+CDLTransformTest.py::CDLTransformTest.test_create_from_file_cc
 CDLTransformTest.py::CDLTransformTest.test_create_from_file_ccc
 CDLTransformTest.py::CDLTransformTest.test_create_group_from_file
 CDLTransformTest.py::CDLTransformTest.test_description
@@ -40,6 +41,7 @@ ColorSpaceTest.py::ColorSpaceTest.test_allocation
 ColorSpaceTest.py::ColorSpaceTest.test_allocation_vars
 ColorSpaceTest.py::ColorSpaceTest.test_bitdepth
 ColorSpaceTest.py::ColorSpaceTest.test_category
+ColorSpaceTest.py::ColorSpaceTest.test_config
 ColorSpaceTest.py::ColorSpaceTest.test_constructor_with_keyword
 ColorSpaceTest.py::ColorSpaceTest.test_constructor_without_keyword
 ColorSpaceTest.py::ColorSpaceTest.test_constructor_without_parameter
@@ -51,6 +53,7 @@ ColorSpaceTest.py::ColorSpaceTest.test_equality
 ColorSpaceTest.py::ColorSpaceTest.test_family
 ColorSpaceTest.py::ColorSpaceTest.test_interchange_attributes
 ColorSpaceTest.py::ColorSpaceTest.test_interop_id
+ColorSpaceTest.py::ColorSpaceTest.test_is_colorspace_linear
 ColorSpaceTest.py::ColorSpaceTest.test_name
 ColorSpaceTest.py::ColorSpaceTest.test_transform
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_constructor_with_keyword
@@ -59,7 +62,28 @@ ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_constructor_wrong_param
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_dst
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_src
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_transform_type
+ConfigTest.py::ConfigTest.test_active__displayview_lists
+ConfigTest.py::ConfigTest.test_canonical_name
+ConfigTest.py::ConfigTest.test_copy
+ConfigTest.py::ConfigTest.test_inactive_colorspaces
+ConfigTest.py::ConfigTest.test_inactive_named_transform
+ConfigTest.py::ConfigTest.test_named_transform
 ConfigTest.py::ConfigTest.test_resolve_config
+ConfigTest.py::ConfigTest.test_roles
+ConfigTest.py::ConfigTest.test_ruled_views
+ConfigTest.py::ConfigTest.test_shared_views
+ConfigTest.py::ConfigTest.test_virtual_display
+ConfigTest.py::ConfigVirtualDisplayTest.test_get_virtual_display_film
+ConfigTest.py::ConfigVirtualDisplayTest.test_get_virtual_display_raw
+ConfigTest.py::ConfigVirtualDisplayTest.test_get_virtual_display_views_display_defined
+ConfigTest.py::ConfigVirtualDisplayTest.test_get_virtual_display_views_shared
+ConfigTest.py::ConfigVirtualDisplayTest.test_remove_view_from_virtual_display
+ConfigTest.py::ConfigVirtualDisplayTest.test_remove_virtual_display
+ConfigTest.py::ConfigVirtualDisplayTest.test_temporary_display
+ConfigTest.py::ConfigVirtualDisplayTest.test_validate
+ConfigTest.py::ConfigVirtualDisplayTest.test_virtual_display_exceptions
+ConfigTest.py::ConfigVirtualDisplayTest.test_virtual_display_v1
+ConfigTest.py::ConfigVirtualWithActiveDisplayTest.test_virtual_display_with_active_displays
 ConstantsTest.py::ConstantsTest.test_string_constants
 ContextTest.py::ContextTest.test_copy
 ContextTest.py::ContextTest.test_interface
@@ -103,6 +127,7 @@ FileRulesTest.py::FileRulesTest.test_name
 FileRulesTest.py::FileRulesTest.test_pattern
 FileRulesTest.py::FileRulesTest.test_regex
 FileRulesTest.py::FileRulesTest.test_rule_priority
+FileRulesTest.py::FileRulesTest.test_using_rules
 FileTransformTest.py::FileTransformTest.test_cccid
 FileTransformTest.py::FileTransformTest.test_cdlstyle
 FileTransformTest.py::FileTransformTest.test_constructor_with_keyword
@@ -133,6 +158,7 @@ GroupTransformTest.py::GroupTransformTest.test_format_metadata
 GroupTransformTest.py::GroupTransformTest.test_prepend_transform
 GroupTransformTest.py::GroupTransformTest.test_transform_type
 GroupTransformTest.py::GroupTransformTest.test_validate_direction
+GroupTransformTest.py::GroupTransformTest.test_write_clf
 LogCameraTransformTest.py::LogCameraTransformTest.test_base
 LogCameraTransformTest.py::LogCameraTransformTest.test_constructor
 LogCameraTransformTest.py::LogCameraTransformTest.test_direction
@@ -199,8 +225,10 @@ NamedTransformTest.py::NamedTransformTest.test_description
 NamedTransformTest.py::NamedTransformTest.test_family
 NamedTransformTest.py::NamedTransformTest.test_name
 NamedTransformTest.py::NamedTransformTest.test_transform
+OCIOZArchiveTest.py::ArchiveIsConfigArchivableTest.test_is_archivable
 OpenColorIOTest.py::OpenColorIOTest.test_attributes
 OpenColorIOTest.py::OpenColorIOTest.test_env_variable
+ProcessorCacheTest.py::ProcessorCacheTest.test_processor_cache
 RangeTransformTest.py::RangeTransformTest.test_range_transform_equality
 RangeTransformTest.py::RangeTransformTest.test_range_transform_interface
 RangeTransformTest.py::RangeTransformTest.test_range_transform_validation
@@ -213,6 +241,7 @@ ViewTransformTest.py::ViewTransformTest.test_interchangeAttribute
 ViewTransformTest.py::ViewTransformTest.test_name
 ViewTransformTest.py::ViewTransformTest.test_transform
 ViewingRulesTest.py::ViewingRulesTest.test_color_spaces
+ViewingRulesTest.py::ViewingRulesTest.test_config
 ViewingRulesTest.py::ViewingRulesTest.test_copy
 ViewingRulesTest.py::ViewingRulesTest.test_custom_keys
 ViewingRulesTest.py::ViewingRulesTest.test_encodings

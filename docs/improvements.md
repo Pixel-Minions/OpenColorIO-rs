@@ -5020,6 +5020,15 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `bit_depth`, `allocation` of `py_transform.rs` and `transforms/py_allocation_transform.rs`);
   `color_space_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error`,
   `look_view_named_oracle.rs`, `a_reference_space_outside_the_enumerators_is_the_ports_error`.
+  Also the config's enum arguments, which the wheel hands to the library as they are
+  (`getProcessor(OCIO.MatrixTransform(), OCIO.TransformDirection(5))` returns a processor,
+  `isColorSpaceLinear('raw', OCIO.ReferenceSpaceType(5))` returns False, probed 2026-10-22):
+  `setEnvironmentMode`, the reference space of `isColorSpaceLinear`, the search reference
+  type and visibility of `getColorSpaces` and `getColorSpaceNames`, the visibility of
+  `getNamedTransforms` and `getNamedTransformNames`, the view type of `getViews` and
+  `getVirtualDisplayViews`, and the direction of `getProcessor`; in `p6-config` (6.3f, 6.3g,
+  `crates/ocio-py/src/py_config.rs`, `enumerator`); `config_oracle.rs`,
+  `an_enum_value_outside_the_enumerators_is_the_ports_error`.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -5112,7 +5121,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** the port raises ValueError "<call>: None, a null pointer from which the wheel
   constructs a std::string (its process dies; docs/improvements.md, U-123)". In `p6-objects`
   (6.3d, `crates/ocio-py/src/py_context.rs`, `null_string`, `py_processor_metadata.rs`,
-  `py_viewing_rules.rs`); `context_oracle.rs`, `rules_oracle.rs`.
+  `py_viewing_rules.rs`); `context_oracle.rs`, `rules_oracle.rs`. Also the config's
+  `const char *` arguments that upstream makes a `std::string` of or compares unchecked:
+  `CreateFromBuiltinConfig`, `getColorSpace`, `getCanonicalName`, `isColorSpaceLinear`,
+  `isInactiveColorSpace`, `setActiveDisplays`, `setActiveViews` and `archive` given `None`
+  (each probed in its own process on Windows, 2026-10-22: the wheel's process dies); in
+  `p6-config` (6.3f, 6.3g, `crates/ocio-py/src/py_config.rs`, `checked`); `config_oracle.rs`,
+  `where_the_wheels_process_dies_the_port_raises`.
 
 ### U-124. `None` for a color space set, a color space or a transform that upstream dereferences
 
@@ -5140,6 +5155,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   an empty set as the wheel's; a set of one color space or none removing its own returns, as
   the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
   `py_look.rs`, `py_named_transform.rs`); `color_space_oracle.rs`, `look_view_named_oracle.rs`.
+  Also the config's: `addColorSpace`, `addLook`, `addViewTransform`, `setFileRules`,
+  `setViewingRules`, `AreViewsEqual`, `AreVirtualViewsEqual` and `SetCurrentConfig` given
+  `None`, and `getProcessor` of a named transform with neither transform (through
+  `NamedTransform::GetTransform`), each probed in its own process on Windows (2026-10-22); in
+  `p6-config` (6.3f, 6.3g, `crates/ocio-py/src/py_config.rs`, `null_object`);
+  `config_oracle.rs`, `where_the_wheels_process_dies_the_port_raises`.
 
 ### U-131. `ExtractOCIOZArchive` given `None` for a path
 

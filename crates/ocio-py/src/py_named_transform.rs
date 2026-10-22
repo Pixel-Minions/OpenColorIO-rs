@@ -53,6 +53,23 @@ fn unspecified(py: Python<'_>) -> PyErr {
 }
 
 impl NamedTransformNode {
+    /// The node of a named transform the library holds (a config's): its transforms become
+    /// nodes of their own, which Python then shares with the config.
+    pub(crate) fn from_library(nt: &NamedTransform) -> NamedTransformNode {
+        use ocio_ops::open_color_types::TransformDirection;
+        let node = |dir| nt.transform(dir).map(|t| TransformRc::new(t.clone()));
+        let forward = node(TransformDirection::Forward);
+        let inverse = node(TransformDirection::Inverse);
+        let mut bare = nt.clone();
+        bare.set_transform_as_is(None, TransformDirection::Forward);
+        bare.set_transform_as_is(None, TransformDirection::Inverse);
+        NamedTransformNode {
+            nt: bare,
+            forward,
+            inverse,
+        }
+    }
+
     fn new() -> NamedTransformNode {
         NamedTransformNode {
             nt: NamedTransform::new(),
@@ -409,7 +426,7 @@ static SET_TRANSFORM: Function = method_def!(
 /// v2.5.2): the transform of the direction, else a copy of the other inverted; a null named
 /// transform or a direction outside the enumerators is upstream's error, and neither transform
 /// the port's (U-124: upstream copies the null one).
-fn get_transform(
+pub(crate) fn get_transform(
     py: Python<'_>,
     nt: Option<&NamedTransformRc>,
     dir: i64,

@@ -20,8 +20,8 @@ use crate::py_context::{null_comparison, null_string};
 use crate::py_open_color_io::py_result;
 use crate::py_transform::{INT, Out, class, def, nested_class, none, ok, string_out};
 use crate::py_utils::{check_index, new_iterator};
-use crate::shared::{Shared, construct, out};
-use crate::{method_def, q, this_iter, this_shared};
+use crate::shared::{Held, Shared, construct, out};
+use crate::{method_def, q, this_held, this_iter};
 
 pub(crate) const VIEWING_RULES: &str = q!("ViewingRules");
 const COLOR_SPACE_ITERATOR: &str = q!("ViewingRules.ViewingRuleColorSpaceIterator");
@@ -29,7 +29,7 @@ const ENCODING_ITERATOR: &str = q!("ViewingRules.ViewingRuleEncodingIterator");
 const SELF: Param = Param::new("self", VIEWING_RULES);
 const RULE_INDEX: Param = Param::new("ruleIndex", INT);
 
-type RulesRc = Shared<ViewingRules>;
+pub(crate) type RulesRc = Held<ViewingRules, ocio::ConfigRules<ViewingRules>>;
 
 /// A `const char *` argument's bytes, a null pointer as the empty string.
 fn or_empty(s: CharPtr) -> Vec<u8> {
@@ -46,7 +46,11 @@ static INIT: Function = Function {
         params: &[SELF],
         ret: "None",
         call: |py, _, a, _| {
-            construct(&a[0], VIEWING_RULES, Shared::new(ViewingRules::new()))?;
+            construct(
+                &a[0],
+                VIEWING_RULES,
+                RulesRc::Own(Shared::new(ViewingRules::new())),
+            )?;
             none(py)
         },
         pos_only: 0,
@@ -60,18 +64,18 @@ static DEEPCOPY: Function = method_def!(
     [SELF, Param::new("memo", "dict")],
     VIEWING_RULES,
     |py, o, a, _| {
-        let rc = this_shared!(o, a, ViewingRules);
+        let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
         if !a[1].is_instance_of::<pyo3::types::PyDict>() {
             return Ok(None);
         }
         let copy = rc.lock().clone();
-        out(py, VIEWING_RULES, &Shared::new(copy))
+        out(py, VIEWING_RULES, &RulesRc::Own(Shared::new(copy)))
     }
 );
 
 // .def("getNumEntries", &ViewingRules::getNumEntries) (PyViewingRules.cpp:44-45 @ v2.5.2).
 static GET_NUM_ENTRIES: Function = method_def!("getNumEntries", [SELF], "int", |py, o, a, _| {
-    let rc = this_shared!(o, a, ViewingRules);
+    let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
     let n = rc.lock().num_entries();
     ok(py, n)
 });
@@ -83,7 +87,7 @@ static GET_INDEX_FOR_RULE: Function = method_def!(
     [SELF, Param::new("ruleName", "str")],
     "int",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, ViewingRules);
+        let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
         let Some(name) = crate::arg!(a, 1, convert, CharPtr).0 else {
             return Err(if rc.lock().num_entries() > 0 {
                 null_comparison(py)
@@ -99,7 +103,7 @@ static GET_INDEX_FOR_RULE: Function = method_def!(
 // .def("getName", &ViewingRules::getName, "ruleIndex"_a) (PyViewingRules.cpp:48-49 @ v2.5.2).
 static GET_NAME: Function =
     method_def!("getName", [SELF, RULE_INDEX], "str", |py, o, a, convert| {
-        let rc = this_shared!(o, a, ViewingRules);
+        let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
         let i = crate::arg!(a, 1, convert, u64) as usize;
         let name = py_result(py, rc.lock().name(i).map(<[u8]>::to_vec))?;
         string_out(py, c_str(&name))
@@ -113,7 +117,7 @@ macro_rules! iterator_getter {
             [SELF, RULE_INDEX],
             $qualified,
             |py, o, a, convert| {
-                let rc = this_shared!(o, a, ViewingRules);
+                let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
                 let i = crate::arg!(a, 1, convert, u64) as usize;
                 Ok(Some(
                     new_iterator(py, $qualified, Some(Box::new((rc, i))))?.unbind(),
@@ -131,7 +135,7 @@ macro_rules! rule_text_action {
             [SELF, RULE_INDEX, Param::new($param, "str")],
             "None",
             |py, o, a, convert| {
-                let rc = this_shared!(o, a, ViewingRules);
+                let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
                 let i = crate::arg!(a, 1, convert, u64) as usize;
                 let s = or_empty(crate::arg!(a, 2, convert, CharPtr));
                 py_result(py, $act(&mut *rc.lock(), i, &s))?;
@@ -149,7 +153,7 @@ macro_rules! rule_index_action {
             [SELF, RULE_INDEX, Param::new($param, INT)],
             "None",
             |py, o, a, convert| {
-                let rc = this_shared!(o, a, ViewingRules);
+                let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
                 let i = crate::arg!(a, 1, convert, u64) as usize;
                 let k = crate::arg!(a, 2, convert, u64) as usize;
                 py_result(py, $act(&mut *rc.lock(), i, k))?;
@@ -196,7 +200,7 @@ static GET_NUM_CUSTOM_KEYS: Function = method_def!(
     [SELF, RULE_INDEX],
     "int",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, ViewingRules);
+        let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
         let i = crate::arg!(a, 1, convert, u64) as usize;
         let n = py_result(py, rc.lock().num_custom_keys(i))?;
         ok(py, n)
@@ -211,7 +215,7 @@ macro_rules! key_getter {
             [SELF, RULE_INDEX, Param::new("key", INT)],
             "str",
             |py, o, a, convert| {
-                let rc = this_shared!(o, a, ViewingRules);
+                let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
                 let i = crate::arg!(a, 1, convert, u64) as usize;
                 let k = crate::arg!(a, 2, convert, u64) as usize;
                 let text: Vec<u8> = py_result(py, $get(&*rc.lock(), i, k))?;
@@ -243,7 +247,7 @@ static SET_CUSTOM_KEY: Function = method_def!(
     ],
     "None",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, ViewingRules);
+        let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
         let i = crate::arg!(a, 1, convert, u64) as usize;
         let key = or_empty(crate::arg!(a, 2, convert, CharPtr));
         let value = or_empty(crate::arg!(a, 3, convert, CharPtr));
@@ -265,7 +269,7 @@ static REMOVE_RULE: Function = method_def!(
     [SELF, RULE_INDEX],
     "None",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, ViewingRules);
+        let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
         let i = crate::arg!(a, 1, convert, u64) as usize;
         py_result(py, rc.lock().remove_rule(i))?;
         none(py)
@@ -274,7 +278,7 @@ static REMOVE_RULE: Function = method_def!(
 
 // defRepr(clsViewingRules) (PyViewingRules.cpp:86 @ v2.5.2).
 static REPR: Function = method_def!("__repr__", [SELF], "str", |py, o, a, _| {
-    let rc = this_shared!(o, a, ViewingRules);
+    let rc = this_held!(o, a, ViewingRules, ocio::ConfigRules<ViewingRules>);
     let text = rc.lock().to_bytes();
     string_out(py, &text)
 });
