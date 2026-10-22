@@ -8,7 +8,7 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: under development, about 66% done.** Milestones M0 (the op engine and the analytic
+> **Status: under development, about 68% done.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs) and M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker) are complete: all of it is merged
 > and matches the official library on the CPU and the GPU. Next: dynamic properties, grading
@@ -86,10 +86,12 @@ one.
 
 ## Progress
 
-Status as of 2026-10-21: **milestones M0, M1 and M2 are complete**, about 66% of the planned
-work. Phase 5 (M3) has started in main: the grading values (GradingPrimary, GradingTone,
-GradingHueCurve) with their dynamic properties, and the whole ExposureContrast op family, CPU
-and GPU. Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
+Status as of 2026-10-22: **milestones M0, M1 and M2 are complete**, about 68% of the planned
+work. Phase 5 (M3) in main: the grading values (GradingPrimary, GradingTone, GradingHueCurve)
+with their dynamic properties, and the ExposureContrast, GradingPrimary and GradingTone op
+families, CPU and GPU. Phase 6 (M4) in main: the `PyOpenColorIO` module's foundation (the
+module and its build, upstream's Python suite runner, pybind11's dispatcher, casters, classes
+and enums as the wheel shows them, every enum, constant and string conversion). Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
 Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pandora, Nuke
@@ -213,9 +215,9 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 1,009 | 1,191 |
+| C++ | 1,022 | 1,191 |
 | GPU | 0 | 264 |
-| Python | 0 | 384 |
+| Python | 2 | 384 |
 
 The live numbers are in [`docs/parity.md`](docs/parity.md). The GPU tests need a GPU to run
 on; they are ported with the pixel harness in a later phase. The shaders themselves are already
@@ -230,8 +232,8 @@ Each milestone is a complete section of OCIO, byte-exact on CPU and GPU:
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
-| **M3** | Dynamic properties, grading ops, app helpers | In progress: the grading values, dynamic properties and ExposureContrast are merged | `0.4.0` |
-| **M4** | The `PyOpenColorIO`-compatible Python module | Started: the oracle commands (the module's surface, upstream's Python suite, scripts on the official module) are merged | `0.5.0` |
+| **M3** | Dynamic properties, grading ops, app helpers | In progress: the grading values, dynamic properties, ExposureContrast, GradingPrimary and GradingTone are merged | `0.4.0` |
+| **M4** | The `PyOpenColorIO`-compatible Python module | In progress: the module's foundation (build, suite runner, dispatcher, classes and enums) is merged | `0.5.0` |
 | **M5** | Full OCIO 2.5.2 parity | Not started | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
