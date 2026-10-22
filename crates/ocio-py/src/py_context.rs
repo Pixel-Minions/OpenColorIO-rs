@@ -436,6 +436,18 @@ fn resolve<R>(
     }
 }
 
+/// The error of `Platform::Strcasecmp` given a null pointer, which the rules'
+/// `getIndexForRule` compares with each rule's name.
+///
+/// Port of the null check of `Platform::Strcasecmp` (src/OpenColorIO/Platform.cpp:155-160 @
+/// v2.5.2).
+pub(crate) fn null_comparison(py: Python<'_>) -> PyErr {
+    crate::py_open_color_io::to_py_err(
+        py,
+        &ocio::Exception::new("String pointer for comparison must not be null."),
+    )
+}
+
 /// The port's error for a null file name, from which upstream makes a `std::string` (MSVC's
 /// reads address 0; docs/improvements.md, U-123).
 pub(crate) fn null_string(what: &str) -> PyErr {

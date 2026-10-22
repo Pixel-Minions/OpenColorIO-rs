@@ -31,6 +31,7 @@ CDLTransformTest.py::CDLTransformTest.test_validate_direction
 CDLTransformTest.py::CDLTransformTest.test_validate_power
 CDLTransformTest.py::CDLTransformTest.test_validate_saturation
 CDLTransformTest.py::CDLTransformTest.test_validate_slope
+ConstantsTest.py::ConstantsTest.test_string_constants
 ContextTest.py::ContextTest.test_copy
 ContextTest.py::ContextTest.test_interface
 ExponentTransformTest.py::ExponentTransformTest.test_constructor_with_keyword
@@ -51,6 +52,16 @@ ExponentWithLinearTransformTest.py::ExponentWithLinearTransformTest.test_offset
 ExponentWithLinearTransformTest.py::ExponentWithLinearTransformTest.test_transform_type
 ExponentWithLinearTransformTest.py::ExponentWithLinearTransformTest.test_validate_gamma
 ExponentWithLinearTransformTest.py::ExponentWithLinearTransformTest.test_validate_offset
+FileRulesTest.py::FileRulesTest.test_color_space
+FileRulesTest.py::FileRulesTest.test_copy
+FileRulesTest.py::FileRulesTest.test_custom_keys
+FileRulesTest.py::FileRulesTest.test_default
+FileRulesTest.py::FileRulesTest.test_extension
+FileRulesTest.py::FileRulesTest.test_insert_rule
+FileRulesTest.py::FileRulesTest.test_name
+FileRulesTest.py::FileRulesTest.test_pattern
+FileRulesTest.py::FileRulesTest.test_regex
+FileRulesTest.py::FileRulesTest.test_rule_priority
 FileTransformTest.py::FileTransformTest.test_cccid
 FileTransformTest.py::FileTransformTest.test_cdlstyle
 FileTransformTest.py::FileTransformTest.test_constructor_with_keyword
@@ -107,3 +118,8 @@ OpenColorIOTest.py::OpenColorIOTest.test_env_variable
 RangeTransformTest.py::RangeTransformTest.test_range_transform_equality
 RangeTransformTest.py::RangeTransformTest.test_range_transform_interface
 RangeTransformTest.py::RangeTransformTest.test_range_transform_validation
+ViewingRulesTest.py::ViewingRulesTest.test_color_spaces
+ViewingRulesTest.py::ViewingRulesTest.test_copy
+ViewingRulesTest.py::ViewingRulesTest.test_custom_keys
+ViewingRulesTest.py::ViewingRulesTest.test_encodings
+ViewingRulesTest.py::ViewingRulesTest.test_insert_remove

@@ -29,6 +29,8 @@ pub(crate) mod py_builtin_transform_registry;
 #[cfg(feature = "python")]
 pub(crate) mod py_context;
 #[cfg(feature = "python")]
+pub(crate) mod py_file_rules;
+#[cfg(feature = "python")]
 pub(crate) mod py_format_metadata;
 #[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
@@ -46,6 +48,8 @@ pub use py_transform::{RegistryStats, registry_stats};
 pub(crate) mod py_types;
 #[cfg(feature = "python")]
 pub(crate) mod py_utils;
+#[cfg(feature = "python")]
+pub(crate) mod py_viewing_rules;
 #[cfg(feature = "python")]
 pub mod pybind11;
 #[cfg(feature = "python")]

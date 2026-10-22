@@ -3800,7 +3800,8 @@ status = "todo"
 path = "src/bindings/python/PyFileRules.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_file_rules.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3d"
 
 [[file]]
 path = "src/bindings/python/PyFormatMetadata.cpp"
@@ -3960,7 +3961,8 @@ status = "todo"
 path = "src/bindings/python/PyViewingRules.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_viewing_rules.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3d"
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyColorSpaceHelpers.cpp"

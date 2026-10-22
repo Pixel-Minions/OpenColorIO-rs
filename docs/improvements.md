@@ -4752,6 +4752,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   its errors come first, as the wheel's), in `p6-transforms` (6.3a, 6.3c);
   `transforms_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error` (the
   same steps succeed in the wheel), `a_style_outside_the_enumerators_raises_the_wheels_error`.
+  Also the context's environment mode (`Context.setEnvironmentMode` and the constructor's
+  `environmentMode`, which the wheel stores and its cache ID writes as the integer), in
+  `p6-objects` (6.3d, `crates/ocio-py/src/py_context.rs`, `environment_mode`);
+  `context_oracle.rs`, `an_environment_mode_outside_the_enumerators_is_the_ports_error`.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -4821,13 +4825,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** `ProcessorMetadata::addFile(const char *)` and `addLook(const char *)` insert
   the pointer into a `std::set<std::string>` and a `std::vector<std::string>`
-  (Processor.cpp:73-97 @ v2.5.2), and `Context::resolveFileLocation` writes the file name to a
-  stream (Context.cpp:483-485), all without checking it for null; pybind11 passes `None` as a
-  null pointer. The Windows wheel's process dies (probed 2026-10-22); libstdc++ may throw
+  (Processor.cpp:73-97 @ v2.5.2), `Context::resolveFileLocation` writes the file name to a
+  stream (Context.cpp:483-485), and `ViewingRules::getIndexForRule` writes the rule name into
+  its error when there is no rule to compare it with (ViewingRules.cpp:212-226; with a rule,
+  `Platform::Strcasecmp` throws "String pointer for comparison must not be null.", which the
+  port matches, as for `FileRules`, which always holds a rule), all without checking it for
+  null; pybind11 passes `None` as a null pointer. The Windows wheel's process dies (probed 2026-10-22); libstdc++ may throw
   `std::logic_error` instead, or crash in the stream.
 - **Who notices:** Python code that passes `None` as a file name or a look to these.
 - **A fix:** treat a null pointer as the empty string, as the context's setters do.
 - **Status:** the port raises ValueError "<call>: None, a null pointer from which the wheel
   constructs a std::string (its process dies; docs/improvements.md, U-123)". In `p6-objects`
-  (6.3d, `crates/ocio-py/src/py_context.rs`, `null_string`, and `py_processor_metadata.rs`);
-  `context_oracle.rs`.
+  (6.3d, `crates/ocio-py/src/py_context.rs`, `null_string`, `py_processor_metadata.rs`,
+  `py_viewing_rules.rs`); `context_oracle.rs`, `rules_oracle.rs`.

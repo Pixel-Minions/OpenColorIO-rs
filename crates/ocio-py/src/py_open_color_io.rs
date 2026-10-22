@@ -257,8 +257,10 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // The classes' bindings (PyOpenColorIO.cpp:70-103), those ported so far.
     crate::py_context::bind_py_context(m)?;
+    crate::py_file_rules::bind_py_file_rules(m)?;
     crate::py_gpu_shader_creator::bind_py_gpu_shader_creator(m)?;
     crate::py_processor_metadata::bind_py_processor_metadata(m)?;
+    crate::py_viewing_rules::bind_py_viewing_rules(m)?;
     crate::py_builtin_transform_registry::bind_py_builtin_transform_registry(m)?;
     crate::py_format_metadata::bind_py_format_metadata(m)?;
     crate::py_transform::bind_py_transform(m)?;
