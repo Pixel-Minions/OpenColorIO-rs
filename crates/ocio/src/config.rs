@@ -297,6 +297,13 @@ impl CurrentContext {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
+    /// The address the handles of one context share: the key of the Python module's
+    /// registry of its objects ([`CurrentContext::ptr_eq`]).
+    #[doc(hidden)]
+    pub fn key(&self) -> usize {
+        Arc::as_ptr(&self.0) as *const u8 as usize
+    }
+
     fn new(context: Arc<Context>) -> CurrentContext {
         CurrentContext(Arc::new(RwLock::new(context)))
     }
@@ -357,6 +364,13 @@ impl<T: Clone> ConfigRules<T> {
     #[doc(hidden)]
     pub fn ptr_eq(&self, other: &ConfigRules<T>) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// The address the handles of one rules object share: the key of the Python module's
+    /// registry of its objects ([`ConfigRules::ptr_eq`]).
+    #[doc(hidden)]
+    pub fn key(&self) -> usize {
+        Arc::as_ptr(&self.0) as *const u8 as usize
     }
 
     fn new(rules: T) -> ConfigRules<T> {
@@ -6608,6 +6622,10 @@ mod python_identity_tests {
         assert!(vr.ptr_eq(&config.viewing_rules()));
         let ctx = config.current_context();
         assert!(ctx.ptr_eq(&config.current_context()));
+        assert_eq!(ctx.key(), config.current_context().key());
+        assert_ne!(ctx.key(), config.clone().current_context().key());
+        assert_eq!(vr.key(), config.viewing_rules().key());
+        assert_ne!(rules.key(), config.file_rules().key());
         assert!(!ctx.ptr_eq(&config.clone().current_context()));
     }
 }
