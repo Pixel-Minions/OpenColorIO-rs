@@ -5154,6 +5154,43 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   reads as a path (its process dies; docs/improvements.md, U-131)". In `p6-config` (6.3f,
   `crates/ocio-py/src/py_config.rs`); `config_functions_oracle.rs`.
 
+### U-132. `vector_of_uint8_t`: deleting a slice with a negative step erases outside the vector
+
+- **Upstream:** pybind11's `bind_vector` (`stl_bind.h`, which the wheel builds
+  `vector_of_uint8_t` with, PyConfigIOProxy.cpp:54 @ v2.5.2) deletes a slice one element at a
+  time, `v.erase(v.begin() + start)` then `start += step - 1`, which is right for a positive
+  step only. With a negative step the positions drift: some slices delete other elements than
+  Python's (`del v[::-2]` of `[1, 2, 3, 4]` leaves `[2, 3]`, which the port matches), and
+  others reach a position before the vector's start or past its end (`del v[::-1]` of four
+  elements), where `erase` moves memory the vector doesn't own (probed on Windows,
+  2026-10-22: the wheel survived and printed `[]`).
+- **Who notices:** Python code that deletes a slice with a negative step from a
+  `vector_of_uint8_t`.
+- **A fix:** erase the slice's positions from the highest down.
+- **Status:** the port raises ValueError "vector_of_uint8_t.__delitem__: a slice whose erasing
+  loop leaves the vector, where the wheel erases memory it doesn't own (docs/improvements.md,
+  U-132)", before erasing anything, where the loop would leave the vector; elsewhere it erases
+  what the wheel's loop erases. In `p6-config` (6.6a,
+  `crates/ocio-py/src/py_config_io_proxy.rs`); `vector_oracle.rs`.
+
+### U-133. A `vector_of_uint8_t` iterator read after its vector reallocated or shrank
+
+- **Upstream:** pybind11's `make_iterator` (the `__iter__` of `bind_vector`) keeps the vector's
+  `begin()` and `end()` iterators; a change of the vector's size invalidates them. Reading one
+  after the vector reallocated its buffer reads freed memory (`it = iter(v); v.append(4);
+  list(it)` gave `[1, 0, 0]`, probed on Windows, 2026-10-22); after it shrank, the bytes past
+  its new end (`v.clear()` then `list(it)` gave the old `[1, 2, 3]`).
+- **Who notices:** Python code that iterates a `vector_of_uint8_t` while it changes its size.
+- **A fix:** iterate by index, checking the size at each step (as Python's own list iterator).
+- **Status:** the port keeps the capacity the wheel's C++ runtime gives the vector (MSVC's STL
+  grows a buffer by half, libstdc++ doubles it), and raises ValueError "iterator of
+  vector_of_uint8_t: the vector reallocated or shrank since the iterator was made, and the
+  wheel's iterator reads memory the vector no longer holds there (docs/improvements.md,
+  U-133)" where the wheel's iterator would read a byte from a freed buffer or past the
+  vector's end; where it reaches its saved end it stops, and where the byte is the vector's it
+  reads it, as the wheel's does. In `p6-config` (6.6a,
+  `crates/ocio-py/src/py_config_io_proxy.rs`); `vector_oracle.rs`.
+
 ### U-141. A menu of a role that names no color space
 
 - **Upstream:** `ColorSpaceInfo::CreateFromSingleRole` and `CreateFromRole` check

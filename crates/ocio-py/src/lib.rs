@@ -35,6 +35,8 @@ pub(crate) mod py_color_space_set;
 #[cfg(feature = "python")]
 pub(crate) mod py_config;
 #[cfg(feature = "python")]
+pub(crate) mod py_config_io_proxy;
+#[cfg(feature = "python")]
 pub(crate) mod py_context;
 #[cfg(feature = "python")]
 pub(crate) mod py_cpu_processor;

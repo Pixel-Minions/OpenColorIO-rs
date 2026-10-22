@@ -65,6 +65,10 @@ const COMPLETE: [&str; 35] = [
     "BuiltinConfigRegistry",
 ];
 
+/// The classes a binding makes itself rather than bindPyTypes' declarations (bindPyConfigIOProxy's
+/// `py::bind_vector`): each compares with the wheel's entry for entry.
+const OWN_CLASSES: [&str; 1] = ["vector_of_uint8_t"];
+
 /// The stand-ins `common::start_python` adds to the port's module until WP 6.6 binds them.
 const STAND_INS: [&str; 3] = [
     "SetLoggingFunction",
@@ -158,11 +162,17 @@ fn the_module_members_report_as_the_wheels() {
     let theirs = wheel_members();
     let ours = port_members();
     let (mut enums, mut classes, mut others, mut bound, mut complete) = (0, 0, 0, 0, 0);
+    let mut own = 0;
     for our in &ours {
         let n = entry_name(our);
         let their = theirs.iter().find(|t| entry_name(t) == n).unwrap();
         let is_enum = their.get("entries").is_some();
         let declared = their["metatype"] == "pybind11_builtins.pybind11_type" && !is_enum;
+        if OWN_CLASSES.contains(&n.as_str()) {
+            assert_eq!(our, their, "{n}");
+            own += 1;
+            continue;
+        }
         if their["kind"] != "class" || !declared {
             assert_eq!(our, their, "{n}");
             if is_enum {
@@ -208,6 +218,7 @@ fn the_module_members_report_as_the_wheels() {
     }
     assert_eq!(classes, 63);
     assert_eq!(complete, COMPLETE.len());
+    assert_eq!(own, OWN_CLASSES.len());
     assert_eq!(enums, 31);
     // The constants, the exported values and the functions of bindPyTypes and
     // PyOpenColorIO.cpp.

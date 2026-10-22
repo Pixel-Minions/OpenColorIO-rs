@@ -769,6 +769,40 @@ pub fn new_class<'py>(
     Ok(cls)
 }
 
+/// A class pybind11 makes without a scope (`class_<T>(handle(), name, module_local())`, the
+/// state of `make_iterator`): its C name and `__qualname__` `name`, no `__module__` in its
+/// dictionary (Python reads `pybind11_object`'s, `pybind11_builtins`, and prints the class as
+/// `<class 'name'>`), and signatures write it `pybind11_builtins.name`. `PyType_FromMetaclass`
+/// warns of a C name without a module (a DeprecationWarning the wheel's code never raises), so
+/// the metatype makes it, called from a frame whose globals have no `__name__` (which `type()`
+/// would make its `__module__`); its dictionary starts with `__init__` (`pybind11_object`'s
+/// slot wrapper: the wheel's is the class's own) and `__doc__` None.
+pub fn new_scopeless_class<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyType>> {
+    let base = object_base(py)?;
+    let ns = PyDict::new(py);
+    ns.set_item("__init__", base.getattr("__dict__")?.get_item("__init__")?)?;
+    ns.set_item("__doc__", py.None())?;
+    ns.set_item("__slots__", PyTuple::empty(py))?;
+    let globals = PyDict::new(py);
+    globals.set_item("meta", runtime_item(py, "pybind11_type")?)?;
+    globals.set_item("args", (name, (base,), ns))?;
+    py.run(c"cls = meta(*args)", Some(&globals), None)?;
+    let cls = globals
+        .get_item("cls")?
+        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(name.to_string()))?
+        .cast_into::<PyType>()?;
+    cls.delattr("__slots__")?;
+    CLASSES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((
+            format!("pybind11_builtins.{name}"),
+            name.to_string(),
+            cls.clone().unbind(),
+        ));
+    Ok(cls)
+}
+
 /// `f` wrapped as a method, as pybind11 wraps each: CPython's `instancemethod`
 /// (`PyInstanceMethod_New`).
 pub fn instance_method<'py>(py: Python<'py>, f: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
@@ -953,6 +987,7 @@ fn function<'py>(
         Doc::Signatures => Some(crate::dispatch::docstring(f)),
         Doc::Text(text) => Some(format!("{}\n{text}\n", crate::dispatch::docstring(f))),
         Doc::Texts(texts) => Some(crate::dispatch::docstring_with(f, texts)),
+        Doc::Overloads(docs) => Some(crate::dispatch::docstring_with_docs(f, docs)),
     };
     let record = Bound::new(
         py,
@@ -1011,6 +1046,9 @@ enum Doc<'a> {
     /// Each overload's signature, then its own docstring, as [`crate::dispatch::docstring_with`]
     /// writes them (`PyCPUProcessor.cpp:47-249`).
     Texts(&'a [&'a str]),
+    /// Each overload's own docstring, or none ([`crate::dispatch::docstring_with_docs`]): the
+    /// definitions of pybind11's own bindings (`bind_vector`).
+    Overloads(&'a [Option<&'a str>]),
 }
 
 impl From<bool> for Doc<'_> {
@@ -1041,4 +1079,17 @@ pub fn method_with_doc<'py>(
     doc: &str,
 ) -> PyResult<Bound<'py, PyAny>> {
     instance_method(py, function(py, f, Doc::Text(doc), Some(MODULE), None)?)
+}
+
+/// A method whose overloads' definitions give docstrings of their own (`docs`, one per
+/// overload): [`method`], with [`Doc::Overloads`].
+pub fn method_with_overload_docs<'py>(
+    py: Python<'py>,
+    f: &'static Function,
+    docs: &[Option<&str>],
+) -> PyResult<Bound<'py, PyAny>> {
+    instance_method(
+        py,
+        function(py, f, Doc::Overloads(docs), Some(MODULE), None)?,
+    )
 }
