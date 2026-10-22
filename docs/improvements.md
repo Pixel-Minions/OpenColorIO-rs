@@ -4982,7 +4982,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   error ("ColorSpaceMenuHelper: the menu item of the role '<role>' is null (the role refers to
   no color space): ... (docs/improvements.md, U-142)"), before the added color spaces are read.
   The wheel builds the menu and dies when the null item is read, so the port is stricter than
-  the wheel (owner-approved, 2026-10-22). The getters and lookups of a menu that exists are
+  the wheel (owner-approved, 2026-10-22). What that costs (verifier probes, 2026-10-22): the
+  wheel gives a defined result in some of these cases, where the port refuses. With an added
+  name the config lacks, the wheel raises its normal "Element '...' is neither a color space
+  not a named transform." (the check fails before reaching the null item); with an added name
+  already earlier in the menu, the wheel builds the menu (33 items, no crash); without added
+  names the menu is usable except at the null item. The getters and lookups of a menu that exists are
   plain values, as upstream's `OpenColorAppHelpers.h`. In `p5-helpers-1` (5.7b,
   `apphelpers/color_space_helpers.rs`, `ColorSpaceMenuHelper::refresh`);
   `color_space_menu_helper_oracle.rs`
