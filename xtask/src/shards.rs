@@ -182,11 +182,19 @@ pub(crate) const SHARDS: &[Shard] = &[
         release: false,
         groups: &[Group::Formats],
     },
+    // Debug builds of the heavy and the other targets in one job outgrew the hosted runner's
+    // disk (PR #65), as on Windows they run apart.
+    Shard {
+        id: "linux-debug-heavy",
+        platform: Platform::Linux,
+        release: false,
+        groups: &[Group::Heavy],
+    },
     Shard {
         id: "linux-debug-rest",
         platform: Platform::Linux,
         release: false,
-        groups: &[Group::Heavy, Group::Rest],
+        groups: &[Group::Rest],
     },
     Shard {
         id: "linux-release-formats",

@@ -157,6 +157,7 @@ jobs:
       matrix:
         shard:
           - linux-debug-formats
+          - linux-debug-heavy
           - linux-debug-rest
           - linux-release-formats
           - linux-release-rest
