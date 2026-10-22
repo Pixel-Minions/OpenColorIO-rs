@@ -592,7 +592,7 @@ pub fn export_values(scope: &Bound<'_, PyAny>, cls: &Bound<'_, PyType>) -> PyRes
     Ok(())
 }
 
-/// The enum class whose C name is `qualified` (`module.qualname`).
+/// The enum class that signatures write `qualified` (`MODULE.qualname`).
 pub fn enum_class<'py>(py: Python<'py>, qualified: &str) -> PyResult<Bound<'py, PyType>> {
     pybind11::class(py, qualified)
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(qualified.to_string()))
@@ -640,7 +640,7 @@ pub fn to_py<'py>(cls: &Bound<'py, PyType>, value: i64) -> PyResult<Bound<'py, P
     let instance = cls.call_method1("__new__", (cls,))?;
     pybind11::set_value(
         &instance,
-        &pybind11::tp_name(cls)?,
+        &pybind11::qualified_name(cls)?,
         PyInt::new(cls.py(), value).into_any(),
     )?;
     Ok(instance)

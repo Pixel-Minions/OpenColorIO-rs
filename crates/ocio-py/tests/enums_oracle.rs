@@ -298,3 +298,30 @@ fn arithmetic_and_unsigned_enums_behave_as_the_wheels() {
     }
     assert_eq!(ours.len(), theirs.len());
 }
+
+/// A class nested in another has the C name pybind11 gives it, the module and its own name
+/// (`PyOpenColorIO.PyOpenColorIO.TextureType`), which CPython writes in its messages; its
+/// `__qualname__` names the enclosing class.
+#[test]
+fn a_nested_class_c_name_is_the_module_and_its_own_name() {
+    let red = || name("OCIO.GpuShaderCreator.TextureType.TEXTURE_RED_CHANNEL");
+    let one = || name("OCIO.GpuShaderCreator.TextureDimensions.TEXTURE_1D");
+    let op = |f: &str, a: Value, b: Value| call(name(&format!("operator.{f}")), json!([a, b]));
+    let script = json!({ "steps": [
+        op("lt", red(), red()),
+        op("lt", one(), red()),
+        call(name("operator.invert"), json!([red()])),
+        json!({ "eval": name("OCIO.GpuShaderCreator.TextureType.TEXTURE_RED_CHANNEL.nope") }),
+        json!({ "eval": name("OCIO.GpuShaderCreator.TextureType.__qualname__") }),
+        call(name("type"), json!([one()])),
+        call(name("OCIO.GpuShaderCreator.TextureType.__init__"), json!([int("1")])),
+    ]});
+    let ours = port(&script);
+    let theirs = wheel(std::slice::from_ref(&script)).remove(0);
+    let steps = theirs["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 7);
+    for k in [0, 1, 2, 3, 6] {
+        assert!(steps[k].get("raised").is_some(), "step {k}: {}", steps[k]);
+    }
+    assert_eq!(ours, theirs);
+}

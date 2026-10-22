@@ -412,11 +412,14 @@ pub fn object_base(py: Python<'_>) -> PyResult<Bound<'_, PyType>> {
     Ok(py.get_type::<Pybind11Object>())
 }
 
-/// Each class of the module, by its C name (`tp_name`), as [`new_class`] made it: pybind11's
-/// registered types.
-static CLASSES: std::sync::Mutex<Vec<(String, Py<PyType>)>> = std::sync::Mutex::new(Vec::new());
+/// A class of the module as [`new_class`] made it: the name its signatures write
+/// (`MODULE.qualname`), its C name (`tp_name`), the class.
+type Registered = (String, String, Py<PyType>);
 
-/// The class of the module whose C name is `qualified` (`MODULE.qualname`).
+/// Each class of the module: pybind11's registered types.
+static CLASSES: std::sync::Mutex<Vec<Registered>> = std::sync::Mutex::new(Vec::new());
+
+/// The class of the module whose signatures write it `qualified` (`MODULE.qualname`).
 pub fn class<'py>(py: Python<'py>, qualified: &str) -> Option<Bound<'py, PyType>> {
     let classes = CLASSES
         .lock()
@@ -424,8 +427,20 @@ pub fn class<'py>(py: Python<'py>, qualified: &str) -> Option<Bound<'py, PyType>
     classes
         .iter()
         .rev()
-        .find(|(name, _)| name == qualified)
-        .map(|(_, cls)| cls.bind(py).clone())
+        .find(|(name, _, _)| name == qualified)
+        .map(|(_, _, cls)| cls.bind(py).clone())
+}
+
+/// The name the signatures write for `ty`, a class of the module (`MODULE.qualname`), by which
+/// [`class`] finds it.
+pub fn qualified_name(ty: &Bound<'_, PyType>) -> PyResult<String> {
+    CLASSES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .find(|(_, _, cls)| ty.is(cls.bind(ty.py())))
+        .map(|(name, _, _)| name.clone())
+        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("not a class of the module"))
 }
 
 /// Whether `ty` is a class of the module.
@@ -434,7 +449,7 @@ fn registered(ty: &Bound<'_, PyType>) -> bool {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
-        .any(|(_, cls)| ty.is(cls.bind(ty.py())))
+        .any(|(_, _, cls)| ty.is(cls.bind(ty.py())))
 }
 
 /// pybind11's cache of [`all_type_info`] for the other types it was asked about (Python
@@ -547,7 +562,7 @@ fn caster_index(obj: &Bound<'_, PyAny>, cls: &Bound<'_, PyType>) -> PyResult<Opt
     Ok(None)
 }
 
-/// The C++ value `obj` holds as an instance of the class of the module whose C name is
+/// The C++ value `obj` holds as an instance of the class of the module that signatures write
 /// `qualified`, if a constructor constructed it.
 pub fn value<'py>(obj: &Bound<'py, PyAny>, qualified: &str) -> Option<Bound<'py, PyAny>> {
     let cls = class(obj.py(), qualified)?;
@@ -597,8 +612,8 @@ fn constructor_index(obj: &Bound<'_, PyAny>, cls: &Bound<'_, PyType>) -> PyResul
         })
 }
 
-/// Whether a constructor of the class of the module whose C name is `qualified` constructed
-/// its value in `obj` already (the dispatcher then calls none: pybind11's
+/// Whether a constructor of the class of the module that signatures write `qualified`
+/// constructed its value in `obj` already (the dispatcher then calls none: pybind11's
 /// `instance_registered()`).
 pub fn constructed(obj: &Bound<'_, PyAny>, qualified: &str) -> PyResult<bool> {
     let Some(cls) = class(obj.py(), qualified) else {
@@ -614,9 +629,9 @@ pub fn constructed(obj: &Bound<'_, PyAny>, qualified: &str) -> PyResult<bool> {
     Ok(values.get(index).is_some_and(Option::is_some))
 }
 
-/// Constructs the C++ value of `obj` as an instance of the class of the module whose C name is
-/// `qualified`: once, as a constructor (`__init__`, `__setstate__`) does; the dispatcher calls
-/// no constructor on a value constructed already.
+/// Constructs the C++ value of `obj` as an instance of the class of the module that signatures
+/// write `qualified`: once, as a constructor (`__init__`, `__setstate__`) does; the dispatcher
+/// calls no constructor on a value constructed already.
 pub fn set_value(obj: &Bound<'_, PyAny>, qualified: &str, value: Bound<'_, PyAny>) -> PyResult<()> {
     let cls = class(obj.py(), qualified)
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(qualified.to_string()))?;
@@ -669,12 +684,13 @@ fn unconstructed(obj: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
 }
 
 /// A type's C name, as CPython's messages write it: a class of the module's, its dotted
-/// `MODULE.qualname`; another (a Python class), its name.
+/// `MODULE.name`, the class's own name also for a class nested in another (pybind11's
+/// `make_new_python_type` joins the module and `rec.name`); another (a Python class), its name.
 pub fn tp_name(ty: &Bound<'_, PyType>) -> PyResult<String> {
     let classes = CLASSES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((name, _)) = classes.iter().find(|(_, cls)| ty.is(cls.bind(ty.py()))) {
+    if let Some((_, name, _)) = classes.iter().find(|(_, _, cls)| ty.is(cls.bind(ty.py()))) {
         return Ok(name.clone());
     }
     drop(classes);
@@ -695,7 +711,7 @@ pub fn static_property<'py>(
 
 /// A class of the module, made as pybind11 makes it (`make_new_python_type`): named `name`,
 /// its `__qualname__` `qualname` (the enclosing class's name first, for a nested class) and
-/// its C name `MODULE.qualname`, with the metatype and `bases` (`pybind11_object` when empty).
+/// its C name `MODULE.name`, with the metatype and `bases` (`pybind11_object` when empty).
 /// Its dictionary starts with `__init__` (pybind11_object's slot wrapper, raising "No
 /// constructor defined!"), `__doc__` and `__module__`; `ns` then sets those of them a class
 /// gives otherwise (an enum's constructor, its docstring property), in place.
@@ -712,7 +728,7 @@ pub fn new_class<'py>(
     } else {
         bases.to_vec()
     };
-    let tp_name = format!("{MODULE}.{qualname}");
+    let tp_name = format!("{MODULE}.{name}");
     let cls = ocio_py_ffi::from_metaclass::<Pybind11Object>(
         &metatype,
         &tp_name,
@@ -722,7 +738,11 @@ pub fn new_class<'py>(
     CLASSES
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .push((tp_name, cls.clone().unbind()));
+        .push((
+            format!("{MODULE}.{qualname}"),
+            tp_name,
+            cls.clone().unbind(),
+        ));
     debug_assert_eq!(cls.name()?.to_string(), name);
     for (k, v) in ns {
         cls.setattr(*k, v)?;
@@ -945,9 +965,9 @@ pub fn method<'py>(py: Python<'py>, f: &'static Function) -> PyResult<Bound<'py,
     instance_method(py, builtin(py, f, true)?)
 }
 
-/// `obj` when it is an instance of the class of the module whose C name is `qualified` (or of a
-/// subclass): pybind11's caster of a class parameter (and of `self`), which compares types, not
-/// names (a class's `__module__` and `__qualname__` can be changed).
+/// `obj` when it is an instance of the class of the module that signatures write `qualified` (or
+/// of a subclass): pybind11's caster of a class parameter (and of `self`), which compares types,
+/// not names (a class's `__module__` and `__qualname__` can be changed).
 pub fn instance_of<'py>(obj: &Bound<'py, PyAny>, qualified: &str) -> Option<Bound<'py, PyAny>> {
     let cls = class(obj.py(), qualified)?;
     obj.get_type().is_subclass(&cls).ok()?.then(|| obj.clone())
