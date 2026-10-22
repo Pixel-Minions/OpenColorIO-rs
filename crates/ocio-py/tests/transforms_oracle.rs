@@ -1008,3 +1008,122 @@ fn null_children_and_cycles_are_the_ports_errors() {
     }
     assert_eq!(expect_u.len(), 10);
 }
+
+/// The classes of chunks 6.3a-c: each one's own dictionary (`list(Class.__dict__)`, names in
+/// their order), with the nested iterator classes'; the constructors keep their doubles (0.1
+/// and others no `float` holds, read back by the getters); and `getFormatMetadata`'s result
+/// keeps its transform alive (pybind11's `reference_internal`): a transform of a Python
+/// subclass whose `__del__` empties a list, reachable only through its `FormatMetadata`, isn't
+/// deleted.
+#[test]
+fn dictionaries_doubles_and_lifetimes_are_the_wheels() {
+    let mut sc = Script::new();
+    for class in [
+        "Transform",
+        "GroupTransform",
+        "GroupTransform.TransformIterator",
+        "GroupTransform.WriteFormatIterator",
+        "MatrixTransform",
+        "RangeTransform",
+        "AllocationTransform",
+        "ExponentTransform",
+        "ExponentWithLinearTransform",
+        "LogTransform",
+        "LogAffineTransform",
+        "LogCameraTransform",
+        "FixedFunctionTransform",
+        "BuiltinTransform",
+        "BuiltinTransformRegistry",
+        "BuiltinTransformRegistry.BuiltinStyleIterator",
+        "BuiltinTransformRegistry.BuiltinIterator",
+        "CDLTransform",
+        "FileTransform",
+        "FileTransform.FormatIterator",
+    ] {
+        sc.call(n("list"), vec![n(&format!("OCIO.{class}.__dict__"))]);
+    }
+
+    let tenths = |k: usize| -> Vec<f64> { (1..=k).map(|j| j as f64 / 10.0).collect() };
+    let m44 = tenths(16);
+    let off = vec![0.1, 1.0 / 3.0, 2.0 / 3.0, 1e-300];
+    sc.step(
+        serde_json::json!({ "call": n("OCIO.MatrixTransform"), "args": [fl(&m44), fl(&off)],
+            "getters": ["getMatrix", "getOffset", "__repr__"] }),
+        Expect::Value,
+    );
+    sc.step(
+        serde_json::json!({ "call": n("OCIO.MatrixTransform"),
+            "kwargs": [["offset", fl(&off)], ["matrix", fl(&m44)]],
+            "getters": ["getMatrix", "getOffset"] }),
+        Expect::Value,
+    );
+    sc.step(
+        serde_json::json!({ "call": n("OCIO.RangeTransform"),
+            "args": [f(0.1), f(0.7), f(1.0 / 3.0), f(0.9)],
+            "getters": ["getMinInValue", "getMaxInValue", "getMinOutValue", "getMaxOutValue"] }),
+        Expect::Value,
+    );
+    sc.step(
+        serde_json::json!({ "call": n("OCIO.ExponentTransform"), "args": [fl(&[1.1, 1.2, 1.3, 0.1])],
+            "getters": ["getValue"] }),
+        Expect::Value,
+    );
+    sc.step(
+        serde_json::json!({ "call": n("OCIO.ExponentWithLinearTransform"),
+            "args": [fl(&[1.1, 2.2, 2.4, 1.0]), fl(&[0.1, 0.099, 0.3, 0.0])],
+            "getters": ["getGamma", "getOffset"] }),
+        Expect::Value,
+    );
+    sc.step(
+        serde_json::json!({ "call": n("OCIO.AllocationTransform"),
+            "args": [n("OCIO.ALLOCATION_LG2"), fl(&[-0.1, 1.3, 0.1])],
+            "getters": ["getVars"] }),
+        Expect::Value,
+    );
+    sc.step(
+        serde_json::json!({ "call": n("OCIO.FixedFunctionTransform"),
+            "args": [n("OCIO.FIXED_FUNCTION_REC2100_SURROUND"), fl(&[0.1])],
+            "getters": ["getParams"] }),
+        Expect::Value,
+    );
+
+    // The transform lives while its FormatMetadata does. No step's result may hold the
+    // transform (the interpreter keeps every result), so a property makes it: `ns.x` calls
+    // `ns.__call__()`, the class `Sub`, whose instances empty `alive` when deleted.
+    let alive = sc.call(n("list"), vec![l(vec![i(1)])]);
+    let sub = sc.call(
+        n("type"),
+        vec![
+            s("Sub"),
+            t(vec![n("OCIO.MatrixTransform")]),
+            d(vec![
+                (s("__module__"), s("m")),
+                (s("__del__"), ra(alive, "clear")),
+            ]),
+        ],
+    );
+    let property = sc.call(n("type"), vec![n("OCIO.TransformDirection.value")]);
+    let make = sc.call(n("operator.methodcaller"), vec![s("__call__")]);
+    let x = sc.call(r(property), vec![r(make)]);
+    let ns_class = sc.call(
+        n("type"),
+        vec![
+            s("NS"),
+            t(vec![n("object")]),
+            d(vec![
+                (s("__module__"), s("m")),
+                (s("x"), r(x)),
+                (s("__call__"), r(sub)),
+            ]),
+        ],
+    );
+    let ns = sc.call(r(ns_class), vec![]);
+    // FormatMetadata's repr: chunk 6.3d.
+    let fm = sc.call(ra(ns, "x.getFormatMetadata"), vec![]);
+    sc.unrepr(fm);
+    sc.eval(r(alive), &[]);
+    // A transform no FormatMetadata holds dies at once (the probe's control).
+    sc.call(ra(ns, "x.validate"), vec![]);
+    sc.eval(r(alive), &[]);
+    compare(&[sc]);
+}
