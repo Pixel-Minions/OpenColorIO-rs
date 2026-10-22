@@ -23,6 +23,17 @@ use common::{call, name, port, text, wheel};
 use pyo3::prelude::*;
 use serde_json::{Value, json};
 
+/// The tests of this binary change `TransformDirection`'s dictionary (its `__doc__` and
+/// `__members__`, put back after) and read it: one at a time, since the interpreter they share
+/// switches threads in a script's middle.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn int(v: &str) -> Value {
     json!({ "int": v })
 }
@@ -73,6 +84,16 @@ fn steps() -> (Vec<Value>, Vec<usize>) {
         ),
     );
     let spt = push(&mut s, call(name("type"), json!([r(sp)])));
+    let members_property = push(
+        &mut s,
+        call(
+            name("operator.getitem"),
+            json!([
+                name("OCIO.TransformDirection.__dict__"),
+                text("__members__")
+            ]),
+        ),
+    );
     // `property` (not among the step interpreter's names): the type of an enum's `value`.
     let value = push(
         &mut s,
@@ -330,12 +351,18 @@ fn steps() -> (Vec<Value>, Vec<usize>) {
     s.push(json!({ "eval": name("OCIO.TransformDirection.__members__") }));
     s.push(json!({ "delattr": td(), "name": "__doc__" }));
     s.push(json!({ "eval": name("OCIO.TransformDirection.__doc__") }));
+    // Both put back, for the other tests of the process.
+    s.push(json!({ "setattr": td(), "name": "__members__", "value": r(members_property) }));
+    s.push(json!({ "setattr": td(), "name": "__doc__", "value": r(sp) }));
+    s.push(json!({ "eval": name("OCIO.TransformDirection.__members__") }));
+    s.push(json!({ "eval": name("OCIO.TransformDirection.__doc__") }));
     (s, refused)
 }
 
 /// The metatype's and the static property's methods as the wheel's slot wrappers.
 #[test]
 fn metatype_and_static_property_slots_as_the_wheels() {
+    let _serial = serial();
     let (steps, refused) = steps();
     let script = json!({ "steps": steps });
     let ours = port(&script);
@@ -381,6 +408,7 @@ fn shown(report: &Value, i: usize) -> String {
 /// says instead.
 #[test]
 fn d7_lists_what_still_differs() {
+    let _serial = serial();
     let mut s: Vec<Value> = Vec::new();
     let m = 0;
     s.push(call(name("type"), json!([name("OCIO.TransformDirection")])));
@@ -571,6 +599,7 @@ fn d7_lists_what_still_differs() {
 /// error (U-100); a Python subclass's own `value`, and the property itself put back, don't.
 #[test]
 fn replacing_an_enum_value_property_raises_the_ports_error() {
+    let _serial = serial();
     common::start_python();
     Python::attach(|py| {
         let ocio = py.import("PyOpenColorIO").unwrap();
