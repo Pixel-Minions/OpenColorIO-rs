@@ -267,6 +267,16 @@ fn compute(slice: &Bound<'_, PySlice>, size: usize) -> PyResult<(i64, i64, usize
     Ok((ix.start as i64, ix.step as i64, ix.slicelength))
 }
 
+/// The error of a slice's `__getitem__` or `__setitem__` whose `__index__` (run by
+/// `slice.compute` after pybind11 read the size) shrank the vector, where the wheel `reads` or
+/// `writes` past its end (docs/improvements.md, U-132).
+fn outside_after_index(method: &str, access: &str) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(format!(
+        "vector_of_uint8_t.{method}: a slice whose index shrank the vector, where the wheel \
+         {access} memory the vector no longer holds (docs/improvements.md, U-132)"
+    ))
+}
+
 /// A new instance of the class holding `v` (a returned `std::vector`, moved into the instance).
 pub(crate) fn vector_out(py: Python<'_>, v: ByteVector) -> PyResult<Option<Py<PyAny>>> {
     crate::shared::out(py, VECTOR, &Shared::new(v))
@@ -593,13 +603,19 @@ static SETITEM: Function = Function {
                 } else {
                     Some(value.lock().data.clone())
                 };
-                let value_len = source.as_ref().map_or(size, Vec::len);
+                let mut v = this.lock();
+                let value_len = source.as_ref().map_or(v.data.len(), Vec::len);
                 if slicelength != value_len {
                     return Err(pyo3::exceptions::PyRuntimeError::new_err(
                         "Left and right hand size of slice assignment have different sizes!",
                     ));
                 }
-                let mut v = this.lock();
+                // The slice's indices came from the size before its `__index__` ran, which may
+                // have shrunk the vector (U-132): each position checked before any write.
+                let len = v.data.len() as i64;
+                if (0..slicelength).any(|i| !(0..len).contains(&(start + i as i64 * step))) {
+                    return Err(outside_after_index("__setitem__", "writes"));
+                }
                 for i in 0..slicelength {
                     let b = match &source {
                         Some(s) => s[i],
@@ -630,8 +646,15 @@ static GETITEM: Function = Function {
             call: |py, o, a, _| {
                 let this = this_shared!(o, a, ByteVector);
                 let slice = slice_param!(a, 1);
+                // The size first, then the slice's indices (its `__index__` may use the
+                // vector), then the vector, as pybind11's `slice.compute(v.size(), ...)`.
+                let size = this.lock().data.len();
+                let (mut start, step, slicelength) = compute(&slice, size)?;
                 let v = this.lock();
-                let (mut start, step, slicelength) = compute(&slice, v.data.len())?;
+                let len = v.data.len() as i64;
+                if (0..slicelength).any(|i| !(0..len).contains(&(start + i as i64 * step))) {
+                    return Err(outside_after_index("__getitem__", "reads"));
+                }
                 let mut seq = ByteVector::default();
                 seq.reserve(slicelength)?;
                 for _ in 0..slicelength {
@@ -688,8 +711,9 @@ static DELITEM: Function = Function {
             call: |py, o, a, _| {
                 let this = this_shared!(o, a, ByteVector);
                 let slice = slice_param!(a, 1);
+                let size = this.lock().data.len();
+                let (start, step, slicelength) = compute(&slice, size)?;
                 let mut v = this.lock();
-                let (start, step, slicelength) = compute(&slice, v.data.len())?;
                 // The positions pybind11's loop erases at, each within the vector as it is
                 // then.
                 let mut at = Vec::with_capacity(slicelength);

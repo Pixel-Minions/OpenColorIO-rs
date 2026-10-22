@@ -18,14 +18,14 @@
 //! - iteration (`iter`, `next` to `StopIteration` and past it, the iterator class, an element
 //!   changed under it, a vector grown with room in its buffer), keyword arguments.
 //!
-//! And, without the wheel, which reads or erases memory the vector doesn't hold there: a
-//! slice deletion whose loop leaves the vector (U-132), and an iterator read after its vector
-//! reallocated or shrank under it (U-133).
+//! And, without the wheel, which reads, writes or erases memory the vector doesn't hold there:
+//! a slice deletion whose loop leaves the vector, a slice whose bound's `__index__` shrank it
+//! (U-132), and an iterator read after its vector reallocated or shrank under it (U-133).
 #![cfg(feature = "python")]
 
 mod common;
 
-use common::script::{Expect, Script, b, by, compare, f, i, l, n, none, r, ra, s, t};
+use common::script::{Expect, Script, b, by, compare, d, f, i, l, n, none, r, ra, s, t};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::{Value, json};
@@ -213,6 +213,33 @@ fn indexing_script() -> Script {
         sc.call(ra(w, "__delitem__"), vec![r(sl)]);
         show(&mut sc, w);
     }
+    // A slice whose bound's `__index__` reads the vector (its `__len__`, called without the
+    // instance: a bound method isn't a descriptor), for each method taking a slice.
+    let w = vector(&mut sc, &[1, 2, 3, 4]);
+    let half = sc.call(
+        n("type"),
+        vec![
+            s("Half"),
+            t(vec![]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("__index__"), ra(w, "__len__")),
+            ]),
+        ],
+    );
+    let h = sc.call(r(half), vec![]);
+    let from = sc.call(n("slice"), vec![r(h), none(), none()]);
+    let upto = sc.call(n("slice"), vec![none(), r(h), none()]);
+    let part = sc.call(ra(w, "__getitem__"), vec![r(from)]);
+    show(&mut sc, part);
+    let part = sc.call(ra(w, "__getitem__"), vec![r(upto)]);
+    show(&mut sc, part);
+    sc.call(ra(w, "__setitem__"), vec![r(upto), ints(&[5, 6, 7, 8])]);
+    show(&mut sc, w);
+    sc.call(ra(w, "__delitem__"), vec![r(from)]);
+    show(&mut sc, w);
+    sc.call(ra(w, "__delitem__"), vec![r(upto)]);
+    show(&mut sc, w);
     sc
 }
 
@@ -366,6 +393,20 @@ fn where_the_wheel_leaves_the_vector_the_port_raises() {
         for (code, entry) in [
             ("v = V([1, 2, 3, 4])\ndel v[::-1]", "U-132"),
             ("v = V([1, 2, 3])\ndel v[2::-1]", "U-132"),
+            // A slice whose `__index__` shrinks the vector after pybind11 read its size.
+            (
+                "v = V([1, 2, 3, 4])\nP = type('P', (), {'__index__': v.pop})\nv[:P()]",
+                "U-132",
+            ),
+            (
+                "v = V([1, 2, 3, 4])\nP = type('P', (), {'__index__': v.pop})\n\
+                 v[:P()] = V([5, 6, 7, 8])",
+                "U-132",
+            ),
+            (
+                "v = V([1, 2, 3, 4])\nP = type('P', (), {'__index__': v.pop})\ndel v[:P()]",
+                "U-132",
+            ),
             (
                 "v = V([1, 2, 3])\nit = iter(v)\nv.append(4)\nnext(it)",
                 "U-133",

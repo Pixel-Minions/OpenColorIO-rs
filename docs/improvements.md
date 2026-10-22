@@ -5209,14 +5209,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   Python's (`del v[::-2]` of `[1, 2, 3, 4]` leaves `[2, 3]`, which the port matches), and
   others reach a position before the vector's start or past its end (`del v[::-1]` of four
   elements), where `erase` moves memory the vector doesn't own (probed on Windows,
-  2026-10-22: the wheel survived and printed `[]`).
+  2026-10-22: the wheel survived and printed `[]`). The three slice methods also read the
+  vector's size before the slice's bounds run their `__index__`: a bound whose `__index__`
+  shrinks the vector (`v[:P()]` with `P.__index__` being `v.pop`) makes `__getitem__` read,
+  `__setitem__` write and `__delitem__` erase past the vector's new end (probed on Windows,
+  2026-10-22: `__getitem__` gave the popped byte back).
 - **Who notices:** Python code that deletes a slice with a negative step from a
-  `vector_of_uint8_t`.
-- **A fix:** erase the slice's positions from the highest down.
+  `vector_of_uint8_t`, or slices one with a bound whose `__index__` shrinks it.
+- **A fix:** erase the slice's positions from the highest down; compute the slice after its
+  bounds' `__index__`, or check the positions against the size then.
 - **Status:** the port raises ValueError "vector_of_uint8_t.__delitem__: a slice whose erasing
   loop leaves the vector, where the wheel erases memory it doesn't own (docs/improvements.md,
   U-132)", before erasing anything, where the loop would leave the vector; elsewhere it erases
-  what the wheel's loop erases. In `p6-config` (6.6a,
+  what the wheel's loop erases. For a slice whose `__index__` shrank the vector, `__getitem__`
+  and `__setitem__` raise ValueError "vector_of_uint8_t.__getitem__: a slice whose index
+  shrank the vector, where the wheel reads memory the vector no longer holds
+  (docs/improvements.md, U-132)" (`__setitem__` and "writes" in it) before reading or writing
+  any element. In `p6-config` (6.6a,
   `crates/ocio-py/src/py_config_io_proxy.rs`); `vector_oracle.rs`.
 
 ### U-133. A `vector_of_uint8_t` iterator read after its vector reallocated or shrank

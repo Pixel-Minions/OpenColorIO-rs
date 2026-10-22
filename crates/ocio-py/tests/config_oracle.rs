@@ -913,6 +913,14 @@ fn processors_script() -> Script {
     call(&mut sc, c, "getProcessor", vec![s("linear"), s("lg")]);
     call(&mut sc, c, "getProcessor", vec![r(lin), r(log)]);
     call(&mut sc, c, "getProcessor", vec![r(ctx), r(lin), r(log)]);
+    // The same color space as source and destination (the config's own, and one of its own).
+    call(&mut sc, c, "getProcessor", vec![r(lin), r(lin)]);
+    call(&mut sc, c, "getProcessor", vec![r(ctx), r(lin), r(lin)]);
+    call(&mut sc, c, "getProcessor", vec![s("lin"), s("lin")]);
+    let own = sc.call(n("OCIO.ColorSpace"), vec![]);
+    call(&mut sc, own, "setName", vec![s("log")]);
+    call(&mut sc, c, "getProcessor", vec![r(own), r(own)]);
+    call(&mut sc, c, "getProcessor", vec![r(cur), r(own), r(own)]);
     call(&mut sc, c, "getProcessor", vec![r(cur), s("lin"), s("log")]);
     call(&mut sc, c, "getProcessor", vec![r(ctx), s("lin"), s("log")]);
     let dir_fwd = n("OCIO.TRANSFORM_DIR_FORWARD");

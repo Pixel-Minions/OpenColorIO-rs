@@ -2317,7 +2317,10 @@ fn processor_between_spaces(
             &ocio::Exception::new("Config::GetProcessor failed. Destination color space is null."),
         ));
     };
-    let (src, dst) = (src.lock().cs.name().to_vec(), dst.lock().cs.name().to_vec());
+    // Each name in its own statement: `src` and `dst` may be the same color space, whose lock
+    // two guards alive at once would take twice.
+    let src = src.lock().cs.name().to_vec();
+    let dst = dst.lock().cs.name().to_vec();
     processor_with(
         py,
         config,
