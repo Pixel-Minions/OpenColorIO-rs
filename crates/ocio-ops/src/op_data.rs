@@ -20,6 +20,7 @@ use crate::ops::exponent::ExponentOpData;
 use crate::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
 use crate::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpData;
 use crate::ops::gamma::GammaOpData;
+use crate::ops::gradinghuecurve::grading_hue_curve_op_data::GradingHueCurveOpData;
 use crate::ops::gradingprimary::grading_primary_op_data::GradingPrimaryOpData;
 use crate::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
 use crate::ops::gradingtone::grading_tone_op_data::GradingToneOpData;
@@ -121,6 +122,8 @@ pub enum OpData {
     Exponent(ExponentOpData),
     /// `FixedFunctionOpData`.
     FixedFunction(FixedFunctionOpData),
+    /// `GradingHueCurveOpData`.
+    GradingHueCurve(GradingHueCurveOpData),
     /// `GradingToneOpData`.
     GradingTone(GradingToneOpData),
     /// `GradingRGBCurveOpData`.
@@ -157,6 +160,7 @@ impl OpData {
             OpData::Range(data) => data.get_type(),
             OpData::Exponent(data) => data.get_type(),
             OpData::FixedFunction(data) => data.get_type(),
+            OpData::GradingHueCurve(data) => data.get_type(),
             OpData::GradingTone(data) => data.get_type(),
             OpData::GradingRgbCurve(data) => data.get_type(),
             OpData::ExposureContrast(data) => data.get_type(),
@@ -186,6 +190,7 @@ impl OpData {
                 Ok(())
             }
             OpData::FixedFunction(data) => data.validate(),
+            OpData::GradingHueCurve(data) => data.validate(),
             OpData::GradingTone(data) => data.validate(),
             OpData::GradingRgbCurve(data) => data.validate(),
             OpData::ExposureContrast(data) => {
@@ -218,6 +223,7 @@ impl OpData {
             OpData::Range(data) => Ok(data.is_no_op()),
             OpData::Exponent(data) => Ok(data.is_no_op()),
             OpData::FixedFunction(data) => Ok(data.is_no_op()),
+            OpData::GradingHueCurve(data) => Ok(data.is_no_op()),
             OpData::GradingTone(data) => Ok(data.is_no_op()),
             OpData::GradingRgbCurve(data) => Ok(data.is_no_op()),
             OpData::ExposureContrast(data) => Ok(data.is_no_op()),
@@ -242,6 +248,7 @@ impl OpData {
             OpData::Range(data) => Ok(data.is_identity()),
             OpData::Exponent(data) => Ok(data.is_identity()),
             OpData::FixedFunction(data) => Ok(data.is_identity()),
+            OpData::GradingHueCurve(data) => Ok(data.is_identity()),
             OpData::GradingTone(data) => Ok(data.is_identity()),
             OpData::GradingRgbCurve(data) => Ok(data.is_identity()),
             OpData::ExposureContrast(data) => Ok(data.is_identity()),
@@ -272,6 +279,7 @@ impl OpData {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
@@ -303,6 +311,7 @@ impl OpData {
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::FixedFunction(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
@@ -326,6 +335,7 @@ impl OpData {
             OpData::Range(data) => data.has_channel_crosstalk(),
             OpData::Exponent(data) => data.has_channel_crosstalk(),
             OpData::FixedFunction(data) => data.has_channel_crosstalk(),
+            OpData::GradingHueCurve(data) => data.has_channel_crosstalk(),
             OpData::GradingTone(data) => data.has_channel_crosstalk(),
             OpData::GradingRgbCurve(data) => data.has_channel_crosstalk(),
             OpData::ExposureContrast(data) => data.has_channel_crosstalk(),
@@ -351,6 +361,9 @@ impl OpData {
             OpData::Range(data) => matches!(other, OpData::Range(other) if data.equals(other)),
             OpData::FixedFunction(data) => {
                 matches!(other, OpData::FixedFunction(other) if data.equals(other))
+            }
+            OpData::GradingHueCurve(data) => {
+                matches!(other, OpData::GradingHueCurve(other) if data.equals(other))
             }
             OpData::GradingTone(data) => {
                 matches!(other, OpData::GradingTone(other) if data.equals(other))
@@ -388,6 +401,7 @@ impl OpData {
             OpData::Range(data) => Ok(data.get_cache_id()),
             OpData::Exponent(data) => Ok(data.get_cache_id()),
             OpData::FixedFunction(data) => Ok(data.get_cache_id()),
+            OpData::GradingHueCurve(data) => Ok(data.get_cache_id()),
             OpData::GradingTone(data) => Ok(data.get_cache_id()),
             OpData::GradingRgbCurve(data) => Ok(data.get_cache_id()),
             OpData::ExposureContrast(data) => Ok(data.get_cache_id()),
@@ -411,6 +425,7 @@ impl OpData {
             OpData::Range(data) => data.get_format_metadata(),
             OpData::Exponent(data) => data.get_format_metadata(),
             OpData::FixedFunction(data) => data.get_format_metadata(),
+            OpData::GradingHueCurve(data) => data.get_format_metadata(),
             OpData::GradingTone(data) => data.get_format_metadata(),
             OpData::GradingRgbCurve(data) => data.get_format_metadata(),
             OpData::ExposureContrast(data) => data.get_format_metadata(),
@@ -434,6 +449,7 @@ impl OpData {
             OpData::Range(data) => data.get_format_metadata_mut(),
             OpData::Exponent(data) => data.get_format_metadata_mut(),
             OpData::FixedFunction(data) => data.get_format_metadata_mut(),
+            OpData::GradingHueCurve(data) => data.get_format_metadata_mut(),
             OpData::GradingTone(data) => data.get_format_metadata_mut(),
             OpData::GradingRgbCurve(data) => data.get_format_metadata_mut(),
             OpData::ExposureContrast(data) => data.get_format_metadata_mut(),

@@ -3305,6 +3305,42 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   grading_tone_op_cpu.rs`, `lin_log_pixel`, `log_lin_pixel`); the battery compares alpha bit
   for bit for the linear style (`crates/ocio-ops/tests/grading_tone_oracle.rs`).
 
+### I-271. Two hue curve ops make an inverse pair whatever their RGB-to-HSY settings, but linear
+
+- **Upstream:** `GradingHueCurveOpData::isInverse` compares the RGB-to-HSY settings only in the
+  linear style (`m_style != GRADING_LIN || m_RGBToHSY == r->m_RGBToHSY`,
+  `ops/gradinghuecurve/GradingHueCurveOpData.cpp:117-119` @ v2.5.2), a check copied from the
+  RGB curves' lin-to-log bypass, which only the linear style has. The hue curves' setting
+  matters in every style: an op that converts RGB to HSY and back is no inverse of one that
+  doesn't. The optimizer (`RemoveInverseOps`, `OpOptimizers.cpp:207-300`) removes such a pair
+  in the log and video styles, where the unoptimized processor applies both.
+- **Who notices:** a group of a log or video GradingHueCurveTransform and its inverse with
+  `setRGBToHSY(HSY_TRANSFORM_NONE)` on one of them (an application doing its own HSY
+  conversion on one side): the optimized processor is an identity.
+- **A fix:** compare the setting in every style.
+- **Status:** matched in `p5-huecurve` (5.4a, `crates/ocio-ops/src/ops/gradinghuecurve/
+  grading_hue_curve_op_data.rs`, `is_inverse`); checked against the wheel
+  (`crates/ocio-ops/tests/grading_hue_curve_op_data_oracle.rs`,
+  `inverse_pairs_are_removed_as_the_wheels`).
+
+### I-272. A draw-curve-only hue curve op of identity curves is removed as an identity
+
+- **Upstream:** in draw-curve-only mode the CPU renderer evaluates the hue-sat curve on each
+  channel, whether or not the curves are identities ("LocalBypass does not matter",
+  `ops/gradinghuecurve/GradingHueCurveOpCPU.cpp:177-198` @ v2.5.2): with the default curves,
+  every R, G and B comes out 1. But `isIdentity` ignores the mode
+  (`GradingHueCurveOpData.cpp:103-108`, `GradingHueCurve.cpp:206-216`), so the optimizer
+  removes the op, and the processor gives the pixels back unchanged; without optimization it
+  gives the drawn curve. The GPU shader of a non-dynamic op of identity curves is empty too
+  (`GradingHueCurveOpGPU.cpp:604-612`), drawing nothing.
+- **Who notices:** a user interface drawing the default (or any identity) hue-sat curve with
+  an optimized processor.
+- **A fix:** make a draw-curve-only op never an identity, and write its shader whatever the
+  local bypass.
+- **Status:** matched in `p5-huecurve` (5.4a, `grading_hue_curve_op_data.rs`, `is_identity`;
+  the renderer and the shader come with 5.4b and 5.4c); checked against the wheel
+  (`crates/ocio-ops/tests/grading_hue_curve_op_data_oracle.rs`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

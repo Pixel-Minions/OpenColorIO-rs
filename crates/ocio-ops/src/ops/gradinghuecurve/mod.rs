@@ -2,6 +2,9 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The GradingHueCurve op family: a port of `src/OpenColorIO/ops/gradinghuecurve/` @ v2.5.2.
-//! So far its curves (5.0c); the op data, op and renderers come with WP 5.4.
+//! Its curves (5.0c), the op data and the op (5.4a); the renderers come with 5.4b, the GPU
+//! shader with 5.4c, the transform with 5.5e.
 
 pub mod grading_hue_curve;
+pub mod grading_hue_curve_op;
+pub mod grading_hue_curve_op_data;

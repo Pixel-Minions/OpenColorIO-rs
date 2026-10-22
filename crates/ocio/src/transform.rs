@@ -773,6 +773,12 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
             "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
         )),
         OpData::Lut3D(_) => create_lut3d_transform(group, op),
+        // `CreateGradingHueCurveTransform` (src/OpenColorIO/ops/gradinghuecurve/
+        // GradingHueCurveOp.cpp:219-232 @ v2.5.2) comes with `GradingHueCurveTransform` (WP
+        // 5.5e).
+        OpData::GradingHueCurve(_) => Err(Exception::new(
+            "CreateGradingHueCurveTransform is not ported yet (WP 5.5e).",
+        )),
         // `CreateGradingToneTransform` (src/OpenColorIO/ops/gradingtone/GradingToneOp.cpp:
         // 217-230 @ v2.5.2) comes with `GradingToneTransform` (WP 5.5d).
         OpData::GradingTone(_) => Err(Exception::new(

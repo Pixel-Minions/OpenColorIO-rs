@@ -80,9 +80,8 @@ const DOUBLE_PRECISION: i64 = 15;
 
 /// The lowest CTF version that can hold `op`.
 ///
-/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:225-384 @ v2.5.2). The grading types but
-/// the RGB curves', the primary's and the tone's have no op data yet (Phase 5); upstream's
-/// default, `CTF_PROCESS_LIST_VERSION`, is for none of the types the port has.
+/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:225-384 @ v2.5.2). Upstream's default,
+/// `CTF_PROCESS_LIST_VERSION`, is for none of the types the port has.
 fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
     use FixedFunctionOpStyle as F;
 
@@ -126,6 +125,8 @@ fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
         | OpData::GradingRgbCurve(_)
         | OpData::GradingTone(_)
         | OpData::Log(_) => CTF_PROCESS_LIST_VERSION_2_0,
+        // CTFTransform.cpp:296-300.
+        OpData::GradingHueCurve(_) => CTF_PROCESS_LIST_VERSION_2_5,
         OpData::Exponent(exp) => {
             if exp.exp4[3] == 1. {
                 CTF_PROCESS_LIST_VERSION_1_3
@@ -1761,6 +1762,15 @@ impl<'t> TransformWriter<'t> {
                             out_bit_depth: out_bd,
                         };
                         op_writer.write(formatter)?;
+                    }
+                    // CTFTransform.cpp:2849-2862: `GradingHueCurveWriter` comes with WP 4.6f.
+                    OpData::GradingHueCurve(_) => {
+                        if self.is_clf {
+                            return Err(throw_write_op("GradingHueCurve"));
+                        }
+                        return Err(Exception::new(
+                            "GradingHueCurveWriter is not ported yet (WP 4.6f).",
+                        ));
                     }
                     // CTFTransform.cpp:2863-2876: `GradingToneWriter` comes with WP 4.6f.
                     OpData::GradingTone(_) => {

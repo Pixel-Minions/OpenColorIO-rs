@@ -864,6 +864,14 @@ impl DynamicPropertyGradingHueCurveImpl {
         })
     }
 
+    /// A property holding `state` as it is: the curves and their knots, not fitted again.
+    pub fn from_state(state: HueCurveState, dynamic: bool) -> Self {
+        DynamicPropertyGradingHueCurveImpl {
+            base: DynamicPropertyImpl::new(DynamicPropertyType::GradingHueCurve, dynamic),
+            state: RwLock::new(state),
+        }
+    }
+
     /// The value and its knots and coefficients, read-locked.
     pub fn state(&self) -> RwLockReadGuard<'_, HueCurveState> {
         self.state.read().unwrap_or_else(|e| e.into_inner())
