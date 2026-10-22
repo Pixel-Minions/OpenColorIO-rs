@@ -3169,9 +3169,14 @@ pub(crate) fn read<'a>(
     config: &mut Config,
     filename: Option<&[u8]>,
 ) -> ocio_ops::exception::Result<()> {
-    let loaded = load(input)
-        .map_err(LoadError::from)
-        .and_then(|node| load_config(&node, config, filename));
+    // `catch (const std::exception & e)`: an application's exception (its logging function's,
+    // say) is read by its `what()` too.
+    let loaded = ocio_ops::foreign_exception::try_foreign(|| {
+        load(input)
+            .map_err(LoadError::from)
+            .and_then(|node| load_config(&node, config, filename))
+    })
+    .unwrap_or_else(|e| Err(LoadError::from(Exception::new(e.what()))));
     loaded.map_err(|e| {
         let mut os = b"Error: Loading the OCIO profile ".to_vec();
         if let Some(f) = names_a_file(filename) {

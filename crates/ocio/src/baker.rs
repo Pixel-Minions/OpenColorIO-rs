@@ -460,7 +460,10 @@ impl Baker {
         }
 
         let mut stream = OStringStream::new(Crt::NATIVE);
-        let baked = fmt.bake(self, &self.format_name, &mut stream);
+        // `catch (std::exception & e)`: an application's exception too.
+        let baked = ocio_ops::foreign_exception::catch_std(|| {
+            fmt.bake(self, &self.format_name, &mut stream)
+        });
         // What the format wrote before an error stays written, as on upstream's stream.
         let _ = os.write_all(stream.str());
         if let Err(e) = baked {

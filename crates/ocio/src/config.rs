@@ -1052,13 +1052,17 @@ impl Config {
     /// v2.5.2) and `operator<<(std::ostream&, const Config&)` (Config.cpp:5236-5240), into a
     /// buffer: upstream writes nothing to the stream when it fails.
     pub fn serialize(&self) -> Result<Vec<u8>> {
-        self.check_version_consistency()
-            .and_then(|()| crate::ocio_yaml::write(self))
-            .map_err(|e| {
-                let mut error = b"Error building YAML: ".to_vec();
-                error.extend_from_slice(e.what());
-                Exception::new(error)
-            })
+        // `catch (const std::exception & e)`: an application's exception too (its logging
+        // function's, for a warning the writer logs).
+        ocio_ops::foreign_exception::catch_std(|| {
+            self.check_version_consistency()
+                .and_then(|()| crate::ocio_yaml::write(self))
+        })
+        .map_err(|e| {
+            let mut error = b"Error building YAML: ".to_vec();
+            error.extend_from_slice(e.what());
+            Exception::new(error)
+        })
     }
 
     /// The config's cache ID with its current context ([`Config::cache_id_with_context`]).
@@ -1111,9 +1115,14 @@ impl Config {
                 filehash.extend_from_slice(iter);
                 filehash.push(b'=');
 
-                match context
-                    .resolve_file_location(iter)
-                    .and_then(|resolved| get_fast_file_hash(&resolved, context))
+                // `catch (...)`: an application's exception too (the hash function's, an I/O
+                // proxy's).
+                match ocio_ops::foreign_exception::try_foreign(|| {
+                    context
+                        .resolve_file_location(iter)
+                        .and_then(|resolved| get_fast_file_hash(&resolved, context))
+                })
+                .unwrap_or_else(|e| Err(Exception::new(e.what())))
                 {
                     Ok(hash) => {
                         filehash.extend_from_slice(&hash);

@@ -40,6 +40,8 @@ pub mod yaml_cpp;
 #[cfg(test)]
 mod file_tests;
 #[cfg(test)]
+mod foreign_exception_tests;
+#[cfg(test)]
 mod test_env;
 
 pub use apphelpers::color_space_helpers::{self, ColorSpaceMenuHelper, ColorSpaceMenuParameters};

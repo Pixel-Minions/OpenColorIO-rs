@@ -51,6 +51,11 @@ impl Drop for EnvGuard {
 /// Serializes the tests that replace the logging function.
 static LOGGING: Mutex<()> = Mutex::new(());
 
+/// The lock [`capture_log`] holds, for other tests that replace the logging function.
+pub(crate) fn logging_lock() -> std::sync::MutexGuard<'static, ()> {
+    LOGGING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Runs `f`, and gives the messages OCIO logged on this thread meanwhile, each as the logging
 /// function receives it (with its prefix and line feed). Messages of other threads go to
 /// stderr, as with the default logging function.

@@ -17,15 +17,17 @@ use ocio_ops::utils::string_utils::{c_str, lower, reverse_find};
 use crate::config::Config;
 use crate::context::Context;
 
-/// A function computing a file's hash from its path: empty when the file doesn't exist.
+/// A function computing a file's hash from its path: empty when the file doesn't exist. It
+/// may hold state (an application's callable, as upstream's `std::function`), and what it
+/// throws travels as a [`ocio_ops::foreign_exception::ForeignException`].
 ///
 /// Port of `ComputeHashFunction` (include/OpenColorIO/OpenColorIO.h @ v2.5.2).
-pub type ComputeHashFunction = fn(&[u8]) -> Vec<u8>;
+pub type ComputeHashFunction = Arc<dyn Fn(&[u8]) -> Vec<u8> + Send + Sync>;
 
-/// The hash function in use: `CreateFileContentHash` unless set otherwise.
+/// The hash function in use: `CreateFileContentHash` (`None`) unless set otherwise.
 ///
 /// Port of `g_hashFunction` (src/OpenColorIO/PathUtils.cpp:33 @ v2.5.2).
-static HASH_FUNCTION: RwLock<ComputeHashFunction> = RwLock::new(create_file_content_hash);
+static HASH_FUNCTION: RwLock<Option<ComputeHashFunction>> = RwLock::new(None);
 
 /// One file's hash, computed once.
 #[derive(Default)]
@@ -45,7 +47,7 @@ static FAST_FILE_HASH_CACHE: Mutex<BTreeMap<Vec<u8>, Arc<Mutex<FileHashResult>>>
 /// Port of `SetComputeHashFunction` (PathUtils.cpp:54-57 @ v2.5.2).
 #[doc(alias = "SetComputeHashFunction")]
 pub fn set_compute_hash_function(hash_function: ComputeHashFunction) {
-    *HASH_FUNCTION.write().unwrap_or_else(|e| e.into_inner()) = hash_function;
+    *HASH_FUNCTION.write().unwrap_or_else(|e| e.into_inner()) = Some(hash_function);
 }
 
 /// Restores `CreateFileContentHash` as the function that computes file hashes.
@@ -53,11 +55,15 @@ pub fn set_compute_hash_function(hash_function: ComputeHashFunction) {
 /// Port of `ResetComputeHashFunction` (PathUtils.cpp:59-62 @ v2.5.2).
 #[doc(alias = "ResetComputeHashFunction")]
 pub fn reset_compute_hash_function() {
-    set_compute_hash_function(create_file_content_hash);
+    *HASH_FUNCTION.write().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 fn hash_function() -> ComputeHashFunction {
-    *HASH_FUNCTION.read().unwrap_or_else(|e| e.into_inner())
+    HASH_FUNCTION
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_else(|| Arc::new(create_file_content_hash))
 }
 
 /// A file's hash, computed once per path (OCIO never notices a file that changed): from the
@@ -68,11 +74,14 @@ fn hash_function() -> ComputeHashFunction {
 /// Port of `GetFastFileHash` (PathUtils.cpp:64-115 @ v2.5.2).
 pub fn get_fast_file_hash(filename: &[u8], context: &Context) -> Result<Vec<u8>> {
     // In this crate's unit tests, which run in parallel in one process, no hash is computed
-    // and cached while a test has replaced the hash function ([`hash_function_change`]).
+    // and cached while a test has replaced the hash function ([`hash_function_change`]), but
+    // by that test's own thread.
     #[cfg(test)]
-    let _use = HASH_FUNCTION_USE
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _use = (!CHANGING.with(std::cell::Cell::get)).then(|| {
+        HASH_FUNCTION_USE
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    });
     let result = {
         let mut cache = FAST_FILE_HASH_CACHE
             .lock()
@@ -275,10 +284,29 @@ static HASH_FUNCTION_USE: RwLock<()> = RwLock::new(());
 /// path's first candidate, `shot4/shot1/lut1.clf`, broke OCIOZArchive's
 /// extract_config_and_compare_to_original that way, in a CI run on Rocky Linux 9.)
 #[cfg(test)]
-pub(crate) fn hash_function_change() -> std::sync::RwLockWriteGuard<'static, ()> {
-    HASH_FUNCTION_USE
+pub(crate) fn hash_function_change() -> HashFunctionChange {
+    let guard = HASH_FUNCTION_USE
         .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    CHANGING.with(|c| c.set(true));
+    HashFunctionChange(guard)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether this thread holds [`hash_function_change`]'s guard.
+    static CHANGING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// [`hash_function_change`]'s guard.
+#[cfg(test)]
+pub(crate) struct HashFunctionChange(#[allow(dead_code)] std::sync::RwLockWriteGuard<'static, ()>);
+
+#[cfg(test)]
+impl Drop for HashFunctionChange {
+    fn drop(&mut self) {
+        CHANGING.with(|c| c.set(false));
+    }
 }
 
 #[cfg(test)]
