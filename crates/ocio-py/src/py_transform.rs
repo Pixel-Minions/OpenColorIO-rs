@@ -53,8 +53,16 @@ pub(crate) const BIT_DEPTH: &str = q!("BitDepth");
 
 /// A transform as pybind11's holder shares it (`TransformRcPtr`): cloning the handle shares the
 /// node.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct TransformRc(Arc<Mutex<Node>>);
+
+impl Clone for TransformRc {
+    /// The handle shared, counted ([`RegistryStats::handles_cloned`]).
+    fn clone(&self) -> Self {
+        HANDLES_CLONED.fetch_add(1, Ordering::Relaxed);
+        TransformRc(self.0.clone())
+    }
+}
 
 /// What a [`TransformRc`] holds.
 #[derive(Debug)]
@@ -299,6 +307,11 @@ impl<K: Eq + Hash + Clone> Registry<K> {
         })
     }
 
+    /// The number of keys with a live entry.
+    pub(crate) fn key_count(&self) -> usize {
+        self.by_key.len()
+    }
+
     fn insert(&mut self, key: K, wr: Py<PyWeakrefReference>) {
         self.keys.insert(wr.as_ptr() as usize, key.clone());
         self.by_key.entry(key).or_default().push(wr);
@@ -349,6 +362,10 @@ pub(crate) fn register_in<K: Eq + Hash + Clone + Send + 'static>(
     Ok(())
 }
 
+/// The [`TransformRc`] handles cloned, for the tests of the cost of reading a group's
+/// children.
+static HANDLES_CLONED: AtomicUsize = AtomicUsize::new(0);
+
 /// The weak references the registries' lookups have read, for the tests of their cost.
 static EXAMINED: AtomicUsize = AtomicUsize::new(0);
 
@@ -362,16 +379,33 @@ pub struct RegistryStats {
     pub format_metadata: usize,
     /// The objects of the other classes registered (contexts, rules, color spaces, ...).
     pub shared: usize,
+    /// The keys the registries of transforms, `FormatMetadata` objects and the other classes
+    /// hold (`by_key`), which they drop with their last entry.
+    pub keys: [usize; 3],
+    /// The transform handles cloned since the module was loaded: one per child a group's
+    /// `getTransform` reads, and one per new Python object of a transform.
+    pub handles_cloned: usize,
     /// The entries the lookups have read since the module was loaded.
     pub examined: usize,
 }
 
 /// [`RegistryStats`] now.
 pub fn registry_stats() -> RegistryStats {
+    // One lock at a time: a guard in a field's expression lives to the end of the statement.
+    let (transforms, transform_keys) = {
+        let registry = lock(&INSTANCES);
+        (registry.keys.len(), registry.key_count())
+    };
     RegistryStats {
-        transforms: lock(&INSTANCES).keys.len(),
+        transforms,
         format_metadata: crate::py_format_metadata::registered_count(),
         shared: crate::shared::registered_count(),
+        keys: [
+            transform_keys,
+            crate::py_format_metadata::registered_keys(),
+            crate::shared::registered_keys(),
+        ],
+        handles_cloned: HANDLES_CLONED.load(Ordering::Relaxed),
         examined: EXAMINED.load(Ordering::Relaxed),
     }
 }

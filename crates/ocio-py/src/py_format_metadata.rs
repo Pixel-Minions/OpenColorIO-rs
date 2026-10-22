@@ -349,6 +349,11 @@ pub(crate) fn registered_count() -> usize {
     lock(&INSTANCES).keys.len()
 }
 
+/// The number of keys the registry holds.
+pub(crate) fn registered_keys() -> usize {
+    lock(&INSTANCES).key_count()
+}
+
 /// A returned `FormatMetadata &` (`reference_internal`), whose call's first argument is
 /// `patient`: the object registered for the element while it lives, else a new one; either way
 /// keeping `patient` alive.

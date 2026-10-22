@@ -57,6 +57,7 @@ fn the_registries_hold_the_live_objects_only_and_look_up_by_node() {
         assert_eq!(after.transforms, base.transforms);
         assert_eq!(after.format_metadata, base.format_metadata);
         assert_eq!(after.shared, base.shared);
+        assert_eq!(after.keys, base.keys);
 
         // A group's children: registered when Python gets them, found again by node.
         run(
@@ -70,6 +71,10 @@ fn the_registries_hold_the_live_objects_only_and_look_up_by_node() {
         run(py, &globals, "kids = list(g)");
         let first = stats(py, &globals);
         assert_eq!(first.transforms, base.transforms + 1 + 2 * N);
+        // Iterating reads each child once: the handle `getTransform` clones for it, and the
+        // one its new object holds; and the group's own handle for `len(g)` (list's length
+        // hint) and `iter(g)`. 2 N + 2, where reading all the children for each would be N².
+        assert_eq!(first.handles_cloned - made.handles_cloned, 2 * N + 2);
         // No child had an object: each lookup read nothing.
         assert_eq!(first.examined, made.examined);
         run(
@@ -79,6 +84,8 @@ fn the_registries_hold_the_live_objects_only_and_look_up_by_node() {
              assert all(a is b for a, b in zip(kids, again))",
         );
         let second = stats(py, &globals);
+        // `g[i]` for each: the group's handle and the child's, its object found again.
+        assert_eq!(second.handles_cloned - first.handles_cloned, 2 * N);
         // Each lookup read its own node's one entry, whatever else lives.
         assert_eq!(second.examined - first.examined, N);
         assert_eq!(second.transforms, first.transforms);
@@ -88,11 +95,16 @@ fn the_registries_hold_the_live_objects_only_and_look_up_by_node() {
             py,
             &globals,
             "fms = [kids[0].getFormatMetadata() for _ in range(N)]\n\
-             assert all(f is fms[0] for f in fms)",
+             assert all(f is fms[0] for f in fms)\n\
+             assert kids[0].getFormatMetadata() is not kids[1].getFormatMetadata()\n\
+             a, b = OCIO.MatrixTransform(), OCIO.MatrixTransform()\n\
+             assert a.getFormatMetadata() is not b.getFormatMetadata()\n\
+             del a, b",
         );
         let fm = stats(py, &globals);
         assert_eq!(fm.format_metadata, base.format_metadata + 1);
-        assert_eq!(fm.examined - second.examined, N - 1);
+        // The N - 1 lookups of fms[0], and those of kids[0]'s again (fms[0] found).
+        assert_eq!(fm.examined - second.examined, N);
 
         // Objects in a reference cycle, which only the collector frees. (Not one through
         // getFormatMetadata's keep-alive, which the collector can't see, and which the wheel
@@ -113,5 +125,6 @@ fn the_registries_hold_the_live_objects_only_and_look_up_by_node() {
         assert_eq!(end.transforms, base.transforms);
         assert_eq!(end.format_metadata, base.format_metadata);
         assert_eq!(end.shared, base.shared);
+        assert_eq!(end.keys, base.keys);
     });
 }

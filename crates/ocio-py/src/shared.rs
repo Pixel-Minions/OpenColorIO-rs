@@ -154,6 +154,11 @@ macro_rules! this_shared {
     };
 }
 
+/// The number of keys the registry holds, for the registry's tests.
+pub(crate) fn registered_keys() -> usize {
+    lock(&INSTANCES).key_count()
+}
+
 /// The number of objects registered, for the registry's tests.
 pub(crate) fn registered_count() -> usize {
     lock(&INSTANCES).keys.len()
