@@ -6,6 +6,7 @@
 
 pub(crate) mod category_helpers;
 pub mod color_space_helpers;
+pub mod legacy_viewing_pipeline;
 
 #[cfg(test)]
 mod configs_data;

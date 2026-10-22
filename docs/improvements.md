@@ -5003,3 +5003,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`a_role_set_to_the_empty_name_is_refused_when_the_menu_is_made`, which compares with the
   wheel what doesn't build that menu: the same config without the roles included, and an added
   color space the config doesn't have).
+
+### U-151. A pipeline given an invalid FixedFunctionTransform
+
+- **Upstream:** `LegacyViewingPipelineImpl::setLinearCC`, `setColorTimingCC`, `setChannelView`
+  and `setDisplayCC` are `noexcept`, and keep `cc->createEditableCopy()`
+  (`LegacyViewingPipeline.cpp:53-114` @ v2.5.2). A FixedFunctionTransform's copy is made by
+  `FixedFunctionTransform::Create(style, params)`, which validates the parameters
+  (`FixedFunctionTransform.cpp:54-73`): for a transform whose parameters were made invalid
+  after it was built (`setParams`), the copy throws, the exception leaves a `noexcept`
+  function, and `std::terminate` ends the process (probed on Windows, 2026-10-22:
+  `FixedFunctionTransform(ACES_GAMUT_COMP_13, 7 params)`, `setParams([1.0])`, then
+  `pipeline.setLinearCC(ff)` ends the wheel's process without a Python exception).
+- **Who notices:** an application handing the pipeline a fixed function transform it changed
+  to parameters the style refuses.
+- **A fix:** let the setters throw (drop `noexcept`), as `ColorSpace::setTransform` does.
+- **Status:** the port's setters return the copy's error, and the pipeline keeps the transform
+  it had (owner decision 2026-10-22, P5-3 c: setters taking `Option<&Transform>` and returning
+  `Result`, as `ColorSpace::set_transform`). In `p5-helpers-2` (5.7d,
+  `apphelpers/legacy_viewing_pipeline.rs`, `editable_copy`); `legacy_viewing_pipeline_oracle.rs`
+  (`setters_refuse_an_invalid_fixed_function`).

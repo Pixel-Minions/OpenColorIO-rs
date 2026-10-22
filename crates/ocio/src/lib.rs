@@ -43,6 +43,7 @@ mod file_tests;
 mod test_env;
 
 pub use apphelpers::color_space_helpers::{self, ColorSpaceMenuHelper, ColorSpaceMenuParameters};
+pub use apphelpers::legacy_viewing_pipeline::LegacyViewingPipeline;
 pub use baker::Baker;
 pub use builtinconfigs::builtin_config_registry::{
     BuiltinConfigRegistry, OCIO_BUILTIN_URI_PREFIX, resolve_config_path,
