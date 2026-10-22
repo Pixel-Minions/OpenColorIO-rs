@@ -28,6 +28,7 @@ static INIT: Function = Function {
     name: "__init__",
     constructor: true,
     method: true,
+    operator: false,
     overloads: &[crate::dispatch::Overload {
         params: &[SELF],
         ret: "None",

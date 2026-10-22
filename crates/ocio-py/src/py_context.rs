@@ -61,6 +61,7 @@ static INIT: Function = Function {
     name: "__init__",
     constructor: true,
     method: true,
+    operator: false,
     overloads: &[
         Overload {
             params: &[SELF],
@@ -464,6 +465,7 @@ static RESOLVE_STRING_VAR: Function = Function {
     name: "resolveStringVar",
     constructor: false,
     method: true,
+    operator: false,
     overloads: &[
         Overload {
             params: &[SELF, Param::new("string", "str")],
@@ -504,6 +506,7 @@ static RESOLVE_FILE_LOCATION: Function = Function {
     name: "resolveFileLocation",
     constructor: false,
     method: true,
+    operator: false,
     overloads: &[
         Overload {
             params: &[SELF, Param::new("filename", "str")],

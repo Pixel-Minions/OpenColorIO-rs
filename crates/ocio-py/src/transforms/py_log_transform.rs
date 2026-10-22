@@ -23,6 +23,7 @@ static INIT: Function = Function {
     name: "__init__",
     constructor: true,
     method: true,
+    operator: false,
     overloads: &[
         Overload {
             params: &[SELF],

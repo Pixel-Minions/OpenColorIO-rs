@@ -23,7 +23,7 @@
 //!   those whose arguments bound (and that have a positional parameter besides `self`) again,
 //!   with conversions.
 //! - **The casters** ([`Cast`]): see each implementation.
-//! - **No overload accepts the arguments**: `TypeError`, "`name`(): incompatible function
+//! - **No overload accepts the arguments**: for an operator, `NotImplemented`; else `TypeError`, "`name`(): incompatible function
 //!   arguments. The following argument types are supported:" with each overload's signature
 //!   and "Invoked with:" the arguments' reprs (for a constructor, "__init__(): incompatible
 //!   constructor arguments." and each signature as `Class(params)`).
@@ -99,6 +99,9 @@ pub struct Function {
     pub constructor: bool,
     /// A method: its first parameter is `self`, which the second pass doesn't count.
     pub method: bool,
+    /// An operator (`py::is_operator()`): a call no overload accepts returns `NotImplemented`,
+    /// whatever its arguments, so that Python tries the other operand's method.
+    pub operator: bool,
     pub overloads: &'static [Overload],
 }
 
@@ -216,6 +219,9 @@ pub fn dispatch<'py>(
         if let Some(result) = (o.call)(py, o, &values, true)? {
             return Ok(result);
         }
+    }
+    if f.operator {
+        return Ok(py.NotImplemented());
     }
     Err(PyTypeError::new_err(incompatible(f, args, kwargs)?))
 }

@@ -35,6 +35,7 @@ static INIT: Function = Function {
     name: "__init__",
     constructor: true,
     method: true,
+    operator: false,
     overloads: &[Overload {
         params: &[SELF],
         ret: "None",
@@ -223,6 +224,7 @@ static INSERT_RULE: Function = Function {
     name: "insertRule",
     constructor: false,
     method: true,
+    operator: false,
     overloads: &[
         Overload {
             params: &[

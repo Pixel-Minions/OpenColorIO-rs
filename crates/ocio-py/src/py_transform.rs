@@ -612,6 +612,7 @@ macro_rules! method_def {
             name: $name,
             constructor: false,
             method: true,
+            operator: false,
             overloads: &[$crate::dispatch::Overload {
                 params: &[$($param),*],
                 ret: $ret,
@@ -630,6 +631,7 @@ macro_rules! static_def {
             name: $name,
             constructor: false,
             method: false,
+            operator: false,
             overloads: &[$crate::dispatch::Overload {
                 params: &[$($param),*],
                 ret: $ret,

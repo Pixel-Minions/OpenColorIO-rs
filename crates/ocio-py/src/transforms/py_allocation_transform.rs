@@ -16,12 +16,12 @@ use crate::py_transform::{
 use crate::{enum_param, method_def, q, this_rc};
 
 const ALLOCATION_TRANSFORM: &str = q!("AllocationTransform");
-const ALLOCATION: &str = q!("Allocation");
+pub(crate) const ALLOCATION: &str = q!("Allocation");
 const SELF: Param = Param::new("self", ALLOCATION_TRANSFORM);
 const VARS: &str = "collections.abc.Sequence[typing.SupportsFloat]";
 
 /// The library's `Allocation` of the C++ value `v`.
-fn allocation(v: i64) -> PyResult<Allocation> {
+pub(crate) fn allocation(v: i64) -> PyResult<Allocation> {
     [Allocation::Unknown, Allocation::Uniform, Allocation::Lg2]
         .into_iter()
         .find(|a| *a as i64 == v)
@@ -46,6 +46,7 @@ static INIT: Function = Function {
     name: "__init__",
     constructor: true,
     method: true,
+    operator: false,
     overloads: &[
         Overload {
             params: &[SELF],

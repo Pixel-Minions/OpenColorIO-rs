@@ -156,6 +156,7 @@ fn function(
         name,
         constructor,
         method,
+        operator: false,
         overloads: Box::leak(overloads.into_boxed_slice()),
     }))
 }

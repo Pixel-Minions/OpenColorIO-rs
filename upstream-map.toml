@@ -3757,13 +3757,15 @@ status = "todo"
 path = "src/bindings/python/PyColorSpace.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_color_space.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3e"
 
 [[file]]
 path = "src/bindings/python/PyColorSpaceSet.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_color_space_set.rs"]
-status = "todo"
+status = "done"
+note = "p6-objects 6.3e"
 
 [[file]]
 path = "src/bindings/python/PyConfig.cpp"
