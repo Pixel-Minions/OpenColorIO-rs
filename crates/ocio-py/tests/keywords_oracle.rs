@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 
 /// The classes bound so far whose functions the test calls, with their nested classes (the
 /// iterators), as the wheel's module path names them.
-const CLASSES: [&str; 28] = [
+const CLASSES: [&str; 29] = [
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -57,6 +57,7 @@ const CLASSES: [&str; 28] = [
     "ColorSpaceTransform",
     "DisplayViewTransform",
     "LookTransform",
+    "BuiltinConfigRegistry",
 ];
 
 /// The nested classes no function of the module returns: no instance to call them with.
@@ -121,6 +122,16 @@ fn instances(sc: &mut Script) -> Vec<(String, usize)> {
     put(
         "FileTransform.FormatIterator",
         sc.call(n("OCIO.FileTransform.getFormats"), vec![]),
+    );
+    let configs = sc.call(n("OCIO.BuiltinConfigRegistry"), vec![]);
+    put("BuiltinConfigRegistry", configs);
+    put(
+        "BuiltinConfigRegistry.BuiltinConfigNameIterator",
+        sc.call(ra(configs, "__iter__"), vec![]),
+    );
+    put(
+        "BuiltinConfigRegistry.BuiltinConfigIterator",
+        sc.call(ra(configs, "getBuiltinConfigs"), vec![]),
     );
     let registry = sc.call(n("OCIO.BuiltinTransformRegistry"), vec![]);
     put("BuiltinTransformRegistry", registry);

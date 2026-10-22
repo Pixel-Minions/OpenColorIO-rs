@@ -5141,6 +5141,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
   `py_look.rs`, `py_named_transform.rs`); `color_space_oracle.rs`, `look_view_named_oracle.rs`.
 
+### U-131. `ExtractOCIOZArchive` given `None` for a path
+
+- **Upstream:** `ExtractOCIOZArchive(const char * archivePath, const char * destination)`
+  makes a `std::string` of the destination (`pystring::os::path::normpath(destination)`) and
+  hands the archive path to minizip's `mz_zip_reader_open_file`, neither checked for null
+  (OCIOZArchive.cpp:335-388 @ v2.5.2); the binding (PyConfig.cpp:1486-1487) passes `None` as a
+  null pointer. The Windows wheel's process dies for either path, or both (probed 2026-10-22).
+- **Who notices:** Python code that passes `None` as a path to `ExtractOCIOZArchive`.
+- **A fix:** refuse null paths with an `Exception`.
+- **Status:** the port raises ValueError "ExtractOCIOZArchive: None, a null pointer the wheel
+  reads as a path (its process dies; docs/improvements.md, U-131)". In `p6-config` (6.3f,
+  `crates/ocio-py/src/py_config.rs`); `config_functions_oracle.rs`.
+
 ### U-141. A menu of a role that names no color space
 
 - **Upstream:** `ColorSpaceInfo::CreateFromSingleRole` and `CreateFromRole` check

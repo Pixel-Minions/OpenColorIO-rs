@@ -3726,13 +3726,15 @@ status = "todo"
 path = "src/bindings/python/PyBuiltinConfigRegistry.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_builtin_config_registry.rs"]
-status = "todo"
+status = "done"
+note = "p6-config 6.3f"
 
 [[file]]
 path = "src/bindings/python/PyBuiltinConfigRegistry.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_builtin_config_registry.rs"]
-status = "todo"
+status = "done"
+note = "p6-config 6.3f"
 
 [[file]]
 path = "src/bindings/python/PyBuiltinTransformRegistry.cpp"

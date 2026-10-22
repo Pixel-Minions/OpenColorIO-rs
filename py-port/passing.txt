@@ -4,6 +4,10 @@ AllocationTransformTest.py::AllocationTransformTest.test_constructor_with_positi
 AllocationTransformTest.py::AllocationTransformTest.test_constructor_wrong_parameter_type
 AllocationTransformTest.py::AllocationTransformTest.test_transform_type
 AllocationTransformTest.py::AllocationTransformTest.test_vars
+BuiltinConfigRegistryTest.py::BuiltinConfigRegistryTest.test_builtin_config_iterable
+BuiltinConfigRegistryTest.py::BuiltinConfigRegistryTest.test_contains
+BuiltinConfigRegistryTest.py::BuiltinConfigRegistryTest.test_get_builtin_configs
+BuiltinConfigRegistryTest.py::BuiltinConfigRegistryTest.test_multi_reference
 BuiltinTransformRegistryTest.py::BuiltinTransformRegistryTest.test_contains
 BuiltinTransformRegistryTest.py::BuiltinTransformRegistryTest.test_get_builtins
 BuiltinTransformRegistryTest.py::BuiltinTransformRegistryTest.test_iterable
@@ -55,6 +59,7 @@ ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_constructor_wrong_param
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_dst
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_src
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_transform_type
+ConfigTest.py::ConfigTest.test_resolve_config
 ConstantsTest.py::ConstantsTest.test_string_constants
 ContextTest.py::ContextTest.test_copy
 ContextTest.py::ContextTest.test_interface

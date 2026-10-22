@@ -25,11 +25,15 @@ pub mod embed;
 #[cfg(feature = "python")]
 pub mod enums;
 #[cfg(feature = "python")]
+pub(crate) mod py_builtin_config_registry;
+#[cfg(feature = "python")]
 pub(crate) mod py_builtin_transform_registry;
 #[cfg(feature = "python")]
 pub(crate) mod py_color_space;
 #[cfg(feature = "python")]
 pub(crate) mod py_color_space_set;
+#[cfg(feature = "python")]
+pub(crate) mod py_config;
 #[cfg(feature = "python")]
 pub(crate) mod py_context;
 #[cfg(feature = "python")]
