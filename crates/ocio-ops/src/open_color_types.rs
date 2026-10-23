@@ -624,6 +624,21 @@ impl HueCurveType {
     }
 }
 
+/// Whether a GradingHueCurve op converts RGB to hue, saturation and luma (and back) around its
+/// curves.
+///
+/// Port of `HSYTransformStyle` (include/OpenColorIO/OpenColorTypes.h:604-609 @ v2.5.2).
+#[doc(alias = "HSYTransformStyle")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HsyTransformStyle {
+    /// `HSY_TRANSFORM_NONE`: no conversion (the pixels are already HSY, converted outside).
+    #[doc(alias = "HSY_TRANSFORM_NONE")]
+    None = 0,
+    /// `HSY_TRANSFORM_1`: the default RGB to hue, saturation and luma conversion.
+    #[doc(alias = "HSY_TRANSFORM_1")]
+    Transform1,
+}
+
 /// The bit depth of a color space, or of the images a CPU processor reads and writes. The
 /// processor supports only `Uint8`, `Uint10`, `Uint12`, `Uint16`, `F16` and `F32`; the other
 /// enumerators exist for upstream's API and are rejected where a supported one is needed.

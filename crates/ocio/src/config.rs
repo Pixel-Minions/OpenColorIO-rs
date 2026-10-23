@@ -4591,9 +4591,9 @@ impl Config {
     /// styles of later minor versions. A group's children are checked the same way.
     ///
     /// Port of `Config::Impl::checkVersionConsistency(ConstTransformRcPtr&)`
-    /// (src/OpenColorIO/Config.cpp:5586-5832 @ v2.5.2). Its ExposureContrast and grading arms
-    /// come with those classes (Phase 5); until then their tags can't be loaded. Two messages
-    /// keep upstream's misspellings (docs/improvements.md, I-146).
+    /// (src/OpenColorIO/Config.cpp:5586-5832 @ v2.5.2). Two messages keep upstream's
+    /// misspellings (docs/improvements.md, I-146); the GradingHueCurveTransform's check leaves
+    /// version 1 out (I-291).
     fn check_transform_version_consistency(&self, transform: &Transform) -> Result<()> {
         let major = self.major_version;
         let minor = self.minor_version;
@@ -4663,6 +4663,13 @@ impl Config {
                 if major < 2 {
                     return Err(Exception::new(
                         "Only config version 2 (or higher) can have ExponentWithLinearTransform.",
+                    ));
+                }
+            }
+            Transform::ExposureContrast(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have ExposureContrastTransform.",
                     ));
                 }
             }
@@ -4740,6 +4747,35 @@ impl Config {
                 if major < 2 {
                     return Err(Exception::new(
                         "Only config version 2 (or higher) can have LogCameraTransform.",
+                    ));
+                }
+            }
+            Transform::GradingPrimary(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have GradingPrimaryTransform.",
+                    ));
+                }
+            }
+            Transform::GradingRgbCurve(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have GradingRGBCurveTransform.",
+                    ));
+                }
+            }
+            Transform::GradingTone(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have GradingToneTransform.",
+                    ));
+                }
+            }
+            Transform::GradingHueCurve(_) => {
+                // Not in version 1: upstream's test (docs/improvements.md, I-291).
+                if major == 2 && minor < 5 {
+                    return Err(Exception::new(
+                        "Only config version 2.5 (or higher) can have GradingHueCurveTransform.",
                     ));
                 }
             }

@@ -121,6 +121,25 @@ impl Look {
         Ok(())
     }
 
+    /// Stores `transform` itself (no copy, so not checked) as the look's transform; `None`
+    /// removes it.
+    ///
+    /// For the Python module: the binding holds the transforms itself, as nodes Python objects
+    /// share (upstream's getters return the very `TransformRcPtr` the object holds, through which
+    /// Python changes it), and gives the library a copy of them to print or to use. That copy
+    /// must not be checked again: upstream doesn't copy the transform it holds when it prints
+    /// it, so an invalid FixedFunctionTransform made so through Python prints as it is.
+    #[doc(hidden)]
+    pub fn set_transform_as_is(&mut self, transform: Option<Transform>) {
+        self.transform = transform;
+    }
+
+    /// [`set_transform_as_is`](Self::set_transform_as_is) of the inverse transform.
+    #[doc(hidden)]
+    pub fn set_inverse_transform_as_is(&mut self, transform: Option<Transform>) {
+        self.inverse_transform = transform;
+    }
+
     /// Port of `Look::getDescription` (Look.cpp:131-134 @ v2.5.2).
     #[doc(alias = "getDescription")]
     pub fn description(&self) -> &[u8] {
@@ -267,5 +286,34 @@ impl fmt::Display for Look {
     /// [`Look::to_bytes`], what isn't UTF-8 replaced by U+FFFD.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&String::from_utf8_lossy(&self.to_bytes()))
+    }
+}
+
+#[cfg(test)]
+mod as_is_tests {
+    use super::*;
+
+    /// Each transform is stored as it is, where the setters' copy refuses it; `None` removes
+    /// it.
+    #[test]
+    fn set_transform_as_is_stores_without_checking() {
+        let ff = crate::color_space::invalid_fixed_function();
+        let mut look = Look::new();
+        assert!(look.set_transform(&ff).is_err());
+        assert!(look.set_inverse_transform(&ff).is_err());
+        look.set_transform_as_is(Some(ff.clone()));
+        assert!(
+            matches!(look.transform(), Some(Transform::FixedFunction(t)) if t.params() == vec![1.0])
+        );
+        assert!(look.inverse_transform().is_none());
+        look.set_inverse_transform_as_is(Some(ff));
+        assert!(
+            matches!(look.inverse_transform(), Some(Transform::FixedFunction(t)) if t.params() == vec![1.0])
+        );
+        look.set_transform_as_is(None);
+        assert!(look.transform().is_none());
+        assert!(look.inverse_transform().is_some());
+        look.set_inverse_transform_as_is(None);
+        assert!(look.inverse_transform().is_none());
     }
 }

@@ -61,6 +61,7 @@ pub(crate) const fn function(name: &'static str, overloads: &'static [Overload])
         name,
         constructor: false,
         method: false,
+        operator: false,
         overloads,
     }
 }
@@ -256,6 +257,18 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::pybind11::def_function(m, &IS_ENV_VARIABLE_PRESENT)?;
 
     // The classes' bindings (PyOpenColorIO.cpp:70-103), those ported so far.
+    crate::py_color_space::bind_py_color_space(m)?;
+    crate::py_color_space_set::bind_py_color_space_set(m)?;
+    crate::py_context::bind_py_context(m)?;
+    crate::py_file_rules::bind_py_file_rules(m)?;
     crate::py_gpu_shader_creator::bind_py_gpu_shader_creator(m)?;
+    crate::py_look::bind_py_look(m)?;
+    crate::py_named_transform::bind_py_named_transform(m)?;
+    crate::py_processor_metadata::bind_py_processor_metadata(m)?;
+    crate::py_viewing_rules::bind_py_viewing_rules(m)?;
+    crate::py_view_transform::bind_py_view_transform(m)?;
+    crate::py_builtin_transform_registry::bind_py_builtin_transform_registry(m)?;
+    crate::py_format_metadata::bind_py_format_metadata(m)?;
+    crate::py_transform::bind_py_transform(m)?;
     Ok(())
 }

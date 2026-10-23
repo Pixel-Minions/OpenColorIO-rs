@@ -472,6 +472,7 @@ static PROBE: ocio_py::dispatch::Function = ocio_py::dispatch::Function {
     name: "probe",
     constructor: false,
     method: false,
+    operator: false,
     overloads: &[
         ocio_py::dispatch::Overload {
             params: &[ocio_py::dispatch::Param::new("size", "typing.SupportsInt")],

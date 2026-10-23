@@ -367,6 +367,7 @@ fn create_cpu_engine(
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)

@@ -4,7 +4,8 @@
 //! The ExposureContrast op: part of a port of `src/OpenColorIO/ops/exposurecontrast/
 //! ExposureContrastOp.h` and `ExposureContrastOp.cpp` @ v2.5.2: the op's behaviors and
 //! [`create_exposure_contrast_op`]. `BuildExposureContrastOp` and
-//! `CreateExposureContrastTransform` work on the `ExposureContrastTransform` (5.5a);
+//! `CreateExposureContrastTransform` work on the `ExposureContrastTransform`, in `ocio`
+//! (crates/ocio/src/transforms/exposure_contrast_transform.rs);
 //! `extractGpuShaderInfo` is the GPU writer's (`ocio-gpu`, 5.1c).
 //!
 //! As for every family, the op is its data, [`OpData::ExposureContrast`]: [`Op`]'s methods

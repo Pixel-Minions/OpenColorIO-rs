@@ -29,6 +29,7 @@ use crate::ops::exponent::exponent_op_gpu::get_exponent_gpu_shader_program;
 use crate::ops::exposurecontrast::exposure_contrast_op_gpu::get_exposure_contrast_gpu_shader_program;
 use crate::ops::fixedfunction::fixed_function_op_gpu::get_fixed_function_gpu_shader_program;
 use crate::ops::gamma::gamma_op_gpu::get_gamma_gpu_shader_program;
+use crate::ops::gradinghuecurve::grading_hue_curve_op_gpu::get_grading_hue_curve_gpu_shader_program;
 use crate::ops::gradingprimary::grading_primary_op_gpu::get_grading_primary_gpu_shader_program;
 use crate::ops::gradingrgbcurve::grading_rgb_curve_op_gpu::get_grading_rgb_curve_gpu_shader_program;
 use crate::ops::gradingtone::grading_tone_op_gpu::get_grading_tone_gpu_shader_program;
@@ -137,6 +138,11 @@ pub(crate) fn extract_op_gpu_shader_info(
         OpData::Gamma(data) => get_gamma_gpu_shader_program(shader_creator, data),
         OpData::Log(data) => get_log_gpu_shader_program(shader_creator, data),
         OpData::FixedFunction(data) => get_fixed_function_gpu_shader_program(shader_creator, data),
+        // `GradingHueCurveOp::extractGpuShaderInfo` (src/OpenColorIO/ops/gradinghuecurve/
+        // GradingHueCurveOp.cpp:194-198 @ v2.5.2).
+        OpData::GradingHueCurve(data) => {
+            get_grading_hue_curve_gpu_shader_program(shader_creator, data)
+        }
         // `GradingToneOp::extractGpuShaderInfo` (src/OpenColorIO/ops/gradingtone/
         // GradingToneOp.cpp:187-191 @ v2.5.2).
         OpData::GradingTone(data) => get_grading_tone_gpu_shader_program(shader_creator, data),

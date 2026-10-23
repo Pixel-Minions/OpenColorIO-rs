@@ -12,8 +12,10 @@
 
 use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
+use crate::open_color_types::GradingStyle;
 use crate::open_color_types::{
-    Allocation, BitDepth, CdlStyle, EnvironmentMode, NegativeStyle, TransformDirection,
+    Allocation, BitDepth, CdlStyle, EnvironmentMode, ExposureContrastStyle, NegativeStyle,
+    TransformDirection,
 };
 use crate::ops::lut3d::lut3d_op_data::Interpolation;
 use crate::platform::strcasecmp;
@@ -189,6 +191,43 @@ pub fn cdl_style_from_string(style: Option<&[u8]>) -> Result<CdlStyle> {
         b"asc" => Ok(CdlStyle::Asc),
         b"noclamp" => Ok(CdlStyle::NoClamp),
         _ => Err(Exception::new(msg(&[b"Wrong CDL style: '", p, b"'."]))),
+    }
+}
+
+/// `linear`, `log` or `video`, in any ASCII case.
+///
+/// Port of `GradingStyleFromString` (src/OpenColorIO/ParseUtils.cpp:443-456 @ v2.5.2).
+pub fn grading_style_from_string(style: Option<&[u8]>) -> Result<GradingStyle> {
+    let p = arg(style);
+    match lower(p).as_slice() {
+        b"linear" => Ok(GradingStyle::Lin),
+        b"log" => Ok(GradingStyle::Log),
+        b"video" => Ok(GradingStyle::Video),
+        // Default style is meaningless.
+        _ => Err(Exception::new(msg(&[
+            b"Unknown grading style: '",
+            p,
+            b"'.",
+        ]))),
+    }
+}
+
+/// `linear`, `video` or `log`, in any ASCII case.
+///
+/// Port of `ExposureContrastStyleFromString` (src/OpenColorIO/ParseUtils.cpp:478-491 @
+/// v2.5.2).
+pub fn exposure_contrast_style_from_string(style: Option<&[u8]>) -> Result<ExposureContrastStyle> {
+    let p = arg(style);
+    match lower(p).as_slice() {
+        b"linear" => Ok(ExposureContrastStyle::Linear),
+        b"video" => Ok(ExposureContrastStyle::Video),
+        b"log" => Ok(ExposureContrastStyle::Logarithmic),
+        // Default style is meaningless.
+        _ => Err(Exception::new(msg(&[
+            b"Unknown exposure contrast style: '",
+            p,
+            b"'.",
+        ]))),
     }
 }
 

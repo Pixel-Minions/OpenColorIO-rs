@@ -31,6 +31,7 @@ use crate::ops::exponent::exponent_op::create_exponent_op;
 use crate::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
 use crate::ops::fixedfunction::fixed_function_op::create_fixed_function_op_from_data;
 use crate::ops::gamma::gamma_op::create_gamma_op;
+use crate::ops::gradinghuecurve::grading_hue_curve_op::create_grading_hue_curve_op;
 use crate::ops::gradingprimary::grading_primary_op::create_grading_primary_op;
 use crate::ops::gradingrgbcurve::grading_rgb_curve_op::create_grading_rgb_curve_op;
 use crate::ops::gradingtone::grading_tone_op::create_grading_tone_op;
@@ -236,6 +237,7 @@ impl Op {
             OpData::Range(data) => data.clone_op(),
             OpData::Exponent(data) => Ok(data.clone_op()),
             OpData::FixedFunction(data) => data.clone_op(),
+            OpData::GradingHueCurve(data) => Ok(data.clone_op()),
             OpData::GradingTone(data) => Ok(data.clone_op()),
             OpData::GradingRgbCurve(data) => Ok(data.clone_op()),
             OpData::ExposureContrast(data) => Ok(data.clone_op()),
@@ -261,6 +263,7 @@ impl Op {
             OpData::Range(data) => data.get_info(),
             OpData::Exponent(data) => data.get_info(),
             OpData::FixedFunction(data) => data.get_info(),
+            OpData::GradingHueCurve(data) => data.get_info(),
             OpData::GradingTone(data) => data.get_info(),
             OpData::GradingRgbCurve(data) => data.get_info(),
             OpData::ExposureContrast(data) => data.get_info(),
@@ -295,6 +298,7 @@ impl Op {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
@@ -319,6 +323,7 @@ impl Op {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
@@ -351,6 +356,7 @@ impl Op {
             | OpData::Gamma(_)
             | OpData::Exponent(_)
             | OpData::Lut1D(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
@@ -395,6 +401,7 @@ impl Op {
             OpData::Range(data) => data.is_same_type(op),
             OpData::Exponent(data) => data.is_same_type(op),
             OpData::FixedFunction(data) => data.is_same_type(op),
+            OpData::GradingHueCurve(data) => data.is_same_type(op),
             OpData::GradingTone(data) => data.is_same_type(op),
             OpData::GradingRgbCurve(data) => data.is_same_type(op),
             OpData::ExposureContrast(data) => data.is_same_type(op),
@@ -419,6 +426,7 @@ impl Op {
             OpData::Range(data) => data.is_inverse(op),
             OpData::Exponent(data) => data.is_inverse(op),
             OpData::FixedFunction(data) => data.is_inverse_op(op),
+            OpData::GradingHueCurve(data) => data.is_inverse_op(op),
             OpData::GradingTone(data) => data.is_inverse_op(op),
             OpData::GradingRgbCurve(data) => data.is_inverse_op(op),
             OpData::ExposureContrast(data) => data.is_inverse_op(op),
@@ -442,6 +450,7 @@ impl Op {
             OpData::Range(data) => data.can_combine_with(op),
             OpData::Exponent(data) => Ok(data.can_combine_with(op)),
             OpData::FixedFunction(data) => Ok(data.can_combine_with(op)),
+            OpData::GradingHueCurve(data) => Ok(data.can_combine_with(op)),
             OpData::GradingTone(data) => Ok(data.can_combine_with(op)),
             OpData::GradingRgbCurve(data) => Ok(data.can_combine_with(op)),
             OpData::ExposureContrast(data) => Ok(data.can_combine_with(op)),
@@ -467,6 +476,7 @@ impl Op {
             OpData::Range(data) => data.combine_with(ops, second_op),
             OpData::Exponent(data) => data.combine_with(ops, second_op),
             OpData::FixedFunction(data) => data.combine_with(ops, second_op),
+            OpData::GradingHueCurve(data) => data.combine_with(ops, second_op),
             OpData::GradingTone(data) => data.combine_with(ops, second_op),
             OpData::GradingRgbCurve(data) => data.combine_with(ops, second_op),
             OpData::ExposureContrast(data) => data.combine_with(ops, second_op),
@@ -503,6 +513,7 @@ impl Op {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
@@ -574,6 +585,7 @@ impl Op {
             | OpData::Log(_)
             | OpData::FixedFunction(_)
             | OpData::Exponent(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
@@ -597,6 +609,7 @@ impl Op {
             OpData::Range(data) => Ok(data.get_op_cache_id()),
             OpData::Exponent(data) => Ok(data.get_op_cache_id()),
             OpData::FixedFunction(data) => Ok(data.get_op_cache_id()),
+            OpData::GradingHueCurve(data) => Ok(data.get_op_cache_id()),
             OpData::GradingTone(data) => Ok(data.get_op_cache_id()),
             OpData::GradingRgbCurve(data) => Ok(data.get_op_cache_id()),
             OpData::ExposureContrast(data) => Ok(data.get_op_cache_id()),
@@ -645,6 +658,10 @@ impl Op {
             }
             OpData::FixedFunction(data) => {
                 data.get_cpu_op(false)?.apply(rgba);
+                Ok(())
+            }
+            OpData::GradingHueCurve(data) => {
+                data.get_cpu_op()?.apply(rgba);
                 Ok(())
             }
             OpData::GradingTone(data) => {
@@ -759,6 +776,14 @@ impl Op {
                 renderer.apply(output);
                 Ok(())
             }
+            // The GradingHueCurve renderers read a pixel before writing it too (the conversion
+            // to HSY, or the matrix that replaces it, reads the whole pixel first).
+            OpData::GradingHueCurve(data) => {
+                let renderer = data.get_cpu_op()?;
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             // The GradingTone renderers copy each pixel before grading it (the linear style's
             // read it from the output's copy).
             OpData::GradingTone(data) => {
@@ -804,6 +829,7 @@ impl Op {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingHueCurve(_)
             | OpData::GradingTone(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
@@ -818,6 +844,7 @@ impl Op {
     pub fn is_dynamic(&self) -> bool {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
+            OpData::GradingHueCurve(data) => data.is_dynamic(),
             OpData::GradingTone(data) => data.is_dynamic(),
             OpData::GradingRgbCurve(data) => data.is_dynamic(),
             OpData::ExposureContrast(data) => data.is_dynamic(),
@@ -843,6 +870,7 @@ impl Op {
     pub fn has_dynamic_property(&self, type_: DynamicPropertyType) -> bool {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
+            OpData::GradingHueCurve(data) => data.has_dynamic_property_op(type_),
             OpData::GradingTone(data) => data.has_dynamic_property_op(type_),
             OpData::GradingRgbCurve(data) => data.has_dynamic_property_op(type_),
             OpData::ExposureContrast(data) => data.has_dynamic_property(type_),
@@ -868,6 +896,7 @@ impl Op {
     pub fn get_dynamic_property(&self, type_: DynamicPropertyType) -> Result<DynamicPropertyRcPtr> {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
+            OpData::GradingHueCurve(data) => data.get_dynamic_property_op(type_),
             OpData::GradingTone(data) => data.get_dynamic_property_op(type_),
             OpData::GradingRgbCurve(data) => data.get_dynamic_property_op(type_),
             OpData::ExposureContrast(data) => data.get_dynamic_property(type_),
@@ -899,6 +928,12 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The data is copied first if another op shares it (`Op`'s docs).
+            OpData::GradingHueCurve(_) => {
+                let OpData::GradingHueCurve(data) = Arc::make_mut(&mut self.data) else {
+                    unreachable!("the data is a GradingHueCurve");
+                };
+                data.replace_dynamic_property_op(type_, prop)
+            }
             OpData::GradingTone(_) => {
                 let OpData::GradingTone(data) = Arc::make_mut(&mut self.data) else {
                     unreachable!("the data is a GradingTone");
@@ -946,6 +981,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The property changes in place, for every op data that shares it, as upstream's
             // does.
+            OpData::GradingHueCurve(data) => data.remove_dynamic_property(),
             OpData::GradingTone(data) => data.remove_dynamic_property(),
             OpData::GradingRgbCurve(data) => data.remove_dynamic_property(),
             OpData::ExposureContrast(data) => data.remove_dynamic_properties(),
@@ -986,6 +1022,7 @@ impl Op {
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Exponent(data) => Ok(Some(data.get_cpu_op())),
             OpData::FixedFunction(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
+            OpData::GradingHueCurve(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::GradingTone(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::GradingRgbCurve(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::ExposureContrast(data) => Ok(Some(data.get_cpu_op())),
@@ -1382,6 +1419,11 @@ pub fn create_op_vec_from_op_data(
         OpData::FixedFunction(ff_src) => {
             let ff = ff_src.clone();
             create_fixed_function_op_from_data(ops, ff, dir)
+        }
+        OpData::GradingHueCurve(hue_src) => {
+            let hue = hue_src.clone();
+            create_grading_hue_curve_op(ops, hue, dir);
+            Ok(())
         }
         OpData::GradingTone(tone_src) => {
             let tone = tone_src.clone();

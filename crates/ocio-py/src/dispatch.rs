@@ -17,13 +17,17 @@
 //!   argument fills the parameter of its name not filled positionally; a parameter left over
 //!   takes its default. An overload whose parameters can't be filled that way (too many
 //!   positional arguments, an unknown keyword, a keyword naming a parameter given positionally,
-//!   a missing argument without a default) is skipped.
+//!   a missing argument without a default) is skipped. An overload bound without argument
+//!   names (neither `py::arg` nor `py::pos_only`: its signature names its parameters `self`,
+//!   `arg0`, `arg1`, ...; [`unnamed`]) has no keywords: pybind11 keeps no argument records for
+//!   it, so any keyword argument, `self=` included, skips it, and its arguments are all
+//!   positional.
 //! - **Two passes.** A function with one overload is called once, its casters allowed to
 //!   convert. With several, each is first tried without conversions, in definition order; then
 //!   those whose arguments bound (and that have a positional parameter besides `self`) again,
 //!   with conversions.
 //! - **The casters** ([`Cast`]): see each implementation.
-//! - **No overload accepts the arguments**: `TypeError`, "`name`(): incompatible function
+//! - **No overload accepts the arguments**: for an operator, `NotImplemented`; else `TypeError`, "`name`(): incompatible function
 //!   arguments. The following argument types are supported:" with each overload's signature
 //!   and "Invoked with:" the arguments' reprs (for a constructor, "__init__(): incompatible
 //!   constructor arguments." and each signature as `Class(params)`).
@@ -99,6 +103,9 @@ pub struct Function {
     pub constructor: bool,
     /// A method: its first parameter is `self`, which the second pass doesn't count.
     pub method: bool,
+    /// An operator (`py::is_operator()`): a call no overload accepts returns `NotImplemented`,
+    /// whatever its arguments, so that Python tries the other operand's method.
+    pub operator: bool,
     pub overloads: &'static [Overload],
 }
 
@@ -137,15 +144,37 @@ pub fn docstring(f: &Function) -> String {
     }
 }
 
-/// Binds `args` and `kwargs` to `o`'s parameters: one value per parameter, or `None` when they
-/// don't fit.
+/// Whether `o` was bound without argument names: no `py::pos_only()`, and each parameter (after
+/// a method's `self`) named as pybind11 names one it has no record of, `arg` and its position
+/// among them (`cpp_function::initialize_generic`'s signature). pybind11 keeps argument records
+/// only for an overload given `py::arg`s (one for each parameter; a method's `self` gets its
+/// own) or `py::pos_only()`, and its dispatcher's step 3 skips an overload without records
+/// that a keyword argument was given to, since no record consumed it.
+pub fn unnamed(o: &Overload, method: bool) -> bool {
+    let skip = usize::from(method);
+    o.pos_only == 0
+        && o.params.iter().enumerate().skip(skip).all(|(k, p)| {
+            p.name
+                .strip_prefix("arg")
+                .is_some_and(|n| n == (k - skip).to_string())
+        })
+}
+
+/// Binds `args` and `kwargs` to `o`'s parameters (of a method, `method`): one value per
+/// parameter, or `None` when they don't fit.
 fn bind<'py>(
     py: Python<'py>,
     o: &Overload,
+    method: bool,
     args: &Bound<'py, PyTuple>,
     kwargs: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<Option<Vec<Bound<'py, PyAny>>>> {
     if args.len() > o.params.len() {
+        return Ok(None);
+    }
+    // An overload without argument names takes no keyword (pybind11 skips it whatever the
+    // keyword names, `self` and `arg0` included).
+    if kwargs.is_some_and(|k| !k.is_empty()) && unnamed(o, method) {
         return Ok(None);
     }
     let mut values: Vec<Bound<'py, PyAny>> = args.iter().collect();
@@ -200,7 +229,7 @@ pub fn dispatch<'py>(
     let overloaded = f.overloads.len() > 1;
     let mut second_pass = Vec::new();
     for o in f.overloads {
-        let Some(values) = bind(py, o, args, kwargs)? else {
+        let Some(values) = bind(py, o, f.method, args, kwargs)? else {
             continue;
         };
         if let Some(result) = (o.call)(py, o, &values, !overloaded)? {
@@ -216,6 +245,9 @@ pub fn dispatch<'py>(
         if let Some(result) = (o.call)(py, o, &values, true)? {
             return Ok(result);
         }
+    }
+    if f.operator {
+        return Ok(py.NotImplemented());
     }
     Err(PyTypeError::new_err(incompatible(f, args, kwargs)?))
 }
@@ -536,6 +568,21 @@ impl<'py> Cast<'py> for CharPtr {
     }
 }
 
+/// A `const char *` parameter declared `.none(false)` (`"src"_a.none(false)`): as [`CharPtr`],
+/// but `None` is refused, also with conversions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NonNullCharPtr(pub Vec<u8>);
+
+impl<'py> Cast<'py> for NonNullCharPtr {
+    const CPP_SIZE: usize = 8;
+
+    fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
+        if obj.is_none() {
+            return None;
+        }
+        CharPtr::load(obj, convert)?.0.map(NonNullCharPtr)
+    }
+}
 /// pybind11's `object_is_convertible_to_std_vector`: a sequence (`PySequence_Check`) that isn't
 /// a `str` or `bytes`; else a generator (`PyGen_Check`, its exact type), a set or frozenset (or
 /// a subclass), or an instance (not a class) of a type whose C name (`tp_name`) is
@@ -716,6 +763,78 @@ impl<'py, T: Cast<'py>, const N: usize> Cast<'py> for [T; N] {
         items.truncate(N);
         Ok(items.try_into().ok())
     }
+}
+
+/// A `std::map<std::string, std::string>` parameter: pybind11's `map_caster`. A `dict` (or a
+/// subclass), its items as the dict iterates them; else, with conversions only, an object with
+/// an `items` attribute whose type has `__getitem__` (pybind11's
+/// `object_is_convertible_to_std_map`, `PyMapping_Check`), whose items are
+/// `dict(PyMapping_Items(obj))` (their errors go through). Each key and value loads as a
+/// `std::string`, the first that doesn't refusing the map; a key the map holds already (`'a'`
+/// and `b'a'`) keeps its first value (`emplace`). In the keys' byte order, as `std::map`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StringMap(pub std::collections::BTreeMap<Vec<u8>, Vec<u8>>);
+
+impl<'py> Cast<'py> for StringMap {
+    /// `std::map`: 16 bytes in MSVC's STL, 48 in libstdc++ (not reserved: no vector holds it).
+    const CPP_SIZE: usize = if cfg!(windows) { 16 } else { 48 };
+
+    fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
+        Self::try_load(obj, convert).ok().flatten()
+    }
+
+    fn try_load(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<Self>> {
+        let py = obj.py();
+        let dict = match obj.cast::<PyDict>() {
+            Ok(dict) => dict.clone(),
+            Err(_) => {
+                // PyMapping_Check: the type's mp_subscript, which a type with `__getitem__` has
+                // (a C type with only sq_item and an `items` attribute is the exception).
+                let mapping = obj.hasattr("items").unwrap_or(false)
+                    && crate::pybind11::type_lookup(&obj.get_type(), "__getitem__")?.is_some();
+                if !mapping || !convert {
+                    return Ok(None);
+                }
+                dict_of_items(obj)?
+            }
+        };
+        let mut map = std::collections::BTreeMap::new();
+        for (k, v) in dict.iter() {
+            let Some(StdString(k)) = StdString::try_load(&k, convert)? else {
+                return Ok(None);
+            };
+            let Some(StdString(v)) = StdString::try_load(&v, convert)? else {
+                return Ok(None);
+            };
+            map.entry(k).or_insert(v);
+        }
+        let _ = py;
+        Ok(Some(StringMap(map)))
+    }
+}
+
+/// `dict(PyMapping_Items(obj))` of an object that isn't a `dict`: `obj.items()` as a list
+/// (CPython's `method_output_as_list`, whose TypeError for a result that isn't iterable names
+/// the types), then a dict of it.
+fn dict_of_items<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyDict>> {
+    let py = obj.py();
+    let out = obj.call_method0("items")?;
+    let it = match out.try_iter() {
+        Ok(it) => it,
+        Err(e) if e.is_instance_of::<PyTypeError>(py) => {
+            return Err(PyTypeError::new_err(format!(
+                "{}.items() returned a non-iterable (type {})",
+                crate::pybind11::c_type_name(obj)?,
+                crate::pybind11::c_type_name(&out)?
+            )));
+        }
+        Err(e) => return Err(e),
+    };
+    let list = py.get_type::<pyo3::types::PyList>().call1((it,))?;
+    Ok(py
+        .get_type::<PyDict>()
+        .call1((list,))?
+        .cast_into::<PyDict>()?)
 }
 
 /// Any Python object (`py::object`), as it is.

@@ -15,7 +15,11 @@
 //!   matched;
 //! - and the warnings logged while loading, byte for byte.
 
-use ocio_ops::open_color_types::{CdlStyle, FixedFunctionStyle, NegativeStyle};
+use ocio_ops::open_color_types::GradingStyle;
+use ocio_ops::open_color_types::HsyTransformStyle;
+use ocio_ops::open_color_types::{
+    CdlStyle, ExposureContrastStyle, FixedFunctionStyle, NegativeStyle,
+};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -326,6 +330,82 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("getNegativeStyle", negative_style_out(t.negative_style())));
             out.push(name(t.format_metadata()));
         }
+        Transform::ExposureContrast(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    ExposureContrastStyle::Linear => "EXPOSURE_CONTRAST_LINEAR",
+                    ExposureContrastStyle::Video => "EXPOSURE_CONTRAST_VIDEO",
+                    ExposureContrastStyle::Logarithmic => "EXPOSURE_CONTRAST_LOGARITHMIC",
+                }}),
+            ));
+            out.push(("getExposure", f64_out(t.exposure())));
+            out.push(("getContrast", f64_out(t.contrast())));
+            out.push(("getGamma", f64_out(t.gamma())));
+            out.push(("getPivot", f64_out(t.pivot())));
+            out.push(("getLogExposureStep", f64_out(t.log_exposure_step())));
+            out.push(("getLogMidGray", f64_out(t.log_mid_gray())));
+            out.push(("isExposureDynamic", json!(t.is_exposure_dynamic())));
+            out.push(("isContrastDynamic", json!(t.is_contrast_dynamic())));
+            out.push(("isGammaDynamic", json!(t.is_gamma_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::GradingPrimary(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    GradingStyle::Log => "GRADING_LOG",
+                    GradingStyle::Lin => "GRADING_LIN",
+                    GradingStyle::Video => "GRADING_VIDEO",
+                }}),
+            ));
+            out.push(("isDynamic", json!(t.is_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::GradingRgbCurve(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    GradingStyle::Log => "GRADING_LOG",
+                    GradingStyle::Lin => "GRADING_LIN",
+                    GradingStyle::Video => "GRADING_VIDEO",
+                }}),
+            ));
+            out.push(("getBypassLinToLog", json!(t.bypass_lin_to_log())));
+            out.push(("isDynamic", json!(t.is_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::GradingTone(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    GradingStyle::Log => "GRADING_LOG",
+                    GradingStyle::Lin => "GRADING_LIN",
+                    GradingStyle::Video => "GRADING_VIDEO",
+                }}),
+            ));
+            out.push(("isDynamic", json!(t.is_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::GradingHueCurve(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    GradingStyle::Log => "GRADING_LOG",
+                    GradingStyle::Lin => "GRADING_LIN",
+                    GradingStyle::Video => "GRADING_VIDEO",
+                }}),
+            ));
+            out.push((
+                "getRGBToHSY",
+                json!({"enum": match t.rgb_to_hsy() {
+                    HsyTransformStyle::None => "HSY_TRANSFORM_NONE",
+                    HsyTransformStyle::Transform1 => "HSY_TRANSFORM_1",
+                }}),
+            ));
+            out.push(("isDynamic", json!(t.is_dynamic())));
+            out.push(name(t.format_metadata()));
+        }
         Transform::LogAffine(t) => {
             out.push(("getBase", f64_out(t.base())));
             out.push(("getLogSideSlopeValue", f64s(&t.log_side_slope_value())));
@@ -511,8 +591,13 @@ fn class_name(t: &Transform) -> &'static str {
         Transform::DisplayView(_) => "DisplayView",
         Transform::Exponent(_) => "Exponent",
         Transform::ExponentWithLinear(_) => "ExponentWithLinear",
+        Transform::ExposureContrast(_) => "ExposureContrast",
         Transform::File(_) => "File",
         Transform::FixedFunction(_) => "FixedFunction",
+        Transform::GradingHueCurve(_) => "GradingHueCurve",
+        Transform::GradingPrimary(_) => "GradingPrimary",
+        Transform::GradingRgbCurve(_) => "GradingRGBCurve",
+        Transform::GradingTone(_) => "GradingTone",
         Transform::Group(_) => "Group",
         Transform::LogAffine(_) => "LogAffine",
         Transform::LogCamera(_) => "LogCamera",
@@ -1097,4 +1182,282 @@ fn fixed_function_transforms_load_as_in_the_wheel() {
     // Version 2.5: the config refuses the styles of later versions in older ones
     // (`Config::Impl::checkVersionConsistency`, a config check after loading).
     check_v(b"2.5", &refs);
+}
+
+/// The ExposureContrastTransform's keys: each of exposure, contrast and gamma without a value
+/// (missing or null) is dynamic; the styles in each spelling, set before and after the
+/// direction; numbers in every spelling and the special ones; and its errors.
+#[test]
+fn exposure_contrast_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<ExposureContrastTransform> {}",
+        b"!<ExposureContrastTransform> {style: linear}",
+        b"!<ExposureContrastTransform> {style: VIDEO, exposure: 1.5}",
+        b"!<ExposureContrastTransform> {style: Log, contrast: 0.5, gamma: 1.1}",
+        b"!<ExposureContrastTransform> {style: video, exposure: 1.5, contrast: 0.5, gamma: 1.1, \
+          pivot: 0.18}",
+        b"!<ExposureContrastTransform> {style: log, exposure: -1.4, contrast: 0.6, gamma: 1.2, \
+          pivot: 0.2, log_exposure_step: 0.1, log_midway_gray: 0.5, direction: inverse}",
+        b"!<ExposureContrastTransform> {direction: inverse, style: video}",
+        b"!<ExposureContrastTransform> {style: video, direction: inverse}",
+        b"!<ExposureContrastTransform> {exposure: ~, contrast: , gamma: 2}",
+        b"!<ExposureContrastTransform> {exposure: .nan, contrast: -.inf, gamma: .inf}",
+        b"!<ExposureContrastTransform> {exposure: -0, contrast: 1e-30, gamma: 1e400, pivot: \
+          1e-400}",
+        b"!<ExposureContrastTransform> {exposure: 0.12345678901234567890, contrast: \
+          1.0000000000000002, gamma: 0x10, pivot: 010}",
+        b"!<ExposureContrastTransform> {log_exposure_step: .NaN, log_midway_gray: -.Inf}",
+        b"!<ExposureContrastTransform> {pivot: 0.088, log_exposure_step: 0.435}",
+        b"!<ExposureContrastTransform> {style: foo}",
+        b"!<ExposureContrastTransform> {style: \"\"}",
+        b"!<ExposureContrastTransform> {style: \"video\0x\"}",
+        b"!<ExposureContrastTransform> {style: \xe9x}",
+        b"!<ExposureContrastTransform> {style: [video]}",
+        b"!<ExposureContrastTransform> {exposure: abc}",
+        b"!<ExposureContrastTransform> {contrast: [1]}",
+        b"!<ExposureContrastTransform> {gamma: {a: 1}}",
+        b"!<ExposureContrastTransform> {pivot: \"1\0x\"}",
+        b"!<ExposureContrastTransform> {log_exposure_step: []}",
+        b"!<ExposureContrastTransform> {log_midway_gray: x}",
+        b"!<ExposureContrastTransform> {direction: foo}",
+        b"!<ExposureContrastTransform> {name: ec, exposure: 1}",
+        b"!<ExposureContrastTransform> {name: \"a\0b\"}",
+        b"!<ExposureContrastTransform> {name: [x]}",
+        b"!<ExposureContrastTransform> {exposure: 1, exposure: 2}",
+        b"!<ExposureContrastTransform> {expo: 1, log_midgray: 2, foo: }",
+        b"!<ExposureContrastTransform>\n      exposure: 1\n      bar: 2",
+    ]);
+}
+
+/// The GradingPrimaryTransform's keys: the styles in each spelling, each control of each
+/// style (the controls of the other styles are read and dropped), the pivots and clamps, the
+/// values refused for the style, unknown keys at each level, and the errors of each key.
+/// The values with more digits than the text's 6 are compared through the saver's text
+/// (`ocio_yaml_save_oracle_tests.rs`).
+#[test]
+fn grading_primary_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<GradingPrimaryTransform> {}",
+        b"!<GradingPrimaryTransform> {style: log}",
+        b"!<GradingPrimaryTransform> {style: LINEAR}",
+        b"!<GradingPrimaryTransform> {style: Video, direction: inverse}",
+        b"!<GradingPrimaryTransform> {direction: inverse, style: video}",
+        b"!<GradingPrimaryTransform> {style: lin}",
+        b"!<GradingPrimaryTransform> {style: \"\"}",
+        b"!<GradingPrimaryTransform> {style: \"log\\0x\"}",
+        b"!<GradingPrimaryTransform> {style: [log]}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.2, 0.3], master: \
+          0.4}, contrast: {rgb: [1.1, 1, 1], master: 1.1}, gamma: {rgb: [1.1, 1.2, 1.3], master: \
+          1}, saturation: 0.9, pivot: {contrast: -0.1, black: 0.1, white: 1.1}, clamp: {black: \
+          0.1, white: 1.1}}",
+        b"!<GradingPrimaryTransform> {style: linear, offset: {rgb: [0.1, 0.12345678, 0], \
+          master: 0.1}, exposure: {rgb: [-1.1, 0.9, -0.01], master: 1.1}, contrast: {rgb: [1.1, \
+          1, 1], master: 1.1}, pivot: {contrast: 0.18}}",
+        b"!<GradingPrimaryTransform> {style: video, lift: {rgb: [0.1, 0, 0], master: 0.1}, \
+          gamma: {rgb: [1.1, 1, 1], master: 1.1}, gain: {rgb: [1.1, 1, 1], master: 1.1}, offset: \
+          {rgb: [0, 0, 0], master: 0.5}, pivot: {white: 1.1}, clamp: {black: 0.1}}",
+        b"!<GradingPrimaryTransform> {brightness: {rgb: [1, 1, 1], master: 1}, style: linear}",
+        b"!<GradingPrimaryTransform> {style: linear, brightness: {rgb: [1, 1, 1], master: 1}, \
+          lift: {rgb: [1, 1, 1], master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [.nan, .inf, -.inf], \
+          master: -0.0}, saturation: .nan, pivot: {contrast: 1e-30}}",
+        b"!<GradingPrimaryTransform> {style: log, gamma: {rgb: [0.001, 1, 1], master: 1}}",
+        b"!<GradingPrimaryTransform> {style: linear, contrast: {rgb: [1, 1, 1], master: 0}}",
+        b"!<GradingPrimaryTransform> {style: linear, gamma: {rgb: [0, 0, 0], master: 0}}",
+        b"!<GradingPrimaryTransform> {style: video, pivot: {black: 0.5, white: 0.5}}",
+        b"!<GradingPrimaryTransform> {style: video, clamp: {black: 2, white: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0], master: 0.1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0, 0, 0], master: \
+          0.1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: [0.1, 0.2, 0, 0]}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.2, 0]}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {master: 0.1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.2, 0], master: \
+          [0.1, 0.2, 0.3]}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [a, 0.2, 0], master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: 1, master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [1, 1, 1], master: 1, x: \
+          2}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: [1, 1, 1], rgb: [2, 2, 2], \
+          master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, brightness: {rgb: ~, master: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: 0.1}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: {}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: {foo: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: {contrast: 0.1, foo: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: {contrast: x}}",
+        b"!<GradingPrimaryTransform> {style: log, pivot: !<Foo> {contrast: 0.1, bar: 1}}",
+        b"!<GradingPrimaryTransform> {style: log, clamp: 0.1}",
+        b"!<GradingPrimaryTransform> {style: log, clamp: {}}",
+        b"!<GradingPrimaryTransform> {style: log, clamp: {white: 1, foo: 2}}",
+        b"!<GradingPrimaryTransform> {style: log, clamp: {black: ~}}",
+        b"!<GradingPrimaryTransform> {style: log, saturation: [1]}",
+        b"!<GradingPrimaryTransform> {style: log, saturation: ~}",
+        b"!<GradingPrimaryTransform> {name: gp, style: log, foo: 1}",
+        b"!<GradingPrimaryTransform> {name: \"a\\0b\"}",
+        b"!<GradingPrimaryTransform> {style: log, style: video}",
+        b"!<GradingPrimaryTransform> {direction: foo}",
+        b"!<GradingPrimaryTransform>\n      style: linear\n      offset:\n        rgb: [0.1, 0, \
+          0]\n        master: 0.1\n        other: 1",
+    ]);
+}
+
+/// The GradingRGBCurveTransform's keys: the styles, the bypass, each curve with its control
+/// points and slopes (defaults for the curves not given, of the style at the end), refused
+/// curves, unknown keys at each level, and the errors of each key. The coordinates with more
+/// digits than the text's 6 are compared through the saver's text
+/// (`ocio_yaml_save_oracle_tests.rs`). No NaN x coordinate: the wheel reads past the control
+/// points fitting it (docs/improvements.md, U-35).
+#[test]
+fn grading_rgb_curve_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<GradingRGBCurveTransform> {}",
+        b"!<GradingRGBCurveTransform> {style: LINEAR, lintolog_bypass: true}",
+        b"!<GradingRGBCurveTransform> {style: linear, lintolog_bypass: false}",
+        b"!<GradingRGBCurveTransform> {direction: inverse, style: video}",
+        b"!<GradingRGBCurveTransform> {style: lin}",
+        b"!<GradingRGBCurveTransform> {lintolog_bypass: yes}",
+        b"!<GradingRGBCurveTransform> {lintolog_bypass: 1}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 0.5, 0.5, 1, \
+          1.123456]}}",
+        b"!<GradingRGBCurveTransform> {red: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, \
+          1.1]}, style: linear}",
+        b"!<GradingRGBCurveTransform> {style: video, blue: {control_points: [0, 0, 0.1, 0.5, 1, \
+          1.5], slopes: [0, 1, 1.1]}, master: {control_points: [0, 0, 1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, green: {slopes: [], control_points: [0, 0, \
+          1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, green: {control_points: [0, 0, 1, 1], \
+          slopes: [1, 2]}}",
+        b"!<GradingRGBCurveTransform> {style: log, green: {control_points: [0, .nan, 1, .inf], \
+          slopes: [-0.0, 1e-30]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 0.5, 0.2, 0.2, \
+          0.7, 1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: []}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 1, 1], slopes: \
+          [1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {slopes: [1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: [0, 0, 1, 1]}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [a, 0, 1, 1]}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: 1}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 1, 1], foo: \
+          1}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: ~}}",
+        b"!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 1, 1], \
+          control_points: [0, 0, 2, 2]}}",
+        b"!<GradingRGBCurveTransform> {name: gc, style: log, foo: 1}",
+        b"!<GradingRGBCurveTransform> {style: log, style: video}",
+        b"!<GradingRGBCurveTransform> {direction: foo}",
+        b"!<GradingRGBCurveTransform>\n      style: video\n      red:\n        control_points: \
+          [0, 0, 1, 1]\n        other: 1",
+    ]);
+}
+
+/// The GradingToneTransform's keys: the styles, each range with its own keys (`center` for the
+/// midtones, `pivot` for the shadows and highlights), `s_contrast`, the values refused, unknown
+/// keys at each level, and the errors of each key. The values with more digits than the
+/// text's 6 are compared through the saver's text (`ocio_yaml_save_oracle_tests.rs`).
+#[test]
+fn grading_tone_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<GradingToneTransform> {}",
+        b"!<GradingToneTransform> {style: LINEAR, direction: inverse}",
+        b"!<GradingToneTransform> {direction: inverse, style: video}",
+        b"!<GradingToneTransform> {style: lin}",
+        b"!<GradingToneTransform> {style: \"log\\0x\"}",
+        b"!<GradingToneTransform> {style: log, blacks: {rgb: [0.1, 0.12345678, 0.9], master: \
+          1, start: 0.1, width: 0.9}, shadows: {rgb: [1, 1.1, 1.1111], master: 1.1, start: 0.9, \
+          pivot: 0.1}, midtones: {rgb: [0.85, 0.98, 1], master: 1.11, center: 0.1, width: 0.9}, \
+          highlights: {rgb: [1.1, 1.1111, 1], master: 1.2, start: 0.15, pivot: 1.1}, whites: \
+          {rgb: [0.95, 0.96, 0.95], master: 1.1, start: 0.1, width: 0.9}, s_contrast: 1.1}",
+        b"!<GradingToneTransform> {s_contrast: 1.5, style: linear}",
+        b"!<GradingToneTransform> {style: video, s_contrast: .nan, midtones: {rgb: [.nan, 1, \
+          1], master: 1, center: -0.0, width: 1e-30}}",
+        b"!<GradingToneTransform> {style: log, blacks: {rgb: [0.001, 1, 1], master: 1, start: \
+          0, width: 1}}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [1, 1, 1], master: 2.5, start: 0, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, midtones: {rgb: [1, 1, 1], master: 1, center: 0, \
+          width: 0}}",
+        b"!<GradingToneTransform> {style: log, s_contrast: 0}",
+        b"!<GradingToneTransform> {style: log, s_contrast: 2}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [0.1, 1], master: 1, start: 1, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, whites: [0.1, 0.12345678, 0, 0]}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [0.1, 1, 1], master: 0.1, width: \
+          1}}",
+        b"!<GradingToneTransform> {style: log, midtones: {rgb: [0.1, 1, 1], master: 0.1, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, midtones: {rgb: [0.1, 1, 1], master: 0.1, start: \
+          0, width: 1}}",
+        b"!<GradingToneTransform> {style: log, shadows: {rgb: [1, 1, 1], master: 1, start: 0.5, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, highlights: {rgb: [1, 1, 1], master: 1, start: \
+          0.5}}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [0.1, 1, 1], master: 0.1, start: \
+          [1, 1.1], width: 1}}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [1, 1, 1], master: 1, start: 0, \
+          width: 1, foo: 2}}",
+        b"!<GradingToneTransform> {style: log, whites: {rgb: [1, 1, 1], master: ~, start: 0, \
+          width: 1}}",
+        b"!<GradingToneTransform> {style: log, s_contrast: [1]}",
+        b"!<GradingToneTransform> {style: log, s_contrast: ~}",
+        b"!<GradingToneTransform> {name: gt, style: log, foo: 1}",
+        b"!<GradingToneTransform> {style: log, style: video}",
+        b"!<GradingToneTransform> {direction: foo}",
+    ]);
+}
+
+/// The GradingHueCurveTransform's keys: the styles, `hsy_transform`, each curve with its
+/// control points and slopes (defaults for the curves not given, of the style at the end),
+/// refused curves, unknown keys at each level, and the errors of each key. The coordinates
+/// with more digits than the text's 6 are compared through the saver's text
+/// (`ocio_yaml_save_oracle_tests.rs`). Version 2.5: earlier minor versions refuse the class.
+#[test]
+fn grading_hue_curve_transforms_load_as_in_the_wheel() {
+    check_v(
+        b"2.5",
+        &[
+            b"!<GradingHueCurveTransform> {}",
+            b"!<GradingHueCurveTransform> {style: LINEAR, hsy_transform: none}",
+            b"!<GradingHueCurveTransform> {style: linear, hsy_transform: hsy1}",
+            b"!<GradingHueCurveTransform> {style: linear, hsy_transform: NONE}",
+            b"!<GradingHueCurveTransform> {hsy_transform: [none]}",
+            b"!<GradingHueCurveTransform> {direction: inverse, style: video}",
+            b"!<GradingHueCurveTransform> {style: lin}",
+            b"!<GradingHueCurveTransform> {style: log, hue_hue: {control_points: [0, 0.15, 0.5, \
+              0.5, 1, 1.123456]}}",
+            b"!<GradingHueCurveTransform> {lum_lum: {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, \
+              1, 1.1]}, style: linear}",
+            b"!<GradingHueCurveTransform> {style: video, hue_hue: {control_points: [0.02, -0.1, \
+              0.5, 0.5, 0.9, 0.8]}, hue_lum: {control_points: [0, 0, 0.2, 0.5, 1, 1.5]}, lum_sat: \
+              {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1]}, sat_lum: \
+              {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}, direction: inverse}",
+            b"!<GradingHueCurveTransform> {style: log, hue_fx: {control_points: [-0.15, 0.1, 0, \
+              -0.05, 0.2, -0.1, 0.4, 0.3, 0.6, 0.25, 0.8, 0.2, 0.9, 0.05, 1.1, -0.07]}, hue_sat: \
+              {control_points: [0, 1.2, 0.1, 1.2, 0.4, 0.7]}, sat_sat: {control_points: [0, 0.05, \
+              0.5, 0.8, 1, 1.05], slopes: [1.2, 0.8, 0.4]}}",
+            b"!<GradingHueCurveTransform> {style: log, sat_sat: {control_points: [0, .nan, 1, \
+              .inf], slopes: [-0.0, 1e-30]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_hue: {control_points: [0, 0, 1.5, \
+              1]}}",
+            b"!<GradingHueCurveTransform> {style: log, sat_sat: {control_points: [0, 0.6, 0.5, \
+              0.5, 1, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, lum_sat: {control_points: [0, 1, 0.5, \
+              0.2, 0.2, 0.7, 1, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_sat: {control_points: [0, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_sat: {control_points: [0, 1, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, sat_sat: {control_points: [0, 0, 0.1, 0.5, \
+              1, 1.5], slopes: [0, 1, 1.1, 1]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_fx: {slopes: [1]}}",
+            b"!<GradingHueCurveTransform> {style: log, hue_fx: [0, 0, 1, 1]}",
+            b"!<GradingHueCurveTransform> {style: log, hue_fx: {control_points: [0, 0, 0.5, 0], \
+              foo: 1}}",
+            b"!<GradingHueCurveTransform> {name: hc, style: log, foo: 1}",
+            b"!<GradingHueCurveTransform> {style: log, style: video}",
+            b"!<GradingHueCurveTransform> {direction: foo}",
+        ],
+    );
 }

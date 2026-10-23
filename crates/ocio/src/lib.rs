@@ -5,6 +5,7 @@
 //! (PLAN.md §2): results, text output, errors and accepted configs.
 #![deny(unsafe_code)]
 
+pub mod apphelpers;
 pub mod baker;
 pub mod baking_utils;
 pub mod builtinconfigs;
@@ -41,6 +42,7 @@ mod file_tests;
 #[cfg(test)]
 mod test_env;
 
+pub use apphelpers::color_space_helpers::{self, ColorSpaceMenuHelper, ColorSpaceMenuParameters};
 pub use baker::Baker;
 pub use builtinconfigs::builtin_config_registry::{
     BuiltinConfigRegistry, OCIO_BUILTIN_URI_PREFIX, resolve_config_path,
@@ -60,14 +62,18 @@ pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
     Allocation, BSplineType, BitDepth, CdlStyle, ColorSpaceDirection, ColorSpaceVisibility,
-    EnvironmentMode, FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NamedTransformVisibility,
-    NegativeStyle, OptimizationFlags, ReferenceSpaceType, RgbCurveType, SearchReferenceSpaceType,
-    TransformDirection, ViewTransformDirection, ViewType,
+    DynamicPropertyType, EnvironmentMode, ExposureContrastStyle, FixedFunctionStyle, GradingStyle,
+    Lut1DHueAdjust, NamedTransformVisibility, NegativeStyle, OptimizationFlags, ReferenceSpaceType,
+    RgbCurveType, SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
 };
+pub use ocio_ops::open_color_types::{HsyTransformStyle, HueCurveType};
+pub use ocio_ops::ops::gradinghuecurve::grading_hue_curve::GradingHueCurve;
+pub use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
 pub use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
     GradingBSplineCurve, GradingControlPoint,
 };
 pub use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::GradingRgbCurve;
+pub use ocio_ops::ops::gradingtone::grading_tone::{GradingRgbmsw, GradingTone};
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 pub use ocio_ops::platform::{
     get_env_variable, is_env_variable_present, set_env_variable, unset_env_variable,
@@ -83,8 +89,13 @@ pub use transforms::color_space_transform::ColorSpaceTransform;
 pub use transforms::display_view_transform::DisplayViewTransform;
 pub use transforms::exponent_transform::ExponentTransform;
 pub use transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+pub use transforms::exposure_contrast_transform::ExposureContrastTransform;
 pub use transforms::file_transform::FileTransform;
 pub use transforms::fixed_function_transform::FixedFunctionTransform;
+pub use transforms::grading_hue_curve_transform::GradingHueCurveTransform;
+pub use transforms::grading_primary_transform::GradingPrimaryTransform;
+pub use transforms::grading_rgb_curve_transform::GradingRgbCurveTransform;
+pub use transforms::grading_tone_transform::GradingToneTransform;
 pub use transforms::group_transform::GroupTransform;
 pub use transforms::log_affine_transform::LogAffineTransform;
 pub use transforms::log_camera_transform::LogCameraTransform;

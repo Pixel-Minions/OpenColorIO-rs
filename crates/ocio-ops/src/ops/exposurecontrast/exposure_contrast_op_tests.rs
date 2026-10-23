@@ -2,7 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of tests/cpu/ops/exposurecontrast/ExposureContrastOp_tests.cpp @ v2.5.2, but
-//! `ExposureContrastOp create_transform`, which needs the `ExposureContrastTransform` (5.5a).
+//! `ExposureContrastOp create_transform`, which needs the `ExposureContrastTransform`: it is in
+//! `ocio` (crates/ocio/src/transforms/exposure_contrast_transform_tests.rs).
 //!
 //! Upstream's `CreateExposureContrastOp` shares the caller's data with a forward op; here the
 //! op owns the data the caller passes, a copy where the test goes on using its own.

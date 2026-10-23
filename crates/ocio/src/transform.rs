@@ -36,9 +36,24 @@ use crate::transforms::exponent_transform::{
 use crate::transforms::exponent_with_linear_transform::{
     ExponentWithLinearTransform, build_exponent_with_linear_op, create_gamma_transform,
 };
+use crate::transforms::exposure_contrast_transform::{
+    ExposureContrastTransform, build_exposure_contrast_op, create_exposure_contrast_transform,
+};
 use crate::transforms::file_transform::{FileTransform, build_file_transform_ops};
 use crate::transforms::fixed_function_transform::{
     FixedFunctionTransform, build_fixed_function_op, create_fixed_function_transform,
+};
+use crate::transforms::grading_hue_curve_transform::{
+    GradingHueCurveTransform, build_grading_hue_curve_op, create_grading_hue_curve_transform,
+};
+use crate::transforms::grading_primary_transform::{
+    GradingPrimaryTransform, build_grading_primary_op, create_grading_primary_transform,
+};
+use crate::transforms::grading_rgb_curve_transform::{
+    GradingRgbCurveTransform, build_grading_rgb_curve_op, create_grading_rgb_curve_transform,
+};
+use crate::transforms::grading_tone_transform::{
+    GradingToneTransform, build_grading_tone_op, create_grading_tone_transform,
 };
 use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::log_affine_transform::LogAffineTransform;
@@ -130,10 +145,20 @@ pub enum Transform {
     Exponent(ExponentTransform),
     /// `ExponentWithLinearTransform`.
     ExponentWithLinear(ExponentWithLinearTransform),
+    /// `ExposureContrastTransform`.
+    ExposureContrast(ExposureContrastTransform),
     /// `FileTransform`.
     File(FileTransform),
     /// `FixedFunctionTransform`.
     FixedFunction(FixedFunctionTransform),
+    /// `GradingHueCurveTransform`.
+    GradingHueCurve(GradingHueCurveTransform),
+    /// `GradingPrimaryTransform`.
+    GradingPrimary(GradingPrimaryTransform),
+    /// `GradingRGBCurveTransform`.
+    GradingRgbCurve(GradingRgbCurveTransform),
+    /// `GradingToneTransform`.
+    GradingTone(GradingToneTransform),
     /// `GroupTransform`.
     Group(GroupTransform),
     /// `LogAffineTransform`.
@@ -196,6 +221,12 @@ impl From<ExponentWithLinearTransform> for Transform {
     }
 }
 
+impl From<ExposureContrastTransform> for Transform {
+    fn from(t: ExposureContrastTransform) -> Transform {
+        Transform::ExposureContrast(t)
+    }
+}
+
 impl From<FileTransform> for Transform {
     fn from(t: FileTransform) -> Transform {
         Transform::File(t)
@@ -205,6 +236,30 @@ impl From<FileTransform> for Transform {
 impl From<FixedFunctionTransform> for Transform {
     fn from(t: FixedFunctionTransform) -> Transform {
         Transform::FixedFunction(t)
+    }
+}
+
+impl From<GradingHueCurveTransform> for Transform {
+    fn from(t: GradingHueCurveTransform) -> Transform {
+        Transform::GradingHueCurve(t)
+    }
+}
+
+impl From<GradingPrimaryTransform> for Transform {
+    fn from(t: GradingPrimaryTransform) -> Transform {
+        Transform::GradingPrimary(t)
+    }
+}
+
+impl From<GradingRgbCurveTransform> for Transform {
+    fn from(t: GradingRgbCurveTransform) -> Transform {
+        Transform::GradingRgbCurve(t)
+    }
+}
+
+impl From<GradingToneTransform> for Transform {
+    fn from(t: GradingToneTransform) -> Transform {
+        Transform::GradingTone(t)
     }
 }
 
@@ -293,8 +348,13 @@ impl Transform {
             Transform::DisplayView(_) => TransformType::DisplayView,
             Transform::Exponent(_) => TransformType::Exponent,
             Transform::ExponentWithLinear(_) => TransformType::ExponentWithLinear,
+            Transform::ExposureContrast(_) => TransformType::ExposureContrast,
             Transform::File(_) => TransformType::File,
             Transform::FixedFunction(_) => TransformType::FixedFunction,
+            Transform::GradingHueCurve(_) => TransformType::GradingHueCurve,
+            Transform::GradingPrimary(_) => TransformType::GradingPrimary,
+            Transform::GradingRgbCurve(_) => TransformType::GradingRgbCurve,
+            Transform::GradingTone(_) => TransformType::GradingTone,
             Transform::Group(_) => TransformType::Group,
             Transform::LogAffine(_) => TransformType::LogAffine,
             Transform::LogCamera(_) => TransformType::LogCamera,
@@ -319,8 +379,13 @@ impl Transform {
             Transform::DisplayView(t) => t.direction(),
             Transform::Exponent(t) => t.direction(),
             Transform::ExponentWithLinear(t) => t.direction(),
+            Transform::ExposureContrast(t) => t.direction(),
             Transform::File(t) => t.direction(),
             Transform::FixedFunction(t) => t.direction(),
+            Transform::GradingHueCurve(t) => t.direction(),
+            Transform::GradingPrimary(t) => t.direction(),
+            Transform::GradingRgbCurve(t) => t.direction(),
+            Transform::GradingTone(t) => t.direction(),
             Transform::Group(t) => t.direction(),
             Transform::LogAffine(t) => t.direction(),
             Transform::LogCamera(t) => t.direction(),
@@ -345,8 +410,13 @@ impl Transform {
             Transform::DisplayView(t) => t.set_direction(dir),
             Transform::Exponent(t) => t.set_direction(dir),
             Transform::ExponentWithLinear(t) => t.set_direction(dir),
+            Transform::ExposureContrast(t) => t.set_direction(dir),
             Transform::File(t) => t.set_direction(dir),
             Transform::FixedFunction(t) => t.set_direction(dir),
+            Transform::GradingHueCurve(t) => t.set_direction(dir),
+            Transform::GradingPrimary(t) => t.set_direction(dir),
+            Transform::GradingRgbCurve(t) => t.set_direction(dir),
+            Transform::GradingTone(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
             Transform::LogAffine(t) => t.set_direction(dir),
             Transform::LogCamera(t) => t.set_direction(dir),
@@ -372,8 +442,13 @@ impl Transform {
             Transform::DisplayView(t) => t.validate(),
             Transform::Exponent(t) => t.validate(),
             Transform::ExponentWithLinear(t) => t.validate(),
+            Transform::ExposureContrast(t) => t.validate(),
             Transform::File(t) => t.validate(),
             Transform::FixedFunction(t) => t.validate(),
+            Transform::GradingHueCurve(t) => t.validate(),
+            Transform::GradingPrimary(t) => t.validate(),
+            Transform::GradingRgbCurve(t) => t.validate(),
+            Transform::GradingTone(t) => t.validate(),
             Transform::Group(t) => t.validate(),
             Transform::LogAffine(t) => t.validate(),
             Transform::LogCamera(t) => t.validate(),
@@ -451,8 +526,13 @@ impl Transform {
             Transform::DisplayView(t) => t.write_text(os),
             Transform::Exponent(t) => t.write_text(os),
             Transform::ExponentWithLinear(t) => t.write_text(os),
+            Transform::ExposureContrast(t) => t.write_text(os),
             Transform::File(t) => t.write_text(os),
             Transform::FixedFunction(t) => t.write_text(os),
+            Transform::GradingHueCurve(t) => t.write_text(os),
+            Transform::GradingPrimary(t) => t.write_text(os),
+            Transform::GradingRgbCurve(t) => t.write_text(os),
+            Transform::GradingTone(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
             Transform::LogAffine(t) => t.write_text(os),
             Transform::LogCamera(t) => t.write_text(os),
@@ -725,10 +805,17 @@ fn build_leaf_ops(
         Transform::ExponentWithLinear(exponent_transform) => {
             build_exponent_with_linear_op(ops, exponent_transform, dir)
         }
+        Transform::ExposureContrast(ec_transform) => {
+            build_exposure_contrast_op(ops, ec_transform, dir)
+        }
         Transform::FixedFunction(ff_transform) => build_fixed_function_op(ops, ff_transform, dir),
         Transform::LogAffine(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
+        Transform::GradingPrimary(t) => build_grading_primary_op(ops, t, dir),
+        Transform::GradingRgbCurve(t) => build_grading_rgb_curve_op(ops, t, dir),
+        Transform::GradingTone(t) => build_grading_tone_op(ops, t, dir),
+        Transform::GradingHueCurve(t) => build_grading_hue_curve_op(ops, t, dir),
         Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
         Transform::Lut3D(lut_transform) => build_lut3d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
@@ -766,29 +853,12 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::Cdl(_) => create_cdl_transform(group, op),
         OpData::Lut1D(_) => create_lut1d_transform(group, op),
         OpData::FixedFunction(_) => create_fixed_function_transform(group, op),
-        // `CreateGradingRGBCurveTransform` (src/OpenColorIO/ops/gradingrgbcurve/
-        // GradingRGBCurveOp.cpp:219-233 @ v2.5.2) comes with `GradingRGBCurveTransform`
-        // (Phase 3, WP 3.1).
-        OpData::GradingRgbCurve(_) => Err(Exception::new(
-            "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
-        )),
+        OpData::GradingRgbCurve(_) => create_grading_rgb_curve_transform(group, op),
         OpData::Lut3D(_) => create_lut3d_transform(group, op),
-        // `CreateGradingToneTransform` (src/OpenColorIO/ops/gradingtone/GradingToneOp.cpp:
-        // 217-230 @ v2.5.2) comes with `GradingToneTransform` (WP 5.5d).
-        OpData::GradingTone(_) => Err(Exception::new(
-            "CreateGradingToneTransform is not ported yet (WP 5.5d).",
-        )),
-        // `CreateExposureContrastTransform` (src/OpenColorIO/ops/exposurecontrast/
-        // ExposureContrastOp.cpp:197-210 @ v2.5.2) comes with `ExposureContrastTransform` (WP
-        // 5.5a).
-        OpData::ExposureContrast(_) => Err(Exception::new(
-            "CreateExposureContrastTransform is not ported yet (WP 5.5a).",
-        )),
-        // `CreateGradingPrimaryTransform` (src/OpenColorIO/ops/gradingprimary/
-        // GradingPrimaryOp.cpp:223-236 @ v2.5.2) comes with `GradingPrimaryTransform` (WP 5.5b).
-        OpData::GradingPrimary(_) => Err(Exception::new(
-            "CreateGradingPrimaryTransform is not ported yet (WP 5.5b).",
-        )),
+        OpData::GradingHueCurve(_) => create_grading_hue_curve_transform(group, op),
+        OpData::GradingTone(_) => create_grading_tone_transform(group, op),
+        OpData::ExposureContrast(_) => create_exposure_contrast_transform(group, op),
+        OpData::GradingPrimary(_) => create_grading_primary_transform(group, op),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

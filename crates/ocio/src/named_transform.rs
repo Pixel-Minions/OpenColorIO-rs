@@ -240,6 +240,22 @@ impl NamedTransform {
         Ok(())
     }
 
+    /// Stores `transform` itself (no copy, so not checked) as the forward or the inverse
+    /// transform; `None` removes it.
+    ///
+    /// For the Python module: the binding holds the transforms itself, as nodes Python objects
+    /// share (upstream's getters return the very `TransformRcPtr` the object holds, through which
+    /// Python changes it), and gives the library a copy of them to print or to use. That copy
+    /// must not be checked again: upstream doesn't copy the transform it holds when it prints
+    /// it, so an invalid FixedFunctionTransform made so through Python prints as it is.
+    #[doc(hidden)]
+    pub fn set_transform_as_is(&mut self, transform: Option<Transform>, dir: TransformDirection) {
+        match dir {
+            TransformDirection::Forward => self.forward_transform = transform,
+            TransformDirection::Inverse => self.inverse_transform = transform,
+        }
+    }
+
     /// Writes the named transform's text to `os`; the transforms on the same stream.
     ///
     /// Port of `operator<<(std::ostream &, const NamedTransform &)` (NamedTransform.cpp:
@@ -387,3 +403,29 @@ impl fmt::Display for NamedTransform {
 #[cfg(test)]
 #[path = "named_transform_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod as_is_tests {
+    use super::*;
+
+    /// The transform is stored as it is, where `set_transform`'s copy refuses it; `None`
+    /// removes it; each direction its own.
+    #[test]
+    fn set_transform_as_is_stores_without_checking() {
+        let ff = crate::color_space::invalid_fixed_function();
+        let mut nt = NamedTransform::new();
+        assert!(
+            nt.set_transform(Some(&ff), TransformDirection::Forward)
+                .is_err()
+        );
+        assert!(nt.transform(TransformDirection::Forward).is_none());
+        nt.set_transform_as_is(Some(ff), TransformDirection::Inverse);
+        assert!(matches!(
+            nt.transform(TransformDirection::Inverse),
+            Some(Transform::FixedFunction(t)) if t.params() == vec![1.0]
+        ));
+        assert!(nt.transform(TransformDirection::Forward).is_none());
+        nt.set_transform_as_is(None, TransformDirection::Inverse);
+        assert!(nt.transform(TransformDirection::Inverse).is_none());
+    }
+}

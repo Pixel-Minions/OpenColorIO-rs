@@ -21,10 +21,15 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use ocio::{BSplineType, GradingBSplineCurve, GradingRgbCurve, RgbCurveType};
 use ocio::{
-    Config, FixedFunctionStyle, FormatMetadata, GroupTransform, Interpolation, Lut1DHueAdjust,
-    NegativeStyle, OptimizationFlags, Processor, RangeStyle, Transform, TransformDirection,
+    Config, ExposureContrastStyle, FixedFunctionStyle, FormatMetadata, GroupTransform,
+    Interpolation, Lut1DHueAdjust, NegativeStyle, OptimizationFlags, Processor, RangeStyle,
+    Transform, TransformDirection,
 };
+use ocio::{GradingHueCurve, HsyTransformStyle, HueCurveType};
+use ocio::{GradingPrimary, GradingRgbm, GradingStyle};
+use ocio::{GradingRgbmsw, GradingTone};
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as Depth;
@@ -236,6 +241,7 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
         (Transform::Exponent(a), Transform::Exponent(b)) => Some(a.equals(b)),
         (Transform::ExponentWithLinear(a), Transform::ExponentWithLinear(b)) => Some(a.equals(b)),
         (Transform::FixedFunction(a), Transform::FixedFunction(b)) => Some(a.equals(b)),
+        (Transform::ExposureContrast(a), Transform::ExposureContrast(b)) => Some(a.equals(b)),
         _ => None,
     }
 }
@@ -737,6 +743,79 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("getParams", dumped_f64s(&t.params()));
             "FixedFunctionTransform"
         }
+        Transform::ExposureContrast(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_EXPOSURE_CONTRAST"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put(
+                "getStyle",
+                dumped_enum(exposure_contrast_style_name(t.style())),
+            );
+            put("getExposure", Dumped::F64(t.exposure()));
+            put("getContrast", Dumped::F64(t.contrast()));
+            put("getGamma", Dumped::F64(t.gamma()));
+            put("getPivot", Dumped::F64(t.pivot()));
+            put("getLogExposureStep", Dumped::F64(t.log_exposure_step()));
+            put("getLogMidGray", Dumped::F64(t.log_mid_gray()));
+            put("isExposureDynamic", Dumped::Bool(t.is_exposure_dynamic()));
+            put("isContrastDynamic", Dumped::Bool(t.is_contrast_dynamic()));
+            put("isGammaDynamic", Dumped::Bool(t.is_gamma_dynamic()));
+            "ExposureContrastTransform"
+        }
+        Transform::GradingPrimary(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_GRADING_PRIMARY"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getStyle", dumped_enum(grading_style_name(t.style())));
+            put("getValue", dump_grading_primary(&t.value()));
+            put("isDynamic", Dumped::Bool(t.is_dynamic()));
+            "GradingPrimaryTransform"
+        }
+        Transform::GradingRgbCurve(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_GRADING_RGB_CURVE"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getStyle", dumped_enum(grading_style_name(t.style())));
+            put("getValue", dump_grading_rgb_curve(&t.value()));
+            put("getBypassLinToLog", Dumped::Bool(t.bypass_lin_to_log()));
+            put("isDynamic", Dumped::Bool(t.is_dynamic()));
+            "GradingRGBCurveTransform"
+        }
+        Transform::GradingTone(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_GRADING_TONE"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getStyle", dumped_enum(grading_style_name(t.style())));
+            put("getValue", dump_grading_tone(&t.value()));
+            put("isDynamic", Dumped::Bool(t.is_dynamic()));
+            "GradingToneTransform"
+        }
+        Transform::GradingHueCurve(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_GRADING_HUE_CURVE"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getStyle", dumped_enum(grading_style_name(t.style())));
+            put("getValue", dump_grading_hue_curve(&t.value()));
+            put(
+                "getRGBToHSY",
+                dumped_enum(match t.rgb_to_hsy() {
+                    HsyTransformStyle::None => "HSY_TRANSFORM_NONE",
+                    HsyTransformStyle::Transform1 => "HSY_TRANSFORM_1",
+                }),
+            );
+            put("isDynamic", Dumped::Bool(t.is_dynamic()));
+            "GradingHueCurveTransform"
+        }
         other => panic!("no dump for {other:?}"),
     };
     (class.to_string(), getters)
@@ -894,4 +973,204 @@ pub(crate) fn fixed_function_style_name(style: FixedFunctionStyle) -> &'static s
         RgbToHsyLog => "FIXED_FUNCTION_RGB_TO_HSY_LOG",
         RgbToHsyVid => "FIXED_FUNCTION_RGB_TO_HSY_VID",
     }
+}
+
+/// An exposure contrast style's name in PyOpenColorIO.
+pub(crate) fn exposure_contrast_style_name(style: ExposureContrastStyle) -> &'static str {
+    match style {
+        ExposureContrastStyle::Linear => "EXPOSURE_CONTRAST_LINEAR",
+        ExposureContrastStyle::Video => "EXPOSURE_CONTRAST_VIDEO",
+        ExposureContrastStyle::Logarithmic => "EXPOSURE_CONTRAST_LOGARITHMIC",
+    }
+}
+
+/// A grading style's name in PyOpenColorIO.
+pub(crate) fn grading_style_name(style: GradingStyle) -> &'static str {
+    match style {
+        GradingStyle::Log => "GRADING_LOG",
+        GradingStyle::Lin => "GRADING_LIN",
+        GradingStyle::Video => "GRADING_VIDEO",
+    }
+}
+
+/// A value object as `checks.dump` writes it out: its class, its getters, its properties.
+pub(crate) fn dumped_object(
+    class: &str,
+    getters: &[(&str, Dumped)],
+    properties: &[(&str, Dumped)],
+) -> Dumped {
+    let map = |entries: &[(&str, Dumped)]| {
+        entries
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect()
+    };
+    Dumped::Object(Dump {
+        class: class.to_string(),
+        getters: map(getters),
+        properties: map(properties),
+        uncalled: Vec::new(),
+        children: Vec::new(),
+    })
+}
+
+/// A `GradingRGBM`, as `checks.dump` writes it out: its four fields as properties.
+pub(crate) fn dump_grading_rgbm(v: &GradingRgbm) -> Dumped {
+    dumped_object(
+        "GradingRGBM",
+        &[],
+        &[
+            ("blue", Dumped::F64(v.blue)),
+            ("green", Dumped::F64(v.green)),
+            ("master", Dumped::F64(v.master)),
+            ("red", Dumped::F64(v.red)),
+        ],
+    )
+}
+
+/// A `GradingPrimary`, as `checks.dump` writes it out: its fields as properties (the
+/// binding's static `NoClampBlack` and `NoClampWhite` aren't the class's properties).
+pub(crate) fn dump_grading_primary(v: &GradingPrimary) -> Dumped {
+    dumped_object(
+        "GradingPrimary",
+        &[],
+        &[
+            ("brightness", dump_grading_rgbm(&v.brightness)),
+            ("clampBlack", Dumped::F64(v.clamp_black)),
+            ("clampWhite", Dumped::F64(v.clamp_white)),
+            ("contrast", dump_grading_rgbm(&v.contrast)),
+            ("exposure", dump_grading_rgbm(&v.exposure)),
+            ("gain", dump_grading_rgbm(&v.gain)),
+            ("gamma", dump_grading_rgbm(&v.gamma)),
+            ("lift", dump_grading_rgbm(&v.lift)),
+            ("offset", dump_grading_rgbm(&v.offset)),
+            ("pivot", Dumped::F64(v.pivot)),
+            ("pivotBlack", Dumped::F64(v.pivot_black)),
+            ("pivotWhite", Dumped::F64(v.pivot_white)),
+            ("saturation", Dumped::F64(v.saturation)),
+        ],
+    )
+}
+
+/// A B-spline type, as PyOpenColorIO names it.
+pub(crate) fn b_spline_type_name(t: BSplineType) -> &'static str {
+    match t {
+        BSplineType::BSpline => "B_SPLINE",
+        BSplineType::DiagonalBSpline => "DIAGONAL_B_SPLINE",
+        BSplineType::HueHueBSpline => "HUE_HUE_B_SPLINE",
+        BSplineType::Periodic1BSpline => "PERIODIC_1_B_SPLINE",
+        BSplineType::Periodic0BSpline => "PERIODIC_0_B_SPLINE",
+        BSplineType::Horizontal1BSpline => "HORIZONTAL1_B_SPLINE",
+    }
+}
+
+/// A `GradingBSplineCurve`, as `checks.dump` writes it out: its control points (each a
+/// `GradingControlPoint` of properties `x` and `y`, floats the binding widens), its slopes and
+/// its spline type.
+pub(crate) fn dump_b_spline_curve(c: &GradingBSplineCurve) -> Dumped {
+    let points = c
+        .control_points()
+        .iter()
+        .map(|p| {
+            dumped_object(
+                "GradingControlPoint",
+                &[],
+                &[
+                    ("x", Dumped::F64(f64::from(p.x))),
+                    ("y", Dumped::F64(f64::from(p.y))),
+                ],
+            )
+        })
+        .collect();
+    dumped_object(
+        "GradingBSplineCurve",
+        &[
+            ("getControlPoints", Dumped::List(points)),
+            (
+                "getSlopes",
+                Dumped::List(
+                    c.slopes()
+                        .iter()
+                        .map(|&s| Dumped::F64(f64::from(s)))
+                        .collect(),
+                ),
+            ),
+            (
+                "getSplineType",
+                dumped_enum(b_spline_type_name(c.spline_type())),
+            ),
+        ],
+        &[],
+    )
+}
+
+/// A `GradingRGBCurve`, as `checks.dump` writes it out: `isIdentity`, and its four curves as
+/// properties.
+pub(crate) fn dump_grading_rgb_curve(v: &GradingRgbCurve) -> Dumped {
+    let c = |t| dump_b_spline_curve(v.curve(t).expect("an RGB curve type"));
+    dumped_object(
+        "GradingRGBCurve",
+        &[("isIdentity", Dumped::Bool(v.is_identity()))],
+        &[
+            ("blue", c(RgbCurveType::Blue)),
+            ("green", c(RgbCurveType::Green)),
+            ("master", c(RgbCurveType::Master)),
+            ("red", c(RgbCurveType::Red)),
+        ],
+    )
+}
+
+/// A `GradingRGBMSW`, as `checks.dump` writes it out: its six fields as properties.
+pub(crate) fn dump_grading_rgbmsw(v: &GradingRgbmsw) -> Dumped {
+    dumped_object(
+        "GradingRGBMSW",
+        &[],
+        &[
+            ("blue", Dumped::F64(v.blue)),
+            ("green", Dumped::F64(v.green)),
+            ("master", Dumped::F64(v.master)),
+            ("red", Dumped::F64(v.red)),
+            ("start", Dumped::F64(v.start)),
+            ("width", Dumped::F64(v.width)),
+        ],
+    )
+}
+
+/// A `GradingTone`, as `checks.dump` writes it out: its fields as properties.
+pub(crate) fn dump_grading_tone(v: &GradingTone) -> Dumped {
+    dumped_object(
+        "GradingTone",
+        &[],
+        &[
+            ("blacks", dump_grading_rgbmsw(&v.blacks)),
+            ("highlights", dump_grading_rgbmsw(&v.highlights)),
+            ("midtones", dump_grading_rgbmsw(&v.midtones)),
+            ("scontrast", Dumped::F64(v.scontrast)),
+            ("shadows", dump_grading_rgbmsw(&v.shadows)),
+            ("whites", dump_grading_rgbmsw(&v.whites)),
+        ],
+    )
+}
+
+/// A `GradingHueCurve`, as `checks.dump` writes it out: `getDrawCurveOnly`, `isIdentity`, and
+/// its eight curves as properties.
+pub(crate) fn dump_grading_hue_curve(v: &GradingHueCurve) -> Dumped {
+    let c = |t| dump_b_spline_curve(v.curve(t).expect("a hue curve type"));
+    dumped_object(
+        "GradingHueCurve",
+        &[
+            ("getDrawCurveOnly", Dumped::Bool(v.get_draw_curve_only())),
+            ("isIdentity", Dumped::Bool(v.is_identity())),
+        ],
+        &[
+            ("hue_fx", c(HueCurveType::HueFx)),
+            ("hue_hue", c(HueCurveType::HueHue)),
+            ("hue_lum", c(HueCurveType::HueLum)),
+            ("hue_sat", c(HueCurveType::HueSat)),
+            ("lum_lum", c(HueCurveType::LumLum)),
+            ("lum_sat", c(HueCurveType::LumSat)),
+            ("sat_lum", c(HueCurveType::SatLum)),
+            ("sat_sat", c(HueCurveType::SatSat)),
+        ],
+    )
 }

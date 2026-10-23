@@ -2,7 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The ExposureContrast op family: a port of `src/OpenColorIO/ops/exposurecontrast/` @ v2.5.2.
-//! The GPU shader comes with 5.1c, the transform with 5.5a.
+//! The GPU shader is in `ocio-gpu`, the transform in `ocio`
+//! (crates/ocio/src/transforms/exposure_contrast_transform.rs).
 
 pub mod exposure_contrast_op;
 pub mod exposure_contrast_op_cpu;

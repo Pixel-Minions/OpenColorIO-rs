@@ -4,7 +4,8 @@
 //! The GradingRGBCurve op: part of a port of `src/OpenColorIO/ops/gradingrgbcurve/
 //! GradingRGBCurveOp.h` and `GradingRGBCurveOp.cpp` @ v2.5.2: the op's behaviors and
 //! [`create_grading_rgb_curve_op`]. `BuildGradingRGBCurveOp` and
-//! `CreateGradingRGBCurveTransform` work on the `GradingRGBCurveTransform` (Phase 3);
+//! `CreateGradingRGBCurveTransform` work on the `GradingRGBCurveTransform`, in `ocio`
+//! (crates/ocio/src/transforms/grading_rgb_curve_transform.rs);
 //! `extractGpuShaderInfo` is the GPU writer's (`ocio-gpu`, WP 2.6e).
 //!
 //! As for every family, the op is its data, [`OpData::GradingRgbCurve`]: [`Op`]'s methods

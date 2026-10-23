@@ -555,6 +555,22 @@ impl ColorSpace {
         Ok(())
     }
 
+    /// Stores `transform` itself (no copy, so not checked) as the transform to the reference
+    /// space or from it; `None` removes it.
+    ///
+    /// For the Python module: the binding holds the transforms itself, as nodes Python objects
+    /// share (upstream's getters return the very `TransformRcPtr` the object holds, through which
+    /// Python changes it), and gives the library a copy of them to print or to use. That copy
+    /// must not be checked again: upstream doesn't copy the transform it holds when it prints
+    /// it, so an invalid FixedFunctionTransform made so through Python prints as it is.
+    #[doc(hidden)]
+    pub fn set_transform_as_is(&mut self, transform: Option<Transform>, dir: ColorSpaceDirection) {
+        match dir {
+            ColorSpaceDirection::ToReference => self.to_ref_transform = transform,
+            ColorSpaceDirection::FromReference => self.from_ref_transform = transform,
+        }
+    }
+
     /// The color space's text, as Python's `repr()` prints it, in bytes: names and
     /// descriptions that aren't UTF-8 pass through unchanged, where `Display` replaces them.
     ///
@@ -675,6 +691,46 @@ impl fmt::Display for ColorSpace {
     }
 }
 
+/// A FixedFunctionTransform whose parameters its style refuses (`ACES_Glow03` takes none), as
+/// Python can make one through the transform a getter returns.
+#[cfg(test)]
+pub(crate) fn invalid_fixed_function() -> Transform {
+    use crate::transforms::fixed_function_transform::FixedFunctionTransform;
+    use ocio_ops::open_color_types::FixedFunctionStyle;
+    let mut ff = FixedFunctionTransform::new(FixedFunctionStyle::AcesGlow03, &[])
+        .expect("a valid style without parameters");
+    ff.set_params(&[1.0]);
+    Transform::FixedFunction(ff)
+}
+
 #[cfg(test)]
 #[path = "color_space_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod as_is_tests {
+    use super::*;
+
+    /// The transform is stored as it is, where `set_transform`'s copy refuses it; `None`
+    /// removes it; each direction its own.
+    #[test]
+    fn set_transform_as_is_stores_without_checking() {
+        let ff = invalid_fixed_function();
+        let mut cs = ColorSpace::new();
+        assert!(
+            cs.set_transform(Some(&ff), ColorSpaceDirection::ToReference)
+                .is_err()
+        );
+        assert!(cs.transform(ColorSpaceDirection::ToReference).is_none());
+        cs.set_transform_as_is(Some(ff.clone()), ColorSpaceDirection::FromReference);
+        let Some(Transform::FixedFunction(stored)) =
+            cs.transform(ColorSpaceDirection::FromReference)
+        else {
+            panic!("the transform stored");
+        };
+        assert_eq!(stored.params(), vec![1.0]);
+        assert!(cs.transform(ColorSpaceDirection::ToReference).is_none());
+        cs.set_transform_as_is(None, ColorSpaceDirection::FromReference);
+        assert!(cs.transform(ColorSpaceDirection::FromReference).is_none());
+    }
+}

@@ -338,3 +338,304 @@ fn a_config_with_a_lut1d_transform_is_not_serialized() {
         String::from_utf8_lossy(&wheel)
     );
 }
+
+/// Checks that the wheel and the port refuse each case's config of a profile version, with the
+/// same message.
+fn check_refused_v(version: &str, cases: &[&str]) {
+    let configs: Vec<String> = cases.iter().map(|c| config_text(version, c)).collect();
+    let calls: Vec<BatchCall<'_>> = configs
+        .iter()
+        .map(|text| BatchCall {
+            cmd: "config_calls",
+            args: json!({"config": {"yaml": {"bytes": hex(text.as_bytes())}}, "calls": []}),
+            blobs: Vec::new(),
+        })
+        .collect();
+    let wheel = Oracle::get().batch(&calls, true);
+    assert_eq!(wheel.len(), cases.len());
+    let mut failures = Vec::new();
+    for ((case, w), text) in cases.iter().zip(wheel).zip(&configs) {
+        let w = w.expect("config_calls").result;
+        let wheel_message = bytes(&w["config"]["exception"]["message"]);
+        let port = Config::create_from_stream(text.as_bytes());
+        match port {
+            Ok(_) => failures.push(format!("{case}: the port loads it, the wheel: {w}")),
+            Err(e) => {
+                if wheel_message.is_empty() || e.what() != wheel_message.as_slice() {
+                    failures.push(format!(
+                        "{case}:\n  wheel {}\n  port  {}",
+                        String::from_utf8_lossy(&wheel_message),
+                        String::from_utf8_lossy(e.what())
+                    ));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The ExposureContrastTransform's saver: the dynamic values left out, the pivot always, the
+/// log values unless they are the defaults, the name, and special values.
+#[test]
+fn exposure_contrast_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2",
+        &[
+            "!<ExposureContrastTransform> {}",
+            "!<ExposureContrastTransform> {style: video, exposure: 1.5, contrast: 0.5, gamma: \
+             1.1, pivot: 0.18}",
+            "!<ExposureContrastTransform> {style: LOG, exposure: -1.4, contrast: 0.6, gamma: 1.2, \
+             pivot: 0.2, direction: inverse, name: ec}",
+            "!<ExposureContrastTransform> {direction: inverse, style: Video, contrast: 2}",
+            "!<ExposureContrastTransform> {log_exposure_step: 0.088, log_midway_gray: 0.435}",
+            "!<ExposureContrastTransform> {log_exposure_step: 0.0880000001, log_midway_gray: \
+             0.43500000000000005}",
+            "!<ExposureContrastTransform> {log_exposure_step: 0.1, log_midway_gray: 0.5, \
+             exposure: 0}",
+            "!<ExposureContrastTransform> {exposure: .nan, contrast: .inf, gamma: -.inf, pivot: \
+             -0.0}",
+            "!<ExposureContrastTransform> {exposure: 1e-30, contrast: 1e300, gamma: 1e-320, \
+             pivot: 4.9e-324}",
+            "!<ExposureContrastTransform> {exposure: 0.12345678901234567, contrast: \
+             1.0000000000000002, gamma: 123456789012345678, pivot: 0.30000000000000004}",
+            "!<ExposureContrastTransform> {log_exposure_step: .nan, log_midway_gray: .nan}",
+            "!<ExposureContrastTransform> {exposure: 3.4028234663852886e38, contrast: \
+             1.1754943508222875e-38, gamma: 1.7976931348623157e308}",
+            "!<GroupTransform> {children: [!<ExposureContrastTransform> {style: linear, \
+             exposure: 1}, !<ExposureContrastTransform> {name: x, gamma: 2}]}",
+        ],
+    );
+}
+
+/// Version 1 configs refuse an ExposureContrastTransform (`checkVersionConsistency`), in a
+/// group too.
+#[test]
+fn exposure_contrast_transforms_are_refused_in_version_1() {
+    check_refused_v(
+        "1",
+        &[
+            "!<ExposureContrastTransform> {}",
+            "!<ExposureContrastTransform> {style: video, exposure: 1}",
+            "!<GroupTransform> {children: [!<ExposureContrastTransform> {}]}",
+        ],
+    );
+}
+
+/// The GradingPrimaryTransform's saver: a flow map for default values, a block map otherwise;
+/// each style's controls, the contrast pivot forced by a contrast or pivot that isn't the
+/// default, the other styles' controls dropped, the clamps; and special values and values
+/// with more digits than the writer's precision.
+#[test]
+fn grading_primary_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2",
+        &[
+            "!<GradingPrimaryTransform> {style: log}",
+            "!<GradingPrimaryTransform> {style: linear, direction: inverse, name: gp}",
+            "!<GradingPrimaryTransform> {style: video}",
+            "!<GradingPrimaryTransform> {style: log, brightness: {rgb: [0.1, 0.12345678, 0], \
+             master: 0.1}, contrast: {rgb: [1.1, 1, 1], master: 1.1}, gamma: {rgb: [1.1, 1.2, \
+             1.3], master: 1}, saturation: 0.9, pivot: {black: 0.1, white: 1.1}, clamp: {black: \
+             0.1, white: 1.1}}",
+            "!<GradingPrimaryTransform> {style: log, pivot: {contrast: -0.2}}",
+            "!<GradingPrimaryTransform> {style: log, pivot: {contrast: -0.1}}",
+            "!<GradingPrimaryTransform> {style: log, contrast: {rgb: [1, 1, 1], master: 1.5}}",
+            "!<GradingPrimaryTransform> {style: log, offset: {rgb: [1, 1, 1], master: 1}, lift: \
+             {rgb: [1, 1, 1], master: 1}, exposure: {rgb: [1, 1, 1], master: 1}, gain: {rgb: [2, \
+             2, 2], master: 2}}",
+            "!<GradingPrimaryTransform> {style: linear, offset: {rgb: [0.1, 0.12345678, 0], \
+             master: 0.1}, exposure: {rgb: [-1.1, 0.9, -0.01], master: 1.1}, contrast: {rgb: \
+             [1.1, 1, 1], master: 1.1}, saturation: 1.1, direction: inverse}",
+            "!<GradingPrimaryTransform> {style: linear, pivot: {contrast: 0.18, black: 0.5, \
+             white: 2}}",
+            "!<GradingPrimaryTransform> {style: linear, pivot: {black: 0.5}, clamp: {white: 1.1}}",
+            "!<GradingPrimaryTransform> {style: linear, gamma: {rgb: [2, 2, 2], master: 2}}",
+            "!<GradingPrimaryTransform> {style: video, lift: {rgb: [0.1, 0, 0], master: 0.1}, \
+             gamma: {rgb: [1.1, 1, 1], master: 1.1}, gain: {rgb: [1.1, 1, 1], master: 1.1}, \
+             offset: {rgb: [0, 0, 0], master: 0.5}, pivot: {contrast: 0.3, white: 1.1}, clamp: \
+             {black: 0.1}}",
+            "!<GradingPrimaryTransform> {style: video, contrast: {rgb: [2, 2, 2], master: 2}, \
+             brightness: {rgb: [1, 1, 1], master: 1}}",
+            "!<GradingPrimaryTransform> {style: log, brightness: {rgb: [.nan, .inf, -.inf], \
+             master: -0.0}, saturation: .nan}",
+            "!<GradingPrimaryTransform> {style: log, gamma: {rgb: [.nan, 1, 1], master: 1}, \
+             pivot: {contrast: .nan, black: .nan}, clamp: {black: .nan, white: .nan}}",
+            "!<GradingPrimaryTransform> {style: linear, offset: {rgb: [1e-30, 1e300, \
+             4.9e-324], master: 0.12345678901234567}, saturation: 1.0000000000000002, pivot: \
+             {contrast: 0.30000000000000004}}",
+            "!<GradingPrimaryTransform> {style: video, clamp: {black: -1.7976931348623157e308, \
+             white: 1.7976931348623157e308}}",
+            "!<GradingPrimaryTransform> {style: video, clamp: {black: -1e308, white: 1e308}}",
+            "!<GradingPrimaryTransform> {style: log, clamp: {black: -.inf, white: .inf}}",
+            "!<GradingPrimaryTransform> {style: log, saturation: 3.4028234663852886e38, \
+             brightness: {rgb: [1.1754943508222875e-38, 0, 0], master: 0}}",
+            "!<GroupTransform> {children: [!<GradingPrimaryTransform> {style: log}, \
+             !<GradingPrimaryTransform> {style: video, saturation: 2}]}",
+        ],
+    );
+}
+
+/// Version 1 configs refuse a GradingPrimaryTransform (`checkVersionConsistency`), in a group
+/// too.
+#[test]
+fn grading_primary_transforms_are_refused_in_version_1() {
+    check_refused_v(
+        "1",
+        &[
+            "!<GradingPrimaryTransform> {style: log}",
+            "!<GroupTransform> {children: [!<GradingPrimaryTransform> {style: video}]}",
+        ],
+    );
+}
+
+/// The GradingRGBCurveTransform's saver: a flow map when every curve is the default, a block
+/// map otherwise; the bypass; the curves that aren't the default or whose slopes aren't, as
+/// floats; special values and coordinates with more digits than the writer's precision.
+#[test]
+fn grading_rgb_curve_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2",
+        &[
+            "!<GradingRGBCurveTransform> {style: log}",
+            "!<GradingRGBCurveTransform> {style: linear, lintolog_bypass: true, direction: \
+             inverse, name: gc}",
+            "!<GradingRGBCurveTransform> {style: video, red: {control_points: [0, 0, 0.5, 0.5, \
+             1, 1.123456]}}",
+            "!<GradingRGBCurveTransform> {style: linear, red: {control_points: [-7, -7, 0, 0, 7, \
+             7], slopes: [1, 1, 1]}}",
+            "!<GradingRGBCurveTransform> {style: log, red: {control_points: [-0.2, 0, 0.5, 0.5, \
+             1.2, 1.5]}, green: {control_points: [0, 0, 0.2, 0.5, 1, 1.5]}, blue: \
+             {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1]}, master: \
+             {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}, direction: inverse}",
+            "!<GradingRGBCurveTransform> {style: log, green: {control_points: [0, .nan, 1, \
+             .inf], slopes: [-0.0, 1e-30]}}",
+            "!<GradingRGBCurveTransform> {style: log, green: {control_points: [0, \
+             1.1754944e-38, 0.30000001, 0.123456789, 1, 3.4028234e38], slopes: [1.0000001, \
+             0.99999994, 1e-45]}}",
+            "!<GradingRGBCurveTransform> {style: video, master: {control_points: [0, 0, 1, 1], \
+             slopes: [0, -0.0]}}",
+            "!<GroupTransform> {children: [!<GradingRGBCurveTransform> {style: log}, \
+             !<GradingRGBCurveTransform> {style: video, red: {control_points: [0, 0, 1, 2]}}]}",
+        ],
+    );
+}
+
+/// Version 1 configs refuse a GradingRGBCurveTransform (`checkVersionConsistency`), in a
+/// group too.
+#[test]
+fn grading_rgb_curve_transforms_are_refused_in_version_1() {
+    check_refused_v(
+        "1",
+        &[
+            "!<GradingRGBCurveTransform> {style: log}",
+            "!<GroupTransform> {children: [!<GradingRGBCurveTransform> {style: video}]}",
+        ],
+    );
+}
+
+/// The GradingToneTransform's saver: a flow map for default values, a block map otherwise,
+/// each range with its keys, the s-contrast; special values and values with more digits than
+/// the writer's precision.
+#[test]
+fn grading_tone_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2",
+        &[
+            "!<GradingToneTransform> {style: log}",
+            "!<GradingToneTransform> {style: linear, direction: inverse, name: gt}",
+            "!<GradingToneTransform> {style: video, s_contrast: 1.1}",
+            "!<GradingToneTransform> {style: log, blacks: {rgb: [0.1, 0.12345678, 0.9], master: \
+             1, start: 0.1, width: 0.9}, shadows: {rgb: [1, 1.1, 1.1111], master: 1.1, start: \
+             0.9, pivot: 0.1}, midtones: {rgb: [0.85, 0.98, 1], master: 1.11, center: 0.1, width: \
+             0.9}, highlights: {rgb: [1.1, 1.1111, 1], master: 1.2, start: 0.15, pivot: 1.1}, \
+             whites: {rgb: [0.95, 0.96, 0.95], master: 1.1, start: 0.1, width: 0.9}, s_contrast: \
+             1.1}",
+            "!<GradingToneTransform> {style: linear, whites: {rgb: [1, 1, 1], master: 1, start: \
+             0, width: 8}}",
+            "!<GradingToneTransform> {style: linear, whites: {rgb: [1, 1, 1], master: 1, start: \
+             0.000001, width: 8}}",
+            "!<GradingToneTransform> {style: video, s_contrast: .nan, midtones: {rgb: [.nan, 1, \
+             1], master: 1, center: -0.0, width: 1.0000000000000002}}",
+            "!<GradingToneTransform> {style: log, midtones: {rgb: [0.12345678901234567, \
+             1.0000000000000002, 1], master: 1, center: 0.30000000000000004, width: 1e300}}",
+            "!<GradingToneTransform> {style: log, blacks: {rgb: [1, 1, 1], master: 1, start: \
+             -.inf, width: .inf}}",
+            "!<GroupTransform> {children: [!<GradingToneTransform> {style: log}, \
+             !<GradingToneTransform> {style: video, s_contrast: 1.2}]}",
+        ],
+    );
+}
+
+/// Version 1 configs refuse a GradingToneTransform (`checkVersionConsistency`), in a group too.
+#[test]
+fn grading_tone_transforms_are_refused_in_version_1() {
+    check_refused_v(
+        "1",
+        &[
+            "!<GradingToneTransform> {style: log}",
+            "!<GroupTransform> {children: [!<GradingToneTransform> {style: video}]}",
+        ],
+    );
+}
+
+/// The GradingHueCurveTransform's saver: a flow map when every curve is its default, a block
+/// map otherwise; `hsy_transform: none`; the curves that aren't the default or whose slopes
+/// aren't, as floats; special values and coordinates with more digits than the writer's
+/// precision.
+#[test]
+fn grading_hue_curve_transforms_save_as_in_the_wheel() {
+    check_save_v(
+        "2.5",
+        &[
+            "!<GradingHueCurveTransform> {style: log}",
+            "!<GradingHueCurveTransform> {style: linear, hsy_transform: none, direction: \
+             inverse, name: hc}",
+            "!<GradingHueCurveTransform> {style: video, hue_hue: {control_points: [0, 0.15, 0.5, \
+             0.5, 1, 1.123456]}}",
+            "!<GradingHueCurveTransform> {style: linear, lum_lum: {control_points: [-7, -7, 0, 0, \
+             7, 7], slopes: [1, 1, 1]}}",
+            "!<GradingHueCurveTransform> {style: video, hue_hue: {control_points: [0.02, -0.1, \
+             0.5, 0.5, 0.9, 0.8]}, hue_lum: {control_points: [0, 0, 0.2, 0.5, 1, 1.5]}, lum_sat: \
+             {control_points: [0, 0, 0.1, 0.5, 1, 1.5], slopes: [0, 1, 1.1]}, sat_lum: \
+             {control_points: [-1, -1, 0, 0.1, 0.5, 0.6, 1, 1.1]}, direction: inverse}",
+            "!<GradingHueCurveTransform> {style: log, sat_sat: {control_points: [0, .nan, 1, \
+             .inf], slopes: [-0.0, 1e-30]}}",
+            "!<GradingHueCurveTransform> {style: log, lum_sat: {control_points: [0, \
+             1.1754944e-38, 0.30000001, 0.123456789, 1, 3.4028234e38], slopes: [1.0000001, \
+             0.99999994, 1e-45]}}",
+            "!<GradingHueCurveTransform> {style: video, hue_fx: {control_points: [0, 0, 0.5, 0], \
+             slopes: [0, -0.0]}}",
+            "!<GroupTransform> {children: [!<GradingHueCurveTransform> {style: log}, \
+             !<GradingHueCurveTransform> {style: video, hue_sat: {control_points: [0, 1, 0.5, \
+             2]}}]}",
+        ],
+    );
+}
+
+/// Versions 2.0 to 2.4 refuse a GradingHueCurveTransform (`checkVersionConsistency`), in a
+/// group too.
+#[test]
+fn grading_hue_curve_transforms_are_refused_before_version_2_5() {
+    check_refused_v(
+        "2.4",
+        &[
+            "!<GradingHueCurveTransform> {style: log}",
+            "!<GroupTransform> {children: [!<GradingHueCurveTransform> {style: video}]}",
+        ],
+    );
+    check_refused_v("2", &["!<GradingHueCurveTransform> {style: linear}"]);
+}
+
+/// Version 1 configs accept a GradingHueCurveTransform: upstream's check refuses it only in
+/// versions 2.0 to 2.4 (docs/improvements.md, I-291).
+#[test]
+fn grading_hue_curve_transforms_save_in_version_1_as_in_the_wheel() {
+    check_save_v(
+        "1",
+        &[
+            "!<GradingHueCurveTransform> {style: log}",
+            "!<GradingHueCurveTransform> {style: video, hue_sat: {control_points: [0, 1, 0.5, \
+             2]}, name: hc}",
+        ],
+    );
+}

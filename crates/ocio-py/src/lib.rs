@@ -25,10 +25,44 @@ pub mod embed;
 #[cfg(feature = "python")]
 pub mod enums;
 #[cfg(feature = "python")]
+pub(crate) mod py_builtin_transform_registry;
+#[cfg(feature = "python")]
+pub(crate) mod py_color_space;
+#[cfg(feature = "python")]
+pub(crate) mod py_color_space_set;
+#[cfg(feature = "python")]
+pub(crate) mod py_context;
+#[cfg(feature = "python")]
+pub(crate) mod py_file_rules;
+#[cfg(feature = "python")]
+pub(crate) mod py_format_metadata;
+#[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
+#[cfg(feature = "python")]
+pub(crate) mod py_look;
+#[cfg(feature = "python")]
+pub(crate) mod py_named_transform;
 #[cfg(feature = "python")]
 pub mod py_open_color_io;
 #[cfg(feature = "python")]
+pub(crate) mod py_processor_metadata;
+#[cfg(feature = "python")]
+pub(crate) mod py_transform;
+/// What the identity registries hold, for the tests of their size and cost.
+#[cfg(feature = "python")]
+#[doc(hidden)]
+pub use py_transform::{RegistryStats, registry_stats};
+#[cfg(feature = "python")]
 pub(crate) mod py_types;
 #[cfg(feature = "python")]
+pub(crate) mod py_utils;
+#[cfg(feature = "python")]
+pub(crate) mod py_view_transform;
+#[cfg(feature = "python")]
+pub(crate) mod py_viewing_rules;
+#[cfg(feature = "python")]
 pub mod pybind11;
+#[cfg(feature = "python")]
+pub(crate) mod shared;
+#[cfg(feature = "python")]
+pub(crate) mod transforms;

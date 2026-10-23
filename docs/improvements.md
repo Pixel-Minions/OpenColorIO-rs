@@ -886,7 +886,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   output shows it.
 - **Who notices:** nobody through the library; code calling the function directly.
 - **A fix:** `std::ostringstream ss; ss << "Unknown Log style: '" << str << "'.";`.
-- **Status:** matched in `p1-log` (1.3l1); `log_utils.rs`, `overwritten`.
+- **Status:** matched in `p1-log` (1.3l1); `log_utils.rs`, `overwritten` (which I-262 reuses).
 
 ### I-55. Exponents that differ past 7 digits share a cache ID
 
@@ -1918,6 +1918,70 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `incompatible`);
   `dispatch_oracle.rs`, `module_functions_answer_as_the_wheels`.
 
+### I-261. A transform's direction outside the enumerators
+
+- **Upstream:** Python can make a `TransformDirection` outside its enumerators
+  (`OCIO.TransformDirection(5)`, I-223), and `setDirection` (or a constructor's `direction`)
+  stores it. Most classes keep the integer: `getDirection` gives it back
+  (`<TransformDirection.???: 5>`), `operator<<` writes "inverse"
+  (`TransformDirectionToString`), and `validate` raises from `Transform::validate`
+  (Transform.cpp:30-40 @ v2.5.2) with the C++ class's `typeid` name, which each compiler
+  writes its own way, after the class's prefix: "MatrixTransform validation failed: class
+  OpenColorIO_v2_5::MatrixTransformImpl: invalid direction." in the Windows wheel (MSVC), the
+  mangled `N16OpenColorIO_v2_519MatrixTransformImplE` in the Linux one (GCC);
+  `BuiltinTransformImpl` adds no prefix. The classes whose op data keep the direction in a
+  style (CDL, exponent, exponent with linear, exposure contrast, fixed function:
+  `GammaOpData::setDirection`, "invert when different") flip their direction instead, so
+  setting such a value twice gives the first direction back. A processor validates its
+  transform first (Processor.cpp:633), so none is built from such a value.
+- **Who notices:** Python code that sets a direction made from a number outside 0 and 1.
+- **A fix:** refuse the number when the enum is constructed (I-223's fix).
+- **Status:** matched in `p6-transforms` (6.3a, `crates/ocio-py/src/py_transform.rs`,
+  `set_direction`, `validate`, `invalid_direction`): the binding keeps the integer beside the
+  library's transform, whose own direction is forward for 0 and inverse otherwise;
+  `transforms_oracle.rs`.
+
+### I-262. A style outside the enumerators: its message is written over its own start
+
+- **Upstream:** the setters that convert a style to their op data's at once refuse a value
+  outside the enumerators (I-223) at the end of the conversion's `switch` with
+  `std::stringstream ss("Unknown ...: "); ss << style;`, which writes the number over the
+  start of the text, as I-52's: `GammaOpData::ConvertStyleBasic` and `ConvertStyleMonCurve`
+  (`ops/gamma/GammaOpData.cpp:205-208`, `238-241`), `FixedFunctionOpData::ConvertStyle`
+  (`ops/fixedfunction/FixedFunctionOpData.cpp:488-491`) and `CDLOpData::ConvertStyle`
+  (`ops/cdl/CDLOpData.cpp:102-105`). Python reaches them through `ExponentTransform` and
+  `ExponentWithLinearTransform` (constructor and `setNegativeStyle`), `FixedFunctionTransform`
+  (constructor and `setStyle`) and `CDLTransform.setStyle`: `OCIO.NegativeStyle(9)` gives
+  "9nknown negative extrapolation style: ", `-1` "-1known negative extrapolation style: ",
+  `2147483647` "2147483647gative extrapolation style: ", `OCIO.FixedFunctionStyle(99)` "99known
+  FixedFunction transform style: ", `OCIO.CDLStyle(9)` "9nknown CDL transform style: ". The
+  number is the enum's promotion, an `int`: in the Linux wheel, whose enums are `unsigned int`
+  (I-225), `OCIO.NegativeStyle(4294967295)` writes "-1".
+- **Who notices:** Python code that passes such a value and reads the message.
+- **A fix:** `std::ostringstream ss; ss << "Unknown ...: " << style;`.
+- **Status:** matched in `p6-transforms` (6.3b, 6.3c; `crates/ocio-py/src/py_transform.rs`,
+  `unknown_style`, through I-52's `overwritten`); `transforms_oracle.rs`,
+  `a_style_outside_the_enumerators_raises_the_wheels_error`, against both wheels.
+
+### I-281. A color space set of one color space removing its own empties itself
+
+- **Upstream:** `ColorSpaceSet::Impl::remove(const Impl & rhs)` loops over `rhs`'s vector with
+  a range-`for`, which saves the vector's end before the first step, and erases each color space
+  of that name from its own vector (ColorSpaceSet.cpp:180-204 @ v2.5.2). From Python the two
+  can be the same set (`css.removeColorSpaces(css)`). With one color space the erase empties the
+  vector, the iterator's next step reaches the saved end, and the loop stops having read
+  nothing more: the call returns and the set is empty. Stepping an iterator the erase
+  invalidated is undefined; both wheels step it as a pointer. With two or more the loop reads
+  past the vector's new end (U-124).
+- **Who notices:** Python code that passes a set of one color space to its own
+  `removeColorSpaces`.
+- **A fix:** copy the other set's names before erasing (U-124's fix), which gives the same
+  empty set.
+- **Status:** matched in `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
+  `REMOVE_COLOR_SPACES`): the set is emptied, the color space held from Python unchanged;
+  `color_space_oracle.rs`, `color_spaces_behave_as_the_wheels` (`set_script`), against the
+  wheel.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."
@@ -2366,7 +2430,13 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   whether its objects share the cached ones.
 - **Status:** not reproduced: the port gives copies (`p4-cdl` 4.4e,
   `crates/ocio/src/transforms/cdl_transform.rs`), which differs from the wheel after such an
-  edit.
+  edit. The Python binding gives new objects too (`p6-transforms` 6.3c,
+  `crates/ocio-py/src/transforms/py_cdl_transform.rs`): a second `CreateFromFile` of the same
+  CDL is another Python object, where the wheel gives the first again; `cdl_files_oracle.rs`
+  pins the difference against the wheel. Their metadata's vectors of child elements are a copy's,
+  as large as they hold (`p6-objects` 6.3d, U-121), where the wheel's are the file reader's,
+  which may hold spare room: an `addChildElement` on such a CDL may reallocate (and give new
+  child objects) in the port where the wheel's doesn't.
 
 ### I-175. The CDL reader drops content in four places
 
@@ -3305,6 +3375,161 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   grading_tone_op_cpu.rs`, `lin_log_pixel`, `log_lin_pixel`); the battery compares alpha bit
   for bit for the linear style (`crates/ocio-ops/tests/grading_tone_oracle.rs`).
 
+### I-271. Two hue curve ops make an inverse pair whatever their RGB-to-HSY settings, but linear
+
+- **Upstream:** `GradingHueCurveOpData::isInverse` compares the RGB-to-HSY settings only in the
+  linear style (`m_style != GRADING_LIN || m_RGBToHSY == r->m_RGBToHSY`,
+  `ops/gradinghuecurve/GradingHueCurveOpData.cpp:117-119` @ v2.5.2), a check copied from the
+  RGB curves' lin-to-log bypass, which only the linear style has. The hue curves' setting
+  matters in every style: an op that converts RGB to HSY and back is no inverse of one that
+  doesn't. The optimizer (`RemoveInverseOps`, `OpOptimizers.cpp:207-300`) removes such a pair
+  in the log and video styles, where the unoptimized processor applies both.
+- **Who notices:** a group of a log or video GradingHueCurveTransform and its inverse with
+  `setRGBToHSY(HSY_TRANSFORM_NONE)` on one of them (an application doing its own HSY
+  conversion on one side): the optimized processor is an identity.
+- **A fix:** compare the setting in every style.
+- **Status:** matched in `p5-huecurve` (5.4a, `crates/ocio-ops/src/ops/gradinghuecurve/
+  grading_hue_curve_op_data.rs`, `is_inverse`); checked against the wheel
+  (`crates/ocio-ops/tests/grading_hue_curve_op_data_oracle.rs`,
+  `inverse_pairs_are_removed_as_the_wheels`).
+
+### I-272. A draw-curve-only hue curve op of identity curves is removed as an identity
+
+- **Upstream:** in draw-curve-only mode the CPU renderer evaluates the hue-sat curve on each
+  channel, whether or not the curves are identities ("LocalBypass does not matter",
+  `ops/gradinghuecurve/GradingHueCurveOpCPU.cpp:177-198` @ v2.5.2): with the default curves,
+  every R, G and B comes out 1. But `isIdentity` ignores the mode
+  (`GradingHueCurveOpData.cpp:103-108`, `GradingHueCurve.cpp:206-216`), so the optimizer
+  removes the op, and the processor gives the pixels back unchanged; without optimization it
+  gives the drawn curve. The GPU follows: in draw mode the identity curves still get knots,
+  so the op's local bypass is false and its shader does draw (with the optimization off the
+  GPU draws, like the CPU); the shader of the optimized processor is empty only because the
+  optimizer removed the op.
+- **Who notices:** a user interface drawing the default (or any identity) hue-sat curve with
+  an optimized processor.
+- **A fix:** make a draw-curve-only op never an identity.
+- **Status:** matched in `p5-huecurve` (5.4a, `grading_hue_curve_op_data.rs`, `is_identity`;
+  the renderer and the shader come with 5.4b and 5.4c); checked against the wheel
+  (`crates/ocio-ops/tests/grading_hue_curve_op_data_oracle.rs`).
+
+### I-273. A GradingHueCurve's NaN pixels differ between Windows and Linux
+
+- **Upstream:** the linear style's forward renderer scales luma by its two gains, `out[2] *
+  hueLumGain * satLumGain` (`ops/gradinghuecurve/GradingHueCurveOpCPU.cpp:266-267` @ v2.5.2).
+  The hue-lum gain is NaN where an infinite hue-lum gain meets a saturation of 0, or an
+  infinite hue-sat gain a lum-sat gain of 0 (x86's default NaN); a NaN pixel's luma is NaN
+  too. When both are, the result is the first operand's NaN, and the wheels order the
+  operands differently: MSVC computes `(lum * hueLumGain) * satLumGain` (the pixel's NaN),
+  GCC `satLumGain * (hueLumGain * lum)` (the default NaN). The other sites where two NaNs can
+  meet, the log and video styles' luma shift and the hue effect, are compiled alike (both as
+  `shift + lum` and `HueFX(hue) + hue`, against the source's order), as are the curves'
+  evaluations the renderers share with the RGB curves (I-91).
+- **Who notices:** a linear GradingHueCurveTransform whose curves overflow to infinite gains,
+  applied to NaN pixels: the NaNs' sign and payload differ between the platforms.
+- **A fix:** one operand order on both platforms (the source's).
+- **Status:** matched in `p5-huecurve` (5.4b, `crates/ocio-ops/src/ops/gradinghuecurve/
+  grading_hue_curve_op_cpu.rs`, `apply_fwd`); the battery
+  (`crates/ocio-ops/tests/grading_hue_curve_oracle.rs`) compares them bit for bit on both
+  platforms.
+
+### I-274. The video GradingHueCurve's shader scales luma where its CPU renderer shifts it
+
+- **Upstream:** the CPU renderers scale luma by the hue-lum and sat-lum gains in the linear
+  style only, and shift it (`+ (hueLumGain + satLumGain - 2) * 0.1`) in the log and video
+  styles (`m_isLinear ? ... : ...`, `ops/gradinghuecurve/GradingHueCurveOpCPU.cpp:266-267,
+  334-335` @ v2.5.2). The GPU shader shifts in the log style only and scales in the linear and
+  video styles (`style == GRADING_LOG ? ... : ...`, `GradingHueCurveOpGPU.cpp:405-414,
+  528-537`). A video-style op with a hue-lum or sat-lum curve that isn't 1 gives other luma on
+  the GPU than on the CPU.
+- **Who notices:** a video GradingHueCurveTransform with hue-lum or sat-lum adjustments,
+  compared between a CPU and a GPU render.
+- **A fix:** shift in the video style on the GPU too, as the CPU does (or scale on both,
+  whichever upstream intended).
+- **Status:** matched in `p5-huecurve` (5.4c, `crates/ocio-gpu/src/ops/gradinghuecurve/
+  grading_hue_curve_op_gpu.rs`, `add_gc_forward_shader`, `add_gc_inverse_shader`); the shader
+  text is checked byte for byte against the wheel
+  (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`).
+
+### I-275. The hue-fx curve's reverse evaluation differs between the GPU and the CPU
+
+- **Upstream:** the CPU's `evalCurveRevHue` adds the curve's first knot to `knStartY` for the
+  hue-fx curve (curve 7), `knStartY = isHfx ? knStartY + knStart : knStartY`
+  (`ops/gradingrgbcurve/GradingBSplineCurve.cpp:1404-1408` @ v2.5.2). The GPU's
+  `AddShaderEvalRevHue` sets the shader's `knStartY` to the coefficient alone
+  (`float knStartY = coefs[coefsOffs + coefsSets * 2];`, `GradingBSplineCurve.cpp:1190-1192`),
+  declares `knStart` and never uses it (it does add `knEnd` to `knEndY` for curve 7, `:1202-1203`).
+  For hues between `knStartY` and `knStartY + knStart` the shader wraps the hue up one period
+  (`x = x + ceil(knStartY - x)`, `:1205-1207`) where the CPU doesn't. Example: upstream's test
+  curves in the log style, hue-fx `knStart` -0.01 and `knStartY` -0.02: 3 of 2001 hues in
+  [-0.5, 1.5] differ; at h = -0.024 the CPU gives 0.9243853 and the GPU 0.92438525.
+- **Who notices:** a GradingHueCurveTransform in the inverse direction with a hue-fx curve
+  whose first knot isn't 0, compared between a CPU and a GPU render, for the few hues in that
+  window.
+- **A fix:** add `knStart` to `knStartY` in the shader for the hue-fx curve, as the CPU does.
+- **Status:** ported as upstream in `p5-huecurve` (5.4c,
+  `crates/ocio-gpu/src/ops/gradinghuecurve/grading_hue_curve_op_gpu.rs`, the shader text is
+  copied exactly); checked byte for byte against the wheel
+  (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`).
+
+### I-291. A version 1 config may hold a GradingHueCurveTransform
+
+- **Upstream:** `Config::Impl::checkVersionConsistency` refuses a GradingHueCurveTransform
+  only when `m_majorVersion == 2 && m_minorVersion < 5` (`Config.cpp:5785-5791` @ v2.5.2),
+  where the other classes version 2 brought test `m_majorVersion < 2`. A version 1 config
+  (whose minor version is 0) loads and serializes one, though no version 1 library can read
+  it, and the config is refused by every version 2 library before 2.5.
+- **Who notices:** a version 1 config that holds a GradingHueCurveTransform (by hand, or built
+  through the API and serialized).
+- **A fix:** refuse it before version 2.5, `m_majorVersion < 2 || (m_majorVersion == 2 &&
+  m_minorVersion < 5)`.
+- **Status:** ported as upstream in `p5-transforms` (5.5e), `Config::
+  check_transform_version_consistency`; `ocio_yaml_save_oracle_tests.rs`
+  (`grading_hue_curve_transforms_save_in_version_1_as_in_the_wheel`) checks it against the
+  wheel.
+
+## App helpers
+
+### I-316. A menu's last fall-back lists color spaces the parameters exclude
+
+- **Upstream:** when neither the app categories, the encodings nor the user categories match
+  any item, `FindColorSpaceInfos` falls back to every active color space of the reference
+  space type, and every active named transform if they are included
+  (`CategoryHelpers.cpp:524-554` @ v2.5.2). It doesn't test `includeColorSpaces` there, as it
+  does for the named transforms, so a menu of named transforms only
+  (`setIncludeColorSpaces(false)`, `setIncludeNamedTransforms(true)`) whose categories match
+  nothing lists all the color spaces too (probed against the wheel 2026-10-22).
+- **Who notices:** an application that asks for a menu of named transforms by category, on a
+  config where no named transform (or one without categories, with `treatNoCategoryAsAny`) has
+  them.
+- **A fix:** test `includeColorSpaces` in the last fall-back too.
+- **Status:** ported as upstream in `p5-helpers-1` (5.7a),
+  `apphelpers::category_helpers::find_color_space_infos`; checked against the wheel's menus
+  (`category_helpers_oracle_tests.rs`), where a mutant that tests `includeColorSpaces` fails.
+
+### I-317. Menus are kept for good, by the hash of their parameters' text
+
+- **Upstream:** `ColorSpaceMenuHelper::Create` keeps every menu it makes in a static map,
+  under `std::hash<std::string>` of the parameters' text (`operator<<`: the config's cache ID
+  and the parameters), and returns the kept menu for parameters of the same hash
+  (`ColorSpaceHelpers.cpp:421-450` @ v2.5.2). So: the map only grows (`ClearAllCaches` doesn't
+  empty it); a menu is logged about (its fall-backs, `FindColorSpaceInfos`) only when it is
+  made, while the config's validation warning is logged at every call; anything that changes
+  the items without changing the text gives the first menu (a config whose cache ID stays the
+  same, such as two configs of the same YAML whose inactive color spaces
+  `OCIO_INACTIVE_COLORSPACES` set differently); two texts of the same hash share a menu, and
+  the hash is MSVC's FNV-1a on Windows and libstdc++'s on Linux, so not the same texts.
+  `OCIO_DISABLE_ALL_CACHES` disables it, read once, at the first menu past the checks of its
+  parameters.
+- **Who notices:** applications that make many menus (memory), or that change a config's
+  environment between menus; logs that miss a menu's fall-back message the second time.
+- **A fix:** key the menus by the text itself, in a cache `ClearAllCaches` empties, keyed also
+  by what the cache ID misses; or keep no cache (menus are cheap to make).
+- **Status:** ported as upstream in `p5-helpers-1` (5.7b, `ColorSpaceMenuHelper::new`, keyed
+  by `caching::std_hash_string`); `color_space_menu_helper_oracle.rs` checks the logs of menus
+  asked for again against the wheel. `OCIO_DISABLE_ALL_CACHES` is read as upstream reads it but
+  not checked against the wheel: the oracle refuses to set it per request (it is read once per
+  process), and no command runs menus in a child process of their own.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -3713,7 +3938,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (the dynamic property's `precompute`, building the op data) fails there.
 - **Status:** matched in `p2-rgbcurve` (2.6b), `grading_b_spline_curve.rs`; the GradingRGBCurve
   battery (2.6d) doesn't vary x coordinates (only y and the slopes), so it never sends
-  such a curve to the wheel; `grading_b_spline_curve_tests.rs` checks the error.
+  such a curve to the wheel; `grading_b_spline_curve_tests.rs` checks the error. `p5-transforms`
+  (5.5c): a GradingRGBCurveTransform's `setValue` and its YAML loader refuse such curves with
+  the same error; `tests/grading_rgb_curve_transform_oracle.rs` checks it, and its oracle
+  cases (and the YAML ones) leave NaN x coordinates out.
 
 ### U-45. The working directory when `_getcwd` fails
 
@@ -4531,3 +4759,238 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `type.__setattr__(cls, 'value', ...)` (which the wheel refuses, D-7) and the property's own
   `__init__`. It also refuses a replacement the wheel survives, when the property stays
   reachable for the rest of the process (under another name of the class, say).
+
+### U-110. A group holding a null transform dereferences it
+
+- **Upstream:** pybind11's holder caster takes `None` for a `TransformRcPtr` (with conversions),
+  so `GroupTransform.appendTransform(None)`, `prependTransform(None)` and
+  `GroupTransform([None])` put a null pointer among the children. `len()`, indexing (`None`)
+  and iteration work, and so does `write()` (a null transform builds no op, and the CDL
+  writers' cast refuses it). `validate()` (and so a processor) calls through the null pointer
+  and kills the process; `repr()` takes `typeid` of it, which in the Windows wheel throws
+  std::bad_typeid (RuntimeError "Attempted a typeid of nullptr pointer!") and in the Linux one
+  reads through it (SIGSEGV, probed in Rocky Linux 9).
+- **Who notices:** Python code that passes `None` as a group's transform.
+- **A fix:** refuse `None` (`"transform"_a.none(false)`).
+- **Status:** the port raises RuntimeError "the group holds a null transform (a None it was
+  given), which the wheel dereferences here (docs/improvements.md, U-110)" where the wheel
+  dereferences it, after the children before it (the binding's
+  `TransformRc::materialize` and `validate`, `crates/ocio-py/src/py_transform.rs`), in
+  `p6-transforms` (6.3a).
+
+### U-111. A group holding itself recurses until the stack overflows
+
+- **Upstream:** a group can hold itself, directly or through another group
+  (`g.appendTransform(g)`): pybind11 shares the C++ object. Its `repr()`, `validate()` and
+  `write()` recurse through it without end, and the wheel's process dies of a stack overflow
+  (once every child before it validated, for `validate`).
+- **Who notices:** Python code that builds a cycle of groups.
+- **A fix:** refuse a transform that holds the group in `appendTransform` and
+  `prependTransform`.
+- **Status:** the port raises RuntimeError "the group holds itself, through which the wheel
+  recurses until its stack overflows (docs/improvements.md, U-111)" where the wheel recurses
+  (`crates/ocio-py/src/py_transform.rs`), in `p6-transforms` (6.3a).
+
+### U-112. A transform's setter given an enum value outside its enumerators
+
+- **Upstream:** Python can make an enum value outside its enumerators (I-223), and some setters
+  of a transform store it as it is: `setFileInputBitDepth(OCIO.BitDepth(42))` and
+  `setFileOutputBitDepth` (MatrixTransform, RangeTransform), `RangeTransform.setStyle`,
+  `AllocationTransform.setAllocation`, `FileTransform.setInterpolation` and
+  `FileTransform.setCDLStyle`, and `FileTransform`'s constructor (`interpolation`) when its
+  validation passes (`validate` doesn't read the interpolation, FileTransform.cpp:84-104 @
+  v2.5.2). Each later use then reads the integer through its own `switch` (the text
+  `operator<<` writes, `validate`, building ops): a value C++17 leaves undefined for an enum
+  without a fixed type, which the port's library enums can't hold. Not here: the direction,
+  matched (I-261); the setters that convert the value at once and raise (the exponent
+  classes' negative style, the fixed function's and the CDL's style, I-262); and
+  `AllocationTransform`'s constructor, whose validation refuses the value (matched).
+- **Who notices:** Python code that passes such a value to a transform.
+- **A fix:** refuse the number when the enum is constructed (I-223's fix).
+- **Status:** the port raises ValueError "PyOpenColorIO.PyOpenColorIO.BitDepth(42): the wheel
+  stores an enum value outside its enumerators, which the port's library can't hold
+  (docs/improvements.md, U-112)" (`outside_enumerators`, `crates/ocio-py/src/py_transform.rs`)
+  from each of these setters, and from `FileTransform`'s constructor after its validation (so
+  its errors come first, as the wheel's), in `p6-transforms` (6.3a, 6.3c);
+  `transforms_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error` (the
+  same steps succeed in the wheel), `a_style_outside_the_enumerators_raises_the_wheels_error`.
+  Also the context's environment mode (`Context.setEnvironmentMode` and the constructor's
+  `environmentMode`, which the wheel stores and its cache ID writes as the integer), in
+  `p6-objects` (6.3d, `crates/ocio-py/src/py_context.rs`, `environment_mode`);
+  `context_oracle.rs`, `an_environment_mode_outside_the_enumerators_is_the_ports_error`.
+  Also the color space's reference space, bit depth and allocation
+  (`ColorSpace(referenceSpace=OCIO.ReferenceSpaceType(5))`, `bitDepth=OCIO.BitDepth(77)`,
+  `allocation=OCIO.Allocation(9)`, and `setBitDepth`, `setAllocation`) and the view transform's
+  reference space (`ViewTransform(referenceSpace=...)`), which the wheel stores: its getters
+  return `<ReferenceSpaceType.???: 5>`, `<BitDepth.???: 77>`, and the color space's repr writes
+  nothing for the reference space ("referenceSpaceType=name=x") and "bitDepth=unknown", where
+  the view transform's raises "Unknown reference type"; in `p6-objects` (6.3e,
+  `crates/ocio-py/src/py_color_space.rs`, `reference_space_type`, `py_view_transform.rs`, and
+  `bit_depth`, `allocation` of `py_transform.rs` and `transforms/py_allocation_transform.rs`);
+  `color_space_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error`,
+  `look_view_named_oracle.rs`, `a_reference_space_outside_the_enumerators_is_the_ports_error`.
+
+### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
+
+- **Upstream:** the binding opens the file with `std::ofstream f(fileName.c_str())`
+  (PyGroupTransform.cpp:81-101 @ v2.5.2), a narrow name that MSVC's C runtime reads in the
+  process's ANSI code page (or UTF-8, after a `setlocale` to a UTF-8 locale): the UTF-8 bytes
+  pybind11 makes of a Python `str` become another name, or none, depending on the machine's
+  settings. On Linux the bytes are the name.
+- **Who notices:** Python code on Windows that writes a group to a file whose name isn't ASCII.
+- **A fix:** open the file through OCIO's own UTF-8 conversion (`Platform::CreateOutputFileStream`
+  style), as the library's readers do.
+- **Status:** on Windows the port raises ValueError "the wheel opens a file name that isn't
+  ASCII through the C runtime's ANSI code page (docs/improvements.md, U-113)" and creates no
+  file; on Linux it writes the file under the bytes, as the wheel; in `p6-transforms` (6.3a,
+  `crates/ocio-py/src/transforms/py_group_transform.rs`, `open_text_file`);
+  `group_write_oracle.rs`.
+
+### U-121. A `FormatMetadata` reference into memory the wheel freed
+
+- **Upstream:** every `FormatMetadata` Python object is a C++ reference: `getFormatMetadata`
+  returns one into the transform (`reference_internal`), the child element iterators' `__getitem__`
+  and `__next__` one into the parent's `std::vector<FormatMetadataImpl>` of children
+  (`reference_internal`, which keeps the iterator alive, not the transform), and each iterator
+  (`__iter__`, `getAttributes`, `getChildElements`) holds a plain reference to its element
+  (PyFormatMetadata.cpp:21-201 @ v2.5.2). The reference dangles once the vector reallocates
+  (`addChildElement`, the CDL's `setFirstSOPDescription`; the elements are copied, so their own
+  children's vectors are new too), once `clear` or the CDL's erased description destroys the
+  element (`FormatMetadata.cpp:367-379`, `CDLTransform.cpp:345-367`), or once the transform
+  dies; the wheel then reads and writes freed memory. pybind11 finds a returned element's Python
+  object by its address, so when the allocator puts a later buffer where a freed one was, a
+  lookup there returns the stale object.
+- **Who notices:** Python code that keeps a child element (or an iterator) across
+  `addChildElement` or `clear` of its parent, or past its transform's life.
+- **A fix:** return copies, or keep each element in a stable allocation (a `std::deque`, or
+  `std::vector<std::unique_ptr<...>>`), and keep the transform alive from the iterators.
+- **Status:** the binding names each reference as the wheel's pointer does (the transform's
+  metadata, or a slot of a children vector's buffer), and follows the buffers as the wheels'
+  C++ runtimes allocate them (MSVC's STL grows a full vector by half, libstdc++ doubles it; a
+  copy is as large as it holds; copy-assignment of an element as each runtime's `operator=`).
+  So a child is the same Python object exactly while the wheel's vector keeps its buffer, and a
+  slot `clear` emptied and a later child filled reads that child, as in the wheel. Where the
+  wheel's reference dangles the port raises RuntimeError "the FormatMetadata element was freed
+  (its transform freed, or the vector of child elements holding it reallocated, cleared or
+  shortened), and the wheel reads its memory anyway (docs/improvements.md, U-121)"; a lookup
+  never returns a stale object. In `p6-objects` (6.3d,
+  `crates/ocio-py/src/py_format_metadata.rs`, `MetadataHeap`); `format_metadata_oracle.rs`.
+
+### U-122. A context collecting the variables it uses into itself
+
+- **Upstream:** `Context::resolveStringVar(string, usedContextVars)` and
+  `resolveFileLocation(filename, usedContextVars)` hold the context's `std::mutex`
+  (`m_resultsCacheMutex`) while they call `usedContextVars->setStringVar` for each variable
+  used, which locks the mutex of `usedContextVars` (Context.cpp:83-121, 288-329, 396-516 @
+  v2.5.2). From Python the two can be the same context (`ctx.resolveStringVar('$A', ctx)`):
+  locking a `std::mutex` the thread holds is undefined: the wheel's process dies (Windows,
+  probed 2026-10-22) or deadlocks (glibc, whose default mutex doesn't check its owner;
+  unverified).
+- **Who notices:** Python code that passes a context to its own `resolveStringVar` or
+  `resolveFileLocation` to collect the variables used.
+- **A fix:** collect into a local context and add its variables once the lock is released, or
+  use a recursive mutex.
+- **Status:** the port raises RuntimeError "the context records the variables it used into
+  itself, which locks its mutex twice: the wheel's process dies (Windows) or deadlocks (glibc,
+  unverified) (docs/improvements.md, U-122)"
+  when a variable is used; with none used, the call returns as the wheel's. In `p6-objects`
+  (6.3d, `crates/ocio-py/src/py_context.rs`, `resolve`); `context_oracle.rs`.
+
+### U-123. A null file name or look made into a `std::string`
+
+- **Upstream:** `ProcessorMetadata::addFile(const char *)` and `addLook(const char *)` insert
+  the pointer into a `std::set<std::string>` and a `std::vector<std::string>`
+  (Processor.cpp:73-97 @ v2.5.2), `Context::resolveFileLocation` writes the file name to a
+  stream (Context.cpp:483-485), and `ViewingRules::getIndexForRule` writes the rule name into
+  its error when there is no rule to compare it with (ViewingRules.cpp:212-226; with a rule,
+  `Platform::Strcasecmp` throws "String pointer for comparison must not be null.", which the
+  port matches, as for `FileRules`, which always holds a rule), all without checking it for
+  null; pybind11 passes `None` as a null pointer. The Windows wheel's process dies (probed 2026-10-22); libstdc++ may throw
+  `std::logic_error` instead, or crash in the stream.
+- **Who notices:** Python code that passes `None` as a file name or a look to these.
+- **A fix:** treat a null pointer as the empty string, as the context's setters do.
+- **Status:** the port raises ValueError "<call>: None, a null pointer from which the wheel
+  constructs a std::string (its process dies; docs/improvements.md, U-123)". In `p6-objects`
+  (6.3d, `crates/ocio-py/src/py_context.rs`, `null_string`, `py_processor_metadata.rs`,
+  `py_viewing_rules.rs`); `context_oracle.rs`, `rules_oracle.rs`.
+
+### U-124. `None` for a color space set, a color space or a transform that upstream dereferences
+
+- **Upstream:** the bindings take a `ColorSpaceSetRcPtr`, `ColorSpaceRcPtr` or
+  `TransformRcPtr` argument through pybind11's holder caster, which passes `None` as a null
+  pointer, and these functions dereference it: `ColorSpaceSet.addColorSpace`, `addColorSpaces`
+  and `removeColorSpaces`, the operators `|` and `&`, and `-` when the left set holds a color
+  space (`ColorSpaceSet.cpp:118-204, 314-355` @ v2.5.2); `Look.setTransform` and
+  `setInverseTransform` (`transform->createEditableCopy()`, Look.cpp:111-125; the library's
+  U-50); and
+  `NamedTransform.GetTransform` of a named transform with neither transform, which copies the
+  null one (NamedTransform.cpp:182-221). The wheel's process dies (probed on Windows,
+  2026-10-22). Also `css.removeColorSpaces(css)` on a set that holds two or more color spaces:
+  upstream loops over the set's own vector while it erases from it
+  (`ColorSpaceSet::Impl::remove(const Impl &)`, ColorSpaceSet.cpp:198-204), and its iterator,
+  which the erase invalidated, then reads past the vector's new end (with one color space it
+  stops at the end it saved: I-281).
+- **Who notices:** Python code that passes `None` there, or a set of two or more color spaces
+  to its own `removeColorSpaces`.
+- **A fix:** check the pointers (as `GetTransform` checks the named transform itself), and copy
+  the other set's names before erasing.
+- **Status:** the port raises ValueError "<call>: None, a null pointer the wheel dereferences
+  (its process dies; docs/improvements.md, U-124)" (or the error naming the case), where the
+  wheel's process dies; `ColorSpaceSet() - None`, which reads nothing of the null set, returns
+  an empty set as the wheel's; a set of one color space or none removing its own returns, as
+  the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
+  `py_look.rs`, `py_named_transform.rs`); `color_space_oracle.rs`, `look_view_named_oracle.rs`.
+
+### U-141. A menu of a role that names no color space
+
+- **Upstream:** `ColorSpaceInfo::CreateFromSingleRole` and `CreateFromRole` check
+  `config->hasRole(role)`, which is true for a role set to any name, then dereference
+  `config->getColorSpace(role)`, which is null when that name is no color space
+  (`ColorSpaceHelpers.cpp:59-94` @ v2.5.2). The config isn't valid then, but
+  `ColorSpaceMenuHelper::Create` only logs its validation's warning and goes on
+  (`ColorSpaceHelpers.cpp:385-394`): a menu whose parameters' role is such a role, or that
+  includes the roles of such a config, reads through a null pointer while it is made, and the
+  wheel's process dies.
+- **Who notices:** an application asking for a menu of a config whose role names a missing
+  color space (`config.setRole('r', 'missing')`, or a hand-written config).
+- **A fix:** treat the role as missing (or skip it among the roles), as for a role the config
+  doesn't have.
+- **Status:** the port's `ColorSpaceMenuHelper::new` returns an error ("ColorSpaceMenuHelper:
+  the role '<role>' refers to the color space '<name>', which doesn't exist: ...
+  (docs/improvements.md, U-141)"). In `p5-helpers-1` (5.7b, `apphelpers/
+  color_space_helpers.rs`, `role_color_space`); `color_space_menu_helper_oracle.rs`
+  (`roles_naming_a_missing_color_space_are_refused`).
+
+### U-142. A menu including a role set to the empty name
+
+- **Upstream:** a role set to `""` (`config.setRole('r', '')`) stays among the roles, but
+  `hasRole` is false for it. With `setIncludeRoles(true)`, `ColorSpaceMenuHelperImpl::refresh`
+  adds what `ColorSpaceInfo::CreateFromRole` returns for every role, a null pointer for that
+  one (`ColorSpaceHelpers.cpp:59-76, 502-511` @ v2.5.2). The menu is made (and counted in
+  `getNumColorSpaces`), but these read through the null item, and the wheel's process dies:
+  the getters of that index (`getName`, `getUIName`, `getFamily`, `getDescription`,
+  `getNumHierarchyLevels`, `getHierarchyLevel`; probed on Windows, 2026-10-22: `getName`), the
+  lookups by name or UI name that reach it before a match (`ColorSpaceHelpers.cpp:613-709`),
+  the menu's text (`operator<<`, 711-734), and the check of added color spaces that reach it
+  while the menu is made (515-583). Through Python, any call to the menu that pybind11 refuses
+  too: its TypeError message holds the menu's `repr` (the oracle's process died writing such
+  a menu out).
+- **Who notices:** an application asking for a menu with the roles of a config that has a role
+  set to the empty name.
+- **A fix:** skip the roles `CreateFromRole` gives nothing for.
+- **Status:** the port refuses when the menu is made: `ColorSpaceMenuHelper::new` returns an
+  error ("ColorSpaceMenuHelper: the menu item of the role '<role>' is null (the role refers to
+  no color space): ... (docs/improvements.md, U-142)"), before the added color spaces are read.
+  The wheel builds the menu and dies when the null item is read, so the port is stricter than
+  the wheel (owner-approved, 2026-10-22). What that costs (verifier probes, 2026-10-22): the
+  wheel gives a defined result in some of these cases, where the port refuses. With an added
+  name the config lacks, the wheel raises its normal "Element '...' is neither a color space
+  not a named transform." (the check fails before reaching the null item); with an added name
+  already earlier in the menu, the wheel builds the menu (33 items, no crash); without added
+  names the menu is usable except at the null item. The getters and lookups of a menu that exists are
+  plain values, as upstream's `OpenColorAppHelpers.h`. In `p5-helpers-1` (5.7b,
+  `apphelpers/color_space_helpers.rs`, `ColorSpaceMenuHelper::refresh`);
+  `color_space_menu_helper_oracle.rs`
+  (`a_role_set_to_the_empty_name_is_refused_when_the_menu_is_made`, which compares with the
+  wheel what doesn't build that menu: the same config without the roles included, and an added
+  color space the config doesn't have).
