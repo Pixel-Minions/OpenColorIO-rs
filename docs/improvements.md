@@ -5808,7 +5808,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   constructor copies each through its pointer, GradingHueCurve.cpp:99-117); and
   `GradingRGBCurveTransform` and `GradingHueCurveTransform` given `None` for their values
   (`setValue(None)`, the constructor's `values`: the property validates through the pointer,
-  DynamicProperty.cpp:216-223, 315-322). The wheel's process dies. (`GradingRGBCurve(..., None)` checks its curves: "All curves have to be
+  DynamicProperty.cpp:216-223, 315-322), and `DynamicProperty.setGradingRGBCurve(None)` and
+  `setGradingHueCurve(None)` on a property of that kind (PyDynamicProperty.h:117-145). The
+  wheel's process dies. (`GradingRGBCurve(..., None)` checks its curves: "All curves have to be
   defined", matched. The methods bound without argument names are U-134's.)
 - **Who notices:** Python code that passes `None` for a curve.
 - **A fix:** refuse `None` there (`py::arg().none(false)`), or check the pointers.
@@ -5817,8 +5819,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`; 6.7b,
   `transforms/py_grading_rgb_curve_transform.rs`, `py_grading_hue_curve_transform.rs`);
   `grading_data_oracle.rs`, `a_null_curve_is_the_ports_error`, `grading_transforms_oracle.rs`,
-  `null_values_are_the_ports_error` (each case's process dies in the wheel, and only at that
-  step).
+  `null_values_are_the_ports_error`; 6.7a, `crates/ocio-py/src/py_dynamic_property.rs`,
+  `dynamic_property_oracle.rs`, `null_curves_are_the_ports_error` (each case's process dies in
+  the wheel, and only at that step).
 
 ### U-171. The heuristics turn a shared config's processor cache off while other threads use it
 

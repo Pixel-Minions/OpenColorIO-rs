@@ -3802,14 +3802,13 @@ note = "p6-objects 6.3d"
 path = "src/bindings/python/PyDynamicProperty.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_dynamic_property.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/PyDynamicProperty.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_dynamic_property.rs"]
-status = "partial"
-note = "p6-buffers 6.5b: the value an instance holds (m_prop), which CPUProcessor.getDynamicProperty returns; the class's methods come with 6.7a"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/PyFileRules.cpp"
@@ -3854,8 +3853,7 @@ status = "todo"
 path = "src/bindings/python/PyGradingData.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_grading_data.rs"]
-status = "partial"
-note = "p6-after-p5 6.7a: the values and the curves; done with the dynamic property chunk"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/PyImageDesc.cpp"
