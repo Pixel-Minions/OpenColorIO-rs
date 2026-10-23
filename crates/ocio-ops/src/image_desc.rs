@@ -560,109 +560,22 @@ impl<B: AsRef<[u8]>> PackedImageDesc<B> {
             origin,
             element,
         } = parts;
-        let bit_depth = strides.map_or(BitDepth::F32, |(bit_depth, _)| bit_depth);
-
-        // The Python binding checks the buffer's type before the library sees it.
-        check_buffer_type(element, bit_depth)?;
-
-        let (chan_order, num_channels) = match channels {
-            Channels::Count(4) => (ChannelOrdering::Rgba, 4),
-            Channels::Count(3) => (ChannelOrdering::Rgb, 3),
-            Channels::Count(_) => {
-                return Err(Exception::new(
-                    "PackedImageDesc Error: Invalid number of channels.",
-                ));
-            }
-            // A value outside the enum ("Unknown channel ordering.") can't reach Rust.
-            Channels::Order(
-                order @ (ChannelOrdering::Rgba | ChannelOrdering::Bgra | ChannelOrdering::Abgr),
-            ) => (order, 4),
-            Channels::Order(order @ (ChannelOrdering::Rgb | ChannelOrdering::Bgr)) => (order, 3),
-        };
-
-        // The constructors without a bit depth use `sizeof(BitDepthInfo<BIT_DEPTH_F32>::Type)`
-        // and derive every stride; the others ask `GetChannelSizeInBytes`, which refuses the bit
-        // depths the CPU processor doesn't take, and derive the `AutoStride` ones.
-        let (one_channel_in_bytes, [chan, x, y]) = match strides {
-            None => (item_size::<F32>(), [AUTO_STRIDE; 3]),
-            Some((bit_depth, strides)) => (get_channel_size_in_bytes(bit_depth)? as isize, strides),
-        };
-        let chan_stride = if chan == AUTO_STRIDE {
-            one_channel_in_bytes
-        } else {
-            chan
-        };
-        let x_stride = if x == AUTO_STRIDE {
-            chan_stride.wrapping_mul(num_channels as isize)
-        } else {
-            x
-        };
-        let y_stride = if y == AUTO_STRIDE {
-            x_stride.wrapping_mul(width as isize)
-        } else {
-            y
-        };
-
-        let channels = packed_channel_offsets(chan_order, num_channels, chan_stride);
-        let is_rgba_packed = packed_is_rgba_packed(bit_depth, &channels, chan_stride, x_stride)?;
-        let is_float = chan_stride == item_size::<F32>() && bit_depth == BitDepth::F32;
-
-        packed_validate(
-            bytes.as_ref().is_empty(),
+        let made = packed_core(
+            bytes.as_ref().len(),
+            origin,
+            element,
             width,
             height,
-            bit_depth,
-            num_channels,
-            chan_stride,
-            x_stride,
-            y_stride,
+            channels,
+            strides,
         )?;
-
-        // Deviation D-2: the bytes the CPU engine will touch must be in the buffer. An RGBA-packed
-        // image is read and written in whole rows from its red channel.
-        let item = get_channel_size_in_bytes(bit_depth)? as usize;
-        let len = bytes.as_ref().len();
-        let starts = channels.map(|offset| offset.map(|o| origin as i128 + o as i128));
-        let outside = if is_rgba_packed {
-            let red = starts[0].expect("a packed image has red");
-            rows_reach_outside(len, red, item, width, height, y_stride)
-        } else {
-            starts.iter().flatten().any(|&start| {
-                channel_reaches_outside(len, start, item, width, height, x_stride, y_stride)
-            })
-        };
-        if outside {
-            return Err(Exception::new(
-                "PackedImageDesc Error: The strides and dimensions reach outside the image buffer.",
-            ));
-        }
-
-        // Inside the buffer, so every start is an offset in it.
-        let pos = |start: i128| ChannelPos {
-            buffer: 0,
-            offset: start as usize,
-        };
-        let [r, g, b, a] = starts;
-        let layout = ImageLayout {
-            bit_depth,
-            width,
-            height,
-            x_stride_bytes: x_stride,
-            y_stride_bytes: y_stride,
-            r: pos(r.expect("a packed image has red")),
-            g: pos(g.expect("a packed image has green")),
-            b: pos(b.expect("a packed image has blue")),
-            a: a.map(pos),
-            is_rgba_packed,
-            is_float,
-        };
         Ok(PackedImageDesc {
             data: bytes,
             data_offset: origin,
-            chan_order,
-            num_channels,
-            chan_stride_bytes: chan_stride,
-            layout,
+            chan_order: made.chan_order,
+            num_channels: made.num_channels as c_long,
+            chan_stride_bytes: made.chan_stride_bytes,
+            layout: made.layout,
         })
     }
 
@@ -713,6 +626,182 @@ impl<B: AsRef<[u8]>> ImageDesc for PackedImageDesc<B> {
 }
 
 impl<B: AsRef<[u8]> + AsMut<[u8]>> ImageDescMut for PackedImageDesc<B> {}
+
+/// What a packed image's constructors make of their arguments over memory of `len` bytes whose
+/// first pixel is `origin` bytes from its start: the getters' values, or the constructor's error.
+/// The constructors read nothing of the memory but its length.
+///
+/// Internal to the Python binding, which checks an image's arguments where the wheel's
+/// constructor runs without reading its pixels (`PyPackedImageDesc.cpp`): public for it only.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackedLayout {
+    /// The layout, as [`ImageDesc::layout`] gives it.
+    pub layout: ImageLayout,
+    /// `getChannelOrder()`.
+    pub chan_order: ChannelOrdering,
+    /// `getNumChannels()`.
+    pub num_channels: usize,
+    /// `getChanStrideBytes()`.
+    pub chan_stride_bytes: isize,
+}
+
+/// A packed image constructor's channel argument: `numChannels` or `chanOrder`.
+///
+/// Internal to the Python binding: public for it only ([`packed_layout`]).
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackedChannels {
+    /// `numChannels`.
+    Count(usize),
+    /// `chanOrder`.
+    Order(ChannelOrdering),
+}
+
+/// [`PackedImageDesc`]'s constructors over raw bytes ([`Bytes`] at `origin`, as [`At`] puts it)
+/// of `len` bytes, without the memory: the four constructors of
+/// src/OpenColorIO/ImageDesc.cpp:332-507 @ v2.5.2, `strides` `None` for the two without a bit
+/// depth. Each constructor gives the same layout or error for memory of that length.
+///
+/// Internal to the Python binding: public for it only.
+#[doc(hidden)]
+pub fn packed_layout(
+    len: usize,
+    origin: usize,
+    width: usize,
+    height: usize,
+    channels: PackedChannels,
+    strides: Option<(BitDepth, [isize; 3])>,
+) -> Result<PackedLayout> {
+    let channels = match channels {
+        PackedChannels::Count(n) => Channels::Count(long(n)),
+        PackedChannels::Order(order) => Channels::Order(order),
+    };
+    packed_core(
+        len,
+        origin,
+        None,
+        long(width),
+        long(height),
+        channels,
+        strides,
+    )
+}
+
+/// The checks and layout of [`PackedImageDesc`]'s constructors (src/OpenColorIO/ImageDesc.cpp:
+/// 332-507 @ v2.5.2), over memory of `len` bytes whose first pixel is at `origin`, typed
+/// `element`; the constructors read nothing else of the memory.
+fn packed_core(
+    len: usize,
+    origin: usize,
+    element: Option<Element>,
+    width: c_long,
+    height: c_long,
+    channels: Channels,
+    strides: Option<(BitDepth, [isize; 3])>,
+) -> Result<PackedLayout> {
+    let bit_depth = strides.map_or(BitDepth::F32, |(bit_depth, _)| bit_depth);
+
+    // The Python binding checks the buffer's type before the library sees it.
+    check_buffer_type(element, bit_depth)?;
+
+    let (chan_order, num_channels) = match channels {
+        Channels::Count(4) => (ChannelOrdering::Rgba, 4),
+        Channels::Count(3) => (ChannelOrdering::Rgb, 3),
+        Channels::Count(_) => {
+            return Err(Exception::new(
+                "PackedImageDesc Error: Invalid number of channels.",
+            ));
+        }
+        // A value outside the enum ("Unknown channel ordering.") can't reach Rust.
+        Channels::Order(
+            order @ (ChannelOrdering::Rgba | ChannelOrdering::Bgra | ChannelOrdering::Abgr),
+        ) => (order, 4),
+        Channels::Order(order @ (ChannelOrdering::Rgb | ChannelOrdering::Bgr)) => (order, 3),
+    };
+
+    // The constructors without a bit depth use `sizeof(BitDepthInfo<BIT_DEPTH_F32>::Type)`
+    // and derive every stride; the others ask `GetChannelSizeInBytes`, which refuses the bit
+    // depths the CPU processor doesn't take, and derive the `AutoStride` ones.
+    let (one_channel_in_bytes, [chan, x, y]) = match strides {
+        None => (item_size::<F32>(), [AUTO_STRIDE; 3]),
+        Some((bit_depth, strides)) => (get_channel_size_in_bytes(bit_depth)? as isize, strides),
+    };
+    let chan_stride = if chan == AUTO_STRIDE {
+        one_channel_in_bytes
+    } else {
+        chan
+    };
+    let x_stride = if x == AUTO_STRIDE {
+        chan_stride.wrapping_mul(num_channels as isize)
+    } else {
+        x
+    };
+    let y_stride = if y == AUTO_STRIDE {
+        x_stride.wrapping_mul(width as isize)
+    } else {
+        y
+    };
+
+    let channels = packed_channel_offsets(chan_order, num_channels, chan_stride);
+    let is_rgba_packed = packed_is_rgba_packed(bit_depth, &channels, chan_stride, x_stride)?;
+    let is_float = chan_stride == item_size::<F32>() && bit_depth == BitDepth::F32;
+
+    packed_validate(
+        len == 0,
+        width,
+        height,
+        bit_depth,
+        num_channels,
+        chan_stride,
+        x_stride,
+        y_stride,
+    )?;
+
+    // Deviation D-2: the bytes the CPU engine will touch must be in the buffer. An RGBA-packed
+    // image is read and written in whole rows from its red channel.
+    let item = get_channel_size_in_bytes(bit_depth)? as usize;
+    let starts = channels.map(|offset| offset.map(|o| origin as i128 + o as i128));
+    let outside = if is_rgba_packed {
+        let red = starts[0].expect("a packed image has red");
+        rows_reach_outside(len, red, item, width, height, y_stride)
+    } else {
+        starts.iter().flatten().any(|&start| {
+            channel_reaches_outside(len, start, item, width, height, x_stride, y_stride)
+        })
+    };
+    if outside {
+        return Err(Exception::new(
+            "PackedImageDesc Error: The strides and dimensions reach outside the image buffer.",
+        ));
+    }
+
+    // Inside the buffer, so every start is an offset in it.
+    let pos = |start: i128| ChannelPos {
+        buffer: 0,
+        offset: start as usize,
+    };
+    let [r, g, b, a] = starts;
+    let layout = ImageLayout {
+        bit_depth,
+        width,
+        height,
+        x_stride_bytes: x_stride,
+        y_stride_bytes: y_stride,
+        r: pos(r.expect("a packed image has red")),
+        g: pos(g.expect("a packed image has green")),
+        b: pos(b.expect("a packed image has blue")),
+        a: a.map(pos),
+        is_rgba_packed,
+        is_float,
+    };
+    Ok(PackedLayout {
+        layout,
+        chan_order,
+        num_channels: num_channels as usize,
+        chan_stride_bytes: chan_stride,
+    })
+}
 
 /// Where R, G, B and A of the first pixel are, in bytes from the data pointer; A is `None` for
 /// 3 channels. Upstream computes pointers (`(char*)m_rData + 2 * m_chanStrideBytes`); the
@@ -1016,15 +1105,19 @@ impl<B: AsRef<[u8]>> PlanarImageDesc<B> {
         let start = |offset: usize| Some((0, origin as i128 + offset as i128));
         let starts = [start(r), start(g), start(b), a.and_then(start)];
         let null = bytes.as_ref().is_empty();
-        Self::construct(
-            vec![bytes],
+        let layout = planar_core(
+            &[bytes.as_ref().len()],
             element,
             starts,
             null,
             long(width),
             long(height),
             Some((bit_depth, [x_stride_bytes, y_stride_bytes])),
-        )
+        )?;
+        Ok(PlanarImageDesc {
+            buffers: vec![bytes],
+            layout,
+        })
     }
 
     /// The constructors with separate planes.
@@ -1050,94 +1143,8 @@ impl<B: AsRef<[u8]>> PlanarImageDesc<B> {
             starts[channel] = Some((buffers.len(), parts.origin as i128));
             buffers.push(parts.bytes);
         }
-        Self::construct(buffers, element, starts, null, width, height, strides)
-    }
-
-    /// The two constructors (src/OpenColorIO/ImageDesc.cpp:638-710 @ v2.5.2) and
-    /// `PlanarImageDesc::Impl::isFloat` (609-612). `strides` is `None` for the one without a bit
-    /// depth: F32, and the strides `AutoStride` gives.
-    fn construct(
-        buffers: Vec<B>,
-        element: Option<Element>,
-        starts: PlanarStarts,
-        null: bool,
-        width: c_long,
-        height: c_long,
-        strides: Option<(BitDepth, [isize; 2])>,
-    ) -> Result<Self> {
-        let bit_depth = strides.map_or(BitDepth::F32, |(bit_depth, _)| bit_depth);
-
-        // The Python binding checks each plane's type before the library sees them; the planes
-        // of one call all have the same type here.
-        check_buffer_type(element, bit_depth)?;
-
-        if null {
-            return Err(Exception::new(
-                "PlanarImageDesc Error: Invalid image buffer.",
-            ));
-        }
-
-        if width <= 0 || height <= 0 {
-            return Err(Exception::new(
-                "PlanarImageDesc Error: Invalid image dimensions.",
-            ));
-        }
-
-        // The constructor without a bit depth uses `sizeof(BitDepthInfo<BIT_DEPTH_F32>::Type)`
-        // and derives both strides; the other asks `GetChannelSizeInBytes`, which refuses the bit
-        // depths the CPU processor doesn't take, and derives the `AutoStride` ones.
-        let (one_channel_in_bytes, [x, y]) = match strides {
-            None => (item_size::<F32>(), [AUTO_STRIDE; 2]),
-            Some((bit_depth, strides)) => (get_channel_size_in_bytes(bit_depth)? as isize, strides),
-        };
-        let x_stride = if x == AUTO_STRIDE {
-            one_channel_in_bytes
-        } else {
-            x
-        };
-        let y_stride = if y == AUTO_STRIDE {
-            x_stride.wrapping_mul(width as isize)
-        } else {
-            y
-        };
-
-        let is_float = x_stride == item_size::<F32>() && bit_depth == BitDepth::F32;
-
-        planar_validate(bit_depth, width, x_stride, y_stride)?;
-
-        // Deviation D-2: the bytes the CPU engine will touch must be in the buffers. A planar
-        // image is never RGBA-packed, so it is read and written channel by channel.
-        let item = get_channel_size_in_bytes(bit_depth)? as usize;
-        let outside = starts.iter().flatten().any(|&(buffer, start)| {
-            let len = buffers[buffer].as_ref().len();
-            channel_reaches_outside(len, start, item, width, height, x_stride, y_stride)
-        });
-        if outside {
-            return Err(Exception::new(
-                "PlanarImageDesc Error: The strides and dimensions reach outside the image buffer.",
-            ));
-        }
-
-        // Inside their buffers, so every start is an offset in its buffer.
-        let pos = |(buffer, start): (usize, i128)| ChannelPos {
-            buffer,
-            offset: start as usize,
-        };
-        let [r, g, b, a] = starts;
-        let layout = ImageLayout {
-            bit_depth,
-            width,
-            height,
-            x_stride_bytes: x_stride,
-            y_stride_bytes: y_stride,
-            r: pos(r.expect("a planar image has red")),
-            g: pos(g.expect("a planar image has green")),
-            b: pos(b.expect("a planar image has blue")),
-            a: a.map(pos),
-            // Port of `PlanarImageDesc::isRGBAPacked` (src/OpenColorIO/ImageDesc.cpp:763-766).
-            is_rgba_packed: false,
-            is_float,
-        };
+        let lens: Vec<usize> = buffers.iter().map(|b| b.as_ref().len()).collect();
+        let layout = planar_core(&lens, element, starts, null, width, height, strides)?;
         Ok(PlanarImageDesc { buffers, layout })
     }
 
@@ -1168,6 +1175,135 @@ impl<B: AsRef<[u8]>> ImageDesc for PlanarImageDesc<B> {
 }
 
 impl<B: AsRef<[u8]> + AsMut<[u8]>> ImageDescMut for PlanarImageDesc<B> {}
+
+/// [`PlanarImageDesc`]'s constructors with separate planes ([`PlanarImageDesc::new`] when
+/// `strides` is `None`, [`PlanarImageDesc::with_strides`] otherwise) over raw bytes, without the
+/// memory: each plane `r`, `g`, `b`, `a` given as the length of its memory and where its first
+/// pixel is in it (as [`At`] puts it), and `a` `None` for an image without alpha. Each constructor gives the same
+/// layout or error for memory of those lengths.
+///
+/// Internal to the Python binding, which checks an image's arguments where the wheel's
+/// constructor runs without reading its pixels (`PyPlanarImageDesc.cpp`): public for it only.
+#[doc(hidden)]
+pub fn planar_layout(
+    r: (usize, usize),
+    g: (usize, usize),
+    b: (usize, usize),
+    a: Option<(usize, usize)>,
+    width: usize,
+    height: usize,
+    strides: Option<(BitDepth, [isize; 2])>,
+) -> Result<ImageLayout> {
+    let mut lens = Vec::with_capacity(4);
+    let mut starts: PlanarStarts = [None; 4];
+    let mut null = false;
+    for (channel, plane) in [Some(r), Some(g), Some(b), a].into_iter().enumerate() {
+        let Some((len, origin)) = plane else { continue };
+        // Null for R, G or B; a null A means no alpha, which `None` says.
+        null |= channel < 3 && len == 0;
+        starts[channel] = Some((lens.len(), origin as i128));
+        lens.push(len);
+    }
+    planar_core(
+        &lens,
+        None,
+        starts,
+        null,
+        long(width),
+        long(height),
+        strides,
+    )
+}
+
+/// The checks and layout of [`PlanarImageDesc`]'s two constructors
+/// (src/OpenColorIO/ImageDesc.cpp:638-710 @ v2.5.2) and `PlanarImageDesc::Impl::isFloat`
+/// (609-612), over buffers of `lens` bytes, typed `element`, each channel's first pixel at its
+/// buffer and offset in `starts`; `null` for a missing R, G or B buffer. `strides` is `None` for
+/// the constructor without a bit depth: F32, and the strides `AutoStride` gives. The constructors
+/// read nothing of the memory but its length.
+fn planar_core(
+    lens: &[usize],
+    element: Option<Element>,
+    starts: PlanarStarts,
+    null: bool,
+    width: c_long,
+    height: c_long,
+    strides: Option<(BitDepth, [isize; 2])>,
+) -> Result<ImageLayout> {
+    let bit_depth = strides.map_or(BitDepth::F32, |(bit_depth, _)| bit_depth);
+
+    // The Python binding checks each plane's type before the library sees them; the planes
+    // of one call all have the same type here.
+    check_buffer_type(element, bit_depth)?;
+
+    if null {
+        return Err(Exception::new(
+            "PlanarImageDesc Error: Invalid image buffer.",
+        ));
+    }
+
+    if width <= 0 || height <= 0 {
+        return Err(Exception::new(
+            "PlanarImageDesc Error: Invalid image dimensions.",
+        ));
+    }
+
+    // The constructor without a bit depth uses `sizeof(BitDepthInfo<BIT_DEPTH_F32>::Type)`
+    // and derives both strides; the other asks `GetChannelSizeInBytes`, which refuses the bit
+    // depths the CPU processor doesn't take, and derives the `AutoStride` ones.
+    let (one_channel_in_bytes, [x, y]) = match strides {
+        None => (item_size::<F32>(), [AUTO_STRIDE; 2]),
+        Some((bit_depth, strides)) => (get_channel_size_in_bytes(bit_depth)? as isize, strides),
+    };
+    let x_stride = if x == AUTO_STRIDE {
+        one_channel_in_bytes
+    } else {
+        x
+    };
+    let y_stride = if y == AUTO_STRIDE {
+        x_stride.wrapping_mul(width as isize)
+    } else {
+        y
+    };
+
+    let is_float = x_stride == item_size::<F32>() && bit_depth == BitDepth::F32;
+
+    planar_validate(bit_depth, width, x_stride, y_stride)?;
+
+    // Deviation D-2: the bytes the CPU engine will touch must be in the buffers. A planar
+    // image is never RGBA-packed, so it is read and written channel by channel.
+    let item = get_channel_size_in_bytes(bit_depth)? as usize;
+    let outside = starts.iter().flatten().any(|&(buffer, start)| {
+        let len = lens[buffer];
+        channel_reaches_outside(len, start, item, width, height, x_stride, y_stride)
+    });
+    if outside {
+        return Err(Exception::new(
+            "PlanarImageDesc Error: The strides and dimensions reach outside the image buffer.",
+        ));
+    }
+
+    // Inside their buffers, so every start is an offset in its buffer.
+    let pos = |(buffer, start): (usize, i128)| ChannelPos {
+        buffer,
+        offset: start as usize,
+    };
+    let [r, g, b, a] = starts;
+    Ok(ImageLayout {
+        bit_depth,
+        width,
+        height,
+        x_stride_bytes: x_stride,
+        y_stride_bytes: y_stride,
+        r: pos(r.expect("a planar image has red")),
+        g: pos(g.expect("a planar image has green")),
+        b: pos(b.expect("a planar image has blue")),
+        a: a.map(pos),
+        // Port of `PlanarImageDesc::isRGBAPacked` (src/OpenColorIO/ImageDesc.cpp:763-766).
+        is_rgba_packed: false,
+        is_float,
+    })
+}
 
 /// Upstream's checks of a planar image, in its order and with its messages; the product wraps
 /// as the wheels' machine code does where C++ overflows.

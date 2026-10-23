@@ -240,3 +240,146 @@ fn an_empty_alpha_plane_reaches_outside() {
         "PlanarImageDesc Error: Invalid image buffer.",
     );
 }
+
+/// What a packed constructor or [`packed_layout`] gave, to compare: the getters, or the error.
+fn packed_outcome(made: Result<PackedLayout>) -> std::result::Result<PackedLayout, String> {
+    made.map_err(|e| e.message().to_string())
+}
+
+/// [`packed_layout`] and [`planar_layout`], the length-only cores the Python binding checks an
+/// image with, agree with the constructors over raw bytes of that length on every layout and
+/// error: the four packed constructors and the two planar ones, over lengths around each
+/// layout's footprint (empty included), origins, channel arguments, bit depths and strides
+/// (`AutoStride`, tight, padded, zero, negative, inconsistent).
+#[test]
+fn the_length_only_cores_agree_with_the_constructors() {
+    let memory = vec![0u8; 4096];
+    let bit_depths = [
+        BitDepth::Uint8,
+        BitDepth::Uint16,
+        BitDepth::F16,
+        BitDepth::F32,
+        BitDepth::Uint14,
+        BitDepth::Unknown,
+    ];
+    let chans = [AUTO_STRIDE, 0, 2, 4, 8, -4];
+    let xs = [AUTO_STRIDE, 0, 12, 16, 32, -16];
+    let ys = [AUTO_STRIDE, 0, 48, 64, 200, -64];
+    let sizes = [(0usize, 1usize), (1, 1), (3, 2), (4, 3)];
+    let lens = [0usize, 1, 47, 48, 95, 96, 191, 192, 400];
+    let origins = [0usize, 1, 64, 128];
+    let channel_args = [
+        PackedChannels::Count(3),
+        PackedChannels::Count(4),
+        PackedChannels::Count(2),
+        PackedChannels::Order(ChannelOrdering::Bgra),
+        PackedChannels::Order(ChannelOrdering::Abgr),
+        PackedChannels::Order(ChannelOrdering::Bgr),
+    ];
+    let (mut accepted, mut refused) = (0usize, 0usize);
+    for &len in &lens {
+        let bytes = &memory[..len];
+        for &origin in &origins {
+            for &(w, h) in &sizes {
+                for channels in channel_args {
+                    let mut strides: Vec<Option<(BitDepth, [isize; 3])>> = vec![None];
+                    for &bd in &bit_depths {
+                        for &c in &chans {
+                            for &x in &xs {
+                                for &y in &ys {
+                                    strides.push(Some((bd, [c, x, y])));
+                                }
+                            }
+                        }
+                    }
+                    for s in strides {
+                        let data = At(Bytes(bytes), origin);
+                        let made = match (channels, s) {
+                            (PackedChannels::Count(n), None) => PackedImageDesc::new(data, w, h, n),
+                            (PackedChannels::Order(o), None) => {
+                                PackedImageDesc::with_channel_order(data, w, h, o)
+                            }
+                            (PackedChannels::Count(n), Some((bd, [c, x, y]))) => {
+                                PackedImageDesc::with_strides(data, w, h, n, bd, c, x, y)
+                            }
+                            (PackedChannels::Order(o), Some((bd, [c, x, y]))) => {
+                                PackedImageDesc::with_channel_order_and_strides(
+                                    data, w, h, o, bd, c, x, y,
+                                )
+                            }
+                        }
+                        .map(|d| PackedLayout {
+                            layout: *d.layout(),
+                            chan_order: d.channel_order(),
+                            num_channels: d.num_channels(),
+                            chan_stride_bytes: d.chan_stride_bytes(),
+                        });
+                        let core = packed_layout(len, origin, w, h, channels, s);
+                        match &made {
+                            Ok(_) => accepted += 1,
+                            Err(_) => refused += 1,
+                        }
+                        assert_eq!(
+                            packed_outcome(core),
+                            packed_outcome(made),
+                            "len {len} origin {origin} {w}x{h} {channels:?} {s:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(accepted > 1000 && refused > 1000, "{accepted} {refused}");
+
+    let (mut accepted, mut refused) = (0usize, 0usize);
+    let plane_lens = [0usize, 1, 23, 24, 48, 96];
+    for &lr in &plane_lens {
+        for &lg in &plane_lens {
+            for &la in &[None, Some(0usize), Some(24), Some(96)] {
+                for &origin in &[0usize, 4, 24] {
+                    for &(w, h) in &sizes {
+                        let mut strides: Vec<Option<(BitDepth, [isize; 2])>> = vec![None];
+                        for &bd in &bit_depths {
+                            for &x in &xs {
+                                for &y in &ys {
+                                    strides.push(Some((bd, [x, y])));
+                                }
+                            }
+                        }
+                        for s in strides {
+                            let plane = |len: usize| At(Bytes(&memory[..len]), origin);
+                            let (r, g, b) = (plane(lr), plane(lg), plane(lr));
+                            let a = la.map(plane);
+                            let made = match s {
+                                None => PlanarImageDesc::new(r, g, b, a, w, h),
+                                Some((bd, [x, y])) => {
+                                    PlanarImageDesc::with_strides(r, g, b, a, w, h, bd, x, y)
+                                }
+                            }
+                            .map(|d| *d.layout());
+                            let core = planar_layout(
+                                (lr, origin),
+                                (lg, origin),
+                                (lr, origin),
+                                la.map(|l| (l, origin)),
+                                w,
+                                h,
+                                s,
+                            );
+                            match &made {
+                                Ok(_) => accepted += 1,
+                                Err(_) => refused += 1,
+                            }
+                            assert_eq!(
+                                core.map_err(|e| e.message().to_string()),
+                                made.map_err(|e| e.message().to_string()),
+                                "planes {lr} {lg} {la:?} origin {origin} {w}x{h} {s:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(accepted > 100 && refused > 1000, "{accepted} {refused}");
+}
