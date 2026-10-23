@@ -474,6 +474,11 @@ fn a_grading_style_outside_the_enumerators_is_the_ports_error() {
     let v = sc.call(n("OCIO.GradingTone"), vec![n("OCIO.GRADING_LOG")]);
     invalid_tone(&mut sc, v);
     sc.raises(n("OCIO.GradingToneTransform"), vec![r(v), r(st)]);
+    for c in [&RGB, &HUE] {
+        let v = sc.call(n(&format!("OCIO.{}", c.value)), vec![n("OCIO.GRADING_LOG")]);
+        set_points(&mut sc, v, c.curve, &c.invalid);
+        sc.raises(n(&format!("OCIO.{}", c.class)), vec![r(v), r(st)]);
+    }
     compare(&[sc]);
 }
 

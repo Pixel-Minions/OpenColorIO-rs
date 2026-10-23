@@ -710,11 +710,17 @@ fn bspline_script() -> Script {
     // holds (MemoryError).
     // 2**59 points: more than the address space (MemoryError on both); 2**60: libstdc++'s
     // max_size() + 1 (ValueError on Linux, MemoryError on Windows); 2**61 and 2**63: ValueError
-    // on both. (A size the allocator grants but memory can't hold, such as 2**40 on Linux,
-    // depends on the machine: I-366.)
+    // on both. On Windows, MSVC's max_size() of the points (8 bytes) is 2**61 - 1, whose
+    // bytes and alignment overflow (MemoryError "bad array new length"), as 2**61 - 5's do;
+    // 2**61 - 6's don't ("bad allocation"); on Linux the three are over max_size()
+    // (ValueError). (A size the allocator grants but memory can't hold, such as 2**40 on
+    // Linux, depends on the machine: I-366.)
     let mut sizes = Vec::new();
     for k in [59, 60, 61, 63] {
         sizes.push(sc.call(n("pow"), vec![i(2), i(k)]));
+    }
+    for below in [1, 5, 6] {
+        sizes.push(sc.call(n("operator.sub"), vec![r(sizes[2]), i(below)]));
     }
     for size in sizes {
         sc.raises(n("OCIO.GradingBSplineCurve"), vec![r(size)]);
