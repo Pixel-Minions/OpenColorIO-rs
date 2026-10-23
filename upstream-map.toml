@@ -3752,7 +3752,8 @@ note = "p6-transforms 6.3c"
 path = "src/bindings/python/PyCPUProcessor.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_cpu_processor.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5b: apply, applyRGB and applyRGBA with the GIL released (ocio-py-ffi with_bytes); images that share memory as one image, or the port's error (U-150); read-only buffers refused after the library's checks (U-156)"
 
 [[file]]
 path = "src/bindings/python/PyColorSpace.cpp"
@@ -3797,7 +3798,8 @@ status = "todo"
 path = "src/bindings/python/PyDynamicProperty.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_dynamic_property.rs"]
-status = "todo"
+status = "partial"
+note = "p6-buffers 6.5b: the value an instance holds (m_prop), which CPUProcessor.getDynamicProperty returns; the class's methods come with 6.7a"
 
 [[file]]
 path = "src/bindings/python/PyFileRules.cpp"
@@ -3950,15 +3952,15 @@ note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class dec
 path = "src/bindings/python/PyUtils.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_utils.rs"]
-status = "partial"
-note = "p6-buffers 6.5a: formatCodeToDtypeName, bitDepthToDtype, bitDepthToBytes, chanOrderToNumChannels, checkBufferType (both), checkBufferSize; the rest with 6.5b. checkBufferType names the expected integer types as upstream does (I-23); ocio-ops image_desc.rs gives its own message for a typed slice of the wrong type"
+status = "done"
+note = "p6-buffers 6.5a-6.5b: the buffer checks and types, in py_utils.rs; py::buffer's request is ocio-py-ffi Buffer, py::array of a copy is array_of. checkBufferType names the expected integer types as upstream does (I-23); ocio-ops image_desc.rs gives its own message for a typed slice of the wrong type"
 
 [[file]]
 path = "src/bindings/python/PyUtils.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_utils.rs"]
-status = "partial"
-note = "p6-transforms 6.3a: PyIterator (40-61); defRepr (17-35) is py_transform.rs's repr_def; p6-buffers 6.5a: the buffer helpers' declarations (63-93) that 6.5a ports"
+status = "done"
+note = "p6-transforms 6.3a: PyIterator (40-61); defRepr (17-35) is py_transform.rs's repr_def; p6-buffers 6.5a-6.5b: the buffer helpers (63-93)"
 
 [[file]]
 path = "src/bindings/python/PyViewTransform.cpp"
@@ -4146,13 +4148,15 @@ status = "todo"
 path = "src/bindings/python/transforms/PyLut1DTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_lut1d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5b"
 
 [[file]]
 path = "src/bindings/python/transforms/PyLut3DTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_lut3d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5b"
 
 [[file]]
 path = "src/bindings/python/transforms/PyMatrixTransform.cpp"

@@ -952,6 +952,7 @@ fn function<'py>(
         Doc::None => None,
         Doc::Signatures => Some(crate::dispatch::docstring(f)),
         Doc::Text(text) => Some(format!("{}\n{text}\n", crate::dispatch::docstring(f))),
+        Doc::Texts(texts) => Some(crate::dispatch::docstring_with(f, texts)),
     };
     let record = Bound::new(
         py,
@@ -1007,6 +1008,9 @@ enum Doc<'a> {
     /// The signatures, then a line end, the definition's own docstring and a line end (a
     /// docstring the binding gives in place of `DOC(...)`, `PyLogCameraTransform.cpp:156-166`).
     Text(&'a str),
+    /// Each overload's signature, then its own docstring, as [`crate::dispatch::docstring_with`]
+    /// writes them (`PyCPUProcessor.cpp:47-249`).
+    Texts(&'a [&'a str]),
 }
 
 impl From<bool> for Doc<'_> {
@@ -1017,6 +1021,16 @@ impl From<bool> for Doc<'_> {
             Doc::None
         }
     }
+}
+
+/// A method whose overloads' definitions give their own docstrings `docs`: [`method`], with each
+/// after its signature ([`Doc::Texts`]).
+pub fn method_with_docs<'py>(
+    py: Python<'py>,
+    f: &'static Function,
+    docs: &[&str],
+) -> PyResult<Bound<'py, PyAny>> {
+    instance_method(py, function(py, f, Doc::Texts(docs), Some(MODULE), None)?)
 }
 
 /// A method whose definition gives its own docstring `doc`: [`method`], with `doc` after the

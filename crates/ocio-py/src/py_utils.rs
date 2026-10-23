@@ -5,7 +5,7 @@
 //! `PyIterator` (PyUtils.h:40-61), and the buffers' checks and types (PyUtils.cpp, chunk 6.5a).
 
 use std::any::Any;
-use std::ffi::c_long;
+use std::ffi::{c_long, c_ulong};
 use std::sync::Mutex;
 
 use numpy::{PyArray1, PyArrayDescr, PyArrayDescrMethods};
@@ -250,6 +250,29 @@ pub(crate) fn chan_order_to_num_channels(py: Python<'_>, chan_order: i64) -> PyR
     }
 }
 
+/// Port of `getBufferShapeStr` (PyUtils.cpp:129-139 @ v2.5.2): `(2, 3)`.
+pub(crate) fn buffer_shape_str(info: &BufferInfo) -> String {
+    let shape: Vec<String> = info.shape.iter().map(isize::to_string).collect();
+    format!("({})", shape.join(", "))
+}
+
+/// Port of `getBufferBitDepth` (PyUtils.cpp:141-163 @ v2.5.2): the bit depth of a buffer's
+/// format, or RuntimeError "Unsupported data type: ...".
+pub(crate) fn buffer_bit_depth(py: Python<'_>, info: &BufferInfo) -> PyResult<BitDepth> {
+    let dt_name = format_code_to_dtype_name(&info.format, info.itemsize.wrapping_mul(8));
+    match dt_name.as_slice() {
+        b"float32" => Ok(BitDepth::F32),
+        b"float16" => Ok(BitDepth::F16),
+        b"uint16" | b"uint12" | b"uint10" => Ok(BitDepth::Uint16),
+        b"uint8" => Ok(BitDepth::Uint8),
+        _ => {
+            let mut os = b"Unsupported data type: ".to_vec();
+            os.extend_from_slice(&dt_name);
+            Err(runtime_error(py, &os))
+        }
+    }
+}
+
 /// pybind11's `import_numpy_core_submodule(name)`: `numpy._core.<name>` (`numpy.core.<name>`
 /// before NumPy 2), by the major version `numpy.lib.NumpyVersion` reads.
 fn numpy_core_submodule<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyModule>> {
@@ -317,6 +340,41 @@ pub(crate) fn check_buffer_type_of(
     check_buffer_type(py, info, &dt)
 }
 
+/// Port of `checkCContiguousArray` (PyUtils.cpp:182-201 @ v2.5.2).
+pub(crate) fn check_c_contiguous_array(py: Python<'_>, info: &BufferInfo) -> PyResult<()> {
+    let mut expected = info.itemsize;
+    for (&n, &stride) in info.shape.iter().zip(&info.strides).rev() {
+        if stride != expected {
+            return Err(runtime_error(
+                py,
+                b"function only supports C-contiguous (row-major) arrays",
+            ));
+        }
+        expected = expected.wrapping_mul(n);
+    }
+    Ok(())
+}
+
+/// Port of `checkBufferDivisible` (PyUtils.cpp:203-212 @ v2.5.2).
+pub(crate) fn check_buffer_divisible(
+    py: Python<'_>,
+    info: &BufferInfo,
+    num_channels: isize,
+) -> PyResult<()> {
+    let size = buffer_size(info);
+    if size % num_channels != 0 {
+        return Err(runtime_error(
+            py,
+            format!(
+                "Incompatible buffer dimensions: expected size to be divisible by \
+                 {num_channels}, but received {size} entries"
+            )
+            .as_bytes(),
+        ));
+    }
+    Ok(())
+}
+
 /// Port of `checkBufferSize` (PyUtils.cpp:214-223 @ v2.5.2).
 pub(crate) fn check_buffer_size(
     py: Python<'_>,
@@ -330,6 +388,64 @@ pub(crate) fn check_buffer_size(
             format!(
                 "Incompatible buffer dimensions: expected {num_entries} entries, but received \
                  {size} entries"
+            )
+            .as_bytes(),
+        ));
+    }
+    Ok(())
+}
+
+/// Port of `getBufferLut3DGridSize` (PyUtils.cpp:225-250 @ v2.5.2): the grid size of a packed 3D
+/// LUT's buffer, in C++'s `unsigned long` (32 bits in the Windows wheel, I-326), whose products
+/// wrap.
+pub(crate) fn buffer_lut3d_grid_size(py: Python<'_>, info: &BufferInfo) -> PyResult<c_ulong> {
+    check_buffer_divisible(py, info, 3)?;
+
+    let size_ssize = buffer_size(info);
+    let mut gs: c_ulong = 2;
+    let size: c_ulong = if size_ssize >= 0 {
+        size_ssize as c_ulong
+    } else {
+        0
+    };
+
+    if info.ndim == 1 {
+        // std::cbrt of an unsigned long: of the double, as the C runtime computes it.
+        gs = ((size / 3) as f64).cbrt().round() as c_ulong;
+    } else if info.ndim > 1 {
+        gs = if size_ssize >= 0 {
+            info.shape[0] as c_ulong
+        } else {
+            0
+        };
+    }
+
+    if gs.wrapping_mul(gs).wrapping_mul(gs).wrapping_mul(3) != size {
+        return Err(runtime_error(
+            py,
+            format!(
+                "Incompatible buffer dimensions: failed to calculate grid size from shape {}",
+                buffer_shape_str(info)
+            )
+            .as_bytes(),
+        ));
+    }
+
+    Ok(gs)
+}
+
+/// Port of `checkVectorDivisible` (PyUtils.cpp:252-261 @ v2.5.2), of a vector of `len` values.
+pub(crate) fn check_vector_divisible(
+    py: Python<'_>,
+    len: usize,
+    num_channels: usize,
+) -> PyResult<()> {
+    if !len.is_multiple_of(num_channels) {
+        return Err(runtime_error(
+            py,
+            format!(
+                "Incompatible vector dimensions: expected (N*{num_channels}, 1), but received \
+                 ({len}, 1)"
             )
             .as_bytes(),
         ));

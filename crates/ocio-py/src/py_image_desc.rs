@@ -8,8 +8,10 @@
 //! Upstream's `PyImageDesc` keeps the buffer objects it was made from (`m_data`), so that their
 //! memory lives, and the library's description over the pointer each buffer had then (`m_img`).
 //! The port's library describes memory it borrows, so an [`Image`] keeps the buffer objects,
-//! their addresses then, and the getters' values, which the library's description made by the
-//! constructor gave. Whenever it is used, it requests the buffers again ([`Image::request`]):
+//! their addresses then, its constructor's arguments, and the getters' values, which the
+//! library's description made by the constructor gave. Whenever it is used, it requests the
+//! buffers again ([`Image::request`]), and processing makes the library's description again
+//! over their memory, with the same checks ([`describe`]):
 //! - a buffer whose memory has moved since (a `bytearray` or an array resized) is the port's
 //!   error, where the wheel uses the old address (U-147);
 //! - the memory is lent as slices while the GIL is released (`ocio_py_ffi::with_bytes`).
@@ -17,7 +19,9 @@
 use std::ffi::c_long;
 use std::sync::Arc;
 
-use ocio_ops::image_desc::{At, Bytes, ImageDesc, ImageLayout, PackedImageDesc, PlanarImageDesc};
+use ocio_ops::image_desc::{
+    At, Bytes, ImageDesc, ImageDescMut, ImageLayout, PackedImageDesc, PlanarImageDesc,
+};
 use ocio_ops::open_color_types::{BitDepth, ChannelOrdering};
 use ocio_py_ffi::Buffer;
 use pyo3::prelude::*;
@@ -68,11 +72,12 @@ pub(crate) struct PackedGetters {
 
 /// What a `PyImageDesc` holds once constructed: `m_data`, the buffer objects (the packed image's
 /// one, or the planes R, G, B and, if given, A); the address each buffer's first item had then,
-/// which the wheel's `m_img` keeps; and the getters' values.
+/// which the wheel's `m_img` keeps; the constructor's arguments; and the getters' values.
 #[derive(Debug)]
 pub(crate) struct Image {
     pub(crate) data: Vec<Py<PyAny>>,
     pub(crate) ptrs: Vec<usize>,
+    pub(crate) args: ImageArgs,
     pub(crate) layout: ImageLayout,
     pub(crate) packed: Option<PackedGetters>,
 }
@@ -143,17 +148,33 @@ impl<B: AsRef<[u8]>> Described<B> {
     }
 }
 
+impl<B: AsRef<[u8]> + AsMut<[u8]>> Described<B> {
+    pub(crate) fn desc_mut(&mut self) -> &mut dyn ImageDescMut {
+        match self {
+            Described::Packed(d) => d,
+            Described::Planar(d) => d,
+        }
+    }
+}
+
 /// Why the library's description can't be made over what `with_bytes` lent.
 #[derive(Debug)]
 pub(crate) enum DescribeError {
     /// The library's own error, as upstream's constructor raises it.
     Library(ocio::Exception),
+    /// Planes in memory that some share, others not: the port's library takes planes in
+    /// separate buffers or all in one (docs/improvements.md, U-150).
+    MixedPlanes,
 }
 
 impl DescribeError {
     pub(crate) fn into_py(self, py: Python<'_>) -> PyErr {
         match self {
             DescribeError::Library(e) => crate::py_open_color_io::to_py_err(py, &e),
+            DescribeError::MixedPlanes => pyo3::exceptions::PyBufferError::new_err(
+                "PlanarImageDesc: some of its planes share memory and others don't, which the \
+                 port's image descriptions don't describe (docs/improvements.md, U-150)",
+            ),
         }
     }
 }
@@ -230,6 +251,41 @@ where
     }
 }
 
+/// [`describe`] of planes in one buffer (`memory`), each at its offset (R, G, B and, if given,
+/// A).
+pub(crate) fn describe_in_one<B: AsRef<[u8]>>(
+    args: &ImageArgs,
+    memory: B,
+    offsets: &[usize],
+) -> Result<Described<B>, DescribeError>
+where
+    At<Bytes<B>>: ocio_ops::image_desc::PixelData<Bytes = B>,
+{
+    let ImageArgs::Planar {
+        width,
+        height,
+        strides,
+    } = *args
+    else {
+        return Err(DescribeError::MixedPlanes);
+    };
+    let (bd, [x, y]) = strides.unwrap_or((BitDepth::F32, [ocio_ops::image_desc::AUTO_STRIDE; 2]));
+    PlanarImageDesc::in_one_buffer(
+        At(Bytes(memory), 0),
+        offsets[0],
+        offsets[1],
+        offsets[2],
+        offsets.get(3).copied(),
+        size(width),
+        size(height),
+        bd,
+        x,
+        y,
+    )
+    .map(Described::Planar)
+    .map_err(DescribeError::Library)
+}
+
 impl Image {
     /// Makes an image of `args` over `buffers` (each object with its request), as the
     /// constructor does once the binding's checks passed: the library's description over the
@@ -259,6 +315,7 @@ impl Image {
         Ok(Image {
             data: buffers.iter().map(|(o, _)| o.clone().unbind()).collect(),
             ptrs: buffers.iter().map(|(_, b)| b.info().ptr).collect(),
+            args,
             layout,
             packed,
         })

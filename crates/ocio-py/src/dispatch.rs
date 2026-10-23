@@ -144,6 +144,30 @@ pub fn docstring(f: &Function) -> String {
     }
 }
 
+/// The function's `__doc__` when its definitions give docstrings of their own (`docs`, one per
+/// overload, each `R"doc(...)doc"` as written): pybind11 writes each overload's signature line
+/// (numbered for several), then a line end, the docstring and a line end.
+pub fn docstring_with(f: &Function, docs: &[&str]) -> String {
+    match (f.overloads, docs) {
+        ([one], [doc]) => format!("{}{}\n\n{doc}\n", f.name, signature(one)),
+        (many, docs) => {
+            let each: Vec<String> = many
+                .iter()
+                .enumerate()
+                .map(|(i, o)| {
+                    let doc = docs.get(i).map_or(String::new(), |d| format!("\n{d}\n"));
+                    format!("{}. {}{}\n{doc}", i + 1, f.name, signature(o))
+                })
+                .collect();
+            format!(
+                "{}(*args, **kwargs)\nOverloaded function.\n\n{}",
+                f.name,
+                each.join("\n")
+            )
+        }
+    }
+}
+
 /// Whether `o` was bound without argument names: no `py::pos_only()`, and each parameter (after
 /// a method's `self`) named as pybind11 names one it has no record of, `arg` and its position
 /// among them (`cpp_function::initialize_generic`'s signature). pybind11 keeps argument records

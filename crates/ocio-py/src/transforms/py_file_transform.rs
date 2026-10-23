@@ -24,7 +24,7 @@ const SELF: Param = Param::new("self", FILE_TRANSFORM);
 const IT_SELF: Param = Param::new("self", FORMAT_ITERATOR);
 
 /// The library's `Interpolation` of the C++ value `v`, if it is an enumerator.
-fn interpolation(v: i64) -> Option<Interpolation> {
+pub(crate) fn interpolation(v: i64) -> Option<Interpolation> {
     use Interpolation::*;
     [Unknown, Nearest, Linear, Tetrahedral, Cubic, Default, Best]
         .into_iter()

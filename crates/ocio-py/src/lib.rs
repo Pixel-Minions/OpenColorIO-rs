@@ -33,6 +33,10 @@ pub(crate) mod py_color_space_set;
 #[cfg(feature = "python")]
 pub(crate) mod py_context;
 #[cfg(feature = "python")]
+pub(crate) mod py_cpu_processor;
+#[cfg(feature = "python")]
+pub(crate) mod py_dynamic_property;
+#[cfg(feature = "python")]
 pub(crate) mod py_file_rules;
 #[cfg(feature = "python")]
 pub(crate) mod py_format_metadata;

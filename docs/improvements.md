@@ -2001,10 +2001,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   entry check on Windows only.
 - **Who notices:** Python code that passes huge dimensions and reads the message.
 - **A fix:** count in `py::ssize_t` and refuse a product that overflows.
-- **Status:** matched for the image descriptions in `p6-buffers` (6.5a): the binding computes
-  in `c_long`, the platform's `long` (`crates/ocio-py/src/py_packed_image_desc.rs`,
-  `py_planar_image_desc.rs`); `image_desc_oracle.rs`, against the wheel of each platform. The
-  LUTs' counts come with 6.5b. The port's image then refuses a layout past its buffer (D-2) where
+- **Status:** matched in `p6-buffers` (6.5a, 6.5b): the binding computes in `c_long` and
+  `c_ulong`, the platform's `long` (`crates/ocio-py/src/py_packed_image_desc.rs`,
+  `py_planar_image_desc.rs`, `py_utils.rs`, `transforms/py_lut1d_transform.rs`,
+  `py_lut3d_transform.rs`); `image_desc_oracle.rs` and `lut_transforms_oracle.rs`, against the
+  wheel of each platform. The port's image then refuses a layout past its buffer (D-2) where
   the Windows wheel makes one.
 
 ### I-327. A planar image checks its planes from the last to the first
@@ -2034,10 +2035,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   contiguous.
 - **A fix:** read the items by the image's strides (and the buffer's), or refuse buffers that
   aren't C-contiguous, as `applyRGB` does.
-- **Status:** matched for the image descriptions in `p6-buffers` (6.5a,
-  `crates/ocio-py/src/py_image_desc.rs`, `read_items`); `image_desc_oracle.rs`, against the
-  wheel. The LUTs' `setData` comes with 6.5b. Values that this reads past the buffer's items
-  are U-148.
+- **Status:** matched in `p6-buffers` (6.5a, 6.5b: `crates/ocio-py/src/py_image_desc.rs`,
+  `read_items`; `transforms/py_lut1d_transform.rs`, `py_lut3d_transform.rs`, `SET_DATA`);
+  `image_desc_oracle.rs`, `lut_transforms_oracle.rs`, against the wheel. Values that this
+  reads past the buffer's items are U-148.
 
 ## Platform, environment and paths
 
@@ -5204,9 +5205,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **A fix:** no public constructor for the base class, or refuse an empty description.
 - **Status:** the port raises ValueError "...: ImageDesc() describes no image, and the wheel
   dereferences its null image (its process dies; docs/improvements.md, U-146)" where the wheel
-  dereferences it (`crates/ocio-py/src/py_image_desc.rs`, `null_image`), in `p6-buffers`
-  (6.5a: the getters; `CPUProcessor.apply` comes with 6.5b); `image_desc_oracle.rs` checks it,
-  and `repr` against the wheel.
+  dereferences it (`crates/ocio-py/src/py_image_desc.rs`, `null_image`; and
+  `py_cpu_processor.rs`, `APPLY`), in `p6-buffers` (6.5a, 6.5b); `image_desc_oracle.rs` and
+  `cpu_processor_oracle.rs` check it, and `repr` against the wheel.
 
 ### U-147. An image description over memory that moved
 
@@ -5233,8 +5234,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **A fix:** read the items by their strides (I-328's fix).
 - **Status:** the port raises BufferError "...: the items reach outside the buffer's memory,
   which the wheel reads past (docs/improvements.md, U-148)" when an item it reads isn't in the
-  span of the buffer's items (`crates/ocio-py/src/py_image_desc.rs`, `read_items`), in
-  `p6-buffers` (6.5a; the LUTs' `setData` with 6.5b); `image_desc_oracle.rs`. An image layout that reaches outside
+  span of the buffer's items (`crates/ocio-py/src/py_image_desc.rs`, `read_items`;
+  `transforms/py_lut1d_transform.rs`, `py_lut3d_transform.rs`), in `p6-buffers` (6.5a, 6.5b);
+  `image_desc_oracle.rs`, `lut_transforms_oracle.rs`. An image layout that reaches outside
   its buffer, which the wheel's binding doesn't check (only the entry count), is refused when
   the description is made (D-2).
 
@@ -5263,12 +5265,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **A fix:** refuse images that share memory without being the same image, and document that
   a buffer must not be used elsewhere while it is processed.
 - **Status:** the port's library describes an image over borrowed memory, which it can't alias.
-  Memory that a call of the port's binding writes on one thread is refused to its calls on
-  others meanwhile ("another call (of another thread) is using the buffer's memory ...
-  (docs/improvements.md, U-150)", `ocio-py-ffi`, `with_bytes`), in `p6-buffers` (6.5a,
-  `buffer_ffi.rs`). Python code that writes the memory itself while the GIL is released is the
-  program's data race, as with the wheel; the port doesn't see it. `CPUProcessor.apply` comes
-  with 6.5b.
+  The port processes images that share memory as one image when they are the same image (the
+  same description, or descriptions of the same memory and layout); otherwise, once the
+  library's own checks passed (on copies of the memory, so its error comes first, as the
+  wheel's), it raises BufferError "CPUProcessor.apply: the source and destination images
+  share memory without being the same image ... (docs/improvements.md, U-150)", or
+  "PlanarImageDesc: some of its planes share memory and others don't ... (U-150)". Memory that
+  a call of the port's binding writes on one thread is refused to its calls on others
+  meanwhile ("another call (of another thread) is using the buffer's memory ...", `ocio-py-ffi`,
+  `with_bytes`). Python code that writes the memory itself while the GIL is released is the
+  program's data race, as with the wheel; the port doesn't see it. In `p6-buffers` (6.5a: the
+  lending, `buffer_ffi.rs`; 6.5b: `crates/ocio-py/src/py_cpu_processor.rs`,
+  `cpu_processor_oracle.rs`).
 
 ### U-151. A pipeline given an invalid FixedFunctionTransform
 
@@ -5325,11 +5333,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Who notices:** Python code that processes a read-only array, or a `bytes` object.
 - **A fix:** request the buffers to write as writable (`request(true)`), which raises
   BufferError for a read-only one.
-- **Status:** `ocio-py-ffi`'s `with_bytes` refuses to lend such memory to write, with
-  BufferError "the buffer is read-only, and the wheel writes into it (docs/improvements.md,
-  U-156)", in `p6-buffers` (6.5a, `buffer_ffi.rs`). The writes themselves
-  (`CPUProcessor.apply`, `applyRGB`, `applyRGBA`) come with 6.5b. Reading a read-only buffer is
-  as the wheel's.
+- **Status:** the port runs the processing on a copy of the memory, so that the library's error
+  comes first, as the wheel's (a bit-depth mismatch, say), and otherwise raises BufferError
+  "...: the buffer is read-only, and the wheel writes into it (docs/improvements.md, U-156)"
+  without writing (`crates/ocio-py/src/py_cpu_processor.rs`, `dry_run`; `ocio-py-ffi`,
+  `with_bytes`, refuses to lend such memory to write), in `p6-buffers` (6.5a: `buffer_ffi.rs`;
+  6.5b: `cpu_processor_oracle.rs`). Reading a read-only buffer (an image's source,
+  `setData`) is as the wheel's.
 
 ### U-157. Buffer views that break the buffer protocol
 
