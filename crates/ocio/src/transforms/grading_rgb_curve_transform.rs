@@ -60,6 +60,21 @@ impl GradingRgbCurveTransform {
         }
     }
 
+    /// A copy made as upstream's `createEditableCopy` makes it: a new transform of the style,
+    /// given the data with the op data's `operator=` (GradingRGBCurveOpData.cpp:54-72, at 65 @ v2.5.2), which sets
+    /// the copy's curves with the property's `setValue`: they are validated and fitted again,
+    /// so curves that don't validate (held as they are, `set_value_as_is`) are refused with the
+    /// curves' own error text.
+    ///
+    /// Port of `GradingRGBCurveTransformImpl::createEditableCopy` (GradingRGBCurveTransform.cpp:28-33 @ v2.5.2).
+    #[doc(alias = "createEditableCopy")]
+    pub fn create_editable_copy(&self) -> Result<GradingRgbCurveTransform> {
+        let mut transform = GradingRgbCurveTransform::new(self.style());
+        transform.data = self.data.clone();
+        transform.data.set_value(&transform.data.get_value())?;
+        Ok(transform)
+    }
+
     /// The op data the transform holds.
     ///
     /// Port of `GradingRGBCurveTransformImpl::data() const` (GradingRGBCurveTransform.h:56 @

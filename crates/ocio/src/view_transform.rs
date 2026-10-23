@@ -214,8 +214,9 @@ impl ViewTransform {
 
     /// Sets a copy of `transform` as the transform to the reference space or from it; `None`
     /// (upstream's null pointer) removes it. The copy is upstream's `createEditableCopy`
-    /// ([`Transform::create_editable_copy`]): an invalid FixedFunctionTransform is refused with
-    /// its error, and the view transform keeps its transform.
+    /// ([`Transform::create_editable_copy`]): a transform whose copy fails (an invalid
+    /// FixedFunctionTransform, curves that don't validate) is refused with the copy's error, and
+    /// the view transform keeps its transform.
     ///
     /// Port of `ViewTransform::setTransform` (ViewTransform.cpp:228-245 @ v2.5.2).
     #[doc(alias = "setTransform")]

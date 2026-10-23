@@ -895,7 +895,8 @@ static DEEPCOPY: Function = method_def!(
 );
 
 /// `createEditableCopy` of the node: a new node of a copy of its transform (a
-/// FixedFunctionTransform's copy validates it); a group's copy shares its children's nodes, as
+/// FixedFunctionTransform's copy validates it, a curve transform's sets its curves again,
+/// which validates them); a group's copy shares its children's nodes, as
 /// upstream's (`GroupTransformImpl::createEditableCopy`, GroupTransform.cpp:37-45 @ v2.5.2).
 pub(crate) fn create_editable_copy(py: Python<'_>, rc: &TransformRc) -> PyResult<TransformRc> {
     let node = rc.lock();

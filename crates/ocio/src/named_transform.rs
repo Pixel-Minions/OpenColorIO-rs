@@ -222,8 +222,9 @@ impl NamedTransform {
 
     /// Sets a copy of `transform` as the forward or the inverse transform; `None` (upstream's
     /// null pointer) removes it. The copy is upstream's `createEditableCopy`
-    /// ([`Transform::create_editable_copy`]): an invalid FixedFunctionTransform is refused with
-    /// its error, and the named transform keeps its transform.
+    /// ([`Transform::create_editable_copy`]): a transform whose copy fails (an invalid
+    /// FixedFunctionTransform, curves that don't validate) is refused with the copy's error, and
+    /// the named transform keeps its transform.
     ///
     /// Port of `NamedTransformImpl::setTransform` (NamedTransform.cpp:223-251 @ v2.5.2).
     #[doc(alias = "setTransform")]

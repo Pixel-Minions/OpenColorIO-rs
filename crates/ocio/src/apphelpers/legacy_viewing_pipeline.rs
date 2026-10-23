@@ -71,9 +71,9 @@ pub struct LegacyViewingPipeline {
 }
 
 /// A copy of `transform`, as upstream's `createEditableCopy` makes it: an invalid
-/// FixedFunctionTransform is refused. Upstream's pipeline setters are `noexcept`, so the
-/// exception of such a copy ends the wheel's process (`std::terminate`); the port returns it
-/// (docs/improvements.md, U-151).
+/// FixedFunctionTransform, or curves that don't validate, are refused. Upstream's pipeline
+/// setters are `noexcept`, so the exception of such a copy ends the wheel's process
+/// (`std::terminate`); the port returns it (docs/improvements.md, U-151).
 fn editable_copy(transform: Option<&Transform>) -> Result<Option<Transform>> {
     transform.map(Transform::create_editable_copy).transpose()
 }
@@ -123,7 +123,7 @@ impl LegacyViewingPipeline {
     }
 
     /// Sets a copy of `cc` (see [`Transform::create_editable_copy`]) as the linear CC, or
-    /// none. An invalid FixedFunctionTransform is refused, and the pipeline keeps its linear
+    /// none. A transform whose copy fails is refused, and the pipeline keeps its linear
     /// CC; the wheel's process ends there (docs/improvements.md, U-151).
     ///
     /// Port of `LegacyViewingPipelineImpl::setLinearCC` (LegacyViewingPipeline.cpp:53-63 @

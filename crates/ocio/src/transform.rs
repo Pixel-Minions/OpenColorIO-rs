@@ -320,9 +320,12 @@ impl From<RangeTransform> for Transform {
 impl Transform {
     /// A copy made as upstream's `createEditableCopy` makes it, which the config's objects keep
     /// of a transform they are given: a FixedFunctionTransform validates its style and
-    /// parameters ([`FixedFunctionTransform::create_editable_copy`]), the only class whose copy
-    /// can fail; the others copy as they are. A group copies its children without validating
-    /// them, as upstream's shares them (docs/improvements.md, I-11).
+    /// parameters ([`FixedFunctionTransform::create_editable_copy`]), and the RGB and hue curve
+    /// transforms validate and fit their curves again
+    /// ([`GradingRgbCurveTransform::create_editable_copy`],
+    /// [`GradingHueCurveTransform::create_editable_copy`]), the only classes whose copy can
+    /// fail; the others copy as they are. A group copies its children without validating them,
+    /// as upstream's shares them (docs/improvements.md, I-11).
     ///
     /// Port of `Transform::createEditableCopy` (include/OpenColorIO/OpenColorTransforms.h:124 @
     /// v2.5.2) and its overrides (each class's `createEditableCopy`).
@@ -330,6 +333,8 @@ impl Transform {
     pub fn create_editable_copy(&self) -> Result<Transform> {
         match self {
             Transform::FixedFunction(t) => Ok(t.create_editable_copy()?.into()),
+            Transform::GradingRgbCurve(t) => Ok(t.create_editable_copy()?.into()),
+            Transform::GradingHueCurve(t) => Ok(t.create_editable_copy()?.into()),
             other => Ok(other.clone()),
         }
     }

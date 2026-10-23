@@ -13,7 +13,7 @@
 mod common;
 
 use common::script::{
-    Expect, Script, b, base_methods, compare, f, i, l, n, none, r, ra, s, special,
+    Expect, Script, b, base_methods, compare, d, f, i, l, n, none, r, ra, s, special,
 };
 
 /// Each class has the wheel's surface, member for member.
@@ -709,6 +709,112 @@ fn curve_transform_script(c: &CurveClass) -> Script {
 #[test]
 fn curve_transforms_behave_as_the_wheels() {
     compare(&[curve_transform_script(&RGB), curve_transform_script(&HUE)]);
+}
+
+/// A copy of a curve transform (`createEditableCopy`) sets its curves again with the property's
+/// `setValue` (`GradingRGBCurveOpData.cpp:65`, `GradingHueCurveOpData.cpp:73` @ v2.5.2): curves
+/// changed in place to curves that don't validate are refused, with the curves' own text, by
+/// `deepcopy`, by the config objects' transform setters and constructors (which keep a copy, and
+/// keep the transform they had), and by the copy of a config object holding such a transform
+/// (changed through its getter); a group shares its children, so its copy succeeds.
+fn curve_copy_script(c: &CurveClass) -> Script {
+    let mut sc = Script::new();
+    let cls = format!("OCIO.{}", c.class);
+    let t = sc.call(n(&cls), vec![]);
+    let v = sc.call(ra(t, "getValue"), vec![]);
+    set_points(&mut sc, v, c.curve, &c.invalid);
+    sc.raises(n("copy.deepcopy"), vec![r(t)]);
+    sc.raises(ra(t, "__deepcopy__"), vec![d(vec![])]);
+    // Color space: the setter keeps the transform it had.
+    let kept = sc.call_kw(
+        n(&cls),
+        vec![],
+        vec![("style", n("OCIO.GRADING_LIN"))],
+        Expect::Value,
+    );
+    let cs = sc.call(n("OCIO.ColorSpace"), vec![]);
+    let to_ref = n("OCIO.COLORSPACE_DIR_TO_REFERENCE");
+    let from_ref = n("OCIO.COLORSPACE_DIR_FROM_REFERENCE");
+    sc.call(ra(cs, "setTransform"), vec![r(kept), to_ref.clone()]);
+    sc.raises(ra(cs, "setTransform"), vec![r(t), to_ref.clone()]);
+    sc.raises(ra(cs, "setTransform"), vec![r(t), from_ref.clone()]);
+    let held = sc.call(ra(cs, "getTransform"), vec![to_ref.clone()]);
+    sc.repr(r(held));
+    sc.call(ra(cs, "getTransform"), vec![from_ref.clone()]);
+    for kw in ["toReference", "fromReference"] {
+        sc.call_kw(
+            n("OCIO.ColorSpace"),
+            vec![],
+            vec![(kw, r(t))],
+            Expect::Raised,
+        );
+    }
+    // Look, named transform, view transform.
+    let look = sc.call(n("OCIO.Look"), vec![]);
+    sc.raises(ra(look, "setTransform"), vec![r(t)]);
+    sc.raises(ra(look, "setInverseTransform"), vec![r(t)]);
+    sc.call(ra(look, "getTransform"), vec![]);
+    for kw in ["transform", "inverseTransform"] {
+        sc.call_kw(n("OCIO.Look"), vec![], vec![(kw, r(t))], Expect::Raised);
+    }
+    let nt = sc.call(n("OCIO.NamedTransform"), vec![]);
+    for dir in ["OCIO.TRANSFORM_DIR_FORWARD", "OCIO.TRANSFORM_DIR_INVERSE"] {
+        sc.raises(ra(nt, "setTransform"), vec![r(t), n(dir)]);
+        sc.call(ra(nt, "getTransform"), vec![n(dir)]);
+    }
+    for kw in ["forwardTransform", "inverseTransform"] {
+        sc.call_kw(
+            n("OCIO.NamedTransform"),
+            vec![],
+            vec![(kw, r(t))],
+            Expect::Raised,
+        );
+    }
+    let vt = sc.call(n("OCIO.ViewTransform"), vec![]);
+    for dir in [
+        "OCIO.VIEWTRANSFORM_DIR_TO_REFERENCE",
+        "OCIO.VIEWTRANSFORM_DIR_FROM_REFERENCE",
+    ] {
+        sc.raises(ra(vt, "setTransform"), vec![r(t), n(dir)]);
+        sc.call(ra(vt, "getTransform"), vec![n(dir)]);
+    }
+    for kw in ["toReference", "fromReference"] {
+        sc.call_kw(
+            n("OCIO.ViewTransform"),
+            vec![],
+            vec![(kw, r(t))],
+            Expect::Raised,
+        );
+    }
+    // A group shares its children: its copy doesn't copy them.
+    let group = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(group, "appendTransform"), vec![r(t)]);
+    let gcopy = sc.call(n("copy.deepcopy"), vec![r(group)]);
+    sc.repr(r(gcopy));
+    // A config object's copy copies its transforms: curves changed through its getter.
+    let held_value = sc.call(ra(held, "getValue"), vec![]);
+    set_points(&mut sc, held_value, c.curve, &c.invalid);
+    sc.repr(r(cs));
+    sc.raises(n("copy.deepcopy"), vec![r(cs)]);
+    sc.call(ra(look, "setTransform"), vec![r(kept)]);
+    let lheld = sc.call(ra(look, "getTransform"), vec![]);
+    let lvalue = sc.call(ra(lheld, "getValue"), vec![]);
+    set_points(&mut sc, lvalue, c.curve, &c.invalid);
+    sc.raises(n("copy.deepcopy"), vec![r(look)]);
+    // Made valid again: the copies succeed, with the curves.
+    set_points(&mut sc, v, c.curve, &c.valid);
+    let copy = sc.call(n("copy.deepcopy"), vec![r(t)]);
+    sc.eval(r(copy), &CURVE_ALL);
+    sc.call(ra(cs, "setTransform"), vec![r(t), from_ref.clone()]);
+    let got = sc.call(ra(cs, "getTransform"), vec![from_ref]);
+    sc.repr(r(got));
+    sc
+}
+
+/// Copies of transforms holding curves that don't validate are refused as the wheel's.
+#[test]
+fn copies_set_the_curves_again() {
+    compare(&[curve_copy_script(&RGB), curve_copy_script(&HUE)]);
 }
 
 /// An `HSYTransformStyle` outside the enumerators, which the wheel's hue curve transform stores

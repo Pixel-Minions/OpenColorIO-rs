@@ -5728,9 +5728,17 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   after it was built (`setParams`), the copy throws, the exception leaves a `noexcept`
   function, and `std::terminate` ends the process (probed on Windows, 2026-10-22:
   `FixedFunctionTransform(ACES_GAMUT_COMP_13, 7 params)`, `setParams([1.0])`, then
-  `pipeline.setLinearCC(ff)` ends the wheel's process without a Python exception).
+  `pipeline.setLinearCC(ff)` ends the wheel's process without a Python exception). The copy of
+  a GradingRGBCurveTransform or GradingHueCurveTransform sets its curves again with the
+  property's `setValue` (`GradingRGBCurveTransform.cpp:28-33`, `GradingRGBCurveOpData.cpp:65`;
+  `GradingHueCurveTransform.cpp:29-34`, `GradingHueCurveOpData.cpp:73`), which throws for
+  curves that don't validate; Python code makes them so through the curves `getValue` returns
+  (probed on Windows, 2026-10-23: a control point of the `red` or `hue_sat` curve set to
+  `(1.5, 0.5)` through `getControlPoints()`, then `pipeline.setLinearCC(t)` ends the wheel's
+  process).
 - **Who notices:** an application handing the pipeline a fixed function transform it changed
-  to parameters the style refuses.
+  to parameters the style refuses, or, in Python, a curve transform whose curves it changed in
+  place to curves that don't validate.
 - **A fix:** let the setters throw (drop `noexcept`), as `ColorSpace::setTransform` does.
 - **Status:** the port's setters return the copy's error, and the pipeline keeps the transform
   it had (owner decision 2026-10-22, P5-3 c: setters taking `Option<&Transform>` and returning
