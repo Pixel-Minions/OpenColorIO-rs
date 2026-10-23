@@ -403,15 +403,20 @@ macro_rules! int_caster {
             const CPP_SIZE: usize = std::mem::size_of::<$t>();
 
             /// pybind11's integer caster: never a `float` (a subclass included); without
-            /// conversions, an `int` only (a `bool` too: the wheel takes an object with
-            /// `__index__` only with conversions, so a `list` subclass with `__index__` goes to
-            /// a later overload's sequence in the first pass); the value through
-            /// `PyLong_AsLong` (signed, which calls `__index__`) or `PyLong_AsUnsignedLong`
-            /// (unsigned, an `int` only), refused when it errs or doesn't fit; with
+            /// conversions, an `int` (a `bool` too) or an object whose type has `nb_index`
+            /// (`PyIndex_Check`); the value through `PyLong_AsLong` (signed, which calls
+            /// `__index__`: a pybind11 enum value goes to a C++ `long` in the first pass, I-12)
+            /// or `PyLong_AsUnsignedLong` (unsigned, an `int` only: an object with `__index__`
+            /// is refused in the first pass, so a `list` subclass with `__index__` goes to a
+            /// later overload's sequence), refused when it errs or doesn't fit; with
             /// conversions, when that errs for an object `PyNumber_Check` accepts, again with
             /// `int(obj)`.
             fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
-                if obj.is_instance_of::<PyFloat>() || (!convert && !obj.is_instance_of::<PyInt>()) {
+                if obj.is_instance_of::<PyFloat>()
+                    || (!convert
+                        && !obj.is_instance_of::<PyInt>()
+                        && !has_slot(obj, NumberSlot::Index))
+                {
                     return None;
                 }
                 let value: Result<Self, bool> = if $signed {

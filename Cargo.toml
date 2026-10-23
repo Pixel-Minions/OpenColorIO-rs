@@ -58,6 +58,10 @@ flate2 = { version = "=1.1.10", default-features = false, features = ["zlib-rs"]
 # latest 0.29 patch, for CPython 3.13 (cp313, not abi3, P6-5). Only `ocio-py` uses it, behind
 # its `python` feature.
 pyo3 = "=0.29.3"
+# NumPy arrays for the Python module (owner decision P6-2, 2026-10-17): the `numpy` crate at the
+# version that matches pyo3 0.29, with `half` for float16 arrays. Like pybind11, it imports
+# NumPy only when an array is made. Only `ocio-py` uses it, behind its `python` feature.
+numpy = { version = "=0.29.0", features = ["half"] }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

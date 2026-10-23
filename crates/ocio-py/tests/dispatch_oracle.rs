@@ -465,7 +465,7 @@ fn check<T: for<'py> Cast<'py>>(caster: &str, accepted: Vec<bool>) {
     );
 }
 
-/// The port's overloaded function: `(size: int)` and `(points: std::vector<float>)`, as
+/// The port's overloaded function: `(size: size_t)` and `(points: std::vector<float>)`, as
 /// `GradingBSplineCurve.__init__`'s first and fourth overloads. Each returns the arguments it
 /// took, as the wheel's call to make the same curve: `[n]` or `[[x, ...]]`.
 static PROBE: ocio_py::dispatch::Function = ocio_py::dispatch::Function {
@@ -478,7 +478,7 @@ static PROBE: ocio_py::dispatch::Function = ocio_py::dispatch::Function {
             params: &[ocio_py::dispatch::Param::new("size", "typing.SupportsInt")],
             ret: "list",
             call: |py, _, a, convert| {
-                let Some(n) = <i32 as Cast>::try_load(&a[0], convert)? else {
+                let Some(n) = <u64 as Cast>::try_load(&a[0], convert)? else {
                     return Ok(None);
                 };
                 Ok(Some(pyo3::types::PyList::new(py, [n])?.into_any().unbind()))

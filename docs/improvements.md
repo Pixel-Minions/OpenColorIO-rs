@@ -1803,7 +1803,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   O1.2).
 - **Who notices:** Python scripts that pass the channel order positionally.
 - **A fix:** choose the constructor by the argument's type.
-- **Status:** to be matched in Phase 6 (D13).
+- **Status:** matched in `p6-buffers` (6.5a): pybind11's integer caster takes an object with
+  `__index__` (an enum value) for a C++ `long` before conversions
+  (`crates/ocio-py/src/dispatch.rs`, `int_caster!`), so the first overload takes the channel
+  order as a count, as the wheel's; `image_desc_oracle.rs`, `packed_script`.
 
 ### I-13. Read-only NumPy arrays are written to
 
@@ -1811,7 +1814,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   wheel in O1.2).
 - **Who notices:** scripts that rely on a read-only array staying unchanged.
 - **A fix:** refuse read-only destinations.
-- **Status:** to be matched in Phase 6 (D13).
+- **Status:** the port refuses to write them, as undefined behaviour: U-156 (owner, 2026-10-22).
 
 ### I-23. The buffer-type error names integer types oddly
 
@@ -1821,8 +1824,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   Float types print correctly.
 - **Who notices:** Python users who read the message.
 - **A fix:** name the expected type as `uint16`, like the received one.
-- **Status:** to be matched in Phase 6 (D13). The Rust API's own error for a slice of the wrong
-  type uses the clean names.
+- **Status:** matched in `p6-buffers` (6.5a, `crates/ocio-py/src/py_utils.rs`,
+  `check_buffer_type`); `image_desc_oracle.rs`, `packed_script`, against the wheel. The Rust
+  API's own error for a slice of the wrong type uses the clean names.
 
 ### I-31. A shading language made from a number can abort the process
 
@@ -1981,6 +1985,59 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `REMOVE_COLOR_SPACES`): the set is emptied, the color space held from Python unchanged;
   `color_space_oracle.rs`, `color_spaces_behave_as_the_wheels` (`set_script`), against the
   wheel.
+
+### I-326. The buffer checks count entries in 32 bits on Windows
+
+- **Upstream:** the binding counts the entries an image needs in C++ `long`
+  (`width*height*numChannels`, `PyPackedImageDesc.cpp:22, 43, 66, 87`; `width * height` for
+  each plane, `PyPlanarImageDesc.cpp:39-142`), a 3D LUT's grid in `unsigned long`
+  (`gs*gs*gs*3`, `PyUtils.cpp:225-250`; the entry index, `PyLut3DTransform.cpp:95`), and a 1D
+  LUT's entries as `static_cast<unsigned long>(info.size)` (`PyLut1DTransform.cpp:86`). These
+  are 32 bits in the Windows wheel and 64 in the Linux one, and the products wrap. A packed
+  image of 65536 x 65536 x 4 "expects 0 entries" on Windows and 17179869184 on Linux; a 3D
+  LUT buffer of shape (2048, 0) passes the grid check on Windows (2048^3 * 3 wraps to 0) and
+  fails in the library ("Grid size '2048' must not be greater than '129'."), where Linux's
+  binding refuses the shape; a packed image of (2^30 + 4) x 1 x 4 over 16 entries passes the
+  entry check on Windows only.
+- **Who notices:** Python code that passes huge dimensions and reads the message.
+- **A fix:** count in `py::ssize_t` and refuse a product that overflows.
+- **Status:** matched for the image descriptions in `p6-buffers` (6.5a): the binding computes
+  in `c_long`, the platform's `long` (`crates/ocio-py/src/py_packed_image_desc.rs`,
+  `py_planar_image_desc.rs`); `image_desc_oracle.rs`, against the wheel of each platform. The
+  LUTs' counts come with 6.5b. The port's image then refuses a layout past its buffer (D-2) where
+  the Windows wheel makes one.
+
+### I-327. A planar image checks its planes from the last to the first
+
+- **Upstream:** `PlanarImageDesc`'s constructors check each plane's type and entries in the
+  arguments of one call, `std::make_shared<PlanarImageDesc>(getBufferData(rData, ...),
+  getBufferData(gData, ...), ...)` (`PyPlanarImageDesc.cpp:12-18, 28-152`), whose order C++
+  leaves unspecified. The Windows wheel evaluates them from the last to the first, so with two
+  bad planes the error names the alpha (or blue) plane's problem, not the red one's.
+- **Who notices:** Python code that passes several bad planes and reads the message.
+- **A fix:** check the planes one by one, in order, before the call.
+- **Status:** matched in `p6-buffers` (6.5a, `crates/ocio-py/src/py_planar_image_desc.rs`,
+  `LAST_TO_FIRST`); `image_desc_oracle.rs`, `planar_script`, against the wheel of each
+  platform.
+
+### I-328. An image's data and a LUT's buffer are read without their strides
+
+- **Upstream:** `PackedImageDesc.getData` copies `height*width*numChannels` items one channel
+  stride apart from the image's data pointer, and the planar getters `height*width` items one
+  item apart from each plane's (`PyPackedImageDesc.cpp:102-110`,
+  `PyPlanarImageDesc.cpp:154-189`), whatever the image's x and y strides; the LUTs' `setData`
+  reads its values one after another from the buffer's data pointer
+  (`PyLut1DTransform.cpp:78-96`, `PyLut3DTransform.cpp:76-104`), whatever the buffer's strides.
+  A view of every other value of an array gives the first half of the array's values; an image
+  with padded rows gives the padding among its items.
+- **Who notices:** Python code that describes, or loads a LUT from, a NumPy view that isn't
+  contiguous.
+- **A fix:** read the items by the image's strides (and the buffer's), or refuse buffers that
+  aren't C-contiguous, as `applyRGB` does.
+- **Status:** matched for the image descriptions in `p6-buffers` (6.5a,
+  `crates/ocio-py/src/py_image_desc.rs`, `read_items`); `image_desc_oracle.rs`, against the
+  wheel. The LUTs' `setData` comes with 6.5b. Values that this reads past the buffer's items
+  are U-148.
 
 ## Platform, environment and paths
 
@@ -5136,6 +5193,83 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   wheel what doesn't build that menu: the same config without the roles included, and an added
   color space the config doesn't have).
 
+### U-146. An `ImageDesc()` used
+
+- **Upstream:** `ImageDesc()` makes an image description whose image (`m_img`) is null
+  (`PyImageDesc.cpp:16-17`). Its getters (`getBitDepth`, `getWidth`, ...) and
+  `CPUProcessor.apply` of it, as the source or the destination, call through the null pointer,
+  and the wheel's process dies (probed on Windows: `apply`). Its `repr` prints the null
+  pointer.
+- **Who notices:** Python code that makes an `ImageDesc` itself, as a placeholder.
+- **A fix:** no public constructor for the base class, or refuse an empty description.
+- **Status:** the port raises ValueError "...: ImageDesc() describes no image, and the wheel
+  dereferences its null image (its process dies; docs/improvements.md, U-146)" where the wheel
+  dereferences it (`crates/ocio-py/src/py_image_desc.rs`, `null_image`), in `p6-buffers`
+  (6.5a: the getters; `CPUProcessor.apply` comes with 6.5b); `image_desc_oracle.rs` checks it,
+  and `repr` against the wheel.
+
+### U-147. An image description over memory that moved
+
+- **Upstream:** an image description keeps its buffer objects and the data pointer each had
+  when it was made (`PyImageDesc.h:33-66`), and releases the buffer request at once: nothing
+  keeps the memory where it was. A `bytearray` resized afterwards, or an exporter that gives
+  new memory to each request, leaves the description pointing at freed memory, which
+  `getData`, the planes' getters and `CPUProcessor.apply` read and write.
+- **Who notices:** Python code that resizes a buffer an image description was made over.
+- **A fix:** hold the buffer request (`py::buffer_info`) for the description's life, as
+  CPython then refuses the resize.
+- **Status:** the port requests each buffer again when the description is used and raises
+  BufferError "the buffer's memory moved since the image description was made over it ...
+  (docs/improvements.md, U-147)" when its data pointer differs
+  (`crates/ocio-py/src/py_image_desc.rs`, `Image::request`), in `p6-buffers` (6.5a);
+  `image_desc_oracle.rs`.
+
+### U-148. Items read past a buffer
+
+- **Upstream:** `PackedImageDesc.getData` and the planar getters copy items forward from the
+  data pointer (I-328), as do the LUTs' `setData`: for a view whose data pointer is its last
+  item (a reversed NumPy view, negative strides), they read past the buffer's memory.
+- **Who notices:** Python code that passes reversed or otherwise backward views.
+- **A fix:** read the items by their strides (I-328's fix).
+- **Status:** the port raises BufferError "...: the items reach outside the buffer's memory,
+  which the wheel reads past (docs/improvements.md, U-148)" when an item it reads isn't in the
+  span of the buffer's items (`crates/ocio-py/src/py_image_desc.rs`, `read_items`), in
+  `p6-buffers` (6.5a; the LUTs' `setData` with 6.5b); `image_desc_oracle.rs`. An image layout that reaches outside
+  its buffer, which the wheel's binding doesn't check (only the entry count), is refused when
+  the description is made (D-2).
+
+### U-149. The alpha plane of a planar image without one
+
+- **Upstream:** `PlanarImageDesc.getAData` of an image made without an alpha plane passes a
+  null pointer to `py::array`, which then makes a new array without copying: NumPy leaves its
+  memory uninitialized, and the values are whatever the allocator gives
+  (`PyPlanarImageDesc.cpp:181-189`).
+- **Who notices:** Python code that reads `getAData` of a three-plane image.
+- **A fix:** return `None` for an image without alpha.
+- **Status:** the port raises ValueError "PlanarImageDesc.getAData: the image has no alpha
+  plane, and the wheel returns a new array of uninitialized memory (docs/improvements.md,
+  U-149)" (`crates/ocio-py/src/py_planar_image_desc.rs`), in `p6-buffers` (6.5a);
+  `image_desc_oracle.rs`.
+
+### U-150. Memory shared between images, or between threads
+
+- **Upstream:** `CPUProcessor.apply(src, dst)` processes rows from one image into the other with
+  the GIL released, whatever memory they share: a source and a destination that partly
+  overlap are read after they are written; planes some of which share memory are read and
+  written through different pointers; and another thread can run Python code meanwhile, which
+  may apply to, or write into, the same memory at the same time, a data race.
+- **Who notices:** Python code that passes overlapping views, or processes the same array on
+  several threads.
+- **A fix:** refuse images that share memory without being the same image, and document that
+  a buffer must not be used elsewhere while it is processed.
+- **Status:** the port's library describes an image over borrowed memory, which it can't alias.
+  Memory that a call of the port's binding writes on one thread is refused to its calls on
+  others meanwhile ("another call (of another thread) is using the buffer's memory ...
+  (docs/improvements.md, U-150)", `ocio-py-ffi`, `with_bytes`), in `p6-buffers` (6.5a,
+  `buffer_ffi.rs`). Python code that writes the memory itself while the GIL is released is the
+  program's data race, as with the wheel; the port doesn't see it. `CPUProcessor.apply` comes
+  with 6.5b.
+
 ### U-151. A pipeline given an invalid FixedFunctionTransform
 
 - **Upstream:** `LegacyViewingPipelineImpl::setLinearCC`, `setColorTimingCC`, `setChannelView`
@@ -5180,3 +5314,35 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (5.7e, `apphelpers/mixing_helpers.rs`, `color_picker_of`); `mixing_helpers_oracle.rs`
   (`a_color_picking_role_naming_no_color_space_is_refused`, against the wheel's crash in
   `py_eval`).
+
+### U-156. Read-only buffers are written
+
+- **Upstream:** the binding requests buffers without asking for write access
+  (`py::buffer::request()`) and writes into them: `CPUProcessor.apply` into a destination,
+  `applyRGB` and `applyRGBA` into their buffer, whatever the exporter marked read-only (I-13).
+  `np.frombuffer(b"...")` is an array over a `bytes` object, which Python treats as immutable
+  (and may share, or intern): writing it changes every holder of that object.
+- **Who notices:** Python code that processes a read-only array, or a `bytes` object.
+- **A fix:** request the buffers to write as writable (`request(true)`), which raises
+  BufferError for a read-only one.
+- **Status:** `ocio-py-ffi`'s `with_bytes` refuses to lend such memory to write, with
+  BufferError "the buffer is read-only, and the wheel writes into it (docs/improvements.md,
+  U-156)", in `p6-buffers` (6.5a, `buffer_ffi.rs`). The writes themselves
+  (`CPUProcessor.apply`, `applyRGB`, `applyRGBA`) come with 6.5b. Reading a read-only buffer is
+  as the wheel's.
+
+### U-157. Buffer views that break the buffer protocol
+
+- **Upstream:** pybind11's `buffer_info` copies what the exporter filled into the view
+  unchecked: a null `format` into a `std::string` (undefined, a crash), a null `shape` or
+  `strides` with dimensions; it ignores `suboffsets`, which the request doesn't ask for, so
+  the items aren't where the binding addresses them.
+- **Who notices:** C extensions whose buffer export is broken. Python's own exporters (and
+  memoryviews over a `__buffer__` method) never give such a view for this request.
+- **A fix:** none in OCIO: pybind11 trusts the exporter.
+- **Status:** the port refuses such a view (and a negative number of dimensions, dimension or
+  item size, items without memory, items whose span doesn't fit in the address space) with
+  BufferError "...: the view breaks the buffer protocol where pybind11 reads it
+  (docs/improvements.md, U-157)", once the export is made, which it then releases
+  (`crates/ocio-py/ffi/src/lib.rs`, `Buffer::request`), in `p6-buffers` (6.5a). Not reachable
+  from Python code, so not tested through an exporter.

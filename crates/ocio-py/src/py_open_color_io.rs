@@ -262,6 +262,7 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::py_context::bind_py_context(m)?;
     crate::py_file_rules::bind_py_file_rules(m)?;
     crate::py_gpu_shader_creator::bind_py_gpu_shader_creator(m)?;
+    crate::py_image_desc::bind_py_image_desc(m)?;
     crate::py_look::bind_py_look(m)?;
     crate::py_named_transform::bind_py_named_transform(m)?;
     crate::py_processor_metadata::bind_py_processor_metadata(m)?;

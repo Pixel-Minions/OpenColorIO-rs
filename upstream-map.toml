@@ -3848,13 +3848,15 @@ status = "todo"
 path = "src/bindings/python/PyImageDesc.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_image_desc.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5a: AutoStride, ImageDesc (its getters and repr); an Image keeps the buffer objects and their data pointers, and describes their memory again with the library whenever it is used (U-147)"
 
 [[file]]
 path = "src/bindings/python/PyImageDesc.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_image_desc.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5a: PyImageDesc (33-66) is py_image_desc.rs Image and ImageHolder"
 
 [[file]]
 path = "src/bindings/python/PyLook.cpp"
@@ -3888,13 +3890,15 @@ note = "6.1a: the module's declarations; the classes it declares come with their
 path = "src/bindings/python/PyPackedImageDesc.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_packed_image_desc.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5a"
 
 [[file]]
 path = "src/bindings/python/PyPlanarImageDesc.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_planar_image_desc.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5a: getBufferData (12-18) checked from the last plane to the first, as the wheels evaluate the arguments (I-327)"
 
 [[file]]
 path = "src/bindings/python/PyProcessor.cpp"
@@ -3946,15 +3950,15 @@ note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class dec
 path = "src/bindings/python/PyUtils.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_utils.rs"]
-status = "todo"
-note = "checkBufferType (165-180): ocio-ops image_desc.rs gives its message for a typed slice of the wrong type, naming the expected type cleanly (uint16, where the binding writes 'u' (16-bit): improvement candidate I-23)"
+status = "partial"
+note = "p6-buffers 6.5a: formatCodeToDtypeName, bitDepthToDtype, bitDepthToBytes, chanOrderToNumChannels, checkBufferType (both), checkBufferSize; the rest with 6.5b. checkBufferType names the expected integer types as upstream does (I-23); ocio-ops image_desc.rs gives its own message for a typed slice of the wrong type"
 
 [[file]]
 path = "src/bindings/python/PyUtils.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_utils.rs"]
 status = "partial"
-note = "p6-transforms 6.3a: PyIterator (40-61); defRepr (17-35) is py_transform.rs's repr_def; the buffer helpers come with 6.5a"
+note = "p6-transforms 6.3a: PyIterator (40-61); defRepr (17-35) is py_transform.rs's repr_def; p6-buffers 6.5a: the buffer helpers' declarations (63-93) that 6.5a ports"
 
 [[file]]
 path = "src/bindings/python/PyViewTransform.cpp"

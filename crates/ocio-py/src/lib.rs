@@ -39,11 +39,17 @@ pub(crate) mod py_format_metadata;
 #[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
 #[cfg(feature = "python")]
+pub(crate) mod py_image_desc;
+#[cfg(feature = "python")]
 pub(crate) mod py_look;
 #[cfg(feature = "python")]
 pub(crate) mod py_named_transform;
 #[cfg(feature = "python")]
 pub mod py_open_color_io;
+#[cfg(feature = "python")]
+pub(crate) mod py_packed_image_desc;
+#[cfg(feature = "python")]
+pub(crate) mod py_planar_image_desc;
 #[cfg(feature = "python")]
 pub(crate) mod py_processor_metadata;
 #[cfg(feature = "python")]
