@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the display view transform: `tests/cpu/transforms/DisplayViewTransform_tests.cpp`
-//! @ v2.5.2. `build_ops` uses an ExposureContrastTransform (Phase 5). The text, the validation
+//! @ v2.5.2. The text, the validation
 //! and the processors are compared with the wheel's in `tests/config_transforms_oracle.rs`.
 
 use super::*;
@@ -132,6 +132,317 @@ fn build(config: &Config, dt: &DisplayViewTransform, dir: TransformDirection) ->
     let mut ops = OpVec::new();
     build_display_ops(&mut ops, config, &config.current_context().get(), dt, dir)?;
     Ok(ops)
+}
+
+/// The op's data type is `ty`.
+#[track_caller]
+fn check_type(ops: &OpVec, i: usize, ty: OpDataType) {
+    assert_eq!(ops[i].data().get_type(), ty, "op {i}");
+}
+
+/// Op `i` is a matrix of the offset `offset`.
+#[track_caller]
+fn check_offset(ops: &OpVec, i: usize, offset: &[f64; 4]) {
+    check_type(ops, i, OpDataType::Matrix);
+    let OpData::Matrix(mat_data) = &**ops[i].data() else {
+        panic!("op {i}: not a matrix");
+    };
+    for (k, &v) in offset.iter().enumerate() {
+        assert_eq!(
+            v,
+            mat_data.get_offset_value(k as _).unwrap(),
+            "op {i} offset {k}"
+        );
+    }
+}
+
+/// Op `i` is a log of the base `base`.
+#[track_caller]
+fn check_log_base(ops: &OpVec, i: usize, base: f64) {
+    check_type(ops, i, OpDataType::Log);
+    let OpData::Log(log_data) = &**ops[i].data() else {
+        panic!("op {i}: not a log");
+    };
+    assert_eq!(base, log_data.base(), "op {i}");
+}
+
+/// Port of `OCIO_ADD_TEST(DisplayViewTransform, build_ops)` @ v2.5.2.
+#[test]
+fn build_ops() {
+    use crate::color_space::ColorSpace;
+    use crate::display::OCIO_VIEW_USE_DISPLAY_NAME;
+    use crate::transforms::cdl_transform::CdlTransform;
+    use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
+    use crate::transforms::fixed_function_transform::FixedFunctionTransform;
+    use crate::transforms::log_transform::LogTransform;
+    use crate::transforms::matrix_transform::MatrixTransform;
+    use OpDataType::{Cdl, ExposureContrast, FixedFunction, NoOp};
+    use ocio_ops::open_color_types::{FixedFunctionStyle, ReferenceSpaceType};
+    use ocio_ops::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpStyle;
+
+    let _env = EnvGuard::new();
+    //
+    // Validate BuildDisplayOps where the display/view is a simple color space
+    // (i.e., no ViewTransform).
+    //
+
+    let src = "source";
+    let dst = "destination";
+
+    let mut config = (*Config::create_raw().unwrap()).clone();
+    let mut cs_source = ColorSpace::new();
+    cs_source.set_name(src);
+    let mut mat = MatrixTransform::new();
+    let offset: [f64; 4] = [0., 0.1, 0.2, 0.];
+    mat.set_offset(&offset);
+    cs_source
+        .set_transform(
+            Some(&Transform::from(mat)),
+            ColorSpaceDirection::ToReference,
+        )
+        .unwrap();
+    config.add_color_space(&cs_source).unwrap();
+
+    let mut cs = ColorSpace::new();
+    cs.set_name(dst);
+    let ff = FixedFunctionTransform::new(FixedFunctionStyle::AcesGlow03, &[]).unwrap();
+    cs.set_transform(
+        Some(&Transform::from(ff)),
+        ColorSpaceDirection::FromReference,
+    )
+    .unwrap();
+    config.add_color_space(&cs).unwrap();
+
+    let display = "display";
+    let view = "view";
+    config.add_display_view(display, view, dst, "").unwrap();
+
+    config.validate().unwrap();
+
+    let mut dt = DisplayViewTransform::new();
+    dt.set_src(src);
+
+    dt.set_display(display);
+    dt.set_view(view);
+
+    {
+        let mut ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+        assert_eq!(ops.len(), 4);
+        ops.validate().unwrap();
+
+        // No look.
+        // Input -> destination color space:
+
+        // 0. GPU Allocation No-op.
+        check_type(&ops, 0, NoOp);
+
+        // 1. Input color space (source) to reference.
+        check_offset(&ops, 1, &offset);
+
+        // 2. Display color space (destination) from reference.
+        check_type(&ops, 2, FixedFunction);
+        let OpData::FixedFunction(ff_data) = &**ops[2].data() else {
+            panic!("not a fixed function");
+        };
+        assert_eq!(ff_data.style(), FixedFunctionOpStyle::AcesGlow03Fwd);
+
+        // 3. GPU Allocation No-op.
+        check_type(&ops, 3, NoOp);
+    }
+
+    //
+    // Using a scene-referred ViewTransform.
+    //
+
+    // Create a new display color space and use the same name as the display.
+    let mut cs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+    cs.set_name(display);
+    let ec = ExposureContrastTransform::new();
+    cs.set_transform(
+        Some(&Transform::from(ec)),
+        ColorSpaceDirection::FromReference,
+    )
+    .unwrap();
+    config.add_color_space(&cs).unwrap();
+
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+    vt.set_name("default_vt");
+    let mut cdl = CdlTransform::new();
+    cdl.set_sat(1.2);
+    vt.set_transform(
+        Some(&Transform::from(cdl)),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config.add_view_transform(&vt).unwrap();
+
+    let scenevt = "scene_vt";
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+    vt.set_name(scenevt);
+    let mut log = LogTransform::new();
+    log.set_base(4.2);
+    vt.set_transform(
+        Some(&Transform::from(log)),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config.add_view_transform(&vt).unwrap();
+
+    let viewt = "viewt";
+    // Explicitly use the display color space named "display".
+    config
+        .add_display_view_with_view_transform(display, viewt, scenevt, display, "", "", "")
+        .unwrap();
+    config.validate().unwrap();
+
+    dt.set_view(viewt);
+
+    {
+        let mut ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+
+        // Getting an additional op for the view transform.
+        assert_eq!(ops.len(), 5);
+        ops.validate().unwrap();
+
+        // 0. GPU Allocation No-op.
+        check_type(&ops, 0, NoOp);
+
+        // 1. Input to reference.
+        check_offset(&ops, 1, &offset);
+
+        // 2. View Transform (converts scene-referred to display-referred reference space).
+        check_log_base(&ops, 2, 4.2);
+
+        // 3. DisplayCS from reference.
+        check_type(&ops, 3, ExposureContrast);
+
+        // 4. GPU Allocation No-op.
+        check_type(&ops, 4, NoOp);
+    }
+
+    //
+    // Adding a display-referred ViewTransform.
+    //
+
+    let displayvt = "display_vt";
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Display);
+    vt.set_name(displayvt);
+    let mut log = LogTransform::new();
+    log.set_base(2.1);
+    vt.set_transform(
+        Some(&Transform::from(log)),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config.add_view_transform(&vt).unwrap();
+
+    // Replace view display.
+    config
+        .add_display_view_with_view_transform(display, viewt, displayvt, display, "", "", "")
+        .unwrap();
+    config.validate().unwrap();
+
+    {
+        let mut ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+
+        // Getting an additional op for the reference space change.
+        assert_eq!(ops.len(), 6);
+        ops.validate().unwrap();
+
+        // 0. GPU Allocation No-op.
+        check_type(&ops, 0, NoOp);
+
+        // 1. Input to reference.
+        check_type(&ops, 1, OpDataType::Matrix);
+
+        // 2. Convert from the scene-referred reference space to the display-referred reference
+        //    space (using the default view transform).
+        check_type(&ops, 2, Cdl);
+
+        // 3. The view's View Transform converts from the display-referred reference space to
+        //    the same display-referred reference space.
+        check_log_base(&ops, 3, 2.1);
+
+        // 4. DisplayCS from reference.
+        check_type(&ops, 4, ExposureContrast);
+
+        // 5. GPU Allocation No-op.
+        check_type(&ops, 5, NoOp);
+    }
+
+    // Redo the same test using a shared view that uses USE_DISPLAY_NAME.  The results should
+    // be exactly the same
+
+    let shared_view = "shared_view";
+    config
+        .add_shared_view(
+            shared_view,
+            displayvt,
+            OCIO_VIEW_USE_DISPLAY_NAME,
+            "",
+            "",
+            "",
+        )
+        .unwrap();
+    config
+        .add_display_shared_view(display, shared_view)
+        .unwrap();
+
+    // This is valid because shared view refers to a view transform, is used in "display" and
+    // there is a color space named "display".
+    config.validate().unwrap();
+    dt.set_view(shared_view);
+
+    {
+        // Same as previous.
+        let mut ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+
+        ops.validate().unwrap();
+        assert_eq!(ops.len(), 6);
+
+        // 0. GPU Allocation No-op.
+        check_type(&ops, 0, NoOp);
+
+        // 1. Input to reference.
+        check_offset(&ops, 1, &offset);
+
+        // 2. Changing from scene-referred space to display-referred space done
+        //    using the default scene view transform.
+        check_type(&ops, 2, Cdl);
+
+        // 3. Display-referred reference to display-referred reference using the specified view
+        //    transform.
+        check_log_base(&ops, 3, 2.1);
+
+        // 4. DisplayCS from reference.
+        check_type(&ops, 4, ExposureContrast);
+
+        // 5. GPU Allocation No-op.
+        check_type(&ops, 5, NoOp);
+    }
+
+    // Repeat with data color space.
+    cs_source.set_is_data(true);
+    config.add_color_space(&cs_source).unwrap();
+    config.validate().unwrap();
+
+    {
+        let ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+
+        // Data color space conversion is skipped.
+        assert_eq!(ops.len(), 0);
+    }
+
+    // Process data color space.
+    dt.set_data_bypass(false);
+
+    {
+        // Getting same results as before.
+        let ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+
+        // Data color space conversion is not skipped.
+        assert_eq!(ops.len(), 6);
+    }
 }
 
 /// Port of `OCIO_ADD_TEST(DisplayViewTransform, build_ops_with_looks)` @ v2.5.2.
