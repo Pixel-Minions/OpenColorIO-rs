@@ -695,13 +695,13 @@ status = "done"
 path = "src/OpenColorIO/apphelpers/MixingHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mixing_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/MixingHelpers.h"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mixing_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/mergeconfigs/MergeConfigsHelpers.cpp"
@@ -4641,8 +4641,8 @@ status = "todo"
 [[file]]
 path = "tests/cpu/apphelpers/MixingHelpers_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/apphelpers/mixing_helpers_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/apphelpers/mixing_helpers_tests.rs", "crates/ocio/tests/mixing_helpers_oracle.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/builtinconfigs/BuiltinConfig_tests.cpp"

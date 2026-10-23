@@ -156,6 +156,24 @@ pub fn check_equal<T: PartialEq + Debug>(x: T, y: T) {
     }
 }
 
+/// The mixing helpers' tests' `FLOAT_CHECK_EQUAL(a, b)`: `OCIO_CHECK_EQUAL(int(a),
+/// int((b)*100000.))`, `a` an integer literal (the expected value, in units of 1e-5) and `b` a
+/// float, widened to a double, scaled, and truncated toward zero.
+///
+/// Port of `FLOAT_CHECK_EQUAL` (tests/cpu/apphelpers/MixingHelpers_tests.cpp:230-231 @
+/// v2.5.2).
+#[track_caller]
+pub fn mixing_float_check_equal(a: i32, b: f32) {
+    let scaled = f64::from(b) * 100000.;
+    // C++'s int(double) truncates toward zero; outside int's range it is undefined, and the
+    // check fails here.
+    assert!(
+        scaled > f64::from(i32::MIN) - 1.0 && scaled < f64::from(i32::MAX) + 1.0,
+        "FLOAT_CHECK_EQUAL failed: {b:?} * 100000. = {scaled:?} is outside int's range"
+    );
+    check_equal(a, scaled as i32);
+}
+
 /// `OCIO_CHECK_THROW_WHAT(S, E, W)`: `S` fails with an error whose message contains `W`. An
 /// empty message, or an empty `W`, fails the check.
 ///

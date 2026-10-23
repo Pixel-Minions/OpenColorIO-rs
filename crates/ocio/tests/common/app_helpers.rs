@@ -360,6 +360,9 @@ pub(crate) fn compare_processor_call(
             }
         };
         let Some(list) = wheel_pixels["result"].as_array() else {
+            problems.push(format!(
+                "{label}: the wheel gave {wheel_pixels}, the port pixels"
+            ));
             continue;
         };
         let wheel_bits: Vec<u64> = list

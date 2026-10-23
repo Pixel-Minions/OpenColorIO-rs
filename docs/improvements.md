@@ -3548,6 +3548,60 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `add_display_view`, `remove_display_view`); `display_view_helpers_oracle.rs`
   (`edits_match_the_wheel`) compares the config's text after every case, failed ones too.
 
+### I-337. A slider's `sliderToMixing` picks a different NaN on Windows and Linux
+
+- **Upstream:** `MixingSliderImpl::sliderToMixing` computes `getSliderMinEdge() + sliderUnits
+  * (getSliderMaxEdge() - getSliderMinEdge())` (`MixingHelpers.cpp:87-93` @ v2.5.2). MSVC
+  compiles it as `min + ((max - min) * units)`, GCC as `(units * (max - min)) + min` (Windows
+  `0x180043f62`-`0x180043f77`, Linux `0x15af83`-`0x15af98`). Where NaNs meet (a NaN edge and NaN
+  slider units, or NaN edges of different payloads), x86 returns the first operand's NaN, so
+  the wheels return different NaNs: with the edges NaN `a` and `b` and the units NaN `c`, in a
+  linear mixing space, Windows returns `a`, Linux `c`. Further on, the square of
+  `perceptualToLinear` is a `powf(x, 2.0f)` call on Windows and `x * x` on Linux; no input was
+  found where they differ (the slider grids of `mixing_helpers_oracle.rs`).
+- **Who notices:** nobody in practice: a slider whose edges or units are NaN.
+- **A fix:** none needed beyond picking one order (or refusing NaN edges, I-338).
+- **Status:** ported per platform in `p5-helpers-2` (5.7e, `apphelpers/mixing_helpers.rs`,
+  `MixingSlider::slider_to_mixing` with `sse_add`/`sse_mul`, and `square`);
+  `mixing_helpers_oracle.rs` (`slider_specials_match_the_wheel`, every pair of edges with NaNs
+  of their own payloads) on both platforms.
+
+### I-338. A slider's edges aren't checked
+
+- **Upstream:** `MixingSliderImpl::setSliderMinEdge` and `setSliderMaxEdge` take any float
+  (`MixingHelpers.cpp:70-85` @ v2.5.2). In a linear mixing space the edges are kept 0.01 apart
+  by `std::min(min, max - 0.01f)` and `std::max(max, min + 0.01f)`, each against the other
+  edge as set, so edges set the wrong way round give other edges (a minimum of 1 and a maximum
+  of 0 give the range from -0.01 to 1.01, before the perceptual mapping), and a NaN edge stays NaN
+  (`std::min` keeps its first operand). In a perceptually uniform mixing space (the display
+  space, the color picking role's) the edges are used as set: equal edges make
+  `mixingToSlider` divide by zero (infinities and NaN) and `sliderToMixing` return the edge
+  whatever the units; infinite edges give NaN.
+- **Who notices:** an application that lets its users type a slider's range.
+- **A fix:** refuse (or swap) edges that aren't finite and increasing, in every mixing space.
+- **Status:** ported as upstream in `p5-helpers-2` (5.7e, `apphelpers/mixing_helpers.rs`,
+  `MixingSlider`); `mixing_helpers_oracle.rs` (`slider_specials_match_the_wheel`) compares
+  every ordered pair of a list of edges (equal, swapped, infinite, NaN) in both kinds of
+  mixing space.
+
+### I-339. The mixing spaces are fixed
+
+- **Upstream:** `MixingColorSpaceManagerImpl::refresh` offers the color picking role's color
+  space alone when the config has that role, else `Rendering Space` and `Display Space`, with
+  a TODO to list the config's display color spaces instead (`MixingHelpers.cpp:141-167` @
+  v2.5.2); `isPerceptuallyUniform` is true for the display space and for the color picking
+  role, with TODOs saying that it should depend on the space and that the role's color space
+  isn't always perceptually uniform (`227-236`). The rendering space's processor is an identity
+  (a MatrixTransform) whatever the working space is called, even a name the config doesn't
+  have (`296-325`).
+- **Who notices:** a color picker that mixes in a scene-linear color picking role (its slider
+  isn't compensated), or that expects the working space's name to be checked.
+- **A fix:** the TODOs: list the display color spaces, and decide perceptual uniformity from
+  the color space (its encoding, or a config setting).
+- **Status:** ported as upstream in `p5-helpers-2` (5.7e, `apphelpers/mixing_helpers.rs`,
+  `MixingColorSpaceManager`); `mixing_helpers_oracle.rs` (`managers_match_the_wheel`,
+  `builtin_config_managers_match_the_wheel`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -5041,3 +5095,28 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `Result`, as `ColorSpace::set_transform`). In `p5-helpers-2` (5.7d,
   `apphelpers/legacy_viewing_pipeline.rs`, `editable_copy`); `legacy_viewing_pipeline_oracle.rs`
   (`setters_refuse_an_invalid_fixed_function`).
+
+### U-152. A color picking role that names no color space
+
+- **Upstream:** `MixingColorSpaceManagerImpl::refresh` calls
+  `ColorSpaceInfo::CreateFromSingleRole(config, ROLE_COLOR_PICKING)` when the config has the
+  role (`MixingHelpers.cpp:150-154` @ v2.5.2), which reads the name of the color space
+  `config->getColorSpace("color_picking")` returns, null when the role names no color space (a
+  name the config doesn't have, or another role's name: `getColorSpace` doesn't follow a role
+  to a role) (`ColorSpaceHelpers.cpp:78-94`, the path of U-141). Making a
+  `MixingColorSpaceManager` of such a config, or refreshing one with it, reads through a null
+  pointer, and the wheel's process dies (probed on Windows on 2026-10-22, and through
+  `py_eval`'s crash report on both platforms).
+- **Who notices:** an application with a color picker on a config whose `color_picking` role
+  names a missing color space (`config.setRole('color_picking', 'missing')`, a hand-written
+  config, or a role renamed after the fact).
+- **A fix:** treat the role as missing (fall back to the rendering and display spaces), or
+  throw.
+- **Status:** the port returns an error ("MixingColorSpaceManager: the role 'color_picking'
+  refers to the color space '<name>', which doesn't exist: OCIO 2.5.2 reads a null color space
+  there, and its process dies (docs/improvements.md, U-152).") from
+  `MixingColorSpaceManager::new` and `refresh`; a manager whose refresh fails is left as it was
+  (owner decision 2026-10-22, P5-3 d: `new` and `refresh` return `Result`). In `p5-helpers-2`
+  (5.7e, `apphelpers/mixing_helpers.rs`, `color_picker_of`); `mixing_helpers_oracle.rs`
+  (`a_color_picking_role_naming_no_color_space_is_refused`, against the wheel's crash in
+  `py_eval`).
