@@ -3505,6 +3505,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`crates/ocio/tests/file_format_ctf_oracle.rs`, `exposure_contrast_files_read_as_in_the_wheel`,
   cases "a NaN exposure" and "a NaN gamma").
 
+### I-347. A written CTF GradingPrimary leaves out the controls its style doesn't use
+
+- **Upstream:** the CTF reader reads every GradingPrimary control into the op, "even those
+  that are not used by the current style" (`fileformats/ctf/CTFReaderHelper.cpp:2521-2568` @
+  v2.5.2), and the op's cache ID and `equals` hold all of them
+  (`ops/gradingprimary/GradingPrimaryOpData.cpp:187-207`). `GradingPrimaryWriter::writeContent`
+  writes only the style's controls: brightness, contrast and gamma for log, offset, exposure
+  and contrast for linear (and no pivot black or white), lift, gamma, gain and offset for video
+  (`fileformats/ctf/CTFTransform.cpp:1394-1499`). The same holds for a GradingPrimaryTransform
+  whose values were set through the API.
+- **Who notices:** a GradingPrimary read from a CTF file (or set through the API) with a
+  control of another style, written and read back: the values, the cache ID and `equals`
+  differ from the original's, though the pixels don't.
+- **A fix:** write every control that differs from its default, or drop the unused controls
+  on reading.
+- **Status:** ported as upstream in `p4-after-p5` (4.5i and 4.6f, `crates/ocio/src/
+  fileformats/ctf/ctf_reader_helper.rs` and `ctf_writer.rs`, `GradingPrimaryWriter`); checked
+  against the wheel (`crates/ocio/tests/file_format_ctf_write_oracle.rs`,
+  `processors_of_exposure_contrast_and_grading_files_write_as_in_the_wheel`, `gp.ctf`).
+
 ## App helpers
 
 ### I-316. A menu's last fall-back lists color spaces the parameters exclude

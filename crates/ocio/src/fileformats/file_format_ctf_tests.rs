@@ -18,7 +18,12 @@ use crate::transform::Transform;
 use crate::transforms::cdl_transform::CdlTransform;
 use crate::transforms::exponent_transform::ExponentTransform;
 use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
 use crate::transforms::fixed_function_transform::FixedFunctionTransform;
+use crate::transforms::grading_hue_curve_transform::GradingHueCurveTransform;
+use crate::transforms::grading_primary_transform::GradingPrimaryTransform;
+use crate::transforms::grading_rgb_curve_transform::GradingRgbCurveTransform;
+use crate::transforms::grading_tone_transform::GradingToneTransform;
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::LogTransform;
@@ -36,8 +41,9 @@ use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
 use ocio_ops::open_color_types::{
-    BitDepth, CdlStyle, FixedFunctionStyle, GradingStyle, HsyTransformStyle, HueCurveType,
-    Interpolation, LoggingLevel, Lut1DHueAdjust, NegativeStyle, RgbCurveType, TransformDirection,
+    BitDepth, CdlStyle, ExposureContrastStyle, FixedFunctionStyle, GradingStyle, HsyTransformStyle,
+    HueCurveType, Interpolation, LoggingLevel, Lut1DHueAdjust, NegativeStyle, RgbCurveType,
+    TransformDirection,
 };
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
 use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::{
@@ -47,11 +53,12 @@ use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
     FixedFunctionOpData, FixedFunctionOpStyle,
 };
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::gradinghuecurve::grading_hue_curve::GradingHueCurve;
 use ocio_ops::ops::gradinghuecurve::grading_hue_curve_op_data::GradingHueCurveOpData;
 use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
 use ocio_ops::ops::gradingprimary::grading_primary_op_data::GradingPrimaryOpData;
 use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::GradingControlPoint;
-use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::default_lin_curve;
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::{GradingRgbCurve, default_lin_curve};
 use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
 use ocio_ops::ops::gradingtone::grading_tone::{GradingRgbmsw, GradingTone};
 use ocio_ops::ops::gradingtone::grading_tone_op_data::GradingToneOpData;
@@ -7472,6 +7479,770 @@ fn fixed_function_lin_to_doublelog_ctf() {
 "#;
 
         check_written(expected, &output_transform);
+    }
+}
+
+/// The CTF of a group whose id is `id`, of `transform`.
+fn write_one(id: &[u8], transform: Transform) -> Vec<u8> {
+    let group = group_of(id, transform);
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+    output_transform
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_video_ctf)` @ v2.5.2.
+#[test]
+fn exposure_contrast_video_ctf() {
+    let mut ec = ExposureContrastTransform::new();
+
+    ec.set_style(ExposureContrastStyle::Video);
+
+    ec.make_exposure_dynamic();
+    ec.make_gamma_dynamic();
+
+    let output_transform = write_one(b"UIDEC42", Transform::ExposureContrast(ec));
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDEC42">
+    <ExposureContrast inBitDepth="32f" outBitDepth="32f" style="video">
+        <ECParams exposure="0" contrast="1" gamma="1" pivot="0.18" />
+        <DynamicParameter param="EXPOSURE" />
+        <DynamicParameter param="GAMMA" />
+    </ExposureContrast>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_log_ctf)` @ v2.5.2.
+#[test]
+fn exposure_contrast_log_ctf() {
+    let mut ec = ExposureContrastTransform::new();
+
+    ec.set_style(ExposureContrastStyle::Logarithmic);
+
+    ec.set_exposure(-1.5);
+    ec.set_contrast(0.5);
+    ec.set_gamma(1.5);
+
+    ec.make_exposure_dynamic();
+    ec.make_contrast_dynamic();
+
+    let output_transform = write_one(b"UIDEC42", Transform::ExposureContrast(ec));
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDEC42">
+    <ExposureContrast inBitDepth="32f" outBitDepth="32f" style="log">
+        <ECParams exposure="-1.5" contrast="0.5" gamma="1.5" pivot="0.18" />
+        <DynamicParameter param="EXPOSURE" />
+        <DynamicParameter param="CONTRAST" />
+    </ExposureContrast>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_linear_ctf)` @ v2.5.2.
+#[test]
+fn exposure_contrast_linear_ctf() {
+    let mut ec = ExposureContrastTransform::new();
+
+    ec.set_style(ExposureContrastStyle::Linear);
+
+    ec.set_exposure(0.65);
+    ec.set_contrast(1.2);
+    ec.set_gamma(0.8);
+    ec.set_pivot(1.0);
+
+    ec.make_exposure_dynamic();
+    ec.make_contrast_dynamic();
+
+    let output_transform = write_one(b"UIDEC42", Transform::ExposureContrast(ec));
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDEC42">
+    <ExposureContrast inBitDepth="32f" outBitDepth="32f" style="linear">
+        <ECParams exposure="0.65" contrast="1.2" gamma="0.8" pivot="1" />
+        <DynamicParameter param="EXPOSURE" />
+        <DynamicParameter param="CONTRAST" />
+    </ExposureContrast>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_not_dynamic_ctf)` @ v2.5.2.
+#[test]
+fn exposure_contrast_not_dynamic_ctf() {
+    let mut ec = ExposureContrastTransform::new();
+
+    ec.set_style(ExposureContrastStyle::Video);
+
+    let output_transform = write_one(b"UIDEC42", Transform::ExposureContrast(ec));
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDEC42">
+    <ExposureContrast inBitDepth="32f" outBitDepth="32f" style="video">
+        <ECParams exposure="0" contrast="1" gamma="1" pivot="0.18" />
+    </ExposureContrast>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_log_params_ctf)` @ v2.5.2.
+#[test]
+fn exposure_contrast_log_params_ctf() {
+    let mut ec = ExposureContrastTransform::new();
+
+    ec.set_style(ExposureContrastStyle::Logarithmic);
+
+    ec.set_exposure(0.65);
+    ec.set_contrast(1.2);
+    ec.set_gamma(0.5);
+    ec.set_pivot(1.0);
+    ec.set_log_exposure_step(0.1);
+    ec.set_log_mid_gray(0.5);
+
+    ec.make_exposure_dynamic();
+
+    let output_transform = write_one(b"UIDEC42", Transform::ExposureContrast(ec));
+
+    let expected = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<ProcessList version=\"2\" id=\"UIDEC42\">\n",
+        "    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n",
+        "        <ECParams exposure=\"0.65\" contrast=\"1.2\" gamma=\"0.5\" pivot=\"1\" logExposureStep=\"0.1\" logMidGray=\"0.5\" />\n",
+        "        <DynamicParameter param=\"EXPOSURE\" />\n",
+        "    </ExposureContrast>\n",
+        "</ProcessList>\n"
+    );
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_log_ctf)` @ v2.5.2.
+#[test]
+fn grading_primary_log_ctf() {
+    let mut grading_primary = GradingPrimaryTransform::new(GradingStyle::Log);
+
+    // Non-default parameters.
+    let mut values = GradingPrimary::new(GradingStyle::Log);
+    values.brightness.red += 0.1;
+    values.contrast.green += 0.1;
+    values.gamma.master += 0.1;
+    values.saturation += 0.1;
+    values.pivot += 0.1;
+    values.pivot_black += 0.1;
+    values.pivot_white += 0.1;
+    values.clamp_black = 0.0;
+    values.clamp_white = 1.0;
+    grading_primary.set_value(&values).unwrap();
+
+    {
+        let output_transform = write_one(
+            b"UIDEC42",
+            Transform::GradingPrimary(grading_primary.clone()),
+        );
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingPrimary inBitDepth="32f" outBitDepth="32f" style="log">
+        <Brightness rgb="0.1 0 0" master="0" />
+        <Contrast rgb="1 1.1 1" master="1" />
+        <Gamma rgb="1 1 1" master="1.1" />
+        <Saturation master="1.1" />
+        <Pivot contrast="-0.1" black="0.1" white="1.1" />
+        <Clamp black="0" white="1" />
+    </GradingPrimary>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+
+    // Use default parameters, make dynamic and change direction.
+    let values_def = GradingPrimary::new(GradingStyle::Log);
+    grading_primary.set_value(&values_def).unwrap();
+    grading_primary.make_dynamic();
+    grading_primary.set_direction(TransformDirection::Inverse);
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingPrimary(grading_primary));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingPrimary inBitDepth="32f" outBitDepth="32f" style="logRev">
+        <DynamicParameter param="PRIMARY" />
+    </GradingPrimary>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_lin_ctf)` @ v2.5.2.
+#[test]
+fn grading_primary_lin_ctf() {
+    let mut grading_primary = GradingPrimaryTransform::new(GradingStyle::Lin);
+
+    // Non-default parameters.
+    let mut values = GradingPrimary::new(GradingStyle::Lin);
+    values.offset.red += 0.1;
+    values.exposure.master += -0.99999;
+    values.contrast.green += 0.1;
+    values.saturation = 1.00001;
+    values.pivot += 0.1;
+    values.pivot_black += 0.1;
+    values.pivot_white += 0.1;
+    values.clamp_black = 0.0;
+    values.clamp_white = 1.0;
+    grading_primary.set_value(&values).unwrap();
+
+    {
+        let output_transform = write_one(
+            b"UIDEC42",
+            Transform::GradingPrimary(grading_primary.clone()),
+        );
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingPrimary inBitDepth="32f" outBitDepth="32f" style="linear">
+        <Offset rgb="0.1 0 0" master="0" />
+        <Exposure rgb="0 0 0" master="-0.99999" />
+        <Contrast rgb="1 1.1 1" master="1" />
+        <Saturation master="1.00001" />
+        <Pivot contrast="0.28" />
+        <Clamp black="0" white="1" />
+    </GradingPrimary>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+
+    // Use default parameters, make dynamic and change direction.
+    let values_def = GradingPrimary::new(GradingStyle::Lin);
+    grading_primary.set_value(&values_def).unwrap();
+    grading_primary.make_dynamic();
+    grading_primary.set_direction(TransformDirection::Inverse);
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingPrimary(grading_primary));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingPrimary inBitDepth="32f" outBitDepth="32f" style="linearRev">
+        <DynamicParameter param="PRIMARY" />
+    </GradingPrimary>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_video_ctf)` @ v2.5.2.
+#[test]
+fn grading_primary_video_ctf() {
+    let mut grading_primary = GradingPrimaryTransform::new(GradingStyle::Video);
+
+    // Non-default parameters.
+    let mut values = GradingPrimary::new(GradingStyle::Video);
+    values.lift.red += 0.1;
+    values.gamma.master += 0.1;
+    values.gain.green += 0.1;
+    values.offset.green += 0.1;
+    values.saturation += 0.1;
+    values.pivot_black += 0.1;
+    values.pivot_white += 0.1;
+    values.clamp_black = 0.0;
+    values.clamp_white = 1.0;
+    grading_primary.set_value(&values).unwrap();
+
+    {
+        let output_transform = write_one(
+            b"UIDEC42",
+            Transform::GradingPrimary(grading_primary.clone()),
+        );
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingPrimary inBitDepth="32f" outBitDepth="32f" style="video">
+        <Lift rgb="0.1 0 0" master="0" />
+        <Gamma rgb="1 1 1" master="1.1" />
+        <Gain rgb="1 1.1 1" master="1" />
+        <Offset rgb="0 0.1 0" master="0" />
+        <Saturation master="1.1" />
+        <Pivot black="0.1" white="1.1" />
+        <Clamp black="0" white="1" />
+    </GradingPrimary>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+
+    // Use default parameters, make dynamic and change direction.
+    let values_def = GradingPrimary::new(GradingStyle::Video);
+    grading_primary.set_value(&values_def).unwrap();
+    grading_primary.make_dynamic();
+    grading_primary.set_direction(TransformDirection::Inverse);
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingPrimary(grading_primary));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingPrimary inBitDepth="32f" outBitDepth="32f" style="videoRev">
+        <DynamicParameter param="PRIMARY" />
+    </GradingPrimary>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_log_ctf)` @ v2.5.2.
+#[test]
+fn grading_rgbcurve_log_ctf() {
+    let mut grading_curves = GradingRgbCurveTransform::new(GradingStyle::Log);
+
+    // Two of the curves are the default curves, they are not saved.
+    let mut curves = GradingRgbCurve::new(GradingStyle::Log);
+    curves
+        .curve_mut(RgbCurveType::Green)
+        .unwrap()
+        .control_point_mut(0)
+        .unwrap()
+        .y = -0.5f32;
+    let master = curves.curve_mut(RgbCurveType::Master).unwrap();
+    master.set_num_control_points(4);
+    master.control_point_mut(3).unwrap().x = 1.5f32;
+    master.control_point_mut(3).unwrap().y = 1.4f32;
+    grading_curves.set_value(&curves).unwrap();
+    {
+        let output_transform = write_one(
+            b"UIDGradingCurves",
+            Transform::GradingRgbCurve(grading_curves.clone()),
+        );
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDGradingCurves">
+    <GradingRGBCurve inBitDepth="32f" outBitDepth="32f" style="log">
+        <Green>
+            <ControlPoints>
+                          0 -0.5
+                        0.5 0.5
+                          1 1
+            </ControlPoints>
+        </Green>
+        <Master>
+            <ControlPoints>
+                          0 0
+                        0.5 0.5
+                          1 1
+                        1.5 1.4
+            </ControlPoints>
+        </Master>
+    </GradingRGBCurve>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
+
+    // All curves are default curves, no curve is saved.
+    let curves = GradingRgbCurve::new(GradingStyle::Log);
+    grading_curves.set_value(&curves).unwrap();
+    grading_curves.set_direction(TransformDirection::Inverse);
+    // Make it dynamic so it is not identity.
+    grading_curves.make_dynamic();
+    {
+        let output_transform = write_one(
+            b"UIDGradingCurves",
+            Transform::GradingRgbCurve(grading_curves),
+        );
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDGradingCurves">
+    <GradingRGBCurve inBitDepth="32f" outBitDepth="32f" style="logRev">
+        <DynamicParameter param="RGB_CURVE" />
+    </GradingRGBCurve>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_video_ctf)` @ v2.5.2.
+#[test]
+fn grading_rgbcurve_video_ctf() {
+    let mut grading_curves = GradingRgbCurveTransform::new(GradingStyle::Video);
+
+    // All curves are default curves, no curve is saved.
+    // Make it dynamic so it is not identity.
+    grading_curves.make_dynamic();
+    {
+        let output_transform = write_one(
+            b"UIDGradingCurves",
+            Transform::GradingRgbCurve(grading_curves),
+        );
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDGradingCurves">
+    <GradingRGBCurve inBitDepth="32f" outBitDepth="32f" style="video">
+        <DynamicParameter param="RGB_CURVE" />
+    </GradingRGBCurve>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
+}
+
+/// Compares the written text with upstream's line by line, the lines `close` with
+/// upstream's tolerance (`OCIO_CHECK_STR_FLOAT_VEC_CLOSE`, 1e-5).
+#[track_caller]
+fn check_written_close(expected: &str, output: &[u8], close: impl Fn(usize) -> bool) {
+    let osvec = lines(output);
+    let resvec = lines(expected.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        if close(i) {
+            check_str_float_vec_close(floats(&osvec[i]), floats(&resvec[i]), 1e-5f32);
+        } else {
+            assert_eq!(osvec[i], resvec[i]);
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_lin_ctf)` @ v2.5.2.
+#[test]
+fn grading_rgbcurve_lin_ctf() {
+    let mut grading_curves = GradingRgbCurveTransform::new(GradingStyle::Lin);
+
+    // Two of the curves are the default curves, they are not saved.
+    let mut curves = GradingRgbCurve::new(GradingStyle::Lin);
+    curves
+        .curve_mut(RgbCurveType::Red)
+        .unwrap()
+        .control_point_mut(0)
+        .unwrap()
+        .y = -6.015625f32;
+    let master = curves.curve_mut(RgbCurveType::Master).unwrap();
+    master.set_num_control_points(4);
+    master.control_point_mut(3).unwrap().x = 16.0f32;
+    master.control_point_mut(3).unwrap().y = 10.0f32;
+    master.set_slope(0, 1.0f32).unwrap();
+    master.set_slope(1, 0.75f32).unwrap();
+    master.set_slope(2, 1.1f32).unwrap();
+    master.set_slope(3, 1.0f32).unwrap();
+    grading_curves.set_value(&curves).unwrap();
+    {
+        let output_transform = write_one(
+            b"UIDGradingCurves",
+            Transform::GradingRgbCurve(grading_curves.clone()),
+        );
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDGradingCurves">
+    <GradingRGBCurve inBitDepth="32f" outBitDepth="32f" style="linear">
+        <Red>
+            <ControlPoints>
+                         -7 -6.015625
+                          0 0
+                          7 7
+            </ControlPoints>
+        </Red>
+        <Master>
+            <ControlPoints>
+                         -7 -7
+                          0 0
+                          7 7
+                         16 10
+            </ControlPoints>
+            <Slopes>
+                          1 0.75 1.1 1
+            </Slopes>
+        </Master>
+    </GradingRGBCurve>
+</ProcessList>
+"#;
+
+        check_written_close(expected, &output_transform, |i| {
+            (5..=7).contains(&i) || (12..=15).contains(&i) || i == 18
+        });
+    }
+
+    // All curves are default curves, no curve is saved.
+    let curves = GradingRgbCurve::new(GradingStyle::Lin);
+    grading_curves.set_value(&curves).unwrap();
+    grading_curves.set_bypass_lin_to_log(true);
+    // Make it dynamic so it is not identity.
+    grading_curves.make_dynamic();
+    {
+        let output_transform = write_one(
+            b"UIDGradingCurves",
+            Transform::GradingRgbCurve(grading_curves),
+        );
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDGradingCurves">
+    <GradingRGBCurve inBitDepth="32f" outBitDepth="32f" style="linear" bypassLinToLog="true">
+        <DynamicParameter param="RGB_CURVE" />
+    </GradingRGBCurve>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_huecurve_lin_ctf)` @ v2.5.2.
+#[test]
+fn grading_huecurve_lin_ctf() {
+    let mut grading_curves = GradingHueCurveTransform::new(GradingStyle::Lin);
+
+    // Note: The default curves are not saved.
+    let mut curves = GradingHueCurve::new(GradingStyle::Lin);
+    curves
+        .curve_mut(HueCurveType::LumSat)
+        .unwrap()
+        .control_point_mut(0)
+        .unwrap()
+        .y = 1.1f32;
+    let lum_lum = curves.curve_mut(HueCurveType::LumLum).unwrap();
+    lum_lum.set_num_control_points(4);
+    lum_lum.control_point_mut(3).unwrap().x = 16.0f32;
+    lum_lum.control_point_mut(3).unwrap().y = 10.0f32;
+    lum_lum.set_slope(0, 1.0f32).unwrap();
+    lum_lum.set_slope(1, 0.75f32).unwrap();
+    lum_lum.set_slope(2, 1.1f32).unwrap();
+    lum_lum.set_slope(3, 1.0f32).unwrap();
+    grading_curves.set_value(&curves).unwrap();
+    {
+        let output_transform = write_one(
+            b"UIDGradingCurves",
+            Transform::GradingHueCurve(grading_curves.clone()),
+        );
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.5" id="UIDGradingCurves">
+    <GradingHueCurve inBitDepth="32f" outBitDepth="32f" style="linear">
+        <LumSat>
+            <ControlPoints>
+                         -7 1.1
+                          0 1
+                          7 1
+            </ControlPoints>
+        </LumSat>
+        <LumLum>
+            <ControlPoints>
+                         -7 -7
+                          0 0
+                          7 7
+                         16 10
+            </ControlPoints>
+            <Slopes>
+                          1 0.75 1.1 1
+            </Slopes>
+        </LumLum>
+    </GradingHueCurve>
+</ProcessList>
+"#;
+
+        check_written_close(expected, &output_transform, |i| {
+            (5..=7).contains(&i) || (12..=15).contains(&i) || i == 18
+        });
+    }
+
+    // All curves are default curves, no curve is saved.
+    let curves = GradingHueCurve::new(GradingStyle::Lin);
+    grading_curves.set_value(&curves).unwrap();
+    grading_curves.set_rgb_to_hsy(HsyTransformStyle::None);
+    // Make it dynamic so it is not identity.
+    grading_curves.make_dynamic();
+    {
+        let output_transform = write_one(
+            b"UIDGradingCurves",
+            Transform::GradingHueCurve(grading_curves),
+        );
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.5" id="UIDGradingCurves">
+    <GradingHueCurve inBitDepth="32f" outBitDepth="32f" style="linear" hsyTransform="none">
+        <DynamicParameter param="HUE_CURVE" />
+    </GradingHueCurve>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_log_ctf)` @ v2.5.2.
+#[test]
+fn grading_tone_log_ctf() {
+    let mut grading_tone = GradingToneTransform::new(GradingStyle::Log);
+
+    // Leave midtones and scontrast as default and verify they aren't saved.
+    let mut values = GradingTone::new(GradingStyle::Log);
+    values.blacks.red += 0.12345678912;
+    values.shadows.green += 0.1;
+    values.highlights.start += 0.1;
+    values.whites.width += 0.1;
+    grading_tone.set_value(&values).unwrap();
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingTone(grading_tone.clone()));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingTone inBitDepth="32f" outBitDepth="32f" style="log">
+        <Blacks rgb="1.12345678912 1 1" master="1" start="0.4" width="0.4" />
+        <Shadows rgb="1 1.1 1" master="1" start="0.5" pivot="0" />
+        <Highlights rgb="1 1 1" master="1" start="0.4" pivot="1" />
+        <Whites rgb="1 1 1" master="1" start="0.4" width="0.6" />
+    </GradingTone>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+
+    // All are non-default.
+    values.blacks = GradingRgbmsw::new(1.1, 0.99999, 1.3, 1.2, 1.1, 1.00001);
+    values.shadows = GradingRgbmsw::new(0.99999, 1.00001, 1.3, 1.2, 1.1, 0.1);
+    values.midtones = GradingRgbmsw::new(1.1, 1.3, 0.99999, 1.00001, 1.1, 1.2);
+    values.highlights = GradingRgbmsw::new(1.1, 1.00001, 1.3, 0.99999, 1.1, 1.2);
+    values.whites = GradingRgbmsw::new(1.00001, 1.1, 1.3, 1.2, 0.99999, 1.1);
+    values.scontrast += 0.1111;
+    grading_tone.set_value(&values).unwrap();
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingTone(grading_tone.clone()));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingTone inBitDepth="32f" outBitDepth="32f" style="log">
+        <Blacks rgb="1.1 0.99999 1.3" master="1.2" start="1.1" width="1.00001" />
+        <Shadows rgb="0.99999 1.00001 1.3" master="1.2" start="1.1" pivot="0.1" />
+        <Midtones rgb="1.1 1.3 0.99999" master="1.00001" center="1.1" width="1.2" />
+        <Highlights rgb="1.1 1.00001 1.3" master="0.99999" start="1.1" pivot="1.2" />
+        <Whites rgb="1.00001 1.1 1.3" master="1.2" start="0.99999" width="1.1" />
+        <SContrast master="1.1111" />
+    </GradingTone>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+
+    // Use default parameters, make dynamic and change direction.
+    let values_def = GradingTone::new(GradingStyle::Log);
+    grading_tone.set_value(&values_def).unwrap();
+    grading_tone.make_dynamic();
+    grading_tone.set_direction(TransformDirection::Inverse);
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingTone(grading_tone));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingTone inBitDepth="32f" outBitDepth="32f" style="logRev">
+        <DynamicParameter param="TONE" />
+    </GradingTone>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_lin_ctf)` @ v2.5.2.
+#[test]
+fn grading_tone_lin_ctf() {
+    // Only test the style, sub elements tested with GRADING_LOG.
+    let mut grading_tone = GradingToneTransform::new(GradingStyle::Lin);
+
+    // Make dynamic so it gets saved.
+    grading_tone.make_dynamic();
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingTone(grading_tone.clone()));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingTone inBitDepth="32f" outBitDepth="32f" style="linear">
+        <DynamicParameter param="TONE" />
+    </GradingTone>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+
+    grading_tone.set_direction(TransformDirection::Inverse);
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingTone(grading_tone));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingTone inBitDepth="32f" outBitDepth="32f" style="linearRev">
+        <DynamicParameter param="TONE" />
+    </GradingTone>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_video_ctf)` @ v2.5.2.
+#[test]
+fn grading_tone_video_ctf() {
+    // Only test the style, sub elements tested with GRADING_LOG.
+    let mut grading_tone = GradingToneTransform::new(GradingStyle::Video);
+    // Make dynamic so it gets saved.
+    grading_tone.make_dynamic();
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingTone(grading_tone.clone()));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingTone inBitDepth="32f" outBitDepth="32f" style="video">
+        <DynamicParameter param="TONE" />
+    </GradingTone>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
+    }
+
+    grading_tone.set_direction(TransformDirection::Inverse);
+
+    {
+        let output_transform = write_one(b"UIDEC42", Transform::GradingTone(grading_tone));
+
+        let expected_default = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDEC42">
+    <GradingTone inBitDepth="32f" outBitDepth="32f" style="videoRev">
+        <DynamicParameter param="TONE" />
+    </GradingTone>
+</ProcessList>
+"#;
+
+        check_written(expected_default, &output_transform);
     }
 }
 

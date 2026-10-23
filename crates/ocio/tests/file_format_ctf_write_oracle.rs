@@ -6,24 +6,27 @@
 //! 4.6a-4.6d): matrices of every form, bit depth and value; the ProcessList's version, id,
 //! name, inverseOf, descriptions, descriptors and Info; CDLs, gammas and exponents (a version 1
 //! config's Exponent ops too), logs and ranges of each style, direction and bit depth; 1D and 3D
-//! LUTs of each bit depth, interpolation and direction; FixedFunctions of each style; and the
-//! processors' groups of read files. The GradingRGBCurve writer's cases are
-//! `src/fileformats/file_format_ctf_write_oracle_tests.rs`.
+//! LUTs of each bit depth, interpolation and direction; FixedFunctions of each style;
+//! ExposureContrasts, GradingPrimarys and GradingTones of each style, direction and value
+//! (WP 4.6f); and the processors' groups of read files, the grading curves' among them. The
+//! GradingRGBCurve writer's op cases are `src/fileformats/file_format_ctf_write_oracle_tests.rs`.
 
 mod common;
 
 use common::lut_files::{file, write_files};
 use common::transforms::{
-    BIT_DEPTHS, Case, bit_depth_spec, direction_name, direction_spec, fixed_function_style_name,
-    interpolation_name, negative_style_spec,
+    BIT_DEPTHS, Case, bit_depth_spec, direction_name, direction_spec, exposure_contrast_style_name,
+    fixed_function_style_name, grading_style_name, interpolation_name, negative_style_spec,
 };
 use ocio::TransformDirection::{self, Forward, Inverse};
 use ocio::{
     BitDepth, CdlStyle, CdlTransform, ColorSpaceTransform, Config, ExponentTransform,
-    ExponentWithLinearTransform, FileTransform, FixedFunctionStyle, FixedFunctionTransform,
-    GroupTransform, Interpolation, LogAffineTransform, LogCameraTransform, LogTransform,
-    Lut1DHueAdjust, Lut1DTransform, Lut3DTransform, MatrixTransform, NegativeStyle, RangeStyle,
-    RangeTransform, Transform,
+    ExponentWithLinearTransform, ExposureContrastStyle, ExposureContrastTransform, FileTransform,
+    FixedFunctionStyle, FixedFunctionTransform, GradingPrimary, GradingPrimaryTransform,
+    GradingRgbm, GradingRgbmsw, GradingStyle, GradingTone, GradingToneTransform, GroupTransform,
+    Interpolation, LogAffineTransform, LogCameraTransform, LogTransform, Lut1DHueAdjust,
+    Lut1DTransform, Lut3DTransform, MatrixTransform, NegativeStyle, RangeStyle, RangeTransform,
+    Transform,
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -1876,5 +1879,509 @@ fn nan_parameters_write_as_in_the_wheel() {
             ));
         }
     }
+    check_writes(&cases);
+}
+
+/// An ExposureContrastTransform of `style`, in `dir`, of the exposure, contrast, gamma,
+/// pivot, log exposure step and log mid-gray `v`, with the properties `dynamic` (exposure,
+/// contrast, gamma) dynamic.
+fn exposure_contrast(
+    label: &str,
+    style: ExposureContrastStyle,
+    dir: TransformDirection,
+    v: [f64; 6],
+    dynamic: [bool; 3],
+) -> Case {
+    let mut port = ExposureContrastTransform::new();
+    port.set_style(style);
+    port.set_direction(dir);
+    port.set_exposure(v[0]);
+    port.set_contrast(v[1]);
+    port.set_gamma(v[2]);
+    port.set_pivot(v[3]);
+    port.set_log_exposure_step(v[4]);
+    port.set_log_mid_gray(v[5]);
+    let mut calls = vec![
+        json!(["setStyle", {"enum": exposure_contrast_style_name(style)}]),
+        json!(["setDirection", direction_spec(dir)]),
+        json!(["setExposure", f64_spec(v[0])]),
+        json!(["setContrast", f64_spec(v[1])]),
+        json!(["setGamma", f64_spec(v[2])]),
+        json!(["setPivot", f64_spec(v[3])]),
+        json!(["setLogExposureStep", f64_spec(v[4])]),
+        json!(["setLogMidGray", f64_spec(v[5])]),
+    ];
+    if dynamic[0] {
+        port.make_exposure_dynamic();
+        calls.push(json!(["makeExposureDynamic"]));
+    }
+    if dynamic[1] {
+        port.make_contrast_dynamic();
+        calls.push(json!(["makeContrastDynamic"]));
+    }
+    if dynamic[2] {
+        port.make_gamma_dynamic();
+        calls.push(json!(["makeGammaDynamic"]));
+    }
+    Case::new(
+        label,
+        json!({"class": "ExposureContrastTransform", "calls": calls}),
+        port,
+    )
+}
+
+/// A `GradingRGBM` as an object spec.
+fn rgbm_spec(v: &GradingRgbm) -> Value {
+    json!({"object": {"class": "GradingRGBM",
+        "args": [f64_spec(v.red), f64_spec(v.green), f64_spec(v.blue), f64_spec(v.master)]}})
+}
+
+/// A GradingPrimaryTransform of `style`, in `dir`, of `values` (which its `setValue` takes),
+/// dynamic or not.
+fn grading_primary(
+    label: &str,
+    style: GradingStyle,
+    dir: TransformDirection,
+    v: &GradingPrimary,
+    dynamic: bool,
+) -> Case {
+    let mut port = GradingPrimaryTransform::new(style);
+    port.set_direction(dir);
+    port.set_value(v).expect("values the transform takes");
+    if dynamic {
+        port.make_dynamic();
+    }
+    let value = json!({"object": {"class": "GradingPrimary",
+    "args": [{"enum": grading_style_name(style)}],
+    "attrs": [
+        ["brightness", rgbm_spec(&v.brightness)],
+        ["contrast", rgbm_spec(&v.contrast)],
+        ["gamma", rgbm_spec(&v.gamma)],
+        ["offset", rgbm_spec(&v.offset)],
+        ["exposure", rgbm_spec(&v.exposure)],
+        ["lift", rgbm_spec(&v.lift)],
+        ["gain", rgbm_spec(&v.gain)],
+        ["saturation", f64_spec(v.saturation)],
+        ["pivot", f64_spec(v.pivot)],
+        ["pivotBlack", f64_spec(v.pivot_black)],
+        ["pivotWhite", f64_spec(v.pivot_white)],
+        ["clampBlack", f64_spec(v.clamp_black)],
+        ["clampWhite", f64_spec(v.clamp_white)],
+    ]}});
+    let mut calls = vec![
+        json!(["setDirection", direction_spec(dir)]),
+        json!(["setValue", value]),
+    ];
+    if dynamic {
+        calls.push(json!(["makeDynamic"]));
+    }
+    Case::new(
+        label,
+        json!({"class": "GradingPrimaryTransform",
+            "args": {"style": {"enum": grading_style_name(style)}}, "calls": calls}),
+        port,
+    )
+}
+
+/// A `GradingRGBMSW` as an object spec.
+fn rgbmsw_spec(v: &GradingRgbmsw) -> Value {
+    json!({"object": {"class": "GradingRGBMSW",
+        "args": [f64_spec(v.red), f64_spec(v.green), f64_spec(v.blue), f64_spec(v.master),
+            f64_spec(v.start), f64_spec(v.width)]}})
+}
+
+/// A GradingToneTransform of `style`, in `dir`, of `values` (which its `setValue` takes),
+/// dynamic or not.
+fn grading_tone(
+    label: &str,
+    style: GradingStyle,
+    dir: TransformDirection,
+    v: &GradingTone,
+    dynamic: bool,
+) -> Case {
+    let mut port = GradingToneTransform::new(style);
+    port.set_direction(dir);
+    port.set_value(v).expect("values the transform takes");
+    if dynamic {
+        port.make_dynamic();
+    }
+    let value = json!({"object": {"class": "GradingTone",
+    "args": [{"enum": grading_style_name(style)}],
+    "attrs": [
+        ["blacks", rgbmsw_spec(&v.blacks)],
+        ["shadows", rgbmsw_spec(&v.shadows)],
+        ["midtones", rgbmsw_spec(&v.midtones)],
+        ["highlights", rgbmsw_spec(&v.highlights)],
+        ["whites", rgbmsw_spec(&v.whites)],
+        ["scontrast", f64_spec(v.scontrast)],
+    ]}});
+    let mut calls = vec![
+        json!(["setDirection", direction_spec(dir)]),
+        json!(["setValue", value]),
+    ];
+    if dynamic {
+        calls.push(json!(["makeDynamic"]));
+    }
+    Case::new(
+        label,
+        json!({"class": "GradingToneTransform",
+            "args": {"style": {"enum": grading_style_name(style)}}, "calls": calls}),
+        port,
+    )
+}
+
+/// The ExposureContrast, GradingPrimary and GradingTone transforms: each style in both
+/// directions, dynamic or not, with the defaults and with values that need many digits, are
+/// special or differ from the defaults by little.
+fn grading_cases() -> Vec<Case> {
+    use ExposureContrastStyle as Ec;
+    let neg_nan = f64::from_bits(0xfff8_0000_0000_0000);
+    let pay_nan = f64::from_bits(0x7ff8_0000_0000_1234);
+    let defaults = [0.0, 1.0, 1.0, 0.18, 0.088, 0.435];
+    let mut cases = Vec::new();
+    for style in [Ec::Linear, Ec::Video, Ec::Logarithmic] {
+        for dir in [Forward, Inverse] {
+            cases.push(exposure_contrast(
+                &format!("EC {style:?} {dir:?} defaults"),
+                style,
+                dir,
+                defaults,
+                [false; 3],
+            ));
+            cases.push(exposure_contrast(
+                &format!("EC {style:?} {dir:?} dynamic"),
+                style,
+                dir,
+                [0.65, 1.2, 0.8, 1.0, 0.1, 0.5],
+                [true, true, true],
+            ));
+        }
+    }
+    for (label, v, dynamic) in [
+        (
+            "many digits",
+            [
+                1.0 / 3.0,
+                std::f64::consts::E,
+                1.0 / 7.0,
+                0.123_456_789_012_345_68,
+                0.088,
+                0.435,
+            ],
+            [false, true, false],
+        ),
+        (
+            "a log step and mid-gray just off their defaults",
+            [
+                0.0,
+                1.0,
+                1.0,
+                0.18,
+                0.088_000_000_000_000_01,
+                0.435_000_000_000_001,
+            ],
+            [false, false, true],
+        ),
+        (
+            "special values",
+            [
+                neg_nan,
+                f64::INFINITY,
+                pay_nan,
+                -0.0,
+                f64::NAN,
+                f64::NEG_INFINITY,
+            ],
+            [true, false, false],
+        ),
+        (
+            "tiny and huge values",
+            [5e-324, 1e300, -1e-7, 123_456.789_012_345, 1e15, 1e16],
+            [false; 3],
+        ),
+    ] {
+        cases.push(exposure_contrast(
+            &format!("EC {label}"),
+            Ec::Logarithmic,
+            Forward,
+            v,
+            dynamic,
+        ));
+    }
+
+    for style in [GradingStyle::Log, GradingStyle::Lin, GradingStyle::Video] {
+        let def = GradingPrimary::new(style);
+        let mut typical = def;
+        typical.brightness.red += 0.1;
+        typical.contrast.green += 0.1;
+        typical.gamma.master += 0.1;
+        typical.offset.blue -= 0.05;
+        typical.exposure.master += -0.99999;
+        typical.lift.red += 0.1;
+        typical.gain.green += 0.1;
+        typical.saturation = 1.00001;
+        typical.pivot += 0.1;
+        typical.pivot_black += 0.1;
+        typical.pivot_white += 0.1;
+        typical.clamp_black = 0.0;
+        typical.clamp_white = 1.0;
+        let mut contrast_only = def;
+        contrast_only.contrast.red = 1.25;
+        let mut pivot_only = def;
+        pivot_only.pivot = 1.0 / 3.0;
+        let mut clamp_black_only = def;
+        clamp_black_only.clamp_black = -1e-7;
+        let mut digits = def;
+        digits.gamma = GradingRgbm::new(1.0 / 3.0, 1.0 / 7.0, std::f64::consts::E, 0.5);
+        digits.saturation = 0.123_456_789_012_345_68;
+        for dir in [Forward, Inverse] {
+            for (label, v, dynamic) in [
+                ("defaults", &def, false),
+                ("defaults, dynamic", &def, true),
+                ("typical", &typical, false),
+                ("typical, dynamic", &typical, true),
+                ("contrast only", &contrast_only, false),
+                ("pivot only", &pivot_only, false),
+                ("clamp black only", &clamp_black_only, false),
+                ("many digits", &digits, false),
+            ] {
+                cases.push(grading_primary(
+                    &format!("GP {style:?} {dir:?} {label}"),
+                    style,
+                    dir,
+                    v,
+                    dynamic,
+                ));
+            }
+        }
+
+        let def = GradingTone::new(style);
+        let mut typical = def;
+        typical.blacks.red += 0.12345678912;
+        typical.shadows.green += 0.1;
+        typical.midtones.start += 0.05;
+        typical.highlights.start += 0.1;
+        typical.whites.width += 0.1;
+        typical.scontrast += 0.1111;
+        let mut midtones_only = def;
+        midtones_only.midtones.width = 1.0 / 3.0;
+        let mut scontrast_only = def;
+        scontrast_only.scontrast = 1.00001;
+        for dir in [Forward, Inverse] {
+            for (label, v, dynamic) in [
+                ("defaults", &def, false),
+                ("defaults, dynamic", &def, true),
+                ("typical", &typical, false),
+                ("typical, dynamic", &typical, true),
+                ("midtones only", &midtones_only, false),
+                ("scontrast only", &scontrast_only, false),
+            ] {
+                cases.push(grading_tone(
+                    &format!("GT {style:?} {dir:?} {label}"),
+                    style,
+                    dir,
+                    v,
+                    dynamic,
+                ));
+            }
+        }
+    }
+    cases
+}
+
+/// The ExposureContrast, GradingPrimary and GradingTone transforms, alone in a group and
+/// after a matrix, as CTF and CLF (which refuses them).
+#[test]
+fn exposure_contrast_and_grading_transforms_write_as_in_the_wheel() {
+    let mut cases = Vec::new();
+    let m = matrix(
+        "m",
+        IDENTITY,
+        [0.1, 0.2, 0.3, 0.],
+        Forward,
+        (BitDepth::Uint10, BitDepth::Uint12),
+    );
+    let grading = grading_cases();
+    assert_eq!(grading.len(), 100);
+    for case in grading {
+        for format in [CTF, CLF] {
+            cases.push(group_case(
+                &case.label,
+                std::slice::from_ref(&case),
+                &[],
+                format,
+            ));
+        }
+        cases.push(group_case(
+            &format!("{}, after a matrix", case.label),
+            &[m.clone(), case.clone()],
+            &[("setID", "UID", "")],
+            CTF,
+        ));
+    }
+    check_writes(&cases);
+}
+
+/// A ProcessList of `version` holding `body`.
+fn process_list(version: &str, body: &str) -> Vec<u8> {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <ProcessList id=\"a\" version=\"{version}\">\n{body}</ProcessList>\n"
+    )
+    .into_bytes()
+}
+
+/// CTF files of the ExposureContrast and grading operators (the RGB and hue curves among
+/// them): the processors' groups of what the reader reads, written back.
+#[test]
+fn processors_of_exposure_contrast_and_grading_files_write_as_in_the_wheel() {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let curve = |tag: &str, points: &str, slopes: &str| {
+        let slopes = if slopes.is_empty() {
+            String::new()
+        } else {
+            format!("            <Slopes>{slopes}</Slopes>\n")
+        };
+        format!(
+            "        <{tag}>\n            <ControlPoints>{points}</ControlPoints>\n{slopes}        </{tag}>\n"
+        )
+    };
+    let op = |tag: &str, style: &str, extra: &str, body: &str| {
+        format!("    <{tag} {f32s} style=\"{style}\"{extra}>\n{body}    </{tag}>\n")
+    };
+    let dynamic = |param: &str| format!("        <DynamicParameter param=\"{param}\"/>\n");
+    let files: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "ec.ctf",
+            process_list(
+                "2",
+                &op(
+                    "ExposureContrast",
+                    "logRev",
+                    "",
+                    &format!(
+                        "        <ECParams exposure=\"-1.5\" contrast=\"0.5\" gamma=\"1.2\" \
+                         pivot=\"0.18\" logExposureStep=\"0.1\" logMidGray=\"0.5\"/>\n{}",
+                        dynamic("GAMMA")
+                    ),
+                ),
+            ),
+        ),
+        (
+            "gp.ctf",
+            process_list(
+                "2",
+                &format!(
+                    "{}{}",
+                    op(
+                        "GradingPrimary",
+                        "log",
+                        "",
+                        "        <Brightness rgb=\"0.1 0 0\" master=\"0\"/>\n\
+                         \x20       <Gamma rgb=\"1 1 1\" master=\"1.1\"/>\n\
+                         \x20       <Pivot black=\"0.1\"/>\n\
+                         \x20       <Clamp white=\"1\"/>\n\
+                         \x20       <Lift rgb=\"0.1 0 0\" master=\"0\"/>\n"
+                    ),
+                    op(
+                        "GradingPrimary",
+                        "videoRev",
+                        "",
+                        &format!(
+                            "        <Lift rgb=\"0.25 -.015625 .03125\" master=\"0\"/>\n\
+                             \x20       <Offset rgb=\"02.5 +0.5 -.125\" master=\"1\"/>\n{}",
+                            dynamic("PRIMARY")
+                        )
+                    )
+                ),
+            ),
+        ),
+        (
+            "gt.ctf",
+            process_list(
+                "2",
+                &op(
+                    "GradingTone",
+                    "linear",
+                    "",
+                    "        <Blacks rgb=\"1.1 1 1\" master=\"1\" start=\"0\" width=\"1\"/>\n\
+                     \x20       <Midtones rgb=\"1 1 1\" master=\"1.1\" center=\"0\" width=\"1\"/>\n\
+                     \x20       <SContrast master=\"1.12345678912\"/>\n",
+                ),
+            ),
+        ),
+        (
+            "rgb.ctf",
+            process_list(
+                "2",
+                &op(
+                    "GradingRGBCurve",
+                    "linear",
+                    " bypassLinToLog=\"true\"",
+                    &format!(
+                        "{}{}",
+                        curve("Red", "-7 -6.015625 0 0 7 7", ""),
+                        curve("Master", "-7 -7 0 0 7 7 16 10", "1 0.75 1.1 1")
+                    ),
+                ),
+            ),
+        ),
+        (
+            "hue.ctf",
+            process_list(
+                "2.5",
+                &format!(
+                    "{}{}",
+                    op(
+                        "GradingHueCurve",
+                        "linear",
+                        "",
+                        &format!(
+                            "{}{}",
+                            curve("LumSat", "-7 1.1 0 1 7 1", ""),
+                            curve("LumLum", "-7 -7 0 0 7 7 16 10", "1 0.75 1.1 1")
+                        ),
+                    ),
+                    op(
+                        "GradingHueCurve",
+                        "logRev",
+                        " hsyTransform=\"none\"",
+                        &format!(
+                            "{}{}{}",
+                            curve("HueHue", "0.015625 0 0.5 0.6 0.9 0.8", ""),
+                            curve("HueFx", "0.2 0.05 0.4 -0.09 0.6 -0.2 0.8 0.05", "0 0 0 0"),
+                            dynamic("HUE_CURVE")
+                        ),
+                    )
+                ),
+            ),
+        ),
+    ];
+    let dir = write_files(
+        &files
+            .iter()
+            .map(|(name, bytes)| file(name, bytes.clone()))
+            .collect::<Vec<_>>(),
+    );
+    let mut cases = Vec::new();
+    for (name, _) in &files {
+        for d in [Forward, Inverse] {
+            for format in [CTF, CLF] {
+                cases.push(path_case(name, &format!("{dir}/{name}"), d, format));
+            }
+        }
+    }
+    for name in [
+        "exposure_contrast_video.ctf",
+        "exposure_contrast_log.ctf",
+        "exposure_contrast_linear.ctf",
+        "exposure_contrast_no_gamma.ctf",
+        "grading_hue_curve.ctf",
+    ] {
+        for d in [Forward, Inverse] {
+            cases.push(processor_case(name, d, CTF));
+        }
+    }
+    assert_eq!(cases.len(), 30);
     check_writes(&cases);
 }
