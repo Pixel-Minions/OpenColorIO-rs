@@ -658,3 +658,48 @@ fn setter_validation() {
          '-0.05'.",
     );
 }
+
+/// `set_value_as_is` (the Python binding's hook) holds curves that don't validate as they are:
+/// the transform gives them back and refuses them where it validates, and building ops from
+/// it refuses them as building ops from curves set with `set_value` would (the copy's fit).
+/// (The binding's oracle tests compare what Python sees with the wheel's.)
+#[test]
+fn curves_held_as_they_are() {
+    let mut t = GradingHueCurveTransform::new(GradingStyle::Log);
+    let mut values = t.value();
+    *values.curve_mut(HueCurveType::LumSat).unwrap() = curve(
+        &[(0.0, 1.0), (0.5, 1.0), (0.2, 1.0), (1.0, 1.0)],
+        HueCurveType::LumSat,
+    );
+    assert!(values.validate().is_err());
+    assert!(t.set_value(&values).is_err());
+    t.set_value_as_is(&values);
+    assert_eq!(t.value(), values);
+    assert!(t.validate().is_err());
+    let config = Config::create_raw().unwrap();
+    assert!(config.processor(&t.clone().into()).is_err());
+    // Valid curves held as they are build the same ops as curves set.
+    let mut valid = t.value();
+    *valid.curve_mut(HueCurveType::LumSat).unwrap() =
+        curve(&[(0.0, 1.2), (0.5, 0.8), (1.0, 1.0)], HueCurveType::LumSat);
+    let mut set = GradingHueCurveTransform::new(GradingStyle::Log);
+    set.set_value(&valid).unwrap();
+    t.set_value_as_is(&valid);
+    let apply = |tr: Transform| {
+        let cpu = config
+            .processor(&tr)
+            .unwrap()
+            .default_cpu_processor()
+            .unwrap();
+        let mut px = [0.25f32, 0.5, 0.75];
+        cpu.apply_rgb(&mut px).unwrap();
+        px.map(f32::to_bits)
+    };
+    let (a, b) = (apply(t.clone().into()), apply(set.clone().into()));
+    assert_ne!(
+        a,
+        [0.25f32, 0.5, 0.75].map(f32::to_bits),
+        "the curves change the pixel"
+    );
+    assert_eq!(a, b);
+}

@@ -161,6 +161,18 @@ impl GradingHueCurveTransform {
         self.data.set_value(values)
     }
 
+    /// Holds the curves as they are, not validated (the property's
+    /// `set_value_as_is`). For the Python binding only (`ocio-py`), whose `getValue` returns
+    /// the transform's own curves, as upstream's `GradingHueCurveTransformImpl::getValue` does, which
+    /// Python code changes in place; behaviour-neutral for the Rust API, whose `value` is a
+    /// copy (owner decision 2026-10-23, as `replace_*_as_is` of the config's objects).
+    #[doc(hidden)]
+    pub fn set_value_as_is(&mut self, values: &GradingHueCurve) {
+        self.data
+            .get_dynamic_property_internal()
+            .set_value_as_is(values);
+    }
+
     /// The slope of control point `index` of the curve `c`.
     ///
     /// Port of `GradingHueCurveTransformImpl::getSlope` (GradingHueCurveTransform.cpp:99-102 @
@@ -303,7 +315,13 @@ pub(crate) fn build_grading_hue_curve_op(
     let data = transform.data();
     data.validate()?;
 
+    // Upstream's `data.clone()` (GradingHueCurveOp.cpp:243 @ v2.5.2) is the copy constructor
+    // (GradingHueCurveOpData.cpp:28-36), whose `*this = rhs` sets the copy's value with the
+    // property's `setValue` (operator=, 62-80, at 73): it
+    // validates and fits the curves again (the port's clone copies the knots), so curves held
+    // as they are (`set_value_as_is`) are fitted here, with upstream's errors.
     let curve_data = data.clone();
+    curve_data.set_value(&curve_data.get_value())?;
     create_grading_hue_curve_op(ops, curve_data, dir);
     Ok(())
 }

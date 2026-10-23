@@ -296,6 +296,18 @@ impl DynamicPropertyGradingRgbCurveImpl {
         Self::precompute(&mut state)
     }
 
+    /// Holds a copy of `value` as it is: not validated, the knots and coefficients of the
+    /// curves held before kept. For the Python binding only (`ocio-py`): upstream's `getValue`
+    /// returns the curves the property holds, which Python code changes in place without
+    /// `setValue` (so without validating or fitting them), and the binding writes such
+    /// changes back here. What builds ops from the value fits it again (the transform's
+    /// `build_*_op`, as upstream's copy of the op data does), so the kept knots are never
+    /// rendered.
+    #[doc(hidden)]
+    pub fn set_value_as_is(&self, value: &GradingRgbCurve) {
+        self.state_mut().value = value.clone();
+    }
+
     /// Port of `DynamicPropertyGradingRGBCurveImpl::getLocalBypass` (DynamicProperty.cpp:
     /// 225-228 @ v2.5.2).
     pub fn get_local_bypass(&self) -> bool {
@@ -901,6 +913,18 @@ impl DynamicPropertyGradingHueCurveImpl {
         state.value = value.clone();
         // Convert control points from the UI into knots and coefficients for the apply.
         Self::precompute(&mut state)
+    }
+
+    /// Holds a copy of `value` as it is: not validated, the knots and coefficients of the
+    /// curves held before kept. For the Python binding only (`ocio-py`): upstream's `getValue`
+    /// returns the curves the property holds, which Python code changes in place without
+    /// `setValue` (so without validating or fitting them), and the binding writes such
+    /// changes back here. What builds ops from the value fits it again (the transform's
+    /// `build_*_op`, as upstream's copy of the op data does), so the kept knots are never
+    /// rendered.
+    #[doc(hidden)]
+    pub fn set_value_as_is(&self, value: &GradingHueCurve) {
+        self.state_mut().value = value.clone();
     }
 
     /// Port of `DynamicPropertyGradingHueCurveImpl::getLocalBypass` (DynamicProperty.cpp:
