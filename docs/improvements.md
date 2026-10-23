@@ -3487,6 +3487,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`grading_hue_curve_transforms_save_in_version_1_as_in_the_wheel`) checks it against the
   wheel.
 
+### I-346. A CTF ECParams value of NaN counts as missing
+
+- **Upstream:** `CTFReaderECParamsElt::start` starts each parameter at a quiet NaN, parses
+  the attributes into them, then takes a NaN as an absent attribute
+  (`fileformats/ctf/CTFReaderHelper.cpp:1777-1849` @ v2.5.2). An `exposure`, `contrast` or
+  `pivot` written as `nan` is refused as missing ("ExposureContrast element: exposure
+  missing."), and a `gamma`, `logExposureStep` or `logMidGray` written as `nan` is ignored:
+  the op keeps its default (1, 0.088, 0.435).
+- **Who notices:** a CTF file whose ExposureContrast parameters hold `nan` (as a writer of
+  a NaN value would write it): the read fails with a message naming a parameter that is
+  there, or reads a different op than the one written.
+- **A fix:** keep a found flag per parameter, as the grading parameter elements do, and
+  accept NaN values (or refuse them with their own message).
+- **Status:** ported as upstream in `p4-after-p5` (4.5i, `crates/ocio/src/fileformats/ctf/
+  ctf_reader_helper.rs`, `CtfReaderEcParamsElt::start`); checked against the wheel
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`, `exposure_contrast_files_read_as_in_the_wheel`,
+  cases "a NaN exposure" and "a NaN gamma").
+
 ## App helpers
 
 ### I-316. A menu's last fall-back lists color spaces the parameters exclude

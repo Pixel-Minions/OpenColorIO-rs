@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The CLF/CTF reader's elements: the ProcessList, its metadata, Info and descriptors, and
-//! the versioned choice of each operator's reader.
+//! The CLF/CTF reader's elements: the ProcessList, its metadata, Info and descriptors, the
+//! versioned choice of each operator's reader, the operators' readers and their parameter
+//! elements.
 //!
 //! Port of `src/OpenColorIO/fileformats/ctf/CTFReaderHelper.h` and `CTFReaderHelper.cpp`
-//! (@ v2.5.2), as far as WP 4.5b: the operators' readers come with 4.5c-4.5i, and until then
-//! [`get_reader`] names the reader a file asks for.
+//! (@ v2.5.2).
 //!
 //! **Sharing.** Upstream's parser, ProcessList element and operator elements share one
 //! `CTFReaderTransform` (`CTFReaderTransformPtr`, a `shared_ptr`); here the parse shares a
@@ -37,16 +37,24 @@ use ocio_ops::logging::{is_debug_logging_enabled, log_debug, log_warning};
 use ocio_ops::math_utils::{convert_half_bits_to_float, sse_cvttps_epi32};
 use ocio_ops::op_data::{OpData, OpDataType};
 use ocio_ops::open_color_types::{
-    BitDepth, GradingStyle, Interpolation, Lut1DHueAdjust, RgbCurveType, TransformDirection,
-    bit_depth_to_string,
+    BitDepth, GradingStyle, HsyTransformStyle, HueCurveType, Interpolation, Lut1DHueAdjust,
+    RgbCurveType, TransformDirection, bit_depth_to_string,
 };
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle};
+use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
     FixedFunctionOpData, FixedFunctionOpStyle,
 };
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::gradinghuecurve::grading_hue_curve::GradingHueCurve;
+use ocio_ops::ops::gradinghuecurve::grading_hue_curve_op_data::GradingHueCurveOpData;
+use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
+use ocio_ops::ops::gradingprimary::grading_primary_op_data::GradingPrimaryOpData;
+use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::GradingBSplineCurve;
 use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::GradingRgbCurve;
 use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
+use ocio_ops::ops::gradingtone::grading_tone::{GradingRgbmsw, GradingTone};
+use ocio_ops::ops::gradingtone::grading_tone_op_data::GradingToneOpData;
 use ocio_ops::ops::log::log_op_data::{
     LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE, LogOpData,
 };
@@ -82,6 +90,15 @@ use super::ctf_reader_utils::{
     ATTR_LOGSIDEOFFSET, ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_PARAMS, ATTR_REFBLACK, ATTR_REFWHITE,
     ATTR_SHADOW, ATTR_STYLE, ATTR_VERSION, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE,
     TAG_MIN_OUT_VALUE, TAG_PROCESS_LIST,
+};
+use super::ctf_reader_utils::{
+    ATTR_CENTER, ATTR_CONTRAST, ATTR_EXPOSURE, ATTR_LOGEXPOSURESTEP, ATTR_LOGMIDGRAY, ATTR_MASTER,
+    ATTR_PIVOT, ATTR_PRIMARY_BLACK, ATTR_PRIMARY_CONTRAST, ATTR_PRIMARY_WHITE, ATTR_RGB,
+    ATTR_RGB_TO_HSY, ATTR_START, ATTR_WIDTH, TAG_PRIMARY_BRIGHTNESS, TAG_PRIMARY_CLAMP,
+    TAG_PRIMARY_CONTRAST, TAG_PRIMARY_EXPOSURE, TAG_PRIMARY_GAIN, TAG_PRIMARY_GAMMA,
+    TAG_PRIMARY_LIFT, TAG_PRIMARY_OFFSET, TAG_PRIMARY_PIVOT, TAG_PRIMARY_SATURATION,
+    TAG_TONE_BLACKS, TAG_TONE_HIGHLIGHTS, TAG_TONE_MIDTONES, TAG_TONE_SCONTRAST, TAG_TONE_SHADOWS,
+    TAG_TONE_WHITES,
 };
 use super::ctf_transform::{
     CTF_INFO_ELEMENT_VERSION, CTF_PROCESS_LIST_VERSION, CTF_PROCESS_LIST_VERSION_1_2,
@@ -995,21 +1012,28 @@ pub struct CtfReaderOpElt {
     /// `CTFReaderGradingRGBCurveElt::m_loadingRGBCurve`: the curves the curve elements fill,
     /// from the style's defaults.
     loading_rgb_curve: Option<GradingRgbCurve>,
+    /// `CTFReaderGradingPrimaryElt::m_gradingPrimary`: the values the parameter elements
+    /// fill, the log style's defaults until the style resets them.
+    grading_primary: GradingPrimary,
+    /// `CTFReaderGradingHueCurveElt::m_loadingHueCurve`: the curves the curve elements fill,
+    /// from the style's defaults.
+    loading_hue_curve: Option<GradingHueCurve>,
 }
 
 impl CtfReaderOpElt {
-    /// The reader of `kind`, if ported (WP 4.5c-4.5i port the others).
+    /// The reader of `kind`.
     ///
     /// Port of the constructors of the `CTFReaderOpElt` subclasses: `CTFReaderACESElt`
     /// (CTFReaderHelper.cpp:1199-1203), `CTFReaderCDLElt` (1327-1332),
-    /// `CTFReaderFixedFunctionElt` (1417-1421), `CTFReaderFunctionElt` (1496-1500),
-    /// `CTFReaderGammaElt` (1862-1865), `CTFReaderGradingRGBCurveElt` (2580-2583),
-    /// `CTFReaderReferenceElt` (5014-5018),
-    /// `CTFReaderInvLut1DElt`
-    /// (3245-3248), `CTFReaderInvLut3DElt` (3433-3436), `CTFReaderLogElt` (3545-3549),
-    /// `CTFReaderLut1DElt` (4085-4092), `CTFReaderLut3DElt` (4389-4396),
-    /// `CTFReaderMatrixElt` (4561-4566) and `CTFReaderRangeElt` (4858-4862) @ v2.5.2.
-    pub fn create(kind: CtfReaderKind) -> Option<CtfReaderOpElt> {
+    /// `CTFReaderExposureContrastElt` (1699-1703), `CTFReaderFixedFunctionElt` (1417-1421),
+    /// `CTFReaderFunctionElt` (1496-1500), `CTFReaderGammaElt` (1862-1865),
+    /// `CTFReaderGradingPrimaryElt` (2204-2207), `CTFReaderGradingRGBCurveElt` (2580-2583),
+    /// `CTFReaderGradingHueCurveElt` (2659-2662), `CTFReaderGradingToneElt` (2974-2977),
+    /// `CTFReaderReferenceElt` (5014-5018), `CTFReaderInvLut1DElt` (3245-3248),
+    /// `CTFReaderInvLut3DElt` (3433-3436), `CTFReaderLogElt` (3545-3549), `CTFReaderLut1DElt`
+    /// (4085-4092), `CTFReaderLut3DElt` (4389-4396), `CTFReaderMatrixElt` (4561-4566) and
+    /// `CTFReaderRangeElt` (4858-4862) @ v2.5.2.
+    pub fn create(kind: CtfReaderKind) -> CtfReaderOpElt {
         let op = match kind {
             CtfReaderKind::Matrix | CtfReaderKind::Matrix1_3 => OpData::Matrix(MatrixOpData::new()),
             CtfReaderKind::Range | CtfReaderKind::Range1_7 => OpData::Range(RangeOpData::new()),
@@ -1045,13 +1069,24 @@ impl CtfReaderOpElt {
                         .expect("a style without parameters"),
                 )
             }
-            _ => return None,
+            CtfReaderKind::ExposureContrast => {
+                OpData::ExposureContrast(ExposureContrastOpData::default())
+            }
+            CtfReaderKind::GradingPrimary => {
+                OpData::GradingPrimary(GradingPrimaryOpData::new(GradingStyle::Log))
+            }
+            CtfReaderKind::GradingTone => {
+                OpData::GradingTone(GradingToneOpData::new(GradingStyle::Log))
+            }
+            CtfReaderKind::GradingHueCurve => {
+                OpData::GradingHueCurve(GradingHueCurveOpData::new(GradingStyle::Log))
+            }
         };
         let cdl = match &op {
             OpData::Cdl(cdl) => Some(Rc::new(RefCell::new(cdl.clone()))),
             _ => None,
         };
-        Some(CtfReaderOpElt {
+        CtfReaderOpElt {
             element: XmlReaderElementBase::new(b"", 0, b""),
             transform: None,
             in_bit_depth: BitDepth::Unknown,
@@ -1068,7 +1103,9 @@ impl CtfReaderOpElt {
             index_mapping: IndexMapping::new(0),
             index_map_completed: false,
             loading_rgb_curve: None,
-        })
+            grading_primary: GradingPrimary::new(GradingStyle::Log),
+            loading_hue_curve: None,
+        }
     }
 
     /// Port of `CTFReaderOpElt::setContext` (CTFReaderHelper.cpp:811-824 @ v2.5.2).
@@ -1269,6 +1306,10 @@ impl CtfReaderOpElt {
     /// `CTFReaderFixedFunctionElt::isOpParameterValid` (1475-1480),
     /// `CTFReaderFunctionElt::isOpParameterValid` (1537-1541),
     /// `CTFReaderGradingRGBCurveElt::isOpParameterValid` (2585-2590),
+    /// `CTFReaderExposureContrastElt::isOpParameterValid` (1744-1748),
+    /// `CTFReaderGradingPrimaryElt::isOpParameterValid` (2209-2213),
+    /// `CTFReaderGradingHueCurveElt::isOpParameterValid` (2664-2669),
+    /// `CTFReaderGradingToneElt::isOpParameterValid` (2979-2983),
     /// `CTFReaderReferenceElt::isOpParameterValid` (5095-5102),
     /// `CTFReaderInvLut3DElt::isOpParameterValid` (3471-3475),
     /// `CTFReaderLut3DElt::isOpParameterValid` (4431-4435) and
@@ -1290,7 +1331,14 @@ impl CtfReaderOpElt {
             | CtfReaderKind::Log
             | CtfReaderKind::Log2_0
             | CtfReaderKind::Aces
-            | CtfReaderKind::Function => base || equal_ignoring_case(ATTR_STYLE, att),
+            | CtfReaderKind::Function
+            | CtfReaderKind::ExposureContrast
+            | CtfReaderKind::GradingPrimary
+            | CtfReaderKind::GradingTone => base || equal_ignoring_case(ATTR_STYLE, att),
+            CtfReaderKind::GradingHueCurve => {
+                base || equal_ignoring_case(ATTR_STYLE, att)
+                    || equal_ignoring_case(ATTR_RGB_TO_HSY, att)
+            }
             CtfReaderKind::FixedFunction => {
                 base || equal_ignoring_case(ATTR_STYLE, att)
                     || equal_ignoring_case(ATTR_PARAMS, att)
@@ -2640,6 +2688,269 @@ impl CtfReaderOpElt {
 }
 
 impl CtfReaderOpElt {
+    /// The op data of an ExposureContrast reader.
+    ///
+    /// Port of `CTFReaderExposureContrastElt::getExposureContrast` (CTFReaderHelper.h:1203-1206
+    /// @ v2.5.2).
+    pub fn exposure_contrast_mut(&mut self) -> &mut ExposureContrastOpData {
+        match &mut self.op {
+            OpData::ExposureContrast(ec) => ec,
+            _ => panic!("not an ExposureContrast reader"),
+        }
+    }
+
+    /// The style (required).
+    ///
+    /// Port of `CTFReaderExposureContrastElt::start` (CTFReaderHelper.cpp:1709-1742 @ v2.5.2),
+    /// after `CTFReaderOpElt::start`.
+    fn exposure_contrast_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_style_found = false;
+
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_STYLE, atts[i]) {
+                let style = match ExposureContrastOpData::convert_string_to_style(Some(utf8(
+                    c_str(atts[i + 1]),
+                ))) {
+                    Ok(style) => style,
+                    Err(ce) => {
+                        return Err(self.throw_m(&[b"ExposureContrast element: ", ce.what()]));
+                    }
+                };
+
+                self.exposure_contrast_mut().set_style(style);
+                is_style_found = true;
+            }
+
+            i += 2;
+        }
+        if !is_style_found {
+            return Err(self.throw_message(b"ExposureContrast element: style missing."));
+        }
+        Ok(())
+    }
+
+    /// The op data of a GradingPrimary reader.
+    ///
+    /// Port of `CTFReaderGradingPrimaryElt::getGradingPrimary` (CTFReaderHelper.h:628-631 @
+    /// v2.5.2).
+    fn grading_primary_mut(&mut self) -> &mut GradingPrimaryOpData {
+        match &mut self.op {
+            OpData::GradingPrimary(gp) => gp,
+            _ => panic!("not a GradingPrimary reader"),
+        }
+    }
+
+    /// The values the parameter elements of a GradingPrimary reader fill.
+    ///
+    /// Port of `CTFReaderGradingPrimaryElt::getValue` (CTFReaderHelper.h:633 @ v2.5.2).
+    pub fn grading_primary_value_mut(&mut self) -> &mut GradingPrimary {
+        &mut self.grading_primary
+    }
+
+    /// The style and direction (required), which give the values their defaults.
+    ///
+    /// Port of `CTFReaderGradingPrimaryElt::start` (CTFReaderHelper.cpp:2215-2251 @ v2.5.2),
+    /// after `CTFReaderOpElt::start`.
+    fn grading_primary_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_style_found = false;
+
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_STYLE, atts[i]) {
+                match convert_string_to_grading_style_and_dir(Some(atts[i + 1])) {
+                    Ok((style, dir)) => {
+                        let gp = self.grading_primary_mut();
+                        gp.set_style(style);
+                        gp.set_direction(dir);
+                        // Initialize default values from the style.
+                        self.grading_primary = GradingPrimary::new(style);
+                    }
+                    Err(_) => {
+                        return Err(self.throw_m(&[
+                            b"Required attribute 'style' '",
+                            c_str(atts[i + 1]),
+                            b"' is invalid.",
+                        ]));
+                    }
+                }
+                is_style_found = true;
+            }
+
+            i += 2;
+        }
+
+        if !is_style_found {
+            return Err(self.throw_m(&[b"Required attribute 'style' is missing."]));
+        }
+        Ok(())
+    }
+
+    /// The values set (which validates them), then validated.
+    ///
+    /// Port of `CTFReaderGradingPrimaryElt::end` (CTFReaderHelper.cpp:2253-2259 @ v2.5.2),
+    /// after `CTFReaderOpElt::end`.
+    fn grading_primary_end(&mut self) -> Result<()> {
+        let values = self.grading_primary;
+        let gp = self.grading_primary_mut();
+        gp.set_value(&values)?;
+        gp.validate()
+    }
+
+    /// The op data of a GradingTone reader.
+    ///
+    /// Port of `CTFReaderGradingToneElt::getGradingTone` (CTFReaderHelper.h:795-798 @ v2.5.2).
+    pub fn grading_tone_mut(&mut self) -> &mut GradingToneOpData {
+        match &mut self.op {
+            OpData::GradingTone(gt) => gt,
+            _ => panic!("not a GradingTone reader"),
+        }
+    }
+
+    /// The style and direction (required), which give the values their defaults.
+    ///
+    /// Port of `CTFReaderGradingToneElt::start` (CTFReaderHelper.cpp:2985-3021 @ v2.5.2), after
+    /// `CTFReaderOpElt::start`.
+    fn grading_tone_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_style_found = false;
+
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_STYLE, atts[i]) {
+                let set = (|| -> Result<()> {
+                    let (style, dir) = convert_string_to_grading_style_and_dir(Some(atts[i + 1]))?;
+                    let gt = self.grading_tone_mut();
+                    gt.set_style(style);
+                    gt.set_direction(dir);
+                    // Initialize default values from the style.
+                    let values = GradingTone::new(style);
+                    gt.set_value(&values)
+                })();
+                if set.is_err() {
+                    return Err(self.throw_m(&[
+                        b"Required attribute 'style' '",
+                        c_str(atts[i + 1]),
+                        b"' is invalid.",
+                    ]));
+                }
+                is_style_found = true;
+            }
+
+            i += 2;
+        }
+
+        if !is_style_found {
+            return Err(self.throw_m(&[b"Required attribute 'style' is missing."]));
+        }
+        Ok(())
+    }
+
+    /// The op data of a GradingHueCurve reader.
+    ///
+    /// Port of `CTFReaderGradingHueCurveElt::getGradingHueCurve` (CTFReaderHelper.h:715-718 @
+    /// v2.5.2).
+    fn grading_hue_curve_mut(&mut self) -> &mut GradingHueCurveOpData {
+        match &mut self.op {
+            OpData::GradingHueCurve(curve) => curve,
+            _ => panic!("not a GradingHueCurve reader"),
+        }
+    }
+
+    /// Whether this is a GradingHueCurve reader (`dynamic_cast<CTFReaderGradingHueCurveElt
+    /// *>`).
+    pub fn is_grading_hue_curve(&self) -> bool {
+        self.kind == CtfReaderKind::GradingHueCurve
+    }
+
+    /// The style and direction (required), which give the curves their defaults, and
+    /// `hsyTransform` (only `none`, ignoring case).
+    ///
+    /// Port of `CTFReaderGradingHueCurveElt::start` (CTFReaderHelper.cpp:2671-2719 @ v2.5.2),
+    /// after `CTFReaderOpElt::start`.
+    fn grading_hue_curve_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_style_found = false;
+
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_STYLE, atts[i]) {
+                match convert_string_to_grading_style_and_dir(Some(atts[i + 1])) {
+                    Ok((style, dir)) => {
+                        let curve = self.grading_hue_curve_mut();
+                        curve.set_style(style);
+                        curve.set_direction(dir);
+
+                        // Initialize loading curve with corresponding style.
+                        self.loading_hue_curve = Some(GradingHueCurve::new(style));
+                    }
+                    Err(_) => {
+                        return Err(self.throw_m(&[
+                            b"Required attribute 'style' '",
+                            c_str(atts[i + 1]),
+                            b"' is invalid.",
+                        ]));
+                    }
+                }
+                is_style_found = true;
+            } else if equal_ignoring_case(ATTR_RGB_TO_HSY, atts[i]) {
+                if !equal_ignoring_case(b"none", atts[i + 1]) {
+                    let mut oss = OStringStream::new(Crt::NATIVE);
+                    oss.put_str("Unknown hsyTransform value: '");
+                    oss.put_c_str(atts[i + 1]);
+                    oss.put_str("' while parsing HueCurve.");
+                    return Err(self.throw_message(oss.str()));
+                }
+
+                self.grading_hue_curve_mut()
+                    .set_rgb_to_hsy(HsyTransformStyle::None);
+            }
+
+            i += 2;
+        }
+
+        if !is_style_found {
+            return Err(self.throw_m(&[b"Required attribute 'style' is missing."]));
+        }
+        Ok(())
+    }
+
+    /// The loaded curves set (which validates them), then validated.
+    ///
+    /// Port of `CTFReaderGradingHueCurveElt::end` (CTFReaderHelper.cpp:2721-2729 @ v2.5.2),
+    /// after `CTFReaderOpElt::end`.
+    fn grading_hue_curve_end(&mut self) -> Result<()> {
+        // Set the loaded data.
+        let loading = self
+            .loading_hue_curve
+            .clone()
+            .expect("the GradingHueCurve's start set its curves");
+        let curve = self.grading_hue_curve_mut();
+        curve.set_value(&loading)?;
+        // Validate the end result.
+        curve.validate()
+    }
+
+    /// The curve `id` of the loading curves of a GradingRGBCurve or GradingHueCurve reader.
+    ///
+    /// Port of `CTFReaderGradingRGBCurveElt::getLoadingRGBCurve()->getCurve` and
+    /// `CTFReaderGradingHueCurveElt::getLoadingHueCurve()->getCurve` (CTFReaderHelper.cpp:
+    /// 2849-2856 @ v2.5.2), whose result `CTFReaderGradingCurveElt` keeps.
+    fn loading_curve_mut(&mut self, id: GradingCurveId) -> &mut GradingBSplineCurve {
+        match id {
+            GradingCurveId::Rgb(ty) => self
+                .get_loading_rgb_curve_mut()
+                .curve_mut(ty)
+                .expect("an RGB curve"),
+            GradingCurveId::Hue(ty) => self
+                .loading_hue_curve
+                .as_mut()
+                .expect("the GradingHueCurve's start set its curves")
+                .curve_mut(ty)
+                .expect("a hue curve"),
+        }
+    }
+}
+
+impl CtfReaderOpElt {
     /// The reference of a Reference reader.
     ///
     /// Port of `CTFReaderReferenceElt::getReference` (CTFReaderHelper.h:1180-1183 @ v2.5.2).
@@ -2767,7 +3078,10 @@ impl XmlReaderElement for CtfReaderOpElt {
     /// (1427-1473), `CTFReaderFunctionElt::start` (1506-1534),
     /// `CTFReaderGradingRGBCurveElt::start` (2592-2640), `CTFReaderReferenceElt::start`
     /// (5024-5093), `CTFReaderGammaElt::start` (1871-1916), `CTFReaderLogElt::start`
-    /// (3555-3580) and `CTFReaderRangeElt_1_7::start` (4897-4915) @ v2.5.2.
+    /// (3555-3580), `CTFReaderExposureContrastElt::start` (1709-1742),
+    /// `CTFReaderGradingPrimaryElt::start` (2215-2251), `CTFReaderGradingHueCurveElt::start`
+    /// (2671-2719), `CTFReaderGradingToneElt::start` (2985-3021) and
+    /// `CTFReaderRangeElt_1_7::start` (4897-4915) @ v2.5.2.
     fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
         self.op_start(atts)?;
         match self.kind {
@@ -2789,6 +3103,10 @@ impl XmlReaderElement for CtfReaderOpElt {
             }
             CtfReaderKind::GradingRgbCurve => return self.grading_rgb_curve_start(atts),
             CtfReaderKind::Reference => return self.reference_start(atts),
+            CtfReaderKind::ExposureContrast => return self.exposure_contrast_start(atts),
+            CtfReaderKind::GradingPrimary => return self.grading_primary_start(atts),
+            CtfReaderKind::GradingTone => return self.grading_tone_start(atts),
+            CtfReaderKind::GradingHueCurve => return self.grading_hue_curve_start(atts),
             _ => {}
         }
         if self.kind == CtfReaderKind::Range1_7 {
@@ -2814,8 +3132,10 @@ impl XmlReaderElement for CtfReaderOpElt {
     /// `CTFReaderGradingRGBCurveElt::end` (2642-2650), `CTFReaderReferenceElt::end`
     /// (5104-5109), `CTFReaderGammaElt::end` (1924-1937), `CTFReaderLogElt::end` (3588-3622),
     /// `CTFReaderLogElt_2_0::end` (3664-3717), `CTFReaderMatrixElt::end` (4572-4583),
-    /// `CTFReaderRangeElt::end` (4868-4879) and `CTFReaderRangeElt_1_7::end` (4923-4943) @
-    /// v2.5.2.
+    /// `CTFReaderRangeElt::end` (4868-4879), `CTFReaderRangeElt_1_7::end` (4923-4943),
+    /// `CTFReaderExposureContrastElt::end` (1750-1756), `CTFReaderGradingPrimaryElt::end`
+    /// (2253-2259), `CTFReaderGradingHueCurveElt::end` (2721-2729) and
+    /// `CTFReaderGradingToneElt::end` (3023-3029) @ v2.5.2.
     fn end(&mut self) -> Result<()> {
         match self.kind {
             CtfReaderKind::Matrix | CtfReaderKind::Matrix1_3 => self.matrix_end()?,
@@ -2842,7 +3162,12 @@ impl XmlReaderElement for CtfReaderOpElt {
             }
             CtfReaderKind::GradingRgbCurve => self.grading_rgb_curve_end()?,
             CtfReaderKind::Reference => self.reference_mut().validate(),
-            _ => {}
+            // Validate the end result.
+            CtfReaderKind::ExposureContrast => self.exposure_contrast_mut().validate(),
+            CtfReaderKind::GradingPrimary => self.grading_primary_end()?,
+            // Validate the end result.
+            CtfReaderKind::GradingTone => self.grading_tone_mut().validate()?,
+            CtfReaderKind::GradingHueCurve => self.grading_hue_curve_end()?,
         }
         self.commit_op();
         if self.kind == CtfReaderKind::Lut1D1_7 || self.kind == CtfReaderKind::Lut3D1_7 {
@@ -3943,10 +4268,7 @@ impl XmlReaderElement for CtfReaderDynamicParamElt {
     /// The property `param` names made dynamic, if the parent has it; `LOOK_SWITCH` is
     /// ignored with a warning, and another name is an error.
     ///
-    /// Port of `CTFReaderDynamicParamElt::start` (CTFReaderHelper.cpp:1568-1695 @ v2.5.2). The
-    /// ExposureContrast, GradingPrimary, GradingHueCurve and GradingTone readers come with WP
-    /// 4.5i: until then no such parent is made, and their branches refuse the parameter as
-    /// not ported.
+    /// Port of `CTFReaderDynamicParamElt::start` (CTFReaderHelper.cpp:1569-1693 @ v2.5.2).
     fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
         let container = self.plain.get_parent().clone();
         let (kind, container_name) = {
@@ -3983,16 +4305,35 @@ impl XmlReaderElement for CtfReaderDynamicParamElt {
                     if kind != Some(parent_kind) {
                         return Err(self.not_supported(param, &container_name));
                     }
-                    if parent_kind != CtfReaderKind::GradingRgbCurve {
-                        return Err(self.throw_message(
-                            format!("The CTF reader's {parent_kind:?} reader is not ported yet")
-                                .as_bytes(),
-                        ));
+                    let mut op = op_parent(&container);
+                    match parent_kind {
+                        CtfReaderKind::ExposureContrast => {
+                            let ec = op.exposure_contrast_mut();
+                            if equal_ignoring_case(TAG_DYN_PROP_EXPOSURE, param) {
+                                ec.get_exposure_property().make_dynamic();
+                            } else if equal_ignoring_case(TAG_DYN_PROP_CONTRAST, param) {
+                                ec.get_contrast_property().make_dynamic();
+                            } else {
+                                ec.get_gamma_property().make_dynamic();
+                            }
+                        }
+                        CtfReaderKind::GradingPrimary => op
+                            .grading_primary_mut()
+                            .get_dynamic_property_internal()
+                            .make_dynamic(),
+                        CtfReaderKind::GradingRgbCurve => op
+                            .grading_rgb_curve_mut()
+                            .get_dynamic_property_internal()
+                            .make_dynamic(),
+                        CtfReaderKind::GradingHueCurve => op
+                            .grading_hue_curve_mut()
+                            .get_dynamic_property_internal()
+                            .make_dynamic(),
+                        _ => op
+                            .grading_tone_mut()
+                            .get_dynamic_property_internal()
+                            .make_dynamic(),
                     }
-                    op_parent(&container)
-                        .grading_rgb_curve_mut()
-                        .get_dynamic_property_internal()
-                        .make_dynamic();
                 } else if equal_ignoring_case(TAG_DYN_PROP_LOOK, param) {
                     // The LOOK_SWITCH was used in CTF files from SynColor but is not supported
                     // yet in OCIO. Ignoring it is similar to setting LOOK_SWITCH to 'on' but
@@ -4054,6 +4395,766 @@ impl XmlReaderElement for CtfReaderDynamicParamElt {
 
 impl XmlReaderPlainElt for CtfReaderDynamicParamElt {
     /// Port of `CTFReaderDynamicParamElt::setRawData` (CTFReaderHelper.h:1243 @ v2.5.2).
+    fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
+    }
+}
+
+/// The parameters of an ExposureContrast: the exposure, contrast and pivot (required), and
+/// the gamma, log exposure step and log mid-gray (optional).
+///
+/// Port of `CTFReaderECParamsElt` (CTFReaderHelper.h:1213-1229, CTFReaderHelper.cpp:1763-1849
+/// @ v2.5.2).
+#[derive(Debug)]
+pub struct CtfReaderEcParamsElt {
+    plain: XmlReaderPlainEltBase,
+}
+
+impl CtfReaderEcParamsElt {
+    /// Port of `CTFReaderECParamsElt::CTFReaderECParamsElt` (CTFReaderHelper.cpp:1763-1769 @
+    /// v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderEcParamsElt {
+        CtfReaderEcParamsElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
+        }
+    }
+}
+
+impl XmlReaderElement for CtfReaderEcParamsElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// The parameters, set on the parent's op data. A parameter that is absent, or whose
+    /// value is NaN, is missing.
+    ///
+    /// Port of `CTFReaderECParamsElt::start` (CTFReaderHelper.cpp:1775-1849 @ v2.5.2).
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        // Attributes we want to extract.
+        let mut exposure = f64::NAN;
+        let mut contrast = f64::NAN;
+        let mut gamma = f64::NAN;
+        let mut pivot = f64::NAN;
+        let mut log_exposure_step = f64::NAN;
+        let mut log_mid_gray = f64::NAN;
+
+        // Try extracting the attributes.
+        let mut i = 0;
+        while i < atts.len() && !c_str(atts[i]).is_empty() {
+            let element = &self.plain.element;
+            if equal_ignoring_case(ATTR_EXPOSURE, atts[i]) {
+                exposure = element.parse_scalar_attribute::<f64>(atts[i], atts[i + 1])?;
+            } else if equal_ignoring_case(ATTR_CONTRAST, atts[i]) {
+                contrast = element.parse_scalar_attribute::<f64>(atts[i], atts[i + 1])?;
+            } else if equal_ignoring_case(ATTR_GAMMA, atts[i]) {
+                gamma = element.parse_scalar_attribute::<f64>(atts[i], atts[i + 1])?;
+            } else if equal_ignoring_case(ATTR_PIVOT, atts[i]) {
+                pivot = element.parse_scalar_attribute::<f64>(atts[i], atts[i + 1])?;
+            } else if equal_ignoring_case(ATTR_LOGEXPOSURESTEP, atts[i]) {
+                log_exposure_step = element.parse_scalar_attribute::<f64>(atts[i], atts[i + 1])?;
+            } else if equal_ignoring_case(ATTR_LOGMIDGRAY, atts[i]) {
+                log_mid_gray = element.parse_scalar_attribute::<f64>(atts[i], atts[i + 1])?;
+            } else {
+                element.log_parameter_warning(atts[i]);
+            }
+
+            i += 2;
+        }
+
+        if exposure.is_nan() {
+            return Err(self.throw_message(b"ExposureContrast element: exposure missing."));
+        }
+        if contrast.is_nan() {
+            return Err(self.throw_message(b"ExposureContrast element: contrast missing."));
+        }
+        if pivot.is_nan() {
+            return Err(self.throw_message(b"ExposureContrast element: pivot missing."));
+        }
+
+        let parent = self.plain.get_parent().clone();
+        let mut p_ec = op_parent(&parent);
+        let ec = p_ec.exposure_contrast_mut();
+
+        // Assign the parameters to the object.
+        ec.set_exposure(exposure);
+        ec.set_contrast(contrast);
+
+        // Gamma wasn't always part of the spec, therefore it's optional; use the default
+        // value if not present.
+        if !gamma.is_nan() {
+            ec.set_gamma(gamma);
+        }
+
+        ec.set_pivot(pivot);
+
+        if !log_exposure_step.is_nan() {
+            ec.set_log_exposure_step(log_exposure_step);
+        }
+        if !log_mid_gray.is_nan() {
+            ec.set_log_mid_gray(log_mid_gray);
+        }
+        Ok(())
+    }
+
+    /// Port of `CTFReaderECParamsElt::end` (CTFReaderHelper.h:1226 @ v2.5.2).
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderEcParamsElt {
+    /// Port of `CTFReaderECParamsElt::setRawData` (CTFReaderHelper.h:1228 @ v2.5.2).
+    fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
+    }
+}
+
+/// The numbers of an attribute's value (`GetNumbers<double>`), or the error "Illegal '<type>'
+/// values <value> [<error>]." that upstream's parameter elements of the grading operators
+/// throw.
+///
+/// Port of the parsing that starts each attribute's loop in
+/// `CTFReaderGradingPrimaryParamElt::parseRGBMAttrValues` (CTFReaderHelper.cpp:2287-2300) and
+/// its siblings, and in `CTFReaderGradingToneParamElt::parseRGBMSWAttrValues` (3059-3072) and
+/// `parseScalarAttrValue` (3158-3171) @ v2.5.2.
+fn grading_attr_numbers(elt: &dyn XmlReaderElement, value: &[u8]) -> Result<Vec<f64>> {
+    let value = c_str(value);
+    let len = value.len();
+    get_numbers::<f64>(value, len).map_err(|ce| {
+        elt.throw_message(
+            &[
+                b"Illegal '".as_slice(),
+                elt.get_type_name(),
+                b"' values ",
+                &truncate_string(value, len),
+                b" [",
+                c_str(ce.what()),
+                b"].",
+            ]
+            .concat(),
+        )
+    })
+}
+
+/// "Illegal attribute for '<name>': '<attribute>'.".
+fn illegal_grading_attribute(elt: &dyn XmlReaderElement, att: &[u8]) -> Exception {
+    elt.throw_message(
+        &[
+            b"Illegal attribute for '".as_slice(),
+            c_str(elt.get_name()),
+            b"': '",
+            c_str(att),
+            b"'.",
+        ]
+        .concat(),
+    )
+}
+
+/// "'<what>' for '<type>' must be a single value: '<value>'<end>", the error of a value that
+/// isn't one number (`end` is upstream's, a period or nothing).
+fn grading_single_value_error(
+    elt: &dyn XmlReaderElement,
+    what: &[u8],
+    value: &[u8],
+    end: &[u8],
+) -> Exception {
+    let value = c_str(value);
+    elt.throw_message(
+        &[
+            b"'".as_slice(),
+            what,
+            b"' for '",
+            elt.get_type_name(),
+            b"' must be a single value: '",
+            &truncate_string(value, value.len()),
+            b"'",
+            end,
+        ]
+        .concat(),
+    )
+}
+
+/// "Illegal number of 'rgb' values for '<type>': '<value>'.".
+fn grading_rgb_count_error(elt: &dyn XmlReaderElement, value: &[u8]) -> Exception {
+    let value = c_str(value);
+    elt.throw_message(
+        &[
+            b"Illegal number of 'rgb' values for '".as_slice(),
+            elt.get_type_name(),
+            b"': '",
+            &truncate_string(value, value.len()),
+            b"'.",
+        ]
+        .concat(),
+    )
+}
+
+/// "Missing <what> attribute for '<name>'." (`what` quoted as upstream quotes it).
+fn grading_missing_attribute(elt: &dyn XmlReaderElement, what: &[u8]) -> Exception {
+    elt.throw_message(
+        &[
+            b"Missing ".as_slice(),
+            what,
+            b" attribute for '",
+            c_str(elt.get_name()),
+            b"'.",
+        ]
+        .concat(),
+    )
+}
+
+/// The single value of a scalar parameter of a grading operator: the attribute `tag`, and no
+/// other.
+///
+/// Port of `CTFReaderGradingPrimaryParamElt::parseScalarAttrValue` (CTFReaderHelper.cpp:
+/// 2475-2519) and `CTFReaderGradingToneParamElt::parseScalarAttrValue` (3151-3195) @ v2.5.2,
+/// which are the same.
+fn grading_parse_scalar_attr_value(
+    elt: &dyn XmlReaderElement,
+    atts: &[&[u8]],
+    tag: &[u8],
+    value: &mut f64,
+) -> Result<()> {
+    let mut found = false;
+    let mut i = 0;
+    while i < atts.len() && !c_str(atts[i]).is_empty() {
+        let data = grading_attr_numbers(elt, atts[i + 1])?;
+
+        if equal_ignoring_case(tag, atts[i]) {
+            if data.len() != 1 {
+                return Err(grading_single_value_error(elt, tag, atts[i + 1], b"."));
+            }
+
+            *value = data[0];
+            found = true;
+        } else {
+            return Err(illegal_grading_attribute(elt, atts[i]));
+        }
+
+        i += 2;
+    }
+
+    if !found {
+        return Err(elt.throw_message(
+            &[
+                b"Missing attribute for '".as_slice(),
+                c_str(elt.get_name()),
+                b"'.",
+            ]
+            .concat(),
+        ));
+    }
+    Ok(())
+}
+
+/// A parameter of a GradingPrimary: `Brightness`, `Contrast`, `Gamma`, `Offset`, `Exposure`,
+/// `Lift` and `Gain` (an RGBM), `Pivot`, `Clamp` or `Saturation`.
+///
+/// Port of `CTFReaderGradingPrimaryParamElt` (CTFReaderHelper.h:644-679, CTFReaderHelper.cpp:
+/// 2268-2576 @ v2.5.2).
+#[derive(Debug)]
+pub struct CtfReaderGradingPrimaryParamElt {
+    plain: XmlReaderPlainEltBase,
+}
+
+impl CtfReaderGradingPrimaryParamElt {
+    /// Port of `CTFReaderGradingPrimaryParamElt::CTFReaderGradingPrimaryParamElt`
+    /// (CTFReaderHelper.cpp:2268-2274 @ v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderGradingPrimaryParamElt {
+        CtfReaderGradingPrimaryParamElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
+        }
+    }
+
+    /// The `rgb` (3 values) and `master` (1 value) attributes, both required.
+    ///
+    /// Port of `CTFReaderGradingPrimaryParamElt::parseRGBMAttrValues` (CTFReaderHelper.cpp:
+    /// 2280-2343 @ v2.5.2).
+    fn parse_rgbm_attr_values(&self, atts: &[&[u8]], rgbm: &mut GradingRgbm) -> Result<()> {
+        let mut rgb_found = false;
+        let mut master_found = false;
+        let mut i = 0;
+        while i < atts.len() && !c_str(atts[i]).is_empty() {
+            let data = grading_attr_numbers(self, atts[i + 1])?;
+
+            if equal_ignoring_case(ATTR_RGB, atts[i]) {
+                if data.len() != 3 {
+                    return Err(grading_rgb_count_error(self, atts[i + 1]));
+                }
+
+                rgbm.red = data[0];
+                rgbm.green = data[1];
+                rgbm.blue = data[2];
+
+                rgb_found = true;
+            } else if equal_ignoring_case(ATTR_MASTER, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        b"Master",
+                        atts[i + 1],
+                        b"",
+                    ));
+                }
+
+                rgbm.master = data[0];
+                master_found = true;
+            } else {
+                return Err(illegal_grading_attribute(self, atts[i]));
+            }
+
+            i += 2;
+        }
+
+        if !rgb_found {
+            return Err(grading_missing_attribute(self, b"'rgb'"));
+        }
+
+        if !master_found {
+            return Err(grading_missing_attribute(self, b"'master'"));
+        }
+        Ok(())
+    }
+
+    /// The `black` and `white` attributes (1 value each), one at least.
+    ///
+    /// Port of `CTFReaderGradingPrimaryParamElt::parseBWAttrValues` (CTFReaderHelper.cpp:
+    /// 2345-2401 @ v2.5.2).
+    fn parse_bw_attr_values(&self, atts: &[&[u8]], black: &mut f64, white: &mut f64) -> Result<()> {
+        let mut black_found = false;
+        let mut white_found = false;
+        let mut i = 0;
+        while i < atts.len() && !c_str(atts[i]).is_empty() {
+            let data = grading_attr_numbers(self, atts[i + 1])?;
+
+            if equal_ignoring_case(ATTR_PRIMARY_BLACK, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        b"Black",
+                        atts[i + 1],
+                        b".",
+                    ));
+                }
+
+                *black = data[0];
+                black_found = true;
+            } else if equal_ignoring_case(ATTR_PRIMARY_WHITE, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        b"White",
+                        atts[i + 1],
+                        b".",
+                    ));
+                }
+
+                *white = data[0];
+                white_found = true;
+            } else {
+                return Err(illegal_grading_attribute(self, atts[i]));
+            }
+
+            i += 2;
+        }
+
+        if !black_found && !white_found {
+            return Err(grading_missing_attribute(self, b"'black' or 'white'"));
+        }
+        Ok(())
+    }
+
+    /// The `contrast`, `black` and `white` attributes (1 value each), one at least.
+    ///
+    /// Port of `CTFReaderGradingPrimaryParamElt::parsePivotAttrValues` (CTFReaderHelper.cpp:
+    /// 2403-2473 @ v2.5.2).
+    fn parse_pivot_attr_values(
+        &self,
+        atts: &[&[u8]],
+        contrast: &mut f64,
+        black: &mut f64,
+        white: &mut f64,
+    ) -> Result<()> {
+        let mut contrast_found = false;
+        let mut black_found = false;
+        let mut white_found = false;
+        let mut i = 0;
+        while i < atts.len() && !c_str(atts[i]).is_empty() {
+            let data = grading_attr_numbers(self, atts[i + 1])?;
+
+            if equal_ignoring_case(ATTR_PRIMARY_BLACK, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        b"Black",
+                        atts[i + 1],
+                        b".",
+                    ));
+                }
+
+                *black = data[0];
+                black_found = true;
+            } else if equal_ignoring_case(ATTR_PRIMARY_WHITE, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        b"White",
+                        atts[i + 1],
+                        b".",
+                    ));
+                }
+
+                *white = data[0];
+                white_found = true;
+            } else if equal_ignoring_case(ATTR_PRIMARY_CONTRAST, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        b"Contrast",
+                        atts[i + 1],
+                        b".",
+                    ));
+                }
+
+                *contrast = data[0];
+                contrast_found = true;
+            } else {
+                return Err(illegal_grading_attribute(self, atts[i]));
+            }
+
+            i += 2;
+        }
+
+        if !contrast_found && !white_found && !black_found {
+            return Err(grading_missing_attribute(
+                self,
+                b"'contrast', 'black' or 'white'",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl XmlReaderElement for CtfReaderGradingPrimaryParamElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// The control the element's name gives, read into the parent's values (all of them,
+    /// whatever the style uses).
+    ///
+    /// Port of `CTFReaderGradingPrimaryParamElt::start` (CTFReaderHelper.cpp:2521-2568 @
+    /// v2.5.2). Its parent is always a GradingPrimary reader (the parser makes the element
+    /// only under one), so upstream's `dynamic_cast` never gives null.
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let parent = self.plain.get_parent().clone();
+        let mut gp = op_parent(&parent);
+        let gp_values = gp.grading_primary_value_mut();
+        let name = self.get_name();
+
+        // Read all primary controls even those that are not used by the current style.
+        if equal_ignoring_case(TAG_PRIMARY_BRIGHTNESS, name) {
+            self.parse_rgbm_attr_values(atts, &mut gp_values.brightness)?;
+        } else if equal_ignoring_case(TAG_PRIMARY_CONTRAST, name) {
+            self.parse_rgbm_attr_values(atts, &mut gp_values.contrast)?;
+        } else if equal_ignoring_case(TAG_PRIMARY_GAMMA, name) {
+            self.parse_rgbm_attr_values(atts, &mut gp_values.gamma)?;
+        } else if equal_ignoring_case(TAG_PRIMARY_PIVOT, name) {
+            self.parse_pivot_attr_values(
+                atts,
+                &mut gp_values.pivot,
+                &mut gp_values.pivot_black,
+                &mut gp_values.pivot_white,
+            )?;
+        } else if equal_ignoring_case(TAG_PRIMARY_SATURATION, name) {
+            grading_parse_scalar_attr_value(self, atts, ATTR_MASTER, &mut gp_values.saturation)?;
+        } else if equal_ignoring_case(TAG_PRIMARY_OFFSET, name) {
+            self.parse_rgbm_attr_values(atts, &mut gp_values.offset)?;
+        } else if equal_ignoring_case(TAG_PRIMARY_EXPOSURE, name) {
+            self.parse_rgbm_attr_values(atts, &mut gp_values.exposure)?;
+        } else if equal_ignoring_case(TAG_PRIMARY_LIFT, name) {
+            self.parse_rgbm_attr_values(atts, &mut gp_values.lift)?;
+        } else if equal_ignoring_case(TAG_PRIMARY_GAIN, name) {
+            self.parse_rgbm_attr_values(atts, &mut gp_values.gain)?;
+        } else if equal_ignoring_case(TAG_PRIMARY_CLAMP, name) {
+            self.parse_bw_attr_values(
+                atts,
+                &mut gp_values.clamp_black,
+                &mut gp_values.clamp_white,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Port of `CTFReaderGradingPrimaryParamElt::end` (CTFReaderHelper.cpp:2570-2572 @ v2.5.2).
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderGradingPrimaryParamElt {
+    /// Port of `CTFReaderGradingPrimaryParamElt::setRawData` (CTFReaderHelper.cpp:2574-2576 @
+    /// v2.5.2).
+    fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
+    }
+}
+
+/// A parameter of a GradingTone: `Blacks`, `Shadows`, `Midtones`, `Highlights` and `Whites`
+/// (an RGBMSW), or `SContrast`.
+///
+/// Port of `CTFReaderGradingToneParamElt` (CTFReaderHelper.h:807-835, CTFReaderHelper.cpp:
+/// 3038-3241 @ v2.5.2).
+#[derive(Debug)]
+pub struct CtfReaderGradingToneParamElt {
+    plain: XmlReaderPlainEltBase,
+}
+
+impl CtfReaderGradingToneParamElt {
+    /// Port of `CTFReaderGradingToneParamElt::CTFReaderGradingToneParamElt`
+    /// (CTFReaderHelper.cpp:3038-3044 @ v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderGradingToneParamElt {
+        CtfReaderGradingToneParamElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
+        }
+    }
+
+    /// The `rgb` (3 values), `master`, the start (`center` for the midtones) and the width
+    /// (`pivot` for the shadows and highlights) attributes, 1 value each, all required.
+    ///
+    /// Port of `CTFReaderGradingToneParamElt::parseRGBMSWAttrValues` (CTFReaderHelper.cpp:
+    /// 3050-3149 @ v2.5.2).
+    fn parse_rgbmsw_attr_values(
+        &self,
+        atts: &[&[u8]],
+        rgbm: &mut GradingRgbmsw,
+        center: bool,
+        pivot: bool,
+    ) -> Result<()> {
+        let start_name = if center { ATTR_CENTER } else { ATTR_START };
+        let width_name = if pivot { ATTR_PIVOT } else { ATTR_WIDTH };
+        let mut rgb_found = false;
+        let mut master_found = false;
+        let mut start_found = false;
+        let mut width_found = false;
+        let mut i = 0;
+        while i < atts.len() && !c_str(atts[i]).is_empty() {
+            let data = grading_attr_numbers(self, atts[i + 1])?;
+
+            if equal_ignoring_case(ATTR_RGB, atts[i]) {
+                if data.len() != 3 {
+                    return Err(grading_rgb_count_error(self, atts[i + 1]));
+                }
+
+                rgbm.red = data[0];
+                rgbm.green = data[1];
+                rgbm.blue = data[2];
+
+                rgb_found = true;
+            } else if equal_ignoring_case(ATTR_MASTER, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        b"Master",
+                        atts[i + 1],
+                        b"",
+                    ));
+                }
+
+                rgbm.master = data[0];
+                master_found = true;
+            } else if equal_ignoring_case(start_name, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        start_name,
+                        atts[i + 1],
+                        b"",
+                    ));
+                }
+
+                rgbm.start = data[0];
+                start_found = true;
+            } else if equal_ignoring_case(width_name, atts[i]) {
+                if data.len() != 1 {
+                    return Err(grading_single_value_error(
+                        self,
+                        width_name,
+                        atts[i + 1],
+                        b"",
+                    ));
+                }
+
+                rgbm.width = data[0];
+                width_found = true;
+            } else {
+                return Err(illegal_grading_attribute(self, atts[i]));
+            }
+
+            i += 2;
+        }
+
+        if !rgb_found {
+            return Err(grading_missing_attribute(self, b"'rgb'"));
+        }
+        if !master_found {
+            return Err(grading_missing_attribute(self, b"'master'"));
+        }
+        if !start_found {
+            return Err(grading_missing_attribute(
+                self,
+                &[b"'".as_slice(), start_name, b"'"].concat(),
+            ));
+        }
+        if !width_found {
+            return Err(grading_missing_attribute(
+                self,
+                &[b"'".as_slice(), width_name, b"'"].concat(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl XmlReaderElement for CtfReaderGradingToneParamElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// The control the element's name gives, read into a copy of the parent's values, which
+    /// are then set (and so validated).
+    ///
+    /// Port of `CTFReaderGradingToneParamElt::start` (CTFReaderHelper.cpp:3197-3233 @ v2.5.2).
+    /// Its parent is always a GradingTone reader, and its name always one of the six (the
+    /// parser makes the element only so), so upstream's `dynamic_cast` never gives null and
+    /// its "Invalid element" error can't happen.
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let parent = self.plain.get_parent().clone();
+        let mut gt = op_parent(&parent);
+
+        let mut gt_values = gt.grading_tone_mut().get_value();
+        let name = self.get_name();
+
+        if equal_ignoring_case(TAG_TONE_BLACKS, name) {
+            self.parse_rgbmsw_attr_values(atts, &mut gt_values.blacks, false, false)?;
+        } else if equal_ignoring_case(TAG_TONE_SHADOWS, name) {
+            self.parse_rgbmsw_attr_values(atts, &mut gt_values.shadows, false, true)?;
+        } else if equal_ignoring_case(TAG_TONE_MIDTONES, name) {
+            self.parse_rgbmsw_attr_values(atts, &mut gt_values.midtones, true, false)?;
+        } else if equal_ignoring_case(TAG_TONE_HIGHLIGHTS, name) {
+            self.parse_rgbmsw_attr_values(atts, &mut gt_values.highlights, false, true)?;
+        } else if equal_ignoring_case(TAG_TONE_WHITES, name) {
+            self.parse_rgbmsw_attr_values(atts, &mut gt_values.whites, false, false)?;
+        } else if equal_ignoring_case(TAG_TONE_SCONTRAST, name) {
+            grading_parse_scalar_attr_value(self, atts, ATTR_MASTER, &mut gt_values.scontrast)?;
+        } else {
+            return Err(
+                self.throw_message(&[b"Invalid element '".as_slice(), c_str(name), b"'."].concat())
+            );
+        }
+
+        gt.grading_tone_mut().set_value(&gt_values)
+    }
+
+    /// Port of `CTFReaderGradingToneParamElt::end` (CTFReaderHelper.cpp:3235-3237 @ v2.5.2).
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderGradingToneParamElt {
+    /// Port of `CTFReaderGradingToneParamElt::setRawData` (CTFReaderHelper.cpp:3239-3241 @
+    /// v2.5.2).
     fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
         Ok(())
     }
@@ -4250,6 +5351,40 @@ fn get_rgb_curve_type(name: &[u8]) -> Result<RgbCurveType> {
     Err(illegal_grading_curve_name(name))
 }
 
+/// The hue curve an element names.
+///
+/// Port of `GetHueCurveType` (CTFReaderHelper.cpp:2801-2838 @ v2.5.2).
+fn get_hue_curve_type(name: &[u8]) -> Result<HueCurveType> {
+    if equal_ignoring_case(TAG_HUE_CURVE_HUE_HUE, name) {
+        return Ok(HueCurveType::HueHue);
+    } else if equal_ignoring_case(TAG_HUE_CURVE_HUE_SAT, name) {
+        return Ok(HueCurveType::HueSat);
+    } else if equal_ignoring_case(TAG_HUE_CURVE_HUE_LUM, name) {
+        return Ok(HueCurveType::HueLum);
+    } else if equal_ignoring_case(TAG_HUE_CURVE_LUM_SAT, name) {
+        return Ok(HueCurveType::LumSat);
+    } else if equal_ignoring_case(TAG_HUE_CURVE_SAT_SAT, name) {
+        return Ok(HueCurveType::SatSat);
+    } else if equal_ignoring_case(TAG_HUE_CURVE_LUM_LUM, name) {
+        return Ok(HueCurveType::LumLum);
+    } else if equal_ignoring_case(TAG_HUE_CURVE_SAT_LUM, name) {
+        return Ok(HueCurveType::SatLum);
+    } else if equal_ignoring_case(TAG_HUE_CURVE_HUE_FX, name) {
+        return Ok(HueCurveType::HueFx);
+    }
+    Err(illegal_grading_curve_name(name))
+}
+
+/// Which curve of its operator's loading curves a grading curve element fills: one of a
+/// GradingRGBCurve's or of a GradingHueCurve's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GradingCurveId {
+    /// A curve of a GradingRGBCurve.
+    Rgb(RgbCurveType),
+    /// A curve of a GradingHueCurve.
+    Hue(HueCurveType),
+}
+
 /// A curve of a GradingRGBCurve (`Red`, `Green`, `Blue` or `Master`) or of a GradingHueCurve:
 /// its control points and slopes.
 ///
@@ -4260,7 +5395,7 @@ fn get_rgb_curve_type(name: &[u8]) -> Result<RgbCurveType> {
 pub struct CtfReaderGradingCurveElt {
     complex: XmlReaderComplexEltBase,
     /// `m_curve`: which curve of the parent's.
-    curve: Option<RgbCurveType>,
+    curve: Option<GradingCurveId>,
 }
 
 impl CtfReaderGradingCurveElt {
@@ -4281,7 +5416,7 @@ impl CtfReaderGradingCurveElt {
     /// The parent's reader and which of its curves this is.
     ///
     /// Port of `CTFReaderGradingCurveElt::getCurve` (CTFReaderHelper.h:743 @ v2.5.2).
-    fn get_curve(&self) -> (&ContainerEltRcPtr, RgbCurveType) {
+    fn get_curve(&self) -> (&ContainerEltRcPtr, GradingCurveId) {
         (
             self.complex
                 .get_parent()
@@ -4302,34 +5437,37 @@ impl XmlReaderElement for CtfReaderGradingCurveElt {
     /// Finds the parent's curve the name gives.
     ///
     /// Port of `CTFReaderGradingCurveElt::start` (CTFReaderHelper.cpp:2842-2863 @ v2.5.2).
-    /// The hue curves' branch, whose parent is the GradingHueCurve reader, comes with WP
-    /// 4.5i: until then no such parent is made.
+    /// The parser makes the element only under the operator its name belongs to, so
+    /// upstream's `dynamic_cast` never gives null.
     fn start(&mut self, _atts: &[&[u8]]) -> Result<()> {
-        let found = (|| -> Result<Option<RgbCurveType>> {
+        let found = (|| -> Result<GradingCurveId> {
+            let parent = self
+                .complex
+                .get_parent()
+                .expect("a grading curve is under its operator");
+            let parent = parent.borrow();
+            let op = parent.as_any().downcast_ref::<CtfReaderOpElt>();
             if is_rgb_curve_type(self.get_name())? {
                 let ty = get_rgb_curve_type(self.get_name())?;
-                let parent = self
-                    .complex
-                    .get_parent()
-                    .expect("a grading curve is under its operator");
-                let is_rgb_curve = parent
-                    .borrow()
-                    .as_any()
-                    .downcast_ref::<CtfReaderOpElt>()
-                    .is_some_and(CtfReaderOpElt::is_grading_rgb_curve);
-                assert!(is_rgb_curve, "the parent is a GradingRGBCurve reader");
-                Ok(Some(ty))
+                assert!(
+                    op.is_some_and(CtfReaderOpElt::is_grading_rgb_curve),
+                    "the parent is a GradingRGBCurve reader"
+                );
+                Ok(GradingCurveId::Rgb(ty))
             } else {
-                Ok(None)
+                let ty = get_hue_curve_type(self.get_name())?;
+                assert!(
+                    op.is_some_and(CtfReaderOpElt::is_grading_hue_curve),
+                    "the parent is a GradingHueCurve reader"
+                );
+                Ok(GradingCurveId::Hue(ty))
             }
         })();
         match found {
-            Ok(Some(ty)) => {
-                self.curve = Some(ty);
+            Ok(id) => {
+                self.curve = Some(id);
                 Ok(())
             }
-            Ok(None) => Err(self
-                .throw_message(b"The CTF reader's CTFReaderGradingHueCurveElt is not ported yet")),
             Err(ce) => Err(self.throw_message(c_str(ce.what()))),
         }
     }
@@ -4367,7 +5505,7 @@ impl XmlReaderContainerElt for CtfReaderGradingCurveElt {
 }
 
 /// The curve of the parent, a grading curve: its operator's loading curves and which of them.
-fn parent_curve(parent: &ContainerEltRcPtr) -> (ContainerEltRcPtr, RgbCurveType) {
+fn parent_curve(parent: &ContainerEltRcPtr) -> (ContainerEltRcPtr, GradingCurveId) {
     let parent = parent.borrow();
     let curve = parent
         .as_any()
@@ -4457,10 +5595,7 @@ impl XmlReaderElement for CtfReaderGradingCurvePointsElt {
         let (op, ty) = parent_curve(self.plain.get_parent());
         let mut p_op = op_parent(&op);
         let num_pts = self.data.len() / 2;
-        let curve = p_op
-            .get_loading_rgb_curve_mut()
-            .curve_mut(ty)
-            .expect("an RGB curve");
+        let curve = p_op.loading_curve_mut(ty);
         curve.set_num_control_points(num_pts);
         for p in 0..num_pts {
             let ct_pt = curve
@@ -4555,10 +5690,7 @@ impl XmlReaderElement for CtfReaderGradingCurveSlopesElt {
         let (op, ty) = parent_curve(self.plain.get_parent());
         let mut p_op = op_parent(&op);
         let num_vals = self.data.len();
-        let curve = p_op
-            .get_loading_rgb_curve_mut()
-            .curve_mut(ty)
-            .expect("an RGB curve");
+        let curve = p_op.loading_curve_mut(ty);
         let num_ct_pnts = curve.num_control_points();
         if num_vals != num_ct_pnts {
             return Err(
