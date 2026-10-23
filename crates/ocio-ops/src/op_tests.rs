@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the op list: upstream's `Op`, `OpData`, `OpRcPtrVec` and `FinalizeOpVec` tests
-//! (tests/cpu/Op_tests.cpp @ v2.5.2), but for `OpRcPtrVec/is_noop`, not ported yet. The
-//! tests that aren't upstream's use the no-ops.
+//! (tests/cpu/Op_tests.cpp @ v2.5.2). The tests that aren't upstream's use the no-ops.
 
 use std::sync::Arc;
 
@@ -323,6 +322,45 @@ fn reference_data_makes_no_op() {
         assert_ne!(reference_error, no_op_error);
     }
     assert!(result.is_empty());
+}
+
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, is_noop)` @ v2.5.2.
+#[test]
+fn op_vec_is_noop() {
+    use crate::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
+    use crate::ops::exposurecontrast::exposure_contrast_op_data::{
+        ExposureContrastOpData, ExposureContrastOpStyle,
+    };
+
+    let mut ops = OpVec::new();
+
+    let mut mat = MatrixOpData::create_diagonal_matrix(1.);
+    create_matrix_op(&mut ops, mat.clone(), TransformDirection::Forward);
+
+    assert!(ops.is_no_op().unwrap());
+
+    // (Upstream's first op shares `mat` and sees the change too; here it keeps its copy. The
+    // list isn't a no-op either way.)
+    mat.set_array_value(4, 0.1);
+    create_matrix_op(&mut ops, mat, TransformDirection::Forward);
+
+    assert!(!ops.is_no_op().unwrap());
+
+    // An active dynamic property is never a no-op.
+
+    ops.clear();
+
+    let ec = ExposureContrastOpData::new(ExposureContrastOpStyle::Linear);
+    create_exposure_contrast_op(&mut ops, ec.clone(), TransformDirection::Forward);
+
+    assert!(ops.is_no_op().unwrap());
+
+    // (Upstream's first op shares `ec` and becomes dynamic too; here it keeps its copy, and
+    // the second op is the dynamic one.)
+    ec.get_exposure_property().make_dynamic();
+    create_exposure_contrast_op(&mut ops, ec, TransformDirection::Forward);
+
+    assert!(!ops.is_no_op().unwrap());
 }
 
 /// Port of `OCIO_ADD_TEST(OpRcPtrVec, channel_crosstalk)` @ v2.5.2.

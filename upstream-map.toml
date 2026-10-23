@@ -547,7 +547,7 @@ path = "src/OpenColorIO/Processor.cpp"
 kind = "src"
 target = ["crates/ocio/src/processor.rs"]
 status = "partial"
-note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h2: createGroupTransform over every family ported so far (Allocation, CDL, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, Lut1D, Matrix, Range), the processor and its optimized processor checked against the wheel by every family's oracle test (crates/ocio/tests/common/transforms.rs, check_processors), and the optimized processors of integer and half input, whose LUTs the optimizer bakes or folds (check_optimized_processors), the format metadata createGroupTransform copies (a config per group) and the output bit depth of getOptimizedProcessor (processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). getOptimizedLegacyGPUProcessor comes with the 3D LUT op (PartitionGPUOps, Create3DLut), setColorSpaceConversion and concatenate with the config (Phase 3). To test once ExposureContrastTransform exists: the verifier's surviving mutant M11 (the CPU cache ignoring dynamic ops) (card p1-processor verification, 2026-10-04); its M36 (the fallback taking the first entry), M42 (a copy keeping the processor's cache ID) and M47 (no optimizeForBitdepth) are killed by processors_of_ops_match_the_wheel (crates/ocio/tests/processor_cache_oracle.rs, p1-tests-catchup)"
+note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h2: createGroupTransform over every family ported so far (Allocation, CDL, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, Lut1D, Matrix, Range), the processor and its optimized processor checked against the wheel by every family's oracle test (crates/ocio/tests/common/transforms.rs, check_processors), and the optimized processors of integer and half input, whose LUTs the optimizer bakes or folds (check_optimized_processors), the format metadata createGroupTransform copies (a config per group) and the output bit depth of getOptimizedProcessor (processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). getOptimizedLegacyGPUProcessor comes with the 3D LUT op (PartitionGPUOps, Create3DLut), setColorSpaceConversion and concatenate with the config (Phase 3). p5-dynamic 5.6a: the verifier's mutant M11 (the CPU cache ignoring dynamic ops, card p1-processor verification, 2026-10-04) is killed by cache_cpu_processors and crates/ocio/tests/dynamic_properties_oracle.rs, which compares the sharing of every dynamic property type with the wheel; M36 (the fallback taking the first entry), M42 (a copy keeping the processor's cache ID) and M47 (no optimizeForBitdepth) are killed by processors_of_ops_match_the_wheel (crates/ocio/tests/processor_cache_oracle.rs, p1-tests-catchup)"
 
 [[file]]
 path = "src/OpenColorIO/Processor.h"
@@ -4360,8 +4360,8 @@ note = "build system"
 path = "tests/cpu/CPUProcessor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/cpu_processor_tests.rs", "crates/ocio/tests/cpu_processor_tests.rs"]
-status = "partial"
-note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). dynamic_properties waits for ExposureContrastTransform (Phase 5), p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target)"
+status = "done"
+note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target); p5-dynamic 5.6a: dynamic_properties (crates/ocio/tests/cpu_processor_tests.rs)"
 
 [[file]]
 path = "tests/cpu/Caching_tests.cpp"
@@ -4490,14 +4490,14 @@ path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs", "crates/ocio/src/file_tests/op_optimizers_tests.rs"]
 status = "partial"
-note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. p5-ec 5.1b: dynamic_ops. Not yet: opt_prefix_test1 (its file has an ExposureContrast op, read with 4.5i) and dyn_properties_prefix"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. p5-ec 5.1b: dynamic_ops. p5-dynamic 5.6a: dyn_properties_prefix. Not yet: opt_prefix_test1 (its file has an ExposureContrast op, read with 4.5i)"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_tests.rs"]
-status = "partial"
-note = "all but OpRcPtrVec/is_noop; p5-ec 5.1b: OpRcPtrVec/dynamic_property"
+status = "done"
+note = "all but OpRcPtrVec/is_noop; p5-ec 5.1b: OpRcPtrVec/dynamic_property; p5-dynamic 5.6a: OpRcPtrVec/is_noop"
 
 [[file]]
 path = "tests/cpu/ParseUtils_tests.cpp"
@@ -4524,8 +4524,8 @@ note = "string_compare; envVariable, getenv, setenv (without their checks throug
 path = "tests/cpu/Processor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/processor_tests.rs"]
-status = "partial"
-note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut. cache_optimized_processors, cache_cpu_processors, cache_gpu_processors, is_noop and dynamic_properties wait for ExposureContrastTransform (Phase 5); unique_dynamic_properties for the ExposureContrast op (Phase 5). Cache tests on ops built directly stand in meanwhile (cache_optimized_processors, cache_cpu_processors in crates/ocio/src/processor_tests.rs), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs"
+status = "done"
+note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut; p5-dynamic 5.6a: unique_dynamic_properties, dynamic_properties, is_noop, cache_optimized_processors, cache_cpu_processors and cache_gpu_processors. Cache tests on ops built directly add checks (cache_optimized_processors_of_ops, cache_cpu_processors_of_ops), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs and, for dynamic properties, crates/ocio/tests/dynamic_properties_oracle.rs"
 
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"

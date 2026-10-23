@@ -11,11 +11,8 @@
 //! cache tests here run the checks of upstream's own cache tests on processors of matrix ops
 //! built directly.
 //!
-//! `basic_cache`, `basic_cache_lut`, `channel_crosstalk` and `optimized_processor` get their
-//! processors from `Config::Create()`. The others wait: `cache_optimized_processors`,
-//! `cache_cpu_processors`, `cache_gpu_processors`, `is_noop` and `dynamic_properties` need
-//! `ExposureContrastTransform` (Phase 5); `unique_dynamic_properties` needs the
-//! ExposureContrast op (Phase 5).
+//! Every test of upstream's file is here. `cache_optimized_processors_of_ops` and
+//! `cache_cpu_processors_of_ops` add checks of the caches on processors of ops built directly.
 
 use std::sync::Arc;
 
@@ -27,6 +24,7 @@ use ocio_testkit::crt::{ERANGE, strtoul_c};
 
 use super::*;
 use crate::test_env::EnvGuard;
+use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
 use crate::transforms::group_transform::GroupTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
 use ocio_ops::format_metadata::METADATA_ID;
@@ -541,7 +539,7 @@ fn transform_format_metadata_out_of_range() {
 /// `processor_cache_oracle.rs`, `cache_flags_and_variables_match_the_wheel` (oa, ob, oc) and
 /// `optimization_flags_variable_matches_the_wheel` (o0 against env_o0).
 #[test]
-fn cache_optimized_processors() {
+fn cache_optimized_processors_of_ops() {
     let env = EnvGuard::new();
     let proc1 = processor_of(two_offsets());
     let (f16, f32) = (BitDepth::F16, BitDepth::F32);
@@ -596,7 +594,7 @@ fn cache_optimized_processors() {
 /// `processor_cache_oracle.rs`, `cache_flags_and_variables_match_the_wheel` (ca, cb, cc, and
 /// the `PROCESSOR_CACHE_OFF` case).
 #[test]
-fn cache_cpu_processors() {
+fn cache_cpu_processors_of_ops() {
     let _env = EnvGuard::new();
     let proc1 = processor_of(two_offsets());
     let (f16, f32) = (BitDepth::F16, BitDepth::F32);
@@ -822,4 +820,455 @@ fn getters_leave_the_processor_as_it_was() {
     assert_eq!(processor.num_transforms(), 3);
     // Not vacuous: the optimizer changed the copies' ops.
     assert_ne!(state(&made[0]).1, before.1);
+}
+
+/// Runs `f` as under upstream's `LogGuard` (the debug level, and a logging function that keeps
+/// the messages): what it returns, and the messages logged on this thread, one after another.
+fn log_guard<T>(f: impl FnOnce() -> T) -> (T, Vec<u8>) {
+    use ocio_ops::logging::{get_logging_level, set_logging_level};
+    use ocio_ops::open_color_types::LoggingLevel;
+
+    let (out, log) = crate::test_env::capture_log(|| {
+        struct Level(LoggingLevel);
+        impl Drop for Level {
+            fn drop(&mut self) {
+                set_logging_level(self.0);
+            }
+        }
+        let _level = Level(get_logging_level());
+        set_logging_level(LoggingLevel::Debug);
+        f()
+    });
+    (out, log.concat())
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, unique_dynamic_properties)` @ v2.5.2.
+#[test]
+fn unique_dynamic_properties() {
+    use ocio_ops::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
+    use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
+
+    let direction = TransformDirection::Forward;
+    let mut data = ExposureContrastOpData::default();
+
+    data.set_exposure(1.2);
+    data.set_pivot(0.5);
+    data.get_exposure_property().make_dynamic();
+
+    let mut ops = OpVec::new();
+    create_exposure_contrast_op(&mut ops, data.clone(), direction);
+    assert_eq!(ops.len(), 1);
+
+    let data = data.clone();
+    data.set_exposure(2.2);
+
+    create_exposure_contrast_op(&mut ops, data, direction);
+    assert_eq!(ops.len(), 2);
+
+    let OpData::ExposureContrast(data0) = &**ops[0].data() else {
+        panic!("an ExposureContrast op")
+    };
+    let OpData::ExposureContrast(data1) = &**ops[1].data() else {
+        panic!("an ExposureContrast op")
+    };
+
+    let dp0 = data0.get_exposure_property();
+    let dp1 = data1.get_exposure_property();
+
+    assert_ne!(dp0.get_value(), dp1.get_value());
+
+    let (result, log) = log_guard(|| ops.validate_dynamic_properties());
+    result.unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&log),
+        "[OpenColorIO Warning]: Exposure dynamic property can only be there once.\n"
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, dynamic_properties)` @ v2.5.2.
+#[test]
+fn dynamic_properties() {
+    let _env = EnvGuard::new();
+    let mut ec = ExposureContrastTransform::new();
+
+    ec.set_exposure(1.2);
+    ec.set_pivot(0.5);
+    ec.make_contrast_dynamic();
+
+    let config = Config::new().unwrap();
+    let proc = config.processor(&Transform::from(ec)).unwrap();
+    assert!(proc.is_dynamic());
+    assert!(proc.has_dynamic_property(DynamicPropertyType::Contrast));
+    assert!(!proc.has_dynamic_property(DynamicPropertyType::Exposure));
+    let dpc = proc
+        .dynamic_property(DynamicPropertyType::Contrast)
+        .unwrap();
+    assert_eq!(dpc.get_type(), DynamicPropertyType::Contrast);
+    let err = proc
+        .dynamic_property(DynamicPropertyType::Exposure)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("Cannot find dynamic property"),
+        "{err}"
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, is_noop)` @ v2.5.2.
+#[test]
+fn is_noop() {
+    // Basic validation of the isNoOp() behavior.
+
+    let _env = EnvGuard::new();
+    let config = Config::new().unwrap();
+    let mut matrix = MatrixTransform::new();
+    let mut processor = config.processor(&Transform::from(matrix.clone())).unwrap();
+
+    assert!(processor.is_no_op().unwrap());
+    assert!(processor.default_cpu_processor().unwrap().is_no_op());
+    assert!(processor.default_gpu_processor().unwrap().is_no_op());
+
+    let offset: [f64; 4] = [0.1, 0.2, 0.3, 0.4];
+    matrix.set_offset(&offset);
+
+    processor = config.processor(&Transform::from(matrix)).unwrap();
+
+    assert!(!processor.is_no_op().unwrap());
+    assert!(!processor.default_cpu_processor().unwrap().is_no_op());
+    assert!(!processor.default_gpu_processor().unwrap().is_no_op());
+
+    // Check with at least one dynamic property.
+
+    let mut ec = ExposureContrastTransform::new();
+
+    processor = config.processor(&Transform::from(ec.clone())).unwrap();
+
+    assert!(processor.is_no_op().unwrap());
+    assert!(processor.default_cpu_processor().unwrap().is_no_op());
+    assert!(processor.default_gpu_processor().unwrap().is_no_op());
+
+    assert!(
+        processor
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+            .is_no_op()
+    );
+    assert!(
+        processor
+            .optimized_cpu_processor(OptimizationFlags::DRAFT)
+            .unwrap()
+            .is_no_op()
+    );
+
+    // Check with a bit-depth change.
+    assert!(
+        !processor
+            .optimized_cpu_processor_with_bit_depths(
+                BitDepth::F16,
+                BitDepth::F32,
+                OptimizationFlags::DEFAULT
+            )
+            .unwrap()
+            .is_no_op()
+    );
+
+    ec.make_exposure_dynamic();
+
+    processor = config.processor(&Transform::from(ec)).unwrap();
+
+    assert!(!processor.is_no_op().unwrap());
+    assert!(!processor.default_cpu_processor().unwrap().is_no_op());
+    assert!(!processor.default_gpu_processor().unwrap().is_no_op());
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, cache_optimized_processors)` @ v2.5.2.
+#[test]
+fn cache_optimized_processors() {
+    // Test the cache for the optimized processors.
+
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    config.set_major_version(2).unwrap();
+
+    let mut matrix = MatrixTransform::new();
+
+    let offset: [f64; 4] = [0.1, 0.2, 0.3, 0.];
+    matrix.set_offset(&offset);
+
+    let mut group = GroupTransform::new();
+    group.append_transform(Transform::from(matrix.clone()));
+    group.append_transform(Transform::from(matrix));
+
+    let (f16, f32) = (BitDepth::F16, BitDepth::F32);
+    let proc1 = config.processor(&Transform::from(group)).unwrap();
+
+    let opt_proc1 = proc1
+        .optimized_processor_with_bit_depths(f32, f32, OptimizationFlags::DEFAULT)
+        .unwrap();
+
+    let opt_proc2 = proc1
+        .optimized_processor_with_bit_depths(f32, f32, OptimizationFlags::DEFAULT)
+        .unwrap();
+    assert!(Arc::ptr_eq(&opt_proc1, &opt_proc2));
+
+    let opt_proc2 = proc1
+        .optimized_processor(OptimizationFlags::DEFAULT)
+        .unwrap();
+    assert!(Arc::ptr_eq(&opt_proc1, &opt_proc2));
+
+    // The input bit-depth is different. (The processor is actually the same in this case, but a
+    // new copy is made.)
+    let opt_proc2 = proc1
+        .optimized_processor_with_bit_depths(f16, f32, OptimizationFlags::DEFAULT)
+        .unwrap();
+    assert!(!Arc::ptr_eq(&opt_proc1, &opt_proc2));
+
+    // The optimization flag is different.
+    let opt_proc2 = proc1
+        .optimized_processor_with_bit_depths(f32, f32, OptimizationFlags::NONE)
+        .unwrap();
+    assert!(!Arc::ptr_eq(&opt_proc1, &opt_proc2));
+
+    let opt_proc1 = proc1
+        .optimized_processor_with_bit_depths(f32, f32, OptimizationFlags::NONE)
+        .unwrap();
+    assert!(Arc::ptr_eq(&opt_proc1, &opt_proc2));
+
+    // Even with a 'dynamic' transform (i.e. contains dynamic properties) the cache is still
+    // used.
+
+    let mut ec = ExposureContrastTransform::new();
+    ec.set_exposure(0.65);
+
+    let proc1 = config.processor(&Transform::from(ec.clone())).unwrap();
+
+    // The dynamic properties are not dynamic so the cache is still used.
+    assert!(Arc::ptr_eq(
+        &proc1
+            .optimized_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        &proc1
+            .optimized_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+    ));
+
+    // Make Exposure dynamic.
+    ec.make_exposure_dynamic();
+
+    let proc1 = config.processor(&Transform::from(ec)).unwrap();
+
+    // A dynamic property is now dynamic but the cache is still used.
+    assert!(Arc::ptr_eq(
+        &proc1
+            .optimized_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        &proc1
+            .optimized_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+    ));
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, cache_cpu_processors)` @ v2.5.2.
+#[test]
+fn cache_cpu_processors() {
+    // Test the cache for the CPU processors.
+
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    config.set_major_version(2).unwrap();
+
+    let mut matrix = MatrixTransform::new();
+
+    let offset: [f64; 4] = [0.1, 0.2, 0.3, 0.];
+
+    matrix.set_offset(&offset);
+    let matrix = Transform::from(matrix);
+
+    // Step 1 - Test with default cache flags i.e. cache enabled and share processor instances
+    // containing dynamic properties.
+
+    let (f16, f32) = (BitDepth::F16, BitDepth::F32);
+    let proc1 = config.processor(&matrix).unwrap();
+
+    let cpu_proc1 = proc1
+        .optimized_cpu_processor_with_bit_depths(f32, f32, OptimizationFlags::DEFAULT)
+        .unwrap();
+
+    let cpu_proc2 = proc1
+        .optimized_cpu_processor_with_bit_depths(f32, f32, OptimizationFlags::DEFAULT)
+        .unwrap();
+    assert!(Arc::ptr_eq(&cpu_proc1, &cpu_proc2));
+
+    let cpu_proc2 = proc1
+        .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+        .unwrap();
+    assert!(Arc::ptr_eq(&cpu_proc1, &cpu_proc2));
+
+    let cpu_proc2 = proc1.default_cpu_processor().unwrap();
+    assert!(Arc::ptr_eq(&cpu_proc1, &cpu_proc2));
+
+    // The input bit-depth is different.
+    let cpu_proc2 = proc1
+        .optimized_cpu_processor_with_bit_depths(f16, f32, OptimizationFlags::DEFAULT)
+        .unwrap();
+    assert!(!Arc::ptr_eq(&cpu_proc1, &cpu_proc2));
+
+    // The optimization flag is different.
+    let cpu_proc2 = proc1
+        .optimized_cpu_processor_with_bit_depths(f32, f32, OptimizationFlags::LOSSLESS)
+        .unwrap();
+    assert!(!Arc::ptr_eq(&cpu_proc1, &cpu_proc2));
+
+    let cpu_proc1 = proc1
+        .optimized_cpu_processor(OptimizationFlags::LOSSLESS)
+        .unwrap();
+    assert!(Arc::ptr_eq(&cpu_proc1, &cpu_proc2));
+
+    // If that's a 'dynamic' transform (i.e. contains dynamic properties) then the cache is used
+    // or not depdending of the cache setting.
+
+    let mut ec = ExposureContrastTransform::new();
+    ec.set_exposure(0.65);
+
+    let proc2 = config.processor(&Transform::from(ec.clone())).unwrap();
+
+    // The dynamic properties are not dynamic so the cache is still used.
+    assert!(Arc::ptr_eq(
+        &proc2
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        &proc2
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+    ));
+
+    // Make Exposure dynamic.
+    ec.make_exposure_dynamic();
+    let ec = Transform::from(ec);
+
+    let proc2 = config.processor(&ec).unwrap();
+
+    // By default, the processor cache share processor instances containing dynamic properties.
+    assert!(Arc::ptr_eq(
+        &proc2
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        &proc2
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+    ));
+
+    // Step 2 - Change the default cache flags to disable the dyn. property share.
+
+    let cfg = config.clone();
+    // Enabled but no dyn. property share.
+    cfg.set_processor_cache_flags(ProcessorCacheFlags::ENABLED);
+
+    assert!(Arc::ptr_eq(
+        &cfg.processor(&matrix).unwrap(),
+        &cfg.processor(&matrix).unwrap()
+    ));
+
+    let proc1 = cfg.processor(&ec).unwrap();
+
+    // Now the processor cache does not share processor instances containing dynamic
+    // properties.
+    assert!(!Arc::ptr_eq(
+        &proc1
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        &proc1
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+    ));
+
+    // Disable the caches.
+
+    cfg.set_processor_cache_flags(ProcessorCacheFlags::OFF); // Cache disabled
+
+    assert!(!Arc::ptr_eq(
+        &cfg.processor(&matrix).unwrap(),
+        &cfg.processor(&matrix).unwrap()
+    ));
+
+    let proc1 = cfg.processor(&ec).unwrap();
+
+    assert!(!Arc::ptr_eq(
+        &proc1
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        &proc1
+            .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+    ));
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, cache_gpu_processors)` @ v2.5.2.
+#[test]
+fn cache_gpu_processors() {
+    // Test the cache for the GPU processors.
+
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    config.set_major_version(2).unwrap();
+
+    let mut matrix = MatrixTransform::new();
+
+    let offset: [f64; 4] = [0.1, 0.2, 0.3, 0.];
+
+    matrix.set_offset(&offset);
+
+    let proc1 = config.processor(&Transform::from(matrix)).unwrap();
+
+    let gpu_proc1 = proc1
+        .optimized_gpu_processor(OptimizationFlags::DEFAULT)
+        .unwrap();
+
+    let gpu_proc2 = proc1
+        .optimized_gpu_processor(OptimizationFlags::DEFAULT)
+        .unwrap();
+    assert!(Arc::ptr_eq(&gpu_proc1, &gpu_proc2));
+
+    // The optimization flag is different.
+    let gpu_proc2 = proc1
+        .optimized_gpu_processor(OptimizationFlags::LOSSLESS)
+        .unwrap();
+    assert!(!Arc::ptr_eq(&gpu_proc1, &gpu_proc2));
+
+    let gpu_proc1 = proc1
+        .optimized_gpu_processor(OptimizationFlags::LOSSLESS)
+        .unwrap();
+    assert!(Arc::ptr_eq(&gpu_proc1, &gpu_proc2));
+
+    // Even with a 'dynamic' transform (i.e. contains dynamic properties) the cache is still
+    // used.
+
+    let mut ec = ExposureContrastTransform::new();
+    ec.set_exposure(0.65);
+
+    let proc1 = config.processor(&Transform::from(ec.clone())).unwrap();
+
+    // The dynamic properties are not dynamic so the cache is still used.
+    assert!(Arc::ptr_eq(
+        &proc1
+            .optimized_gpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        &proc1
+            .optimized_gpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+    ));
+
+    // Make Exposure dynamic.
+    ec.make_exposure_dynamic();
+
+    let proc1 = config.processor(&Transform::from(ec)).unwrap();
+
+    // A dynamic property is now dynamic but the cache is still used.
+    assert!(Arc::ptr_eq(
+        &proc1
+            .optimized_gpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        &proc1
+            .optimized_gpu_processor(OptimizationFlags::DEFAULT)
+            .unwrap()
+    ));
 }
