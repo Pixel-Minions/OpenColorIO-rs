@@ -24,13 +24,16 @@
 //! call's arguments are loaded before the config is locked (`config_method!`), so the Python
 //! code their casters run (`__index__`, `__float__`, `__bool__`, a sequence's items) may use
 //! the config, as in the wheel. A call on the config from another thread meanwhile waits for
-//! the first call's end, with the GIL released ([`lock_config`]).
+//! the first call's end, with the GIL released ([`lock_config`]), unless that wait would close
+//! a cycle of threads waiting for each other's configs: then it raises the port's error
+//! instead (D-9, owner decision 2026-10-23), where the wheel's calls run alongside.
 //!
 //! The static methods of `ConfigUtils` (`IdentifyBuiltinColorSpace`,
 //! `IdentifyInterchangeSpace`, `GetProcessorToBuiltinColorSpace`,
 //! `GetProcessorFromBuiltinColorSpace`, `GetProcessorFromConfigs`) come with chunk 6.8a.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::thread::ThreadId;
 
 use ocio::builtinconfigs::builtin_config_registry::resolve_config_path;
 use ocio::{
@@ -274,29 +277,110 @@ fn busy() -> PyErr {
     )
 }
 
-/// The thread whose call holds each locked config, by its key: a call finding a config locked
-/// by its own thread is a callback of that call (D-9); by another thread, it waits.
-static OWNERS: Mutex<Vec<(usize, std::thread::ThreadId)>> = Mutex::new(Vec::new());
+/// The port's error for a call that would wait for a config whose call waits, through the
+/// calls of other threads, for this thread's (D-9: the threads would wait for each other).
+fn wait_cycle() -> PyErr {
+    pyo3::exceptions::PyRuntimeError::new_err(
+        "Config: a call waits for this config, which another thread's call holds while it \
+         waits, through the calls of other threads or not, for this thread's: the threads \
+         would wait for each other, which the port can't share (docs/deviations.md, D-9)",
+    )
+}
 
-fn owners() -> std::sync::MutexGuard<'static, Vec<(usize, std::thread::ThreadId)>> {
-    OWNERS
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+/// The configs locked by calls and the threads that wait for one, by the configs' keys: a
+/// call finding a config locked by its own thread is a callback of that call (D-9); by
+/// another thread, it waits, unless that thread waits in turn, through the calls of other
+/// threads or not, for this one's (D-9, owner decision 2026-10-23).
+struct Locks {
+    /// The thread whose call holds each locked config.
+    owners: Vec<(usize, ThreadId)>,
+    /// The config each waiting thread waits for (one at most).
+    waiting: Vec<(ThreadId, usize)>,
+}
+
+impl Locks {
+    fn owner(&self, key: usize) -> Option<ThreadId> {
+        self.owners.iter().find(|(k, _)| *k == key).map(|(_, t)| *t)
+    }
+
+    fn waits_for(&self, thread: ThreadId) -> Option<usize> {
+        self.waiting
+            .iter()
+            .find(|(t, _)| *t == thread)
+            .map(|(_, k)| *k)
+    }
+
+    /// Whether `this` waiting for the config `key` would close a cycle: its owner waits for a
+    /// config whose owner waits ... for one `this` holds. Every wait is checked as it begins,
+    /// under the lock of this table, so the threads waiting form no cycle, and each waits for
+    /// one config: the chain ends within as many steps as there are waiting threads.
+    fn closes_cycle(&self, key: usize, this: ThreadId) -> bool {
+        let mut key = key;
+        for _ in 0..=self.waiting.len() {
+            let Some(owner) = self.owner(key) else {
+                return false;
+            };
+            if owner == this {
+                return true;
+            }
+            let Some(next) = self.waits_for(owner) else {
+                return false;
+            };
+            key = next;
+        }
+        false
+    }
+
+    fn stop_waiting(&mut self, thread: ThreadId) {
+        if let Some(at) = self.waiting.iter().position(|(t, _)| *t == thread) {
+            self.waiting.swap_remove(at);
+        }
+    }
+}
+
+static LOCKS: Mutex<Locks> = Mutex::new(Locks {
+    owners: Vec::new(),
+    waiting: Vec::new(),
+});
+
+/// Signalled when a call releases a config.
+static RELEASED: Condvar = Condvar::new();
+
+fn locks() -> MutexGuard<'static, Locks> {
+    LOCKS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// A config locked by a call of this thread, its owner recorded until the guard drops.
 struct ConfigGuard<'a> {
-    node: std::sync::MutexGuard<'a, ConfigNode>,
+    node: Option<MutexGuard<'a, ConfigNode>>,
     key: usize,
+}
+
+impl<'a> ConfigGuard<'a> {
+    /// The guard of the config `rc`, whose owner this thread was just recorded as: its node's
+    /// lock, which no other thread holds then.
+    fn new(rc: &'a ConfigRc) -> ConfigGuard<'a> {
+        ConfigGuard {
+            node: Some(rc.lock()),
+            key: rc.key(),
+        }
+    }
+
+    fn node(&mut self) -> &mut ConfigNode {
+        self.node.as_mut().expect("until dropped")
+    }
 }
 
 impl Drop for ConfigGuard<'_> {
     fn drop(&mut self) {
-        // The owner goes first: the node's lock is released after this body.
-        let mut owners = owners();
-        if let Some(at) = owners.iter().position(|(k, _)| *k == self.key) {
-            owners.swap_remove(at);
+        // The node's lock goes first: a thread recorded as the next owner takes it at once.
+        drop(self.node.take());
+        let mut locks = locks();
+        if let Some(at) = locks.owners.iter().position(|(k, _)| *k == self.key) {
+            locks.owners.swap_remove(at);
         }
+        drop(locks);
+        RELEASED.notify_all();
     }
 }
 
@@ -304,27 +388,36 @@ impl Drop for ConfigGuard<'_> {
 /// config is in use by the library under a callback of that call: D-9's error. Locked by
 /// another thread (whose callback released the GIL, as Python code does now and then), the
 /// call waits, with the GIL released, until that thread's call ends, as the wheel's would
-/// run alongside it.
+/// run alongside it; unless that thread waits in turn, through the calls of other threads
+/// or not, for a config this thread holds: then this thread's wait would close the cycle, and
+/// the call raises D-9's error instead (owner decision 2026-10-23).
 fn lock_config(rc: &ConfigRc) -> PyResult<ConfigGuard<'_>> {
     let this = std::thread::current().id();
-    loop {
-        if let Some(node) = rc.try_lock() {
-            owners().push((rc.key(), this));
-            return Ok(ConfigGuard {
-                node,
-                key: rc.key(),
-            });
+    let key = rc.key();
+    {
+        let mut locks = locks();
+        match locks.owner(key) {
+            None => {
+                locks.owners.push((key, this));
+                drop(locks);
+                return Ok(ConfigGuard::new(rc));
+            }
+            Some(owner) if owner == this => return Err(busy()),
+            Some(_) if locks.closes_cycle(key, this) => return Err(wait_cycle()),
+            Some(_) => locks.waiting.push((this, key)),
         }
-        let owner = owners()
-            .iter()
-            .find(|(k, _)| *k == rc.key())
-            .map(|(_, t)| *t);
-        if owner == Some(this) {
-            return Err(busy());
-        }
-        // Another thread's call (its owner recorded, or about to be): wait for its end.
-        Python::attach(|py| py.detach(|| drop(rc.lock())));
     }
+    Python::attach(|py| {
+        py.detach(|| {
+            let mut locks = locks();
+            while locks.owner(key).is_some() {
+                locks = RELEASED.wait(locks).unwrap_or_else(PoisonError::into_inner);
+            }
+            locks.stop_waiting(this);
+            locks.owners.push((key, this));
+        })
+    });
+    Ok(ConfigGuard::new(rc))
 }
 
 /// `f` of the config `rc`, its objects written back first.
@@ -333,8 +426,8 @@ pub(crate) fn with_config<R>(
     f: impl FnOnce(&mut ConfigNode) -> PyResult<R>,
 ) -> PyResult<R> {
     let mut guard = lock_config(rc)?;
-    guard.node.sync()?;
-    f(&mut guard.node)
+    guard.node().sync()?;
+    f(guard.node())
 }
 
 /// `f` of two configs (the same one twice, once locked; two in the order of their keys, so

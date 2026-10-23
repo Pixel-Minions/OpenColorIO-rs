@@ -887,7 +887,11 @@ fn callbacks_as_the_wheels() {
     let (wheel, port) = (&theirs["steps"][2], &ours["steps"][2]);
     assert_eq!(wheel["value"]["type"], "builtins.NoneType", "{wheel}");
     assert_eq!(port["raised"]["type"], "builtins.RuntimeError", "{port}");
-    assert!(message(port).contains("docs/deviations.md, D-9"), "{port}");
+    assert!(
+        message(port).starts_with("Config: a callback of a call on this config uses it")
+            && message(port).ends_with("(docs/deviations.md, D-9)"),
+        "{port}"
+    );
     // Another config is free to use, as the wheel's.
     assert_eq!(theirs["steps"][4], ours["steps"][4]);
     assert_eq!(theirs["steps"][5], ours["steps"][5]);

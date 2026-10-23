@@ -40,16 +40,6 @@ impl<T> Shared<T> {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// The value, locked, unless it is locked already (by a call of this thread, under a
-    /// callback of the library's, or of another thread whose callback released the GIL).
-    pub(crate) fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        match self.0.try_lock() {
-            Ok(g) => Some(g),
-            Err(std::sync::TryLockError::Poisoned(e)) => Some(e.into_inner()),
-            Err(std::sync::TryLockError::WouldBlock) => None,
-        }
-    }
-
     /// The address pybind11's registry keys an instance by.
     pub(crate) fn key(&self) -> usize {
         Arc::as_ptr(&self.0) as *const u8 as usize
