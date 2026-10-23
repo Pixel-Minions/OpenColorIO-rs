@@ -30,7 +30,9 @@
 //! `ocio::get_current_config` neither takes the GIL nor waits for Python: called while a call
 //! (a Python call on the current config, of any thread, or the call whose callback calls it)
 //! holds Python's current config, it returns the config as last published, without what Python
-//! changed since; the next read after that call ends has it.
+//! changed since; the next read after that call ends has it. Upstream's host and Python share
+//! one live object; the port's host reads this snapshot of Python's (owner decision
+//! 2026-10-23, docs/deviations.md, D-11; tests: `tests/embed_current_config.rs`).
 
 /// The Python `PyOpenColorIO.CPUProcessor` of `cpu`, sharing it: the object the module made for
 /// that processor while it lives, else a new one (as pybind11 returns a `CPUProcessorRcPtr`).
