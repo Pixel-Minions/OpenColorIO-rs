@@ -6,7 +6,11 @@
 //! - the same `Arc` while nothing changed, its processors cached, whatever Python read
 //!   meanwhile (upstream's `GetCurrentConfig` returns the same `shared_ptr`);
 //! - a new `Arc` after each kind of change Python makes in place (the config, a color space and
-//!   a transform of it, its context, its file rules), with the change;
+//!   a transform of it, its context, its file rules; then through every collection of the
+//!   config: a look and both its transforms, a named transform and both of its, a view
+//!   transform, a color space's `to_scene_reference` transform, the children of a group and
+//!   those of a group in it), with the change: the serialization of the `Arc` is the one Python
+//!   gives (`serialize()`), and has the text the edit wrote;
 //! - from a thread of its own while the host's thread holds the GIL (S1), while another
 //!   thread's Python call on the config waits in its callback (S2), and from a callback of a
 //!   Python call on the config (S3): an answer at once, the config as last published, never a
@@ -26,7 +30,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 /// A config of version 2.3 without the roles 2.2 requires (its validation logs errors), with a
-/// color space holding a matrix.
+/// color space holding a matrix, one holding only a `to_scene_reference` transform, one holding
+/// groups in a group, a look and a named transform with an inverse, and a view transform.
 const CONFIG: &str = "ocio_profile_version: 2.3
 roles:
   default: raw
@@ -36,6 +41,14 @@ displays:
 colorspaces:
   - !<ColorSpace> {name: raw}
   - !<ColorSpace> {name: m, from_scene_reference: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}}
+  - !<ColorSpace> {name: tr, to_scene_reference: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}}
+  - !<ColorSpace> {name: grp, from_scene_reference: !<GroupTransform> {children: [!<MatrixTransform> {offset: [0.5, 0, 0, 0]}, !<ExponentTransform> {value: [2, 2, 2, 1]}, !<GroupTransform> {children: [!<MatrixTransform> {offset: [0.25, 0, 0, 0]}]}]}}
+looks:
+  - !<Look> {name: lk, process_space: raw, transform: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}, inverse_transform: !<MatrixTransform> {offset: [-0.5, 0, 0, 0]}}
+view_transforms:
+  - !<ViewTransform> {name: vt, from_scene_reference: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}}
+named_transforms:
+  - !<NamedTransform> {name: nt, transform: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}, inverse_transform: !<MatrixTransform> {offset: [-0.5, 0, 0, 0]}}
 ";
 
 /// `ocio::get_current_config()` on a thread of its own, waited for at most a minute.
@@ -64,6 +77,19 @@ fn read_from_rust(_message: &str) {
         .lock()
         .unwrap()
         .push(ocio::get_current_config().unwrap());
+}
+
+/// The serialization of `config`, which is the one Python's `g.serialize()` gives (the config
+/// Python holds, with the change).
+fn serialization_of(py: Python<'_>, g: &Bound<'_, PyDict>, config: &Config) -> String {
+    let python: String = py
+        .eval(c"g.serialize()", Some(g), None)
+        .unwrap()
+        .extract()
+        .unwrap();
+    let host = String::from_utf8(config.serialize().unwrap()).unwrap();
+    assert_eq!(host, python);
+    host
 }
 
 /// The offset of the matrix the color space `m` holds.
@@ -117,7 +143,17 @@ fn rust_reads_the_current_config_python_holds() {
              cs = g.getColorSpace('m'); cs.getDescription()\n\
              t = cs.getTransform(OCIO.COLORSPACE_DIR_FROM_REFERENCE); t.getOffset()\n\
              ctx = g.getCurrentContext(); ctx.getSearchPath()\n\
-             fr = g.getFileRules(); fr.getNumEntries()",
+             fr = g.getFileRules(); fr.getNumEntries()\n\
+             FROM = OCIO.COLORSPACE_DIR_FROM_REFERENCE\n\
+             lk = g.getLook('lk'); lt = lk.getTransform(); lki = lk.getInverseTransform()\n\
+             nt = g.getNamedTransform('nt')\n\
+             ntt = nt.getTransform(OCIO.TRANSFORM_DIR_FORWARD)\n\
+             nti = nt.getTransform(OCIO.TRANSFORM_DIR_INVERSE)\n\
+             vt = g.getViewTransform('vt')\n\
+             vtt = vt.getTransform(OCIO.VIEWTRANSFORM_DIR_FROM_REFERENCE)\n\
+             trt = g.getColorSpace('tr').getTransform(OCIO.COLORSPACE_DIR_TO_REFERENCE)\n\
+             gt = g.getColorSpace('grp').getTransform(FROM)\n\
+             inner = gt[0]; sub = gt[2]; subin = sub[0]",
         );
         assert!(Arc::ptr_eq(&first, &read()));
 
@@ -147,10 +183,44 @@ fn rust_reads_the_current_config_python_holds() {
             let now = read();
             assert!(!Arc::ptr_eq(&last, &now), "{edit}");
             assert!(check(&now), "{edit}");
+            serialization_of(py, &g, &now);
             assert!(Arc::ptr_eq(&now, &read()), "{edit}: again");
             last = now;
         }
         assert_eq!(offset(&last), [0.25, 0.0, 0.0, 0.0]);
+
+        // An edit through each collection of the config, and of the transforms in them: a new
+        // Arc, whose serialization is Python's and has the text the edit wrote (a value of
+        // its own, in none of the texts before it: the config's first serialization lacks it
+        // and so does each edit's before).
+        let edits = [
+            ("lk.setDescription('look desc')", "look desc"),
+            ("lt.setOffset([0.8125, 0, 0, 0])", "0.8125"),
+            ("lki.setOffset([0.4375, 0, 0, 0])", "0.4375"),
+            ("nt.setDescription('named desc')", "named desc"),
+            ("ntt.setOffset([0.3125, 0, 0, 0])", "0.3125"),
+            ("nti.setOffset([0.6875, 0, 0, 0])", "0.6875"),
+            ("vt.setDescription('view desc')", "view desc"),
+            ("vtt.setOffset([0.1875, 0, 0, 0])", "0.1875"),
+            ("trt.setOffset([0.9375, 0, 0, 0])", "0.9375"),
+            ("inner.setOffset([0.34375, 0, 0, 0])", "0.34375"),
+            ("subin.setOffset([0.15625, 0, 0, 0])", "0.15625"),
+            (
+                "sub.appendTransform(OCIO.ExponentTransform([1.5, 1.5, 1.5, 1]))",
+                "1.5",
+            ),
+        ];
+        let mut text = serialization_of(py, &g, &last);
+        for (edit, needle) in edits {
+            assert!(!text.contains(needle), "{edit}: before");
+            run(py, &g, edit);
+            let now = read();
+            assert!(!Arc::ptr_eq(&last, &now), "{edit}");
+            text = serialization_of(py, &g, &now);
+            assert!(text.contains(needle), "{edit}: {text}");
+            assert!(Arc::ptr_eq(&now, &read()), "{edit}: again");
+            last = now;
+        }
 
         // S2: another thread's call on the config waits in its logging function, with a change
         // made before it: the host gets the config as last published at once; the change once
