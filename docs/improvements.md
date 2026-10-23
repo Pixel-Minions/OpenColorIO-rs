@@ -2013,8 +2013,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `PlanarImageDesc`'s constructors check each plane's type and entries in the
   arguments of one call, `std::make_shared<PlanarImageDesc>(getBufferData(rData, ...),
   getBufferData(gData, ...), ...)` (`PyPlanarImageDesc.cpp:12-18, 28-152`), whose order C++
-  leaves unspecified. The Windows wheel evaluates them from the last to the first, so with two
-  bad planes the error names the alpha (or blue) plane's problem, not the red one's.
+  leaves unspecified. Both wheels (MSVC's and GCC's builds) evaluate them from the last to the
+  first, so with two bad planes the error names the alpha (or blue) plane's problem, not the
+  red one's.
 - **Who notices:** Python code that passes several bad planes and reads the message.
 - **A fix:** check the planes one by one, in order, before the call.
 - **Status:** matched in `p6-buffers` (6.5a, `crates/ocio-py/src/py_planar_image_desc.rs`,
