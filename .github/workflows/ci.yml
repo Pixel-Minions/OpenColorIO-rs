@@ -160,6 +160,7 @@ jobs:
           - linux-debug-heavy
           - linux-debug-rest
           - linux-release-formats
+          - linux-release-heavy
           - linux-release-rest
     steps:
       - name: Free runner disk

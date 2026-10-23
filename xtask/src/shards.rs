@@ -202,11 +202,19 @@ pub(crate) const SHARDS: &[Shard] = &[
         release: true,
         groups: &[Group::Formats],
     },
+    // Release builds of the heavy and the other targets in one job outgrew the hosted
+    // runner's disk (PR #66, run 39933842156), as on Windows they run apart.
+    Shard {
+        id: "linux-release-heavy",
+        platform: Platform::Linux,
+        release: true,
+        groups: &[Group::Heavy],
+    },
     Shard {
         id: "linux-release-rest",
         platform: Platform::Linux,
         release: true,
-        groups: &[Group::Heavy, Group::Rest],
+        groups: &[Group::Rest],
     },
 ];
 
