@@ -5304,6 +5304,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `spline_type`); `grading_data_oracle.rs`,
   `a_spline_type_outside_the_enumerators_is_the_ports_error`. (A `HueCurveType` outside the
   enumerators is read at once, as the `default` of `GetBSplineTypeForHueCurveType`: matched.)
+  Also the style of `GradingPrimaryTransform` and `GradingToneTransform` (`setStyle` and the
+  constructors' `style`), which the wheel stores and whose `repr` then kills the wheel's
+  process; a constructor's values are validated first (a primary's with that style, read as
+  `GRADING_VIDEO` is), so their error comes first, as the wheel's; in `p6-after-p5` (6.7b,
+  `crates/ocio-py/src/transforms/py_grading_primary_transform.rs`, `grading_style`);
+  `grading_transforms_oracle.rs`, `a_grading_style_outside_the_enumerators_is_the_ports_error`.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 

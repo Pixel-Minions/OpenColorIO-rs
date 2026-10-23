@@ -600,6 +600,8 @@ variant!(ocio::ExponentWithLinearTransform, ExponentWithLinear);
 variant!(ocio::ExposureContrastTransform, ExposureContrast);
 variant!(ocio::FileTransform, File);
 variant!(ocio::FixedFunctionTransform, FixedFunction);
+variant!(ocio::GradingPrimaryTransform, GradingPrimary);
+variant!(ocio::GradingToneTransform, GradingTone);
 variant!(ocio::GroupTransform, Group);
 variant!(ocio::LogAffineTransform, LogAffine);
 variant!(ocio::LogCameraTransform, LogCamera);
@@ -1146,6 +1148,8 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::transforms::py_exposure_contrast_transform::bind(m)?;
     crate::transforms::py_file_transform::bind(m)?;
     crate::transforms::py_fixed_function_transform::bind(m)?;
+    crate::transforms::py_grading_primary_transform::bind(m)?;
+    crate::transforms::py_grading_tone_transform::bind(m)?;
     crate::transforms::py_group_transform::bind(m)?;
     crate::transforms::py_log_affine_transform::bind(m)?;
     crate::transforms::py_log_camera_transform::bind(m)?;

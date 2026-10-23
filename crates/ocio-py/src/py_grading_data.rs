@@ -159,7 +159,7 @@ macro_rules! shared_arg {
 /// `GradingPrimary(GradingStyle)` (include/OpenColorIO/OpenColorTransforms.h:465-471 @ v2.5.2),
 /// `GradingPrimary::validate` (src/OpenColorIO/ops/gradingprimary/GradingPrimary.cpp:65-106)
 /// and `GradingTone(GradingStyle)` (OpenColorTransforms.h:684-700).
-fn value_style(v: i64) -> GradingStyle {
+pub(crate) fn value_style(v: i64) -> GradingStyle {
     match v {
         0 => GradingStyle::Log,
         1 => GradingStyle::Lin,

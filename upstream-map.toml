@@ -4110,7 +4110,7 @@ status = "todo"
 path = "src/bindings/python/transforms/PyGradingPrimaryTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_grading_primary_transform.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/transforms/PyGradingRGBCurveTransform.cpp"
@@ -4122,7 +4122,7 @@ status = "todo"
 path = "src/bindings/python/transforms/PyGradingToneTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_grading_tone_transform.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/transforms/PyGroupTransform.cpp"
