@@ -52,6 +52,9 @@ const PIPELINE_CONFIG: &str = include_str!("data/apphelpers_pipeline_config.ocio
 enum Source {
     Yaml(&'static str),
     File(String),
+    /// A config file, with the environment variable `(name, value)` added to the config after it
+    /// is read (`Config.addEnvironmentVar`, which also sets it in the current context).
+    FileWithEnv(String, &'static str, &'static str),
     Builtin(String),
     Raw,
 }
@@ -61,6 +64,13 @@ impl Source {
         match self {
             Source::Yaml(text) => Config::create_from_stream(text.as_bytes()).unwrap(),
             Source::File(path) => Config::create_from_file(path).unwrap(),
+            Source::FileWithEnv(path, name, value) => {
+                let mut config = Config::create_from_file(path).unwrap();
+                Arc::get_mut(&mut config)
+                    .expect("a config nobody else holds")
+                    .add_environment_var(name, Some(value.as_bytes()));
+                config
+            }
             Source::Builtin(name) => Config::create_from_builtin_config(name).unwrap(),
             Source::Raw => Config::create_raw().unwrap(),
         }
@@ -69,9 +79,19 @@ impl Source {
     fn wheel(&self) -> Value {
         match self {
             Source::Yaml(text) => json!({"yaml": text}),
-            Source::File(path) => json!({"file": path}),
+            Source::File(path) | Source::FileWithEnv(path, ..) => json!({"file": path}),
             Source::Builtin(name) => json!({"builtin": name}),
             Source::Raw => json!("raw"),
+        }
+    }
+
+    /// The wheel's calls that change the config after it is made, as `port` does.
+    fn wheel_prelude(&self) -> Vec<Value> {
+        match self {
+            Source::FileWithEnv(_, name, value) => {
+                vec![json!({"call": "addEnvironmentVar", "on": "config", "args": [name, value]})]
+            }
+            _ => Vec::new(),
         }
     }
 }
@@ -494,11 +514,12 @@ fn check(
         for (name, value) in CONTEXT_VARS {
             changed_context.set_string_var(name, Some(value.as_bytes()));
         }
-        let mut calls = vec![
+        let mut calls = source.wheel_prelude();
+        calls.extend([
             json!({"call": "getCurrentContext", "as": "ctx0"}),
             json!({"call": "getCurrentContext", "as": "ctx_own"}),
             json!({"copy": "ctx_own", "as": "ctx1"}),
-        ];
+        ]);
         for (name, value) in CONTEXT_VARS {
             calls.push(json!({"call": "setStringVar", "on": "ctx1", "args": [name, value]}));
         }
@@ -674,6 +695,83 @@ fn pipelines_match_the_wheel() {
         "{all_with_context} cases with a context"
     );
     assert_eq!(all.pixels, 2 * all.made, "pixels compared");
+}
+
+/// A pipeline of `case` with all its other settings off.
+fn directed(
+    dvt: (&str, &str, &str, bool, bool),
+    looks_override: &str,
+    linear: Option<usize>,
+    context: Option<usize>,
+) -> Case {
+    let (src, display, view, looks_bypass, data_bypass) = dvt;
+    Case {
+        dvt: Some((
+            src.to_string(),
+            display.to_string(),
+            view.to_string(),
+            TransformDirection::Forward,
+            looks_bypass,
+            data_bypass,
+        )),
+        linear,
+        timing: None,
+        channel: None,
+        display_cc: None,
+        looks_override_enabled: true,
+        looks_override: Some(looks_override.to_string()),
+        context,
+    }
+}
+
+/// Where the pipeline takes the look transform's source color space and the context of its
+/// result color space from, cases the generated pipelines don't pin down.
+///
+/// With a data source color space and the data bypass on, the conversions are skipped, and the
+/// look (which the looks override applies even to data) reads the color space the linear CC
+/// left the image in (the scene-linear role's), not the pipeline's input color space; a named
+/// transform view and a non-trivial linear CC make that visible in the processor.
+///
+/// The looks result color space is computed in the context the processor is asked for: in a
+/// config whose own context cannot resolve the look's file (`CCCID` is `no-such-id`), a context
+/// that can (`look-01`) makes the processor, the config's own context fails as the wheel does.
+#[test]
+fn pipelines_take_the_look_source_and_context_as_the_wheel_does() {
+    let mut failures = Vec::new();
+
+    // The linear CC is `ccs()[0]`, a scale with an offset.
+    let source = Source::Yaml(PIPELINE_CONFIG);
+    let case = directed(
+        ("raw", "d_srgb", "named", false, true),
+        "grade",
+        Some(0),
+        None,
+    );
+    let (r, _) = check("look source", &source, &[case], 1, &mut failures);
+    report("legacy_viewing_pipeline_look_source", &failures);
+    assert_eq!((r.made, r.refused), (1, 0), "{:?}", r.messages);
+    assert_eq!(r.groups.len(), 1, "{:?}", r.groups);
+    assert_eq!(r.groups.iter().next().unwrap().len(), 3, "{:?}", r.groups);
+    assert_eq!(r.pixels, 2);
+
+    // Index 0 of the contexts is the config's own; index 1 has `CCCID` set to `look-01`.
+    let source = Source::FileWithEnv(context_test1(), "CCCID", "no-such-id");
+    let cases: Vec<Case> = [Some(1), Some(0), None]
+        .into_iter()
+        .map(|c| {
+            directed(
+                ("reference", "sRGB", "Raw", false, false),
+                "shot_look",
+                None,
+                c,
+            )
+        })
+        .collect();
+    let (r, with_context) = check("look context", &source, &cases, 3, &mut failures);
+    report("legacy_viewing_pipeline_look_context", &failures);
+    assert_eq!((r.made, r.refused), (1, 2), "{:?}", r.messages);
+    assert_eq!(with_context, 2);
+    assert_eq!(r.pixels, 2);
 }
 
 /// Generated pipelines of every built-in config.

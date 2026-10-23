@@ -84,6 +84,7 @@ colorspaces:
     name: cam
     isdata: false
     to_scene_reference: !<MatrixTransform> {matrix: [0.9, 0.1, 0, 0, 0.05, 0.9, 0.05, 0, 0, 0.1, 0.9, 0, 0, 0, 0, 1]}
+    from_scene_reference: !<ExponentTransform> {value: [1.8, 1.8, 1.8, 1]}
 
 named_transforms:
   - !<NamedTransform>

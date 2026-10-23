@@ -781,6 +781,24 @@ fn specials() -> Vec<f32> {
         nan(0xffc0_0044),
         nan(0x7fe5_5555),
     ];
+    // Inputs where the C runtime's `powf` isn't the correctly rounded `x * x` or `sqrt`
+    // (docs/improvements.md, I-337), found by scanning every float: slider units whose
+    // perceptual value in the range (0, 1) has `powf(x, 2) != x * x` on Windows (the square of
+    // `perceptualToLinear`), mixing values with `powf(x, 0.5) != sqrt(x)` on Windows, and
+    // mixing values with `powf(x, 0.5) != sqrtf(x)` on Linux (glibc, Rocky Linux 9).
+    v.extend(
+        [
+            0x3c44_8128u32,
+            0x3c44_9480,
+            0x3c44_acb0,
+            0x3c23_dc25,
+            0x3c23_ee81,
+            0x3c00_5972,
+            0x3c00_66c3,
+            0x3c00_68ea,
+        ]
+        .map(f32::from_bits),
+    );
     // The break points and their neighbours.
     for b in [0.18f32, 0.42426407] {
         for d in [-2i32, -1, 0, 1, 2] {

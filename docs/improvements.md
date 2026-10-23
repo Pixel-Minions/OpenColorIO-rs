@@ -3548,23 +3548,41 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `add_display_view`, `remove_display_view`); `display_view_helpers_oracle.rs`
   (`edits_match_the_wheel`) compares the config's text after every case, failed ones too.
 
-### I-337. A slider's `sliderToMixing` picks a different NaN on Windows and Linux
+### I-337. A slider's `sliderToMixing` differs on Windows and Linux (a NaN, and the square)
 
 - **Upstream:** `MixingSliderImpl::sliderToMixing` computes `getSliderMinEdge() + sliderUnits
-  * (getSliderMaxEdge() - getSliderMinEdge())` (`MixingHelpers.cpp:87-93` @ v2.5.2). MSVC
-  compiles it as `min + ((max - min) * units)`, GCC as `(units * (max - min)) + min` (Windows
-  `0x180043f62`-`0x180043f77`, Linux `0x15af83`-`0x15af98`). Where NaNs meet (a NaN edge and NaN
-  slider units, or NaN edges of different payloads), x86 returns the first operand's NaN, so
-  the wheels return different NaNs: with the edges NaN `a` and `b` and the units NaN `c`, in a
-  linear mixing space, Windows returns `a`, Linux `c`. Further on, the square of
-  `perceptualToLinear` is a `powf(x, 2.0f)` call on Windows and `x * x` on Linux; no input was
-  found where they differ (the slider grids of `mixing_helpers_oracle.rs`).
-- **Who notices:** nobody in practice: a slider whose edges or units are NaN.
-- **A fix:** none needed beyond picking one order (or refusing NaN edges, I-338).
+  * (getSliderMaxEdge() - getSliderMinEdge())` (`MixingHelpers.cpp:87-93` @ v2.5.2), and in a
+  linear mixing space squares the result of that with `std::pow(percept, GAMMA)`
+  (`perceptualToLinear`, `MixingHelpers.cpp:39-47`). The wheels differ in two ways.
+  - **The order of the sum.** MSVC compiles it as `min + ((max - min) * units)`, GCC as
+    `(units * (max - min)) + min` (Windows `0x180043f62`-`0x180043f77`, Linux
+    `0x15af83`-`0x15af98`). Where NaNs meet (a NaN edge and NaN slider units, or NaN edges of
+    different payloads), x86 returns the first operand's NaN, so the wheels return different
+    NaNs: with the edges NaN `a` and `b` and the units NaN `c`, in a linear mixing space,
+    Windows returns `a`, Linux `c`.
+  - **The square, for ordinary values.** `powf(x, 2.0f)` is a call of the C runtime's `powf`
+    on Windows (`0x180043fb9`-`0x180043fc4`) and `x * x` (`mulss`) on Linux (`0x15b018`). The
+    Windows `powf` is not correctly rounded, so the two differ by one ulp for 3,535,522
+    values of `x` in (0, 0.42426]. For the range (0, 1), `sliderToMixing(f32 0x3c448128)` is
+    `0x38d1c2f0` on the Windows wheel (a `powf`) and `0x38d1c2f1` on the Linux wheel (a
+    product); `0x3c449480` and `0x3c44acb0` differ in the same way.
+  - **The square root.** `linearToPerceptual` (`mixingToSlider`) calls `powf(x, 0.5f)` for
+    values up to 0.18 on both wheels, which is not `sqrt(x)` on either: on Windows for 90,752
+    values in (0, 0.18] (`powf(0.010001217, 0.5)` is `0x3dcccffd`, `sqrt` gives `0x3dcccffe`;
+    `mixingToSlider(0x3c23dc25)` is `0x3df59e54`, a `sqrt` would give `0x3df59e55`), on Linux
+    (glibc, Rocky Linux 9) for 663,525 values (`0x3c005972`, `0x3c0066c3`, `0x3c0068ea`,
+    ...). A port that used a square root, or `x * x` for the Windows square, would give other
+    bits for such values.
+- **Who notices:** nobody in practice for the NaNs (a slider whose edges or units are NaN); an
+  application that compares a slider's values across platforms, for the last bit of the
+  others.
+- **A fix:** none needed beyond picking one order (or refusing NaN edges, I-338) and one
+  correctly rounded square.
 - **Status:** ported per platform in `p5-helpers-2` (5.7e, `apphelpers/mixing_helpers.rs`,
-  `MixingSlider::slider_to_mixing` with `sse_add`/`sse_mul`, and `square`);
-  `mixing_helpers_oracle.rs` (`slider_specials_match_the_wheel`, every pair of edges with NaNs
-  of their own payloads) on both platforms.
+  `MixingSlider::slider_to_mixing` with `sse_add`/`sse_mul`, `square`, and `crt_powf`, which
+  keeps the C runtime's `powf` calls); `mixing_helpers_oracle.rs`
+  (`slider_specials_match_the_wheel`: every pair of edges with NaNs of their own payloads,
+  and the units and values named above) on both platforms.
 
 ### I-338. A slider's edges aren't checked
 

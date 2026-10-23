@@ -48,8 +48,12 @@ const LOGOFFSET: f32 = 0.83386419090511021;
 
 /// C `powf(base, exponent)`: the C runtime's, as both wheels call it. LLVM rewrites `powf` of
 /// a constant exponent (0.5 into a square root, 2 into a product) or base (10 into `exp10f`),
-/// which differ from the C runtime's `powf` for some inputs (a square root of `-inf` or of a
-/// negative NaN); hiding both operands keeps the call.
+/// which differ from the C runtime's `powf` for many ordinary inputs: the C runtime's `powf`
+/// is not correctly rounded, so it is off by one ulp where a square root or a product is
+/// exact (Windows: `powf(0.010001217, 0.5)` is `0x3dcccffd`, `sqrt` gives `0x3dcccffe`;
+/// glibc differs from `sqrtf` for 663,525 inputs in (0, 0.18]), and for a square root of
+/// `-inf` or of a negative NaN; hiding both operands keeps the call (docs/improvements.md,
+/// I-337).
 #[inline]
 fn crt_powf(base: f32, exponent: f32) -> f32 {
     std::hint::black_box(base).powf(std::hint::black_box(exponent))
@@ -72,8 +76,9 @@ fn linear_to_perceptual(linear: f32) -> f32 {
 /// `std::pow(percept, GAMMA)` as each wheel computes it: a `powf` call on Windows (MSVC), and
 /// a product `percept * percept` on Linux (GCC turns `powf(x, 2.0f)` into `mulss`;
 /// `perceptualToLinear`, inlined into `MixingSliderImpl::sliderToMixing`, Windows
-/// `0x180043fb9`-`0x180043fc4`, Linux `0x15b018`). NaN reaches it; no input was found where
-/// the two differ (docs/improvements.md, I-337).
+/// `0x180043fb9`-`0x180043fc4`, Linux `0x15b018`). The Windows `powf` is not correctly rounded, so
+/// the two differ for ordinary values too (`powf(x, 2)` is not `x * x` for 3,535,522 inputs in
+/// (0, 0.42426]; docs/improvements.md, I-337).
 #[inline]
 fn square(percept: f32) -> f32 {
     #[cfg(target_os = "windows")]

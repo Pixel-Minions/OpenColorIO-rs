@@ -902,3 +902,51 @@ fn edits_match_the_wheel() {
         reached.pixels
     );
 }
+
+/// A view added with a connection color space takes the connection's transform from the
+/// reference when it has one, else the inverse of its transform to the reference: `cam` has
+/// both (an exponent from the scene reference and a matrix to it, which are not each other's
+/// inverse), `log` only the transform to, `srgb` only the transform from.
+#[test]
+fn the_connection_color_space_gives_its_from_reference_transform_first() {
+    let source = Source::Yaml(PIPELINE_CONFIG);
+    let file = lut1d_green();
+    let cases: Vec<EditCase> = ["cam", "log", "srgb"]
+        .into_iter()
+        .map(|connection| EditCase {
+            active_displays: None,
+            active_views: None,
+            adds: vec![Add {
+                display: "d_srgb".to_string(),
+                view: format!("NEW_VIEW_{connection}"),
+                look: String::new(),
+                name: format!("new_cs_{connection}"),
+                family: String::new(),
+                description: String::new(),
+                categories: String::new(),
+                file: file.clone(),
+                connection: connection.to_string(),
+            }],
+            removes: Vec::new(),
+        })
+        .collect();
+    let mut failures = Vec::new();
+    let mut reached = Reached::default();
+    check_edits(
+        "connection",
+        &source,
+        &[],
+        &cases,
+        &mut failures,
+        &mut reached,
+    );
+    report("display_view_helpers_connection", &failures);
+    // Each add worked on both sides (and so did its processor).
+    assert_eq!(
+        (reached.made, reached.refused),
+        (3, 0),
+        "{:?}",
+        reached.messages
+    );
+    assert_eq!(reached.pixels, 6);
+}
