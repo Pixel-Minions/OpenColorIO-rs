@@ -67,6 +67,9 @@ fn format_value_and_trace(py: Python<'_>, err: &PyErr) -> Vec<u8> {
             b"<MESSAGE UNAVAILABLE DUE TO ANOTHER EXCEPTION>".to_vec()
         }
     };
+    // Deviation D-10 (owner decision 2026-10-22): the wheel's `PyList_Size` of an attribute that
+    // isn't a list fails, and its message holds "FAILURE obtaining len(__notes__): SystemError:"
+    // with CPython's error text, the interpreter's build path in it. The port lists no notes.
     // `PyList_Size` and `PyList_GET_ITEM` of the attribute (a list's own items); a note that
     // isn't a `str` is `PyUnicode_AsEncodedString`'s `PyErr_BadArgument`, a TypeError without
     // a traceback.

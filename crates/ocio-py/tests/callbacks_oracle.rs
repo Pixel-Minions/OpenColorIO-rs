@@ -661,6 +661,42 @@ fn threads_script() -> Script {
     sc
 }
 
+/// D-10: exceptions whose `__notes__` isn't a list (a tuple, a `str`, `None`), raised by a
+/// logging function in the config reader's message, as `what_script` does for lists.
+fn bad_notes_script() -> Script {
+    let mut sc = Script::new();
+    for notes in [t(vec![s("a"), s("b")]), s("abc"), none()] {
+        let exc = sc.call(n("ValueError"), vec![s("t")]);
+        sc.step(
+            json!({ "setattr": r(exc), "name": "__notes__", "value": notes }),
+            Expect::Value,
+        );
+        let class = raising_class(&mut sc, "Y", vec![], "__iter__", exc);
+        let y = sc.call(r(class), vec![]);
+        let f = sc.call(n("operator.methodcaller"), vec![s("join"), r(y)]);
+        sc.call(n("OCIO.SetLoggingFunction"), vec![r(f)]);
+        sc.raises(n("OCIO.Config.CreateFromStream"), vec![s(WARNING_CONFIG)]);
+        sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    }
+    sc
+}
+
+/// The start of the line the wheel's `what()` holds for a `__notes__` that isn't a list
+/// (`PyList_Size`'s `PyErr_BadInternalCall`: its text names the interpreter's build path), and
+/// the end of that line.
+const BAD_NOTES_LINE: &str = "\nFAILURE obtaining len(__notes__): SystemError: ";
+const BAD_NOTES_TAIL: &str = "listobject.c:342: bad argument to internal function";
+
+/// The wheel's message without [`BAD_NOTES_LINE`] and its text, which it must hold once.
+fn without_bad_notes_line(wheel: &str) -> String {
+    assert_eq!(wheel.matches(BAD_NOTES_LINE).count(), 1, "{wheel:?}");
+    let start = wheel.find(BAD_NOTES_LINE).unwrap();
+    let end = start + 1 + wheel[start + 1..].find('\n').expect(wheel);
+    let line = &wheel[start..end];
+    assert!(line.ends_with(BAD_NOTES_TAIL), "{line:?}");
+    format!("{}{}", &wheel[..start], &wheel[end..])
+}
+
 /// The text of a report's exception message.
 fn message(step: &Value) -> String {
     String::from_utf8(ocio_testkit::oracle_values::bytes(
@@ -712,6 +748,51 @@ fn callbacks_as_the_wheels() {
     ]) {
         for part in parts {
             assert!(m.contains(part), "{part:?} in {m:?}");
+        }
+    }
+
+    // D-10: a `__notes__` that isn't a list. The wheel's what() has the line of CPython's own
+    // error for it, with the interpreter's build path; the port's lists no notes, and is the
+    // wheel's message without that line, in every other byte.
+    let bad = bad_notes_script();
+    let theirs = common::wheel(&[bad.json()]).remove(0);
+    let ours = common::port(&bad.json());
+    let raised = |report: &Value| -> Vec<String> {
+        report["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|st| st.get("raised").is_some())
+            .map(message)
+            .collect()
+    };
+    let (wheel, port) = (raised(&theirs), raised(&ours));
+    assert_eq!(wheel.len(), 3, "{theirs}");
+    assert_eq!(port.len(), 3, "{ours}");
+    for (w, p) in wheel.iter().zip(&port) {
+        let head = "ValueError[WITH __notes__]: t\n";
+        assert!(
+            w.contains(&format!("{head}{}", &BAD_NOTES_LINE[1..])),
+            "{w:?}"
+        );
+        assert!(p.contains(&format!("{head}\nAt:\n  ")), "{p:?}");
+        assert!(
+            !p.contains("FAILURE") && !p.contains("__notes__ (len"),
+            "{p:?}"
+        );
+        assert_eq!(&without_bad_notes_line(w), p);
+    }
+    // The rest of the two reports is equal: the other steps, and the raised types.
+    let (theirs_steps, ours_steps) = (
+        theirs["steps"].as_array().unwrap(),
+        ours["steps"].as_array().unwrap(),
+    );
+    assert_eq!(theirs_steps.len(), ours_steps.len());
+    for (j, (a, b)) in theirs_steps.iter().zip(ours_steps).enumerate() {
+        if a.get("raised").is_some() {
+            assert_eq!(a["raised"]["type"], b["raised"]["type"], "step {j}");
+        } else {
+            assert_eq!(a, b, "step {j}");
         }
     }
 
