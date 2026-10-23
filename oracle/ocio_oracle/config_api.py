@@ -132,7 +132,8 @@ def _transform(spec_):
 
 def value_in(v, objects):
     """A call argument:
-    - {"enum": "NAME"}: the PyOpenColorIO enum value of that name;
+    - {"enum": "NAME"}: the PyOpenColorIO enum value of that name, or {"enum": "Class.NAME"},
+      one only a class of the binding exports (spec.enum_member);
     - {"transform": <spec>}: a transform (spec.transform);
     - {"f64": bits}: the float with those bits;
     - {"bytes": hex}: those bytes;
@@ -143,10 +144,10 @@ def value_in(v, objects):
     if isinstance(v, dict):
         keys = set(v)
         if keys == {"enum"}:
-            member = getattr(OCIO, v["enum"], None) if isinstance(v["enum"], str) else None
-            if member is None or not hasattr(type(member), "__members__"):
-                raise RequestError(f"unknown enum value {v['enum']!r}")
-            return member
+            try:
+                return spec.enum_member(v["enum"])
+            except ValueError as exc:
+                raise RequestError(f"unknown enum value {v['enum']!r}") from exc
         if keys == {"transform"}:
             return _transform(v["transform"])
         if keys == {"f64"}:
