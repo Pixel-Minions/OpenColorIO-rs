@@ -210,6 +210,10 @@ pub(crate) fn vector_arg(obj: &Bound<'_, PyAny>, convert: bool) -> PyResult<Opti
     if !convert || !(obj.is_instance_of::<PyList>() || obj.is_instance_of::<PyByteArray>()) {
         return Ok(None);
     }
+    // The conversion runs with the GIL held and no Python code in between, as the wheel's does;
+    // the first `import operator` (`len_hint`) is Python code, which lets another thread run and
+    // find the flag set. Imported before the flag is set, it can't.
+    let _ = obj.py().import("operator");
     {
         let mut busy = CONVERTING
             .lock()
