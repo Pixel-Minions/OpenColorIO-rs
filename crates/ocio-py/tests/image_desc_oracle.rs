@@ -587,6 +587,22 @@ fn planar_script() -> Script {
             }
         }
     }
+    // A plane of one item that repeats (a stride of 0): its getter's one item is its span.
+    let base = sc.eval(arr("<f4", &[8], &le32(&F32_BITS[..8])), &[]);
+    let tail = sc.call(n("slice"), vec![i(5), none()]);
+    let from_five = sc.call(n("operator.getitem"), vec![r(base), r(tail)]);
+    let one = sc.call_kw(
+        n("numpy.lib.stride_tricks.as_strided"),
+        vec![r(from_five)],
+        vec![("shape", t(vec![i(1)])), ("strides", t(vec![i(0)]))],
+        Expect::Value,
+    );
+    let k = image(
+        &mut sc,
+        n("OCIO.PlanarImageDesc"),
+        vec![r(one), r(one), r(one), i(1), i(1)],
+    );
+    getters(&mut sc, k, false);
     let halves: Vec<usize> = (0..4)
         .map(|k| sc.eval(arr("<f2", &[2], &le16(&F16_BITS[2 * k..2 * k + 2])), &[]))
         .collect();
@@ -802,6 +818,69 @@ fn repr_prints_an_address_as_the_wheels_cpp_library() {
     assert_ne!(text(&ours, rp), text(&ours, 1));
 }
 
+/// An image description's constructor reads none of the buffer's memory, as the wheel's (which
+/// makes one over an array while another thread's in-place `applyRGBA` of it runs): it runs
+/// while another thread's call holds the memory to write. `getData`, which reads the items, is
+/// refused meanwhile (U-150), and runs once that call is done.
+#[test]
+fn a_constructor_reads_no_memory() {
+    use pyo3::prelude::*;
+    use std::sync::{Arc, Barrier};
+    common::start_python();
+    let array = pyo3::Python::attach(|py| {
+        py.eval(c"__import__('numpy').arange(16, dtype='<f4')", None, None)
+            .unwrap()
+            .unbind()
+    });
+    let held = Arc::new(Barrier::new(2));
+    let tried = Arc::new(Barrier::new(2));
+    let (h, t) = (held.clone(), tried.clone());
+    let a = pyo3::Python::attach(|py| array.clone_ref(py));
+    let worker = std::thread::spawn(move || {
+        h.wait();
+        let made = pyo3::Python::attach(|py| {
+            let globals = pyo3::types::PyDict::new(py);
+            globals.set_item("a", a.bind(py)).unwrap();
+            let code = c"
+import PyOpenColorIO as OCIO
+d = OCIO.PackedImageDesc(a, 2, 2, 4)
+p = OCIO.PlanarImageDesc(a[:4], a[4:8], a[8:12], a[12:], 2, 2)
+try:
+    d.getData()
+except BufferError as e:
+    assert 'U-150' in str(e), str(e)
+else:
+    raise AssertionError('getData read memory another call writes')
+";
+            py.run(code, Some(&globals), None)
+                .map(|_| globals.get_item("d").unwrap().unwrap().unbind())
+        });
+        t.wait();
+        made
+    });
+    pyo3::Python::attach(|py| {
+        let buffer = ocio_py_ffi::Buffer::request(array.bind(py)).unwrap();
+        ocio_py_ffi::with_bytes(py, &[(&buffer, true)], |_, _| {
+            held.wait();
+            tried.wait();
+        })
+        .unwrap();
+    });
+    let d = worker.join().unwrap().unwrap_or_else(|e| panic!("{e}"));
+    pyo3::Python::attach(|py| {
+        let data = d.bind(py).call_method0("getData").unwrap();
+        let expected = array.bind(py);
+        assert!(
+            data.call_method1("__eq__", (expected,))
+                .unwrap()
+                .call_method0("all")
+                .unwrap()
+                .is_truthy()
+                .unwrap()
+        );
+    });
+}
+
 /// Runs `code` in the port's module (the embedded interpreter), which asserts what it expects.
 fn port_run(code: &str) {
     common::start_python();
@@ -857,6 +936,13 @@ assert q.getXStrideBytes() == -4
 for get in ["getRData", "getGData", "getBData", "getAData"]:
     refused(getattr(q, get), BufferError, "U-148")
 
+# At the span's end: planes whose two items repeat (a stride of 0) span one item, and their
+# getters copy two items forward from it: the second is outside the span, by one item.
+two = np.lib.stride_tricks.as_strided(np.arange(8, dtype=np.float32)[5:], shape=(2,), strides=(0,))
+q2 = OCIO.PlanarImageDesc(two, two, two, 2, 1, OCIO.BIT_DEPTH_F32, 0, 0)
+for get in ["getRData", "getGData", "getBData"]:
+    refused(getattr(q2, get), BufferError, "U-148")
+
 flat = [np.arange(4, dtype=np.float32) + k for k in range(3)]
 r = OCIO.PlanarImageDesc(*flat, 2, 2)
 refused(r.getAData, ValueError, "U-149")
@@ -866,7 +952,9 @@ refused(r.getAData, ValueError, "U-149")
 a = np.arange(16, dtype=np.float32)
 for args in [(a, 2, 2, 4, OCIO.BIT_DEPTH_F32, 4, 16, 64),
              (a, 2, 2, 4, OCIO.BIT_DEPTH_F32, 8, 32, 64),
-             (a[:8], 1, 2, 4, OCIO.BIT_DEPTH_F32, OCIO.AutoStride, OCIO.AutoStride, 64)]:
+             (a[:8], 1, 2, 4, OCIO.BIT_DEPTH_F32, OCIO.AutoStride, OCIO.AutoStride, 64),
+             # One value past the buffer's end.
+             (a[:8], 2, 1, 4, OCIO.BIT_DEPTH_F32, 4, 20, 40)]:
     try:
         OCIO.PackedImageDesc(*args)
     except OCIO.Exception as e:
@@ -874,13 +962,16 @@ for args in [(a, 2, 2, 4, OCIO.BIT_DEPTH_F32, 4, 16, 64),
                           "the image buffer."), str(e)
     else:
         raise AssertionError("no error")
-try:
-    OCIO.PlanarImageDesc(a[:4], a[:4], a[:4], 2, 2, OCIO.BIT_DEPTH_F32, 4, 16)
-except OCIO.Exception as e:
-    assert str(e) == ("PlanarImageDesc Error: The strides and dimensions reach outside "
-                      "the image buffer."), str(e)
-else:
-    raise AssertionError("no error")
+for planes in [(a[:4], 2, 2, OCIO.BIT_DEPTH_F32, 4, 16),
+               # One value past each plane's end.
+               (a[:2], 2, 1, OCIO.BIT_DEPTH_F32, 8, 16)]:
+    try:
+        OCIO.PlanarImageDesc(planes[0], planes[0], planes[0], *planes[1:])
+    except OCIO.Exception as e:
+        assert str(e) == ("PlanarImageDesc Error: The strides and dimensions reach outside "
+                          "the image buffer."), str(e)
+    else:
+        raise AssertionError("no error")
 assert np.array_equal(r.getBData(), flat[2])
 "#,
     );

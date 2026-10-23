@@ -555,6 +555,23 @@ fn apply_script() -> Script {
     let same = planar(&mut sc, vec![r(one), r(one), r(one), r(one), i(4), i(1)]);
     sc.call(ra(f32_cpu, "apply"), vec![r(same)]);
     sc.eval(r(one), &[]);
+    // Adjacent views of one array (the source's last byte next to the destination's first).
+    let u8_cpu = cpu(&mut sc, m, Some(("UINT8", "UINT8")));
+    let x = sc.eval(arr("|u1", &[8], &U8S[4..12]), &[]);
+    let views: Vec<usize> = [(0, 4), (4, 8)]
+        .into_iter()
+        .map(|(from, to)| {
+            let part = sc.call(n("slice"), vec![i(from), i(to)]);
+            let view = sc.call(n("operator.getitem"), vec![r(x), r(part)]);
+            let u8 = n("OCIO.BIT_DEPTH_UINT8");
+            image(
+                &mut sc,
+                vec![r(view), i(1), i(1), i(4), u8, i(1), i(4), i(4)],
+            )
+        })
+        .collect();
+    sc.call(ra(u8_cpu, "apply"), vec![r(views[0]), r(views[1])]);
+    sc.eval(r(x), &[]);
     // The casters (an image description's repr, its address, would be in the TypeError).
     sc.raises(ra(f32_cpu, "apply"), vec![i(1)]);
     sc.raises(ra(f32_cpu, "apply"), vec![i(1), i(2)]);
@@ -562,11 +579,87 @@ fn apply_script() -> Script {
     sc
 }
 
+/// `ba.extend(b"x")`, which succeeds only once no export of the bytearray `ba` lasts (CPython
+/// refuses to resize a bytearray with one), then the bytearray.
+fn released(sc: &mut Script, ba: usize) {
+    sc.call(ra(ba, "extend"), vec![common::script::by(b"x")]);
+    sc.eval(r(ba), &[]);
+}
+
+/// Every entry point gives the buffer's export back on its error paths, and for buffers
+/// without items: a bytearray resized after each call, as the wheel's. And the C-contiguity
+/// check of empty arrays, whose exported strides have a 0 after a dimension of 0 items.
+fn releases_script() -> Script {
+    let mut sc = Script::new();
+    let m = scale(&mut sc);
+    let f32_cpu = cpu(&mut sc, m, None);
+    let u8_cpu = cpu(&mut sc, m, Some(("UINT8", "UINT8")));
+    for method in ["applyRGB", "applyRGBA"] {
+        // Not divisible by 3 (applyRGB); the library's bit-depth error (applyRGBA).
+        let ba = sc.call(n("bytearray"), vec![common::script::by(&U8S[..8])]);
+        sc.raises(ra(f32_cpu, method), vec![r(ba)]);
+        released(&mut sc, ba);
+        // No items: the library's error.
+        let ba = sc.call(n("bytearray"), vec![]);
+        sc.raises(ra(u8_cpu, method), vec![r(ba)]);
+        released(&mut sc, ba);
+        // Processed.
+        let ba = sc.call(n("bytearray"), vec![common::script::by(&U8S)]);
+        sc.call(ra(u8_cpu, method), vec![r(ba)]);
+        released(&mut sc, ba);
+        for shape in [vec![2, 0, 3], vec![3, 0], vec![0, 4], vec![2, 0, 6]] {
+            let shape = common::script::t(shape.into_iter().map(i).collect());
+            let empty = sc.call(n("numpy.zeros"), vec![shape, s("<f4")]);
+            sc.raises(ra(f32_cpu, method), vec![r(empty)]);
+        }
+    }
+    // The LUTs' setData: the type check, with items and without.
+    for lut in ["OCIO.Lut1DTransform", "OCIO.Lut3DTransform"] {
+        let t = sc.call(n(lut), vec![]);
+        let ba = sc.call(n("bytearray"), vec![common::script::by(&U8S)]);
+        sc.raises(ra(t, "setData"), vec![r(ba)]);
+        released(&mut sc, ba);
+        let ba = sc.call(n("bytearray"), vec![]);
+        sc.raises(ra(t, "setData"), vec![r(ba)]);
+        released(&mut sc, ba);
+    }
+    // The image descriptions' constructors: the type check; the size check; no items.
+    let ba = sc.call(n("bytearray"), vec![common::script::by(&U8S[..8])]);
+    sc.raises(n("OCIO.PackedImageDesc"), vec![r(ba), i(2), i(1), i(4)]);
+    released(&mut sc, ba);
+    let auto = || n("OCIO.AutoStride");
+    let u8 = || n("OCIO.BIT_DEPTH_UINT8");
+    let ba = sc.call(n("bytearray"), vec![common::script::by(&U8S[..6])]);
+    sc.raises(
+        n("OCIO.PackedImageDesc"),
+        vec![r(ba), i(2), i(1), i(4), u8(), auto(), auto(), auto()],
+    );
+    released(&mut sc, ba);
+    let ba = sc.call(n("bytearray"), vec![common::script::by(&U8S[..3])]);
+    sc.raises(
+        n("OCIO.PlanarImageDesc"),
+        vec![r(ba), r(ba), r(ba), i(2), i(2), u8(), auto(), auto()],
+    );
+    released(&mut sc, ba);
+    let ba = sc.call(n("bytearray"), vec![]);
+    sc.raises(
+        n("OCIO.PlanarImageDesc"),
+        vec![r(ba), r(ba), r(ba), i(0), i(0), u8(), auto(), auto()],
+    );
+    released(&mut sc, ba);
+    sc
+}
+
 /// Each method behaves as the wheel's.
 #[test]
 fn the_methods_behave_as_the_wheels() {
     start();
-    let scripts = [getters_script(), apply_rgb_script(), apply_script()];
+    let scripts = [
+        getters_script(),
+        apply_rgb_script(),
+        apply_script(),
+        releases_script(),
+    ];
     compare(&scripts);
 }
 
@@ -619,6 +712,16 @@ dst = OCIO.PackedImageDesc(a[4:12], 2, 1, 4)
 refused(lambda: cpu.apply(src, dst), BufferError, "U-150")
 assert np.array_equal(a, np.arange(16, dtype=np.float32))
 
+# Sharing exactly one byte: the source's alpha is the destination's red.
+u8 = OCIO.Config.CreateRaw().getProcessor(m).getOptimizedCPUProcessor(
+    OCIO.BIT_DEPTH_UINT8, OCIO.BIT_DEPTH_UINT8, OCIO.OPTIMIZATION_DEFAULT)
+x = np.arange(7, dtype=np.uint8)
+U8 = OCIO.BIT_DEPTH_UINT8
+src = OCIO.PackedImageDesc(x[0:4], 1, 1, 4, U8, 1, 4, 4)
+dst = OCIO.PackedImageDesc(x[3:7], 1, 1, 4, U8, 1, 4, 4)
+refused(lambda: u8.apply(src, dst), BufferError, "U-150")
+assert np.array_equal(x, np.arange(7, dtype=np.uint8))
+
 p = np.arange(8, dtype=np.float32)
 q = np.arange(4, dtype=np.float32)
 mixed = OCIO.PlanarImageDesc(p[:4], p[2:6], q, 4, 1)
@@ -627,6 +730,81 @@ assert np.array_equal(p, np.arange(8, dtype=np.float32))
 
 cpu.apply(img)
 assert not np.array_equal(a, np.arange(16, dtype=np.float32))
+"#,
+    );
+}
+
+/// Each entry point that requests a buffer gives every export back, whatever its path: an
+/// exporter of Python code counts the requests and releases (`__buffer__`,
+/// `__release_buffer__`), which balance after each call, and its bytearray can be resized
+/// again. Each call's outcome (raised or not) is asserted too, so that a call that went wrong
+/// some other way doesn't pass.
+#[test]
+fn every_entry_point_gives_its_exports_back() {
+    port_run(
+        r#"
+import PyOpenColorIO as OCIO, numpy as np
+
+class Exporter:
+    def __init__(self, n, fmt="f", shape=None):
+        self.ba = bytearray(np.arange(n, dtype=np.float32).tobytes())
+        self.fmt, self.shape, self.requests, self.releases = fmt, shape, 0, 0
+    def __buffer__(self, flags):
+        self.requests += 1
+        m = memoryview(self.ba).cast("B")
+        return m.cast(self.fmt) if self.shape is None else m.cast(self.fmt, self.shape)
+    def __release_buffer__(self, view):
+        self.releases += 1
+        view.release()
+
+def check(name, obj, call, raised):
+    try:
+        call()
+        outcome = None
+    except Exception as e:
+        outcome = type(e)
+    assert outcome is raised, (name, outcome)
+    assert obj.requests > 0 and obj.requests == obj.releases, (name, obj.requests, obj.releases)
+    obj.ba.extend(b"1234")
+    del obj.ba[-4:]
+
+m = OCIO.MatrixTransform.Scale([0.5, 0.5, 0.5, 1.0])
+cpu = OCIO.Config.CreateRaw().getProcessor(m).getDefaultCPUProcessor()
+F32 = OCIO.BIT_DEPTH_F32
+auto = OCIO.AutoStride
+
+e = Exporter(12); check("applyRGB", e, lambda: cpu.applyRGB(e), None)
+e = Exporter(8); check("applyRGB not divisible", e, lambda: cpu.applyRGB(e), RuntimeError)
+e = Exporter(12, shape=[3, 4]); check("applyRGBA 2d", e, lambda: cpu.applyRGBA(e), None)
+e = Exporter(12, fmt="i"); check("applyRGB int32", e, lambda: cpu.applyRGB(e), RuntimeError)
+e = Exporter(12, fmt="B"); check("applyRGB uint8", e, lambda: cpu.applyRGB(e), OCIO.Exception)
+e = Exporter(0); check("applyRGB empty", e, lambda: cpu.applyRGB(e), OCIO.Exception)
+e = Exporter(16)
+def packed():
+    d = OCIO.PackedImageDesc(e, 4, 1, 4)
+    cpu.apply(d)
+    d.getData()
+    cpu.apply(d, d)
+check("packed", e, packed, None)
+e = Exporter(12); check("packed size", e, lambda: OCIO.PackedImageDesc(e, 4, 1, 4), RuntimeError)
+e = Exporter(16, fmt="i"); check("packed type", e, lambda: OCIO.PackedImageDesc(e, 4, 1, 4), RuntimeError)
+# A layout reaching outside the buffer: the port's error (D-2), where the wheel makes it.
+e = Exporter(16); check("packed outside", e, lambda: OCIO.PackedImageDesc(e, 4, 1, 4, F32, 4, 32, 128), OCIO.Exception)
+e = Exporter(0); check("packed empty", e, lambda: OCIO.PackedImageDesc(e, 0, 0, 4), OCIO.Exception)
+e = Exporter(4)
+def planar():
+    d = OCIO.PlanarImageDesc(e, e, e, e, 2, 2)
+    cpu.apply(d)
+    d.getRData()
+check("planar", e, planar, None)
+e = Exporter(3); check("planar size", e, lambda: OCIO.PlanarImageDesc(e, e, e, 2, 2), RuntimeError)
+e = Exporter(4, fmt="i"); check("planar type", e, lambda: OCIO.PlanarImageDesc(e, e, e, 2, 2), RuntimeError)
+e = Exporter(6); check("lut1d", e, lambda: OCIO.Lut1DTransform().setData(e), None)
+e = Exporter(6, fmt="i"); check("lut1d type", e, lambda: OCIO.Lut1DTransform().setData(e), RuntimeError)
+e = Exporter(7); check("lut1d size", e, lambda: OCIO.Lut1DTransform().setData(e), RuntimeError)
+e = Exporter(24); check("lut3d", e, lambda: OCIO.Lut3DTransform().setData(e), None)
+e = Exporter(24, fmt="i"); check("lut3d type", e, lambda: OCIO.Lut3DTransform().setData(e), RuntimeError)
+e = Exporter(0); check("lut3d empty", e, lambda: OCIO.Lut3DTransform().setData(e), None)
 "#,
     );
 }

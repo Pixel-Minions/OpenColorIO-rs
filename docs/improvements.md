@@ -5230,16 +5230,25 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** `PackedImageDesc.getData` and the planar getters copy items forward from the
   data pointer (I-328), as do the LUTs' `setData`: for a view whose data pointer is its last
-  item (a reversed NumPy view, negative strides), they read past the buffer's memory.
+  item (a reversed NumPy view, negative strides), or whose items repeat (a stride of 0), they
+  read past the buffer's items. That memory may still be inside the exporter's allocation, a
+  larger array the view is of: with `big = np.arange(100, dtype=np.float32)`,
+  `Lut1DTransform().setData(big[10:34][::-1])` reads forward from `big[33]` and returns
+  `[33.0, 34.0, ...]` in the wheel, and a stride-0 `as_strided` view of `big[50:]` returns
+  `[50.0, 51.0, ...]`; or past its end.
 - **Who notices:** Python code that passes reversed or otherwise backward views.
 - **A fix:** read the items by their strides (I-328's fix).
 - **Status:** the port raises BufferError "...: the items reach outside the buffer's memory,
-  which the wheel reads past (docs/improvements.md, U-148)" when an item it reads isn't in the
-  span of the buffer's items (`crates/ocio-py/src/py_image_desc.rs`, `read_items`;
-  `transforms/py_lut1d_transform.rs`, `py_lut3d_transform.rs`), in `p6-buffers` (6.5a, 6.5b);
-  `image_desc_oracle.rs`, `lut_transforms_oracle.rs`. An image layout that reaches outside
-  its buffer, which the wheel's binding doesn't check (only the entry count), is refused when
-  the description is made (D-2).
+  which the wheel reads past (docs/improvements.md, U-148)" when a byte it reads isn't in the
+  span of the buffer's items, the bytes from its lowest item to its highest
+  (`crates/ocio-py/src/py_image_desc.rs`, `read_items`; `transforms/py_lut1d_transform.rs`,
+  `py_lut3d_transform.rs`), in `p6-buffers` (6.5a, 6.5b); `image_desc_oracle.rs`,
+  `lut_transforms_oracle.rs`. The span is all the buffer protocol says of the memory: the
+  exporter's allocation, which the wheel may stay inside of (the examples above), isn't known
+  to the binding, so the port refuses every read outside the span, those the wheel answers
+  included (sound, not the wheel's answer). An image layout that reaches outside its buffer,
+  which the wheel's binding doesn't check (only the entry count), is refused when the
+  description is made (D-2).
 
 ### U-149. The alpha plane of a planar image without one
 
@@ -5271,12 +5280,24 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   library's own checks passed (on copies of the memory, so its error comes first, as the
   wheel's), it raises BufferError "CPUProcessor.apply: the source and destination images
   share memory without being the same image ... (docs/improvements.md, U-150)", or
-  "PlanarImageDesc: some of its planes share memory and others don't ... (U-150)". Memory that
-  a call of the port's binding writes on one thread is refused to its calls on others
-  meanwhile ("another call (of another thread) is using the buffer's memory ...", `ocio-py-ffi`,
-  `with_bytes`). Python code that writes the memory itself while the GIL is released is the
-  program's data race, as with the wheel; the port doesn't see it. In `p6-buffers` (6.5a: the
-  lending, `buffer_ffi.rs`; 6.5b: `crates/ocio-py/src/py_cpu_processor.rs`,
+  "PlanarImageDesc: some of its planes share memory and others don't ... (U-150)".
+  Between threads, memory that a call of the port's binding writes on one thread is refused to
+  its calls on others meanwhile, judged by the span of each buffer's items (the bytes from its
+  lowest item to its highest): "another call (of another thread) is using memory in the span
+  of the buffer's items ... (docs/improvements.md, U-150)" (`ocio-py-ffi`, `with_bytes`). So
+  two threads applying in place to the left and right halves of one image's rows, whose items
+  are disjoint but whose spans interleave, are refused, though the wheel doesn't race there
+  (its threads touch different bytes); this stays an error. An image description's
+  constructor reads no memory, as the wheel's, and runs meanwhile.
+  What the port relies on and can't check, as the wheel's raw pointer does: that the exporter
+  keeps the memory where it is while the export lasts (not all do: `ctypes.resize(obj, n)` and
+  `ndarray.resize(..., refcheck=False)` reallocate under an export, so another thread can free
+  the memory under a live slice of the port, as under the wheel's pointer); and that Python
+  code another thread runs meanwhile doesn't write the memory itself, a data race with the
+  wheel too. The port's slices cover the bytes between items as well (the gaps of a strided
+  view), which the wheel doesn't touch: another thread writing them races with nothing in the
+  wheel, and writes under a slice of the port that it doesn't access there. In `p6-buffers`
+  (6.5a: the lending, `buffer_ffi.rs`; 6.5b: `crates/ocio-py/src/py_cpu_processor.rs`,
   `cpu_processor_oracle.rs`).
 
 ### U-151. A pipeline given an invalid FixedFunctionTransform
@@ -5352,7 +5373,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   memoryviews over a `__buffer__` method) never give such a view for this request.
 - **A fix:** none in OCIO: pybind11 trusts the exporter.
 - **Status:** the port refuses such a view (and a negative number of dimensions, dimension or
-  item size, items without memory, items whose span doesn't fit in the address space) with
+  item size, items without memory, items whose span doesn't fit in the address space, or
+  whose span's sums leave 128 bits: a view of 16 or more dimensions of about 2^62 items, which
+  no memory holds, checked) with
   BufferError "...: the view breaks the buffer protocol where pybind11 reads it
   (docs/improvements.md, U-157)", once the export is made, which it then releases
   (`crates/ocio-py/ffi/src/lib.rs`, `Buffer::request`), in `p6-buffers` (6.5a). Not reachable

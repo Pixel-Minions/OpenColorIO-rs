@@ -9,7 +9,8 @@
 //! memory lives, and the library's description over the pointer each buffer had then (`m_img`).
 //! The port's library describes memory it borrows, so an [`Image`] keeps the buffer objects,
 //! their addresses then, its constructor's arguments, and the getters' values, which the
-//! library's description made by the constructor gave. Whenever it is used, it requests the
+//! library's checks of that description gave over the length of each buffer's memory (the
+//! constructor reads none of it, as the wheel's). Whenever it is used, it requests the
 //! buffers again ([`Image::request`]), and processing makes the library's description again
 //! over their memory, with the same checks ([`describe`]):
 //! - a buffer whose memory has moved since (a `bytearray` or an array resized) is the port's
@@ -20,7 +21,8 @@ use std::ffi::c_long;
 use std::sync::Arc;
 
 use ocio_ops::image_desc::{
-    At, Bytes, ImageDesc, ImageDescMut, ImageLayout, PackedImageDesc, PlanarImageDesc,
+    At, Bytes, ImageDesc, ImageDescMut, ImageLayout, PackedChannels, PackedImageDesc,
+    PlanarImageDesc, packed_layout, planar_layout,
 };
 use ocio_ops::open_color_types::{BitDepth, ChannelOrdering};
 use ocio_py_ffi::Buffer;
@@ -286,32 +288,77 @@ where
     .map_err(DescribeError::Library)
 }
 
+/// What [`describe`] makes of `args` over memory of the lengths `memory` gives, each buffer's
+/// first item at its offset (as [`read_memory`] gives them: one byte for a buffer with an address
+/// and no items), without the memory: the layout, and the packed image's own getters.
+fn layout_of(
+    args: &ImageArgs,
+    memory: &[(usize, usize)],
+) -> ocio::Result<(ImageLayout, Option<PackedGetters>)> {
+    match *args {
+        ImageArgs::Packed {
+            width,
+            height,
+            channels,
+            strides,
+        } => {
+            let (len, origin) = memory[0];
+            let channels = match channels {
+                Channels::Count(n) => PackedChannels::Count(size(n)),
+                Channels::Order(order) => PackedChannels::Order(order),
+            };
+            let made = packed_layout(len, origin, size(width), size(height), channels, strides)?;
+            let getters = PackedGetters {
+                chan_order: made.chan_order,
+                num_channels: made.num_channels,
+                chan_stride_bytes: made.chan_stride_bytes,
+            };
+            Ok((made.layout, Some(getters)))
+        }
+        ImageArgs::Planar {
+            width,
+            height,
+            strides,
+        } => {
+            let layout = planar_layout(
+                memory[0],
+                memory[1],
+                memory[2],
+                memory.get(3).copied(),
+                size(width),
+                size(height),
+                strides,
+            )?;
+            Ok((layout, None))
+        }
+    }
+}
+
 impl Image {
     /// Makes an image of `args` over `buffers` (each object with its request), as the
-    /// constructor does once the binding's checks passed: the library's description over the
-    /// buffers' memory, its checks and errors, and the getters' values.
+    /// constructor does once the binding's checks passed: the library's checks and errors, and
+    /// the getters' values. As the wheel's constructor, which reads none of the pixels, it
+    /// reads no memory: the library's description is checked over the length of each buffer's
+    /// span ([`layout_of`]), so a constructor runs while another thread's call writes the
+    /// buffer.
     pub(crate) fn make(
         py: Python<'_>,
         buffers: Vec<(Bound<'_, PyAny>, Buffer)>,
         args: ImageArgs,
     ) -> PyResult<Image> {
-        let lends: Vec<(&Buffer, bool)> = buffers.iter().map(|(_, b)| (b, false)).collect();
-        let addressed: Vec<bool> = buffers.iter().map(|(_, b)| b.info().ptr != 0).collect();
-        let made = ocio_py_ffi::with_bytes(py, &lends, move |regions, places| {
-            let memory = read_memory(&regions, &places, &addressed);
-            describe(&args, memory).map(|d| {
-                let packed = match &d {
-                    Described::Packed(p) => Some(PackedGetters {
-                        chan_order: p.channel_order(),
-                        num_channels: p.num_channels(),
-                        chan_stride_bytes: p.chan_stride_bytes(),
-                    }),
-                    Described::Planar(_) => None,
-                };
-                (*d.desc().layout(), packed)
+        let memory: Vec<(usize, usize)> = buffers
+            .iter()
+            .map(|(_, b)| {
+                let (start, end) = b.span();
+                if start == end && b.info().ptr != 0 {
+                    (NOT_NULL, 0)
+                } else {
+                    (end - start, b.span_offset())
+                }
             })
-        })?;
-        let (layout, packed) = made.map_err(|e| e.into_py(py))?;
+            .collect();
+        let (layout, packed) =
+            layout_of(&args, &memory).map_err(|e| crate::py_open_color_io::to_py_err(py, &e))?;
         Ok(Image {
             data: buffers.iter().map(|(o, _)| o.clone().unbind()).collect(),
             ptrs: buffers.iter().map(|(_, b)| b.info().ptr).collect(),

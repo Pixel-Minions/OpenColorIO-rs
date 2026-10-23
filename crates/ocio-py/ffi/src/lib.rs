@@ -371,9 +371,11 @@ pub struct BufferInfo {
 
 /// A Python object's buffer as pybind11's `py::buffer::request()` gets it: exported by the
 /// object (`PyObject_GetBuffer` with `PyBUF_STRIDES | PyBUF_FORMAT`: strides and the format, not
-/// writable, no suboffsets) until dropped (`PyBuffer_Release`). While the export lasts, the
-/// exporter keeps its items' memory where [`Buffer::info`] says (CPython refuses to resize a
-/// `bytearray`, NumPy an array, that has an export).
+/// writable, no suboffsets) until dropped (`PyBuffer_Release`). While the export lasts, an
+/// exporter that keeps the buffer protocol keeps its items' memory where [`Buffer::info`] says
+/// (CPython refuses to resize a `bytearray` that has an export, NumPy an array, `mmap` to close).
+/// Not every exporter does: `ctypes.resize(obj, n)` and `ndarray.resize(..., refcheck=False)`
+/// reallocate the memory while an export of it lasts, as they do under the wheel's raw pointer.
 #[derive(Debug)]
 pub struct Buffer {
     /// The view the exporter filled, allocated in [`Buffer::request`] and freed on drop: at a
@@ -478,7 +480,7 @@ impl Buffer {
             strides,
             readonly: raw.readonly != 0,
         };
-        let Some(span) = span(&buffer.info) else {
+        let Some(span) = items_span(&buffer.info) else {
             return refused("the buffer's items don't fit in the address space");
         };
         if span.1 > 0 && buffer.buf.is_null() {
@@ -535,20 +537,23 @@ fn c_strides(shape: &[isize], itemsize: isize) -> Vec<isize> {
 
 /// The span of `info`'s items, as [`Buffer`] holds it: the offset of the lowest item's first
 /// byte from `ptr` and the bytes to the highest item's last; `None` when it leaves the address
-/// space, or is larger than an allocation can be.
-fn span(info: &BufferInfo) -> Option<(isize, usize)> {
+/// space, or is larger than an allocation can be, or when its sums leave `i128` (16 or more
+/// dimensions of about 2^62 items, which no allocation holds), all checked. Public for the
+/// binding's tests, which give it views no Python exporter makes.
+#[doc(hidden)]
+pub fn items_span(info: &BufferInfo) -> Option<(isize, usize)> {
     if info.shape.contains(&0) {
         return Some((0, 0));
     }
     let (mut low, mut high) = (0i128, info.itemsize as i128);
     for (&n, &stride) in info.shape.iter().zip(&info.strides) {
-        let last = (n as i128 - 1) * stride as i128;
-        low += last.min(0);
-        high += last.max(0);
+        let last = (n as i128 - 1).checked_mul(stride as i128)?;
+        low = low.checked_add(last.min(0))?;
+        high = high.checked_add(last.max(0))?;
     }
-    let start = info.ptr as i128 + low;
-    let len = high - low;
-    if start < 0 || len > isize::MAX as i128 || start + len > usize::MAX as i128 {
+    let start = (info.ptr as i128).checked_add(low)?;
+    let len = high.checked_sub(low)?;
+    if start < 0 || len > isize::MAX as i128 || start.checked_add(len)? > usize::MAX as i128 {
         return None;
     }
     Some((isize::try_from(low).ok()?, usize::try_from(len).ok()?))
@@ -600,7 +605,9 @@ fn overlap(a: &Region, b: &Region) -> bool {
 ///
 /// Refused (BufferError), before `f` runs: a buffer lent to write whose exporter marked it
 /// read-only; a region that shares a byte with one another call lends now (on any thread),
-/// when either is lent to write.
+/// when either is lent to write. That is judged by span: two calls whose items are disjoint but
+/// whose spans interleave (the left and right halves of an image's rows) are refused, though the
+/// wheel doesn't race there (docs/improvements.md, U-150).
 pub fn with_bytes<R: Send>(
     py: Python<'_>,
     buffers: &[(&Buffer, bool)],
@@ -696,8 +703,10 @@ pub fn with_bytes<R: Send>(
             .any(|(r, _)| now.iter().any(|o| (r.2 || o.2) && overlap(r, o)));
         if busy {
             return refused(
-                "another call (of another thread) is using the buffer's memory, which the wheel \
-                 would race with (docs/improvements.md, U-150)",
+                "another call (of another thread) is using memory in the span of the buffer's \
+                 items (from the lowest item to the highest), with one of the calls writing; the \
+                 wheel would race there only where items overlap, which the port doesn't tell \
+                 (docs/improvements.md, U-150)",
             );
         }
         let mine: Vec<Region> = regions.iter().map(|(r, _)| *r).collect();
@@ -738,21 +747,28 @@ fn lend(first: &Buffer, len: usize, write: bool) -> Bytes<'_> {
         // `with_bytes` borrows the others for longer); each span is the bytes from its lowest
         // item to its highest, all in the one allocation its exporter addresses the items in
         // from `buf` with fixed strides (without suboffsets, which `Buffer::request` refuses),
-        // within the address space and an allocation's size (`span`); spans that share bytes lie
-        // in the one allocation they share, so their union does too. The exporters keep that
-        // memory there until their exports end (an export blocks a resize, a close or a free).
-        // Each buffer lent to write wasn't marked read-only; a read-only span merged into the
-        // region shares its allocation with a writable export's. No other slice this crate
-        // lends, on any thread, shares a byte with this one while it lives (`LENT`). What the
-        // crate can't see: Python code another thread runs meanwhile (the GIL is released) that
-        // writes the same memory itself. That is the program's data race, as it is with the
-        // wheel's C++ (docs/improvements.md, U-150).
+        // within the address space and an allocation's size (`items_span`); spans that share
+        // bytes lie in the one allocation they share, so their union does too. Each buffer lent
+        // to write wasn't marked read-only; a read-only span merged into the region shares its
+        // allocation with a writable export's. No other slice this crate lends, on any thread,
+        // shares a byte with this one while it lives (`LENT`).
+        // What this relies on and can't check, as the wheel's C++ relies on it with its raw
+        // pointer (docs/improvements.md, U-150):
+        // - The exporter keeps that memory there until its export ends, as the buffer protocol
+        //   asks. Not all do: `ctypes.resize(obj, n)` and `ndarray.resize(..., refcheck=False)`
+        //   reallocate while an export lasts, so another thread (the GIL is released) can free
+        //   the memory under a live slice, as it can under the wheel's pointer.
+        // - No Python code another thread runs meanwhile writes memory in the slice. That
+        //   includes the bytes between items (the gaps of a strided view), which the slice
+        //   covers, and which the binding reads or writes only where the wheel does: another
+        //   thread writing gap bytes the wheel doesn't touch races with nothing there, and here
+        //   writes under a `&mut [u8]` (or a `&[u8]`) that the binding doesn't access there.
         let bytes = unsafe { std::slice::from_raw_parts_mut(start, len) };
         Bytes::Write(bytes)
     } else {
         let start = start.cast_const();
-        // SAFETY: as above, for reading: no slice this crate lends to write shares a byte with
-        // this one while it lives (`LENT`).
+        // SAFETY: as above, for reading, with the same reliances: no slice this crate lends to
+        // write shares a byte with this one while it lives (`LENT`).
         let bytes = unsafe { std::slice::from_raw_parts(start, len) };
         Bytes::Read(bytes)
     }

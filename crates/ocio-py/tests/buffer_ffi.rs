@@ -418,6 +418,76 @@ fn memory_another_threads_call_writes_is_refused_meanwhile() {
         true,
         true
     ));
+    // Bytes: spans that share exactly one byte overlap; spans that touch don't.
+    assert!(!concurrent(
+        "np.arange(8, dtype='u1')[0:4]",
+        "lambda a: a.base[3:7]",
+        true,
+        false
+    ));
+    assert!(concurrent(
+        "np.arange(8, dtype='u1')[0:4]",
+        "lambda a: a.base[4:8]",
+        true,
+        true
+    ));
+}
+
+/// Spans that share exactly one byte, one of them written, are one region; spans that touch
+/// without sharing a byte are two.
+#[test]
+fn spans_sharing_one_byte_are_one_region() {
+    common::start_python();
+    Python::attach(|py| {
+        let base = eval(py, "np.arange(8, dtype='u1')");
+        let view = |code: &str| eval(py, code).call1((&base,)).unwrap();
+        let (a, b, c) = (
+            view("lambda a: a[0:4]"),
+            view("lambda a: a[3:7]"),
+            view("lambda a: a[4:8]"),
+        );
+        let (a, b, c) = (
+            Buffer::request(&a).unwrap(),
+            Buffer::request(&b).unwrap(),
+            Buffer::request(&c).unwrap(),
+        );
+        let regions = |lends: &[(&Buffer, bool)]| {
+            with_bytes(py, lends, |regions, places| (regions.len(), places)).unwrap()
+        };
+        assert_eq!(
+            regions(&[(&a, false), (&b, true)]),
+            (1, vec![(0, 0), (0, 3)])
+        );
+        assert_eq!(
+            regions(&[(&a, true), (&b, false)]),
+            (1, vec![(0, 0), (0, 3)])
+        );
+        assert_eq!(
+            regions(&[(&a, false), (&c, true)]),
+            (2, vec![(0, 0), (1, 0)])
+        );
+    });
+}
+
+/// The span of items whose sums leave 128 bits (a view a C exporter could give, of 16
+/// dimensions of 2^62 + 1 items 2^62 bytes apart, whose sum wraps to the item size) is refused
+/// (U-157), checked, in either direction; one that fits in 128 bits but not in the address
+/// space too.
+#[test]
+fn a_span_past_128_bits_is_refused() {
+    let info = |dims: usize, stride: isize| ocio_py_ffi::BufferInfo {
+        ptr: 1 << 40,
+        itemsize: 4,
+        format: b"f".to_vec(),
+        ndim: dims as isize,
+        shape: vec![(1 << 62) + 1; dims],
+        strides: vec![stride; dims],
+        readonly: false,
+    };
+    for stride in [1 << 62, -(1 << 62)] {
+        assert_eq!(ocio_py_ffi::items_span(&info(16, stride)), None);
+        assert_eq!(ocio_py_ffi::items_span(&info(2, stride)), None);
+    }
 }
 
 #[test]

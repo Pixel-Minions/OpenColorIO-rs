@@ -718,7 +718,7 @@ const PY_FFI_DIR: &str = "crates/ocio-py/ffi/";
 /// SHA-256 of [`PY_FFI`]'s bytes. Changing that file requires updating this pin, so that every
 /// change to the Python binding's `unsafe` code shows in review as a change of this line (the
 /// coordinator's decision, p6-core re-check round 3).
-const PY_FFI_SHA256: &str = "81bff38329c0407bdbb4808f6c52f82820500e0619aafeb74831aa01ffc6e6d3";
+const PY_FFI_SHA256: &str = "3fb244f63643e64de8a7358f858398c2a2339852af2a5944e8d28048406b6168";
 /// The Python binding's crate root, which must forbid `unsafe_code`: no attribute or macro
 /// inside the crate can relax a `forbid`, so the compiler holds the binding to safe code.
 const PY_ROOT: &str = "crates/ocio-py/src/lib.rs";
