@@ -2161,16 +2161,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   on Windows (MSVC's STL), "cannot create std::vector larger than max_size()" (constructor)
   and "vector::_M_default_append" (`resize`) on Linux (libstdc++); one the allocator can't
   serve raises `MemoryError` "bad allocation" or "std::bad_alloc"; and the limits differ as
-  for I-236 (`2**61` points is "vector too long" on Windows, beyond libstdc++'s `2**60 - 1`
-  on Linux). The Linux texts and limits are libstdc++'s as its sources write them: to be
-  confirmed on Linux, through the Linux wheel.
+  for I-236: `max_size()` is `2**61 - 1` points on Windows and `2**60 - 1` on Linux, so `2**60`
+  points is "bad allocation" on Windows and a `ValueError` on Linux (seen through both
+  wheels). A size the allocator grants but memory can't hold depends on the machine: on Linux,
+  whose kernel overcommits memory, `GradingBSplineCurve(2**40)` gets 8 TB of address space
+  and the wheel's process is killed while it zeroes the points (seen in Rocky Linux 9), where
+  the port's curve (whose zeroed memory the kernel maps lazily) is made.
 - **Who notices:** Python code that asks for a curve of an absurd number of points.
 - **A fix:** refuse sizes beyond a sane bound, with one text on both platforms.
 - **Status:** matched in `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`,
   `vector_alloc`: the same limits and texts, the memory reserved through the allocator before
   the library allocates, whose failure would abort the process instead);
-  `grading_data_oracle.rs`, `bspline_script` (`2**40`, `2**61`, `2**63`), against the Windows
-  wheel; on Linux to be confirmed.
+  `grading_data_oracle.rs`, `bspline_script` (`2**59`, `2**60`, `2**61`, `2**63`), against the
+  Windows and the Linux wheels. The machine-dependent sizes are not tested.
 
 ## Platform, environment and paths
 

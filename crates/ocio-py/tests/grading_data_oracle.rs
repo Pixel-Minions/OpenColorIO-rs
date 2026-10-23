@@ -708,10 +708,15 @@ fn bspline_script() -> Script {
     );
     // Sizes the C++ runtime refuses: more than max_size() (ValueError), more than memory
     // holds (MemoryError).
-    let big = sc.call(n("pow"), vec![i(2), i(40)]);
-    let huge = sc.call(n("pow"), vec![i(2), i(61)]);
-    let top = sc.call(n("pow"), vec![i(2), i(63)]);
-    for size in [big, huge, top] {
+    // 2**59 points: more than the address space (MemoryError on both); 2**60: libstdc++'s
+    // max_size() + 1 (ValueError on Linux, MemoryError on Windows); 2**61 and 2**63: ValueError
+    // on both. (A size the allocator grants but memory can't hold, such as 2**40 on Linux,
+    // depends on the machine: I-366.)
+    let mut sizes = Vec::new();
+    for k in [59, 60, 61, 63] {
+        sizes.push(sc.call(n("pow"), vec![i(2), i(k)]));
+    }
+    for size in sizes {
         sc.raises(n("OCIO.GradingBSplineCurve"), vec![r(size)]);
         sc.raises(
             n("OCIO.GradingBSplineCurve"),
