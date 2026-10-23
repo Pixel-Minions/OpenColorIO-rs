@@ -120,3 +120,47 @@ fn the_proxy_lut_exception_is_thrown_again_for_a_relative_path_only() {
     });
     assert!(!absolute.unwrap().unwrap());
 }
+
+/// A proxy whose LUT data is an error (the library's own exception, not a foreign one).
+struct FailingProxy;
+
+impl ConfigIoProxy for FailingProxy {
+    fn lut_data(&self, filepath: &[u8]) -> Result<Vec<u8>> {
+        let mut text = b"FailingProxy: no LUT ".to_vec();
+        text.extend_from_slice(filepath);
+        Err(ocio_ops::exception::Exception::new(text))
+    }
+
+    fn config_data(&self) -> Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+
+    fn fast_lut_file_hash(&self, _filepath: &[u8]) -> Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+}
+
+/// `getLutData` (FileTransform.cpp:187-221 @ v2.5.2) rethrows the proxy's exception for a
+/// relative path: the proxy's own error, as it made it; an absolute path falls back to the
+/// file system, whose file can't be opened.
+#[test]
+fn the_proxy_lut_error_is_the_error_for_a_relative_path_only() {
+    let mut config =
+        Arc::try_unwrap(Config::create_raw().unwrap()).unwrap_or_else(|c| (*c).clone());
+    config.set_config_io_proxy(Some(Arc::new(FailingProxy)));
+    let relative = try_foreign(|| {
+        crate::transforms::file_transform::get_lut_data(&config, b"lut.clf", OpenMode::Text)
+            .map(|_| ())
+    });
+    let error = relative.unwrap().unwrap_err();
+    assert_eq!(error.what(), b"FailingProxy: no LUT lut.clf");
+    let absolute = try_foreign(|| {
+        crate::transforms::file_transform::get_lut_data(
+            &config,
+            b"/foreign_exception_tests/failing.clf",
+            OpenMode::Text,
+        )
+        .map(|s| s.good())
+    });
+    assert!(!absolute.unwrap().unwrap());
+}
