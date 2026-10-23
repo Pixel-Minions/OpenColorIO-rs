@@ -13,7 +13,7 @@ use std::ffi::c_long;
 use std::sync::{Arc, LazyLock, Mutex};
 
 use ocio_ops::cpu_processor::CpuProcessor;
-use ocio_ops::image_desc::{At, Bytes, PackedImageDesc};
+use ocio_ops::image_desc::{At, Bytes, ImageLayout, PackedImageDesc};
 use ocio_ops::open_color_types::DynamicPropertyType;
 use ocio_py_ffi::Buffer;
 use pyo3::prelude::*;
@@ -197,9 +197,10 @@ static IS_DYNAMIC: Function = method_def!("isDynamic", [SELF], "bool", |py, _, a
 
 /// Why an apply stopped with the GIL released.
 enum ApplyError {
-    /// The library's error, or the port's for memory it can't describe.
+    /// The library's error.
     Describe(DescribeError),
-    /// The source and destination images share memory without being the same image (U-150).
+    /// A byte the destination image writes is one the source image reads, without the images
+    /// being the same image (U-150).
     Overlap,
 }
 
@@ -220,19 +221,30 @@ impl ApplyError {
         match self {
             ApplyError::Describe(e) => e.into_py(py),
             ApplyError::Overlap => pyo3::exceptions::PyBufferError::new_err(
-                "CPUProcessor.apply: the source and destination images share memory without \
-                 being the same image, and the wheel copies rows between overlapping memory \
-                 (docs/improvements.md, U-150)",
+                "CPUProcessor.apply: the destination image writes bytes that the source image \
+                 reads, without being the same image, and the wheel's result then depends on \
+                 the order in which it processes them (docs/improvements.md, U-150)",
             ),
         }
     }
 }
 
+/// Whether the library can describe an image whose buffers lie in the regions `places` names
+/// over those regions: its buffers all in one region, or each in its own.
+fn describable(places: &[(usize, usize)]) -> bool {
+    let all_one = places.iter().all(|p| p.0 == places[0].0);
+    let distinct = places
+        .iter()
+        .enumerate()
+        .all(|(i, p)| places[..i].iter().all(|q| q.0 != p.0));
+    all_one || distinct
+}
+
 /// The library's description, to write, of an image made with `args` over memory `with_bytes`
-/// lent to write: each buffer's region (`regions[place.0]`, taken) at its place; one byte from
-/// `ones` for a buffer with an address and no items (`read_memory`'s [`NOT_NULL`] reason).
-/// Planes that share memory are described in one buffer, as C++ passes pointers into one
-/// allocation; planes some of which share memory and others not, the port's error (U-150).
+/// lent to write, whose buffers lie in the regions as [`describable`] takes them: each buffer's
+/// region (`regions[place.0]`, taken) at its place; one byte from `ones` for a buffer with an
+/// address and no items (`read_memory`'s [`NOT_NULL`] reason). Planes in one region are
+/// described in one buffer, as C++ passes pointers into one allocation.
 ///
 /// [`NOT_NULL`]: crate::py_image_desc
 fn describe_mut<'b>(
@@ -247,13 +259,6 @@ fn describe_mut<'b>(
         let memory = regions[first].take().unwrap_or(&mut []);
         let offsets: Vec<usize> = places.iter().map(|p| p.1).collect();
         return describe_in_one(args, memory, &offsets);
-    }
-    let distinct = places
-        .iter()
-        .enumerate()
-        .all(|(i, p)| places[..i].iter().all(|q| q.0 != p.0));
-    if !distinct {
-        return Err(DescribeError::MixedPlanes);
     }
     let mut memory = Vec::new();
     for ((place, &addressed), one) in places.iter().zip(addressed).zip(ones.iter_mut()) {
@@ -277,9 +282,9 @@ fn read_only(call: &str) -> PyErr {
 }
 
 /// Whether one of `lends`' buffers to write is read-only and has items. Then every buffer is
-/// lent to read, and the processing runs on copies of the memory it would write
-/// ([`writable`]): the library's error where it has one, as the wheel's, and the port's error
-/// otherwise ([`read_only`]), where the wheel writes.
+/// lent to read, and the processing runs on copies of the memory it would write: the library's
+/// error where it has one, as the wheel's, and the port's error otherwise ([`read_only`]),
+/// where the wheel writes.
 fn dry_run(lends: &[(&Buffer, bool)]) -> bool {
     lends.iter().any(|(b, write)| {
         let (start, end) = b.span();
@@ -288,7 +293,8 @@ fn dry_run(lends: &[(&Buffer, bool)]) -> bool {
 }
 
 /// `regions`, with each region of `to_write` that was lent to read (a [`dry_run`]) replaced by
-/// a copy of it in `copies`, to write.
+/// a copy of it in `copies`, to write: for `applyRGB`/`applyRGBA`, whose buffer is C-contiguous,
+/// so that its region holds its items and nothing else.
 fn writable<'c>(
     regions: Vec<ocio_py_ffi::Bytes<'c>>,
     to_write: &[bool],
@@ -313,52 +319,186 @@ fn writable<'c>(
         .collect()
 }
 
-/// The regions that a buffer to write (`writes`) lies in, by `places`.
-fn regions_to_write(count: usize, places: &[(usize, usize)], writes: &[bool]) -> Vec<bool> {
-    (0..count)
-        .map(|r| places.iter().zip(writes).any(|(p, &w)| w && p.0 == r))
-        .collect()
+/// The bytes of a region `with_bytes` lent, to read.
+fn bytes_of<'r>(region: &'r ocio_py_ffi::Bytes<'_>) -> &'r [u8] {
+    match region {
+        ocio_py_ffi::Bytes::Read(b) => b,
+        ocio_py_ffi::Bytes::Write(b) => b,
+    }
+}
+
+/// The layout of an image made with `args` whose buffers lie in `regions` at `places`: the
+/// library's description over the regions, read (planes in one region each described over it,
+/// as separate buffers), whose channel positions are then the buffer's index among `places` and
+/// the offset in its region.
+fn layout_over(
+    args: &ImageArgs,
+    regions: &[ocio_py_ffi::Bytes<'_>],
+    places: &[(usize, usize)],
+    addressed: &[bool],
+) -> Result<ImageLayout, DescribeError> {
+    let shared: Vec<ocio_py_ffi::Bytes<'_>> = regions
+        .iter()
+        .map(|r| ocio_py_ffi::Bytes::Read(bytes_of(r)))
+        .collect();
+    let d = describe(args, read_memory(&shared, places, addressed))?;
+    Ok(*d.desc().layout())
+}
+
+/// Calls `f(buffer, offset, len)` for each channel value the CPU engine reads or writes of an
+/// image of `layout` (the channels of every pixel, R, G, B and A, row by row), `buffer` the index
+/// of its buffer and `offset` its first byte's in that buffer, `len` its bytes. The constructors
+/// checked that each is in its buffer (D-2). An RGBA-packed image, which the engine reads and
+/// writes in whole rows from its red channel, has no bytes between its channels and pixels, so
+/// its rows are these values.
+fn for_each_value(layout: &ImageLayout, mut f: impl FnMut(usize, usize, usize)) {
+    let len = ocio_ops::bit_depth_utils::get_channel_size_in_bytes(layout.bit_depth())
+        .expect("a bit depth the constructors accepted") as usize;
+    let channels: Vec<ocio_ops::image_desc::ChannelPos> =
+        [layout.r_data(), layout.g_data(), layout.b_data()]
+            .into_iter()
+            .chain(layout.a_data())
+            .collect();
+    let (xs, ys) = (
+        layout.x_stride_bytes() as i128,
+        layout.y_stride_bytes() as i128,
+    );
+    for y in 0..layout.height() as i128 {
+        for x in 0..layout.width() as i128 {
+            for c in &channels {
+                let at = c.offset as i128 + x * xs + y * ys;
+                f(c.buffer, at as usize, len);
+            }
+        }
+    }
+}
+
+/// A copy of the bytes an image reads or writes, in one buffer: the regions its buffers lie in
+/// one after another, the bytes it doesn't touch zero (the bytes between items of a strided view
+/// are neither read nor copied, as the wheel doesn't read them), and where each of its buffers'
+/// first item is in it, in the order of `places`.
+struct Scratch {
+    bytes: Vec<u8>,
+    /// Where each region starts in `bytes`, for the regions the image lies in.
+    starts: Vec<Option<usize>>,
+    offsets: Vec<usize>,
+}
+
+/// The [`Scratch`] of an image of `layout` whose buffers lie in `regions` at `places`.
+fn scratch(
+    regions: &[ocio_py_ffi::Bytes<'_>],
+    places: &[(usize, usize)],
+    layout: &ImageLayout,
+) -> Scratch {
+    let mut starts = vec![None; regions.len()];
+    let mut len = 0;
+    for p in places {
+        if starts[p.0].is_none() {
+            starts[p.0] = Some(len);
+            len += bytes_of(&regions[p.0]).len();
+        }
+    }
+    let mut bytes = vec![0u8; len];
+    let start = |r: usize| starts[r].expect("a region the image lies in");
+    for_each_value(layout, |buffer, at, n| {
+        let r = places[buffer].0;
+        let to = start(r) + at;
+        bytes[to..to + n].copy_from_slice(&bytes_of(&regions[r])[at..at + n]);
+    });
+    let offsets = places.iter().map(|p| start(p.0) + p.1).collect();
+    Scratch {
+        bytes,
+        starts,
+        offsets,
+    }
+}
+
+impl Scratch {
+    /// Copies the bytes an image of `layout` writes back from the scratch into `regions` (lent
+    /// to write), whose buffers lie at `places`.
+    fn write_back(
+        &self,
+        regions: &mut [Option<&mut [u8]>],
+        places: &[(usize, usize)],
+        layout: &ImageLayout,
+    ) {
+        for_each_value(layout, |buffer, at, n| {
+            let r = places[buffer].0;
+            let from = self.starts[r].expect("a region the image lies in") + at;
+            if let Some(region) = regions[r].as_deref_mut() {
+                region[at..at + n].copy_from_slice(&self.bytes[from..from + n]);
+            }
+        });
+    }
+}
+
+/// Whether a byte that an image of `dst` (layout, places) writes is one that an image of `src`
+/// reads, in the regions they share: an exact check, each byte of every channel value marked.
+fn share_a_byte(
+    regions: &[ocio_py_ffi::Bytes<'_>],
+    src: (&ImageLayout, &[(usize, usize)]),
+    dst: (&ImageLayout, &[(usize, usize)]),
+) -> bool {
+    let shared: Vec<bool> = (0..regions.len())
+        .map(|r| src.1.iter().any(|p| p.0 == r) && dst.1.iter().any(|p| p.0 == r))
+        .collect();
+    let mut read: Vec<Vec<u64>> = regions
+        .iter()
+        .zip(&shared)
+        .map(|(region, &s)| {
+            let words = if s {
+                bytes_of(region).len() / 64 + 1
+            } else {
+                0
+            };
+            vec![0u64; words]
+        })
+        .collect();
+    for_each_value(src.0, |buffer, at, n| {
+        let r = src.1[buffer].0;
+        if shared[r] {
+            for byte in at..at + n {
+                read[r][byte / 64] |= 1 << (byte % 64);
+            }
+        }
+    });
+    let mut found = false;
+    for_each_value(dst.0, |buffer, at, n| {
+        let r = dst.1[buffer].0;
+        if shared[r] && (at..at + n).any(|byte| read[r][byte / 64] & (1 << (byte % 64)) != 0) {
+            found = true;
+        }
+    });
+    found
 }
 
 /// What [`process`] needs besides the memory: the processor, the images' arguments (the
-/// destination's for `apply(src, dst)`), where the source's buffers end among the buffers, and
-/// which buffers have an address.
+/// destination's for `apply(src, dst)`), where the source's buffers end among the buffers, which
+/// buffers have an address, and whether the processing runs on copies only ([`dry_run`]).
 struct Job {
     cpu: Arc<CpuProcessor>,
     src_args: ImageArgs,
     dst_args: Option<ImageArgs>,
     n: usize,
     addressed: Vec<bool>,
-}
-
-/// The port's error, if the images' memory is one the port can't describe or process as the
-/// wheel does (U-150): a source and a destination that share memory without being the same
-/// image; a written image whose planes some share memory and others don't.
-fn unsupported(job: &Job, places: &[(usize, usize)]) -> Option<ApplyError> {
-    let (src_places, dst_places) = places.split_at(job.n);
-    let mixed = |places: &[(usize, usize)]| {
-        let all_one = places.iter().all(|p| p.0 == places[0].0);
-        let distinct = places
-            .iter()
-            .enumerate()
-            .all(|(i, p)| places[..i].iter().all(|q| q.0 != p.0));
-        places.len() > 1 && !all_one && !distinct
-    };
-    let Some(dst_args) = job.dst_args else {
-        return mixed(src_places).then_some(ApplyError::Describe(DescribeError::MixedPlanes));
-    };
-    let shared = src_places
-        .iter()
-        .any(|p| dst_places.iter().any(|q| q.0 == p.0));
-    if shared && (job.src_args != dst_args || src_places != dst_places) {
-        return Some(ApplyError::Overlap);
-    }
-    mixed(dst_places).then_some(ApplyError::Describe(DescribeError::MixedPlanes))
+    dry: bool,
 }
 
 /// The processing of [`apply_images`] over `regions` (`with_bytes`'), each buffer at its place:
-/// in place, from the source to the destination, or, for images that share memory and are the
-/// same image, as one image (`CpuProcessor::apply_same`).
+/// - in place, over the regions, when the library describes the image over them
+///   ([`describable`]); otherwise (planes some of which share memory, as `PlanarImageDesc(b, g,
+///   b, ...)`) over a [`Scratch`] copy of the bytes it reads, described in one buffer as C++
+///   passes pointers into one allocation, the bytes it writes then copied back: the wheel's
+///   result, which processes each row's channels read and then written through the pointers;
+/// - from the source to the destination, which share no region; or, for images that share
+///   memory and are the same image, as one image (`CpuProcessor::apply_same`); or, for images
+///   that share memory without a byte the destination writes being one the source reads (the
+///   left and right halves of an image's rows), from a copy of the bytes the source reads, as
+///   the wheel's result is then. Images whose bytes do overlap are the port's error (U-150), once
+///   the processing ran on copies, so that the library's error comes first, as the wheel's.
+///
+/// A [`dry_run`] processes copies only. The library's error after part of the image is written
+/// (U-1) leaves that part written, as the wheel's, copies too.
 fn process(
     job: &Job,
     regions: Vec<ocio_py_ffi::Bytes<'_>>,
@@ -367,33 +507,66 @@ fn process(
     let n = job.n;
     let mut ones = [[0u8; 1]; 4];
     let (src_places, dst_places) = places.split_at(n);
+    let src_layout = layout_over(&job.src_args, &regions, src_places, &job.addressed[..n])?;
     let Some(dst_args) = job.dst_args else {
-        let mut writes = writes_of(regions);
-        let mut d = describe_mut(
-            &job.src_args,
-            &mut writes,
-            src_places,
-            &job.addressed,
-            &mut ones,
-        )?;
-        job.cpu.apply(d.desc_mut())?;
-        return Ok(());
+        if !job.dry && describable(src_places) {
+            let mut writes = writes_of(regions);
+            let mut d = describe_mut(
+                &job.src_args,
+                &mut writes,
+                src_places,
+                &job.addressed,
+                &mut ones,
+            )?;
+            job.cpu.apply(d.desc_mut())?;
+            return Ok(());
+        }
+        let mut copy = scratch(&regions, src_places, &src_layout);
+        let done = {
+            let mut d = describe_in_one(&job.src_args, &mut copy.bytes[..], &copy.offsets)?;
+            job.cpu.apply(d.desc_mut())
+        };
+        if !job.dry {
+            copy.write_back(&mut writes_of(regions), src_places, &src_layout);
+        }
+        return done.map_err(ApplyError::from);
     };
+    let dst_layout = layout_over(&dst_args, &regions, dst_places, &job.addressed[n..])?;
     let shared = src_places
         .iter()
         .any(|p| dst_places.iter().any(|q| q.0 == p.0));
-    if shared {
-        let mut writes = writes_of(regions);
-        let mut d = describe_mut(
-            &dst_args,
-            &mut writes,
-            dst_places,
-            &job.addressed[n..],
-            &mut ones,
-        )?;
-        job.cpu.apply_same(d.desc_mut())?;
-        return Ok(());
+    if shared && job.src_args == dst_args && src_places == dst_places {
+        if !job.dry && describable(dst_places) {
+            let mut writes = writes_of(regions);
+            let mut d = describe_mut(
+                &dst_args,
+                &mut writes,
+                dst_places,
+                &job.addressed[n..],
+                &mut ones,
+            )?;
+            job.cpu.apply_same(d.desc_mut())?;
+            return Ok(());
+        }
+        let mut copy = scratch(&regions, dst_places, &dst_layout);
+        let done = {
+            let mut d = describe_in_one(&dst_args, &mut copy.bytes[..], &copy.offsets)?;
+            job.cpu.apply_same(d.desc_mut())
+        };
+        if !job.dry {
+            copy.write_back(&mut writes_of(regions), dst_places, &dst_layout);
+        }
+        return done.map_err(ApplyError::from);
     }
+    let overlap = shared
+        && share_a_byte(
+            &regions,
+            (&src_layout, src_places),
+            (&dst_layout, dst_places),
+        );
+    let src_copy = shared.then(|| scratch(&regions, src_places, &src_layout));
+    let direct = !job.dry && !overlap && describable(dst_places);
+    let mut dst_copy = (!direct).then(|| scratch(&regions, dst_places, &dst_layout));
     let mut reads = Vec::new();
     let mut writes = Vec::new();
     for region in regions {
@@ -408,18 +581,39 @@ fn process(
             }
         }
     }
-    let s = describe(
-        &job.src_args,
-        read_memory(&reads, src_places, &job.addressed[..n]),
-    )?;
-    let mut d = describe_mut(
-        &dst_args,
-        &mut writes,
-        dst_places,
-        &job.addressed[n..],
-        &mut ones,
-    )?;
-    job.cpu.apply_src_dst(s.desc(), d.desc_mut())?;
+    let s = match &src_copy {
+        Some(copy) => describe_in_one(&job.src_args, &copy.bytes[..], &copy.offsets)?,
+        None => describe(
+            &job.src_args,
+            read_memory(&reads, src_places, &job.addressed[..n]),
+        )?,
+    };
+    let done = match &mut dst_copy {
+        None => {
+            let mut d = describe_mut(
+                &dst_args,
+                &mut writes,
+                dst_places,
+                &job.addressed[n..],
+                &mut ones,
+            )?;
+            job.cpu.apply_src_dst(s.desc(), d.desc_mut())
+        }
+        Some(copy) => {
+            let done = {
+                let mut d = describe_in_one(&dst_args, &mut copy.bytes[..], &copy.offsets)?;
+                job.cpu.apply_src_dst(s.desc(), d.desc_mut())
+            };
+            if !job.dry && !overlap {
+                copy.write_back(&mut writes, dst_places, &dst_layout);
+            }
+            done
+        }
+    };
+    done?;
+    if overlap {
+        return Err(ApplyError::Overlap);
+    }
     Ok(())
 }
 
@@ -436,14 +630,13 @@ fn writes_of(regions: Vec<ocio_py_ffi::Bytes<'_>>) -> Vec<Option<&mut [u8]>> {
 
 /// `self->apply(*imgDesc.m_img)`, or `apply(*src.m_img, *dst.m_img)` (`dst` given), with the GIL
 /// released: each image's buffers requested again ([`Image::request`]) and lent, the source's to
-/// read and the destination's to write, and the library's descriptions made over them. Images
-/// that share memory are processed as one image (`CpuProcessor::apply_same`) when they are the
-/// same image.
+/// read and the destination's to write, and the library's descriptions made over them, as
+/// [`process`] does.
 ///
 /// Where the wheel writes memory it may not, the library's error comes first, as the wheel's
 /// (the processing runs on copies of the memory, which are dropped), then the port's: a
-/// read-only destination (U-156, [`dry_run`]); memory the port can't describe as the wheel does
-/// ([`unsupported`], U-150), each buffer then copied on its own.
+/// read-only destination (U-156, [`dry_run`]); a source and a destination whose bytes overlap
+/// (U-150).
 fn apply_images(
     py: Python<'_>,
     cpu: &Arc<CpuProcessor>,
@@ -462,7 +655,6 @@ fn apply_images(
         .chain(dst_buffers.iter().map(|b| (b, true)))
         .collect();
     let dry = dry_run(&wanted);
-    let writes: Vec<bool> = wanted.iter().map(|(_, w)| *w).collect();
     let lends: Vec<(&Buffer, bool)> = wanted.iter().map(|&(b, w)| (b, w && !dry)).collect();
     let job = Job {
         cpu: cpu.clone(),
@@ -470,42 +662,14 @@ fn apply_images(
         dst_args: dst.map(|d| d.args),
         n: src_buffers.len(),
         addressed: lends.iter().map(|(b, _)| b.info().ptr != 0).collect(),
+        dry,
     };
     let done = ocio_py_ffi::with_bytes(py, &lends, move |regions, places| {
-        if let Some(refusal) = unsupported(&job, &places) {
-            // Each buffer its own copy of its region, at the same place in it.
-            let mut copies: Vec<Vec<u8>> = places
-                .iter()
-                .map(|p| match &regions[p.0] {
-                    ocio_py_ffi::Bytes::Read(b) => b.to_vec(),
-                    ocio_py_ffi::Bytes::Write(b) => b.to_vec(),
-                })
-                .collect();
-            let alone: Vec<(usize, usize)> =
-                places.iter().enumerate().map(|(k, p)| (k, p.1)).collect();
-            let copied = copies
-                .iter_mut()
-                .zip(&writes)
-                .map(|(c, &w)| {
-                    if w {
-                        ocio_py_ffi::Bytes::Write(&mut c[..])
-                    } else {
-                        ocio_py_ffi::Bytes::Read(&c[..])
-                    }
-                })
-                .collect();
-            process(&job, copied, &alone)?;
-            return Err(refusal);
-        }
-        let to_write = regions_to_write(regions.len(), &places, &writes);
-        let mut copies = Vec::new();
-        let regions = writable(regions, &to_write, &mut copies);
-        process(&job, regions, &places)?;
-        Ok(dry)
+        process(&job, regions, &places)
     })?;
     match done {
-        Ok(false) => Ok(()),
-        Ok(true) => Err(read_only("CPUProcessor.apply")),
+        Ok(()) if dry => Err(read_only("CPUProcessor.apply")),
+        Ok(()) => Ok(()),
         Err(e) => Err(e.into_py(py)),
     }
 }

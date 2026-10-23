@@ -159,24 +159,17 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Described<B> {
     }
 }
 
-/// Why the library's description can't be made over what `with_bytes` lent.
+/// Why the library's description can't be made over what `with_bytes` lent: the library's own
+/// error, as upstream's constructor raises it.
 #[derive(Debug)]
 pub(crate) enum DescribeError {
-    /// The library's own error, as upstream's constructor raises it.
     Library(ocio::Exception),
-    /// Planes in memory that some share, others not: the port's library takes planes in
-    /// separate buffers or all in one (docs/improvements.md, U-150).
-    MixedPlanes,
 }
 
 impl DescribeError {
     pub(crate) fn into_py(self, py: Python<'_>) -> PyErr {
         match self {
             DescribeError::Library(e) => crate::py_open_color_io::to_py_err(py, &e),
-            DescribeError::MixedPlanes => pyo3::exceptions::PyBufferError::new_err(
-                "PlanarImageDesc: some of its planes share memory and others don't, which the \
-                 port's image descriptions don't describe (docs/improvements.md, U-150)",
-            ),
         }
     }
 }
@@ -253,8 +246,9 @@ where
     }
 }
 
-/// [`describe`] of planes in one buffer (`memory`), each at its offset (R, G, B and, if given,
-/// A).
+/// [`describe`] of an image whose buffers are all in one buffer (`memory`), each at its offset:
+/// a packed image's one; the planes R, G, B and, if given, A, as C++ passes pointers into one
+/// allocation.
 pub(crate) fn describe_in_one<B: AsRef<[u8]>>(
     args: &ImageArgs,
     memory: B,
@@ -269,7 +263,7 @@ where
         strides,
     } = *args
     else {
-        return Err(DescribeError::MixedPlanes);
+        return describe(args, vec![(memory, offsets[0])]);
     };
     let (bd, [x, y]) = strides.unwrap_or((BitDepth::F32, [ocio_ops::image_desc::AUTO_STRIDE; 2]));
     PlanarImageDesc::in_one_buffer(

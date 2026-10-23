@@ -5275,12 +5275,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **A fix:** refuse images that share memory without being the same image, and document that
   a buffer must not be used elsewhere while it is processed.
 - **Status:** the port's library describes an image over borrowed memory, which it can't alias.
-  The port processes images that share memory as one image when they are the same image (the
-  same description, or descriptions of the same memory and layout); otherwise, once the
-  library's own checks passed (on copies of the memory, so its error comes first, as the
-  wheel's), it raises BufferError "CPUProcessor.apply: the source and destination images
-  share memory without being the same image ... (docs/improvements.md, U-150)", or
-  "PlanarImageDesc: some of its planes share memory and others don't ... (U-150)".
+  The port gives the wheel's result in these cases: images that share memory and are the same
+  image (the same description, or descriptions of the same memory and layout) are processed as one
+  image; a source and a destination whose spans overlap but whose bytes don't (no byte the
+  destination writes is one the source reads, checked byte by byte: the left and right halves of
+  an image's rows, even and odd pixels) are processed from a copy of the bytes the source reads;
+  planes some of which share memory (`PlanarImageDesc(b, g, b, ...)`, planes shifted in one array)
+  are processed over a copy of the bytes they touch, in one buffer as C++ passes pointers into one
+  allocation, and written back (the value the wheel writes last stays). A source and a destination
+  whose bytes overlap, by a single byte too, which the wheel processes with a result that depends
+  on the order in which it reads and writes them, are refused once the library's own checks passed
+  (on copies of the memory, so its error comes first, as the wheel's): BufferError
+  "CPUProcessor.apply: the destination image writes bytes that the source image reads, without
+  being the same image ... (docs/improvements.md, U-150)". The copies hold only the bytes the
+  images read or write, not the gaps between items, which the wheel doesn't read.
   Between threads, memory that a call of the port's binding writes on one thread is refused to
   its calls on others meanwhile, judged by the span of each buffer's items (the bytes from its
   lowest item to its highest): "another call (of another thread) is using memory in the span

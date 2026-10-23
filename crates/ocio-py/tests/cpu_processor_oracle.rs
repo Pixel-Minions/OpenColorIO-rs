@@ -555,6 +555,91 @@ fn apply_script() -> Script {
     let same = planar(&mut sc, vec![r(one), r(one), r(one), r(one), i(4), i(1)]);
     sc.call(ra(f32_cpu, "apply"), vec![r(same)]);
     sc.eval(r(one), &[]);
+    // Images whose spans interleave and whose bytes don't overlap: the left half of each row to
+    // the right half, and back; even pixels to odd pixels (views made with strides).
+    let a = sc.eval(
+        arr("<f4", &[2, 4, 4], &le32(&[F32_BITS, F32_BITS].concat())),
+        &[],
+    );
+    let halves: Vec<usize> = [(None, Some(2)), (Some(2), None)]
+        .into_iter()
+        .map(|(from, to)| {
+            let bound = |v: Option<i128>| v.map_or(none(), i);
+            let columns = sc.call(n("slice"), vec![bound(from), bound(to)]);
+            let all = sc.call(n("slice"), vec![none()]);
+            let index = sc.eval(common::script::t(vec![r(all), r(columns)]), &[]);
+            let view = sc.call(n("operator.getitem"), vec![r(a), r(index)]);
+            let f32 = n("OCIO.BIT_DEPTH_F32");
+            image(
+                &mut sc,
+                vec![r(view), i(2), i(2), i(4), f32, i(4), i(16), i(64)],
+            )
+        })
+        .collect();
+    sc.call(ra(f32_cpu, "apply"), vec![r(halves[0]), r(halves[1])]);
+    sc.eval(r(a), &[]);
+    sc.call(ra(f32_cpu, "apply"), vec![r(halves[1]), r(halves[0])]);
+    sc.eval(r(a), &[]);
+    let base = sc.eval(arr("<f4", &[64], &le32(&[F32_BITS; 4].concat())), &[]);
+    let pixels: Vec<usize> = [0, 4]
+        .into_iter()
+        .map(|from| {
+            let tail = sc.call(n("slice"), vec![i(from), none()]);
+            let part = sc.call(n("operator.getitem"), vec![r(base), r(tail)]);
+            let view = sc.call_kw(
+                n("numpy.lib.stride_tricks.as_strided"),
+                vec![r(part)],
+                vec![
+                    ("shape", common::script::t(vec![i(2), i(4), i(4)])),
+                    ("strides", common::script::t(vec![i(128), i(32), i(4)])),
+                ],
+                Expect::Value,
+            );
+            let f32 = n("OCIO.BIT_DEPTH_F32");
+            image(
+                &mut sc,
+                vec![r(view), i(4), i(2), i(4), f32, i(4), i(32), i(128)],
+            )
+        })
+        .collect();
+    sc.call(ra(f32_cpu, "apply"), vec![r(pixels[0]), r(pixels[1])]);
+    sc.eval(r(base), &[]);
+    // Planes some of which are the same memory, R and B: in place, and as a destination (the
+    // value written last stays).
+    let rb = sc.eval(arr("<f4", &[4], &le32(&F32_BITS[4..8])), &[]);
+    let g = sc.eval(arr("<f4", &[4], &le32(&F32_BITS[12..16])), &[]);
+    let mixed = planar(&mut sc, vec![r(rb), r(g), r(rb), i(2), i(2)]);
+    sc.call(ra(f32_cpu, "apply"), vec![r(mixed)]);
+    sc.eval(r(rb), &[]);
+    sc.eval(r(g), &[]);
+    let with_alpha = planar(&mut sc, vec![r(g), r(rb), r(rb), r(g), i(4), i(1)]);
+    sc.call(ra(f32_cpu, "apply"), vec![r(with_alpha)]);
+    sc.eval(r(rb), &[]);
+    sc.eval(r(g), &[]);
+    let src = sc.eval(arr("<f4", &[16], &le32(&F32_BITS)), &[]);
+    let s_img = image(&mut sc, vec![r(src), i(4), i(1), i(4)]);
+    let p = sc.call(n("numpy.zeros"), vec![i(4), s("<f4")]);
+    let q = sc.call(n("numpy.zeros"), vec![i(4), s("<f4")]);
+    let out = planar(&mut sc, vec![r(p), r(q), r(p), i(4), i(1)]);
+    sc.call(ra(f32_cpu, "apply"), vec![r(s_img), r(out)]);
+    sc.eval(r(p), &[]);
+    sc.eval(r(q), &[]);
+    sc.call(ra(f32_cpu, "apply"), vec![r(with_alpha), r(out)]);
+    sc.eval(r(p), &[]);
+    sc.eval(r(q), &[]);
+    // Planes R and G that overlap, shifted by two values, and B on its own.
+    let rg = sc.eval(arr("<f4", &[6], &le32(&F32_BITS[2..8])), &[]);
+    let planes: Vec<usize> = [(0, 4), (2, 6)]
+        .into_iter()
+        .map(|(from, to)| {
+            let part = sc.call(n("slice"), vec![i(from), i(to)]);
+            sc.call(n("operator.getitem"), vec![r(rg), r(part)])
+        })
+        .collect();
+    let shifted = planar(&mut sc, vec![r(planes[0]), r(planes[1]), r(g), i(4), i(1)]);
+    sc.call(ra(f32_cpu, "apply"), vec![r(shifted)]);
+    sc.eval(r(rg), &[]);
+    sc.eval(r(g), &[]);
     // Adjacent views of one array (the source's last byte next to the destination's first).
     let u8_cpu = cpu(&mut sc, m, Some(("UINT8", "UINT8")));
     let x = sc.eval(arr("|u1", &[8], &U8S[4..12]), &[]);
@@ -674,8 +759,9 @@ fn port_run(code: &str) {
 
 /// Where the wheel's process dies, or it writes memory it may not, the port's errors: an
 /// `ImageDesc()` applied (U-146: the wheel dereferences its null image); a read-only buffer
-/// written (U-156); a source and a destination that partly overlap, and planes some of which
-/// share memory (U-150). Nothing is written then, and the processor stays usable.
+/// written (U-156), planes some of which are the same memory included; a source and a
+/// destination whose bytes overlap, by one byte too (U-150). Nothing is written then, and the
+/// processor stays usable.
 #[test]
 fn the_ports_errors_where_the_wheel_writes_memory_it_may_not() {
     port_run(
@@ -722,11 +808,11 @@ dst = OCIO.PackedImageDesc(x[3:7], 1, 1, 4, U8, 1, 4, 4)
 refused(lambda: u8.apply(src, dst), BufferError, "U-150")
 assert np.array_equal(x, np.arange(7, dtype=np.uint8))
 
-p = np.arange(8, dtype=np.float32)
-q = np.arange(4, dtype=np.float32)
-mixed = OCIO.PlanarImageDesc(p[:4], p[2:6], q, 4, 1)
-refused(lambda: cpu.apply(mixed), BufferError, "U-150")
-assert np.array_equal(p, np.arange(8, dtype=np.float32))
+# Read-only planes some of which are the same memory: processed on copies, then refused.
+ro_rb = np.frombuffer(np.arange(4, dtype=np.float32).tobytes(), np.float32)
+ro_g = np.frombuffer(np.arange(4, 8, dtype=np.float32).tobytes(), np.float32)
+refused(lambda: cpu.apply(OCIO.PlanarImageDesc(ro_rb, ro_g, ro_rb, 4, 1)), BufferError, "U-156")
+assert np.array_equal(ro_rb, np.arange(4, dtype=np.float32))
 
 cpu.apply(img)
 assert not np.array_equal(a, np.arange(16, dtype=np.float32))
