@@ -13,6 +13,7 @@
 //! docstrings the same way on both.
 #![allow(dead_code)]
 
+pub(crate) mod processors;
 pub(crate) mod script;
 
 use std::sync::Once;

@@ -384,7 +384,12 @@ fn a_grading_style_outside_the_enumerators_is_the_ports_error() {
     let mut refused = Vec::new();
     let mut getters = Vec::new();
     let st = sc.call(n("OCIO.GradingStyle"), vec![i(7)]);
-    for class in ["GradingPrimaryTransform", "GradingToneTransform"] {
+    for class in [
+        "GradingPrimaryTransform",
+        "GradingToneTransform",
+        "GradingRGBCurveTransform",
+        "GradingHueCurveTransform",
+    ] {
         let t = sc.call(n(&format!("OCIO.{class}")), vec![]);
         refused.push(sc.call(ra(t, "setStyle"), vec![r(st)]));
         getters.push(sc.call(ra(t, "getStyle"), vec![]));
@@ -403,7 +408,7 @@ fn a_grading_style_outside_the_enumerators_is_the_ports_error() {
     let ours = ours["steps"].as_array().unwrap();
     assert_eq!(theirs.len(), sc.steps.len());
     assert_eq!(ours.len(), sc.steps.len());
-    assert_eq!(refused.len(), 4);
+    assert_eq!(refused.len(), 8);
     for (k, (step, wheel_step)) in ours.iter().zip(theirs).enumerate() {
         assert!(wheel_step.get("value").is_some(), "step {k}: {wheel_step}");
         if refused.contains(&k) {
@@ -426,7 +431,7 @@ fn a_grading_style_outside_the_enumerators_is_the_ports_error() {
         }
     }
     // The getters: the number in the wheel.
-    assert_eq!(getters.len(), 2);
+    assert_eq!(getters.len(), 4);
     for k in getters {
         let repr = String::from_utf8(ocio_testkit::oracle_values::bytes(
             &theirs[k]["value"]["repr"],
@@ -438,6 +443,8 @@ fn a_grading_style_outside_the_enumerators_is_the_ports_error() {
     for (class, value) in [
         ("GradingPrimaryTransform", "GradingPrimary"),
         ("GradingToneTransform", "GradingTone"),
+        ("GradingRGBCurveTransform", "GradingRGBCurve"),
+        ("GradingHueCurveTransform", "GradingHueCurve"),
     ] {
         let mut sc = Script::new();
         let st = sc.call(n("OCIO.GradingStyle"), vec![i(7)]);
@@ -468,4 +475,338 @@ fn a_grading_style_outside_the_enumerators_is_the_ports_error() {
     invalid_tone(&mut sc, v);
     sc.raises(n("OCIO.GradingToneTransform"), vec![r(v), r(st)]);
     compare(&[sc]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// GradingRGBCurveTransform, GradingHueCurveTransform
+
+#[test]
+fn curve_transforms_have_the_wheels_surface() {
+    surface(&["GradingRGBCurveTransform", "GradingHueCurveTransform"]);
+}
+
+const CURVE_ALL: [&str; 6] = [
+    "getStyle",
+    "isDynamic",
+    "getDirection",
+    "getTransformType",
+    "validate",
+    "__repr__",
+];
+
+/// What differs between the two curve transforms in their scripts.
+struct CurveClass {
+    class: &'static str,
+    value: &'static str,
+    /// The curve the scripts change, and its curve type's name.
+    curve: &'static str,
+    curve_type: &'static str,
+    /// The curve type enum.
+    curve_enum: &'static str,
+    /// Points that make that curve valid and different from its default, then invalid.
+    valid: [f64; 6],
+    invalid: [f64; 6],
+    /// The flag's getter and setter (`BypassLinToLog`, `RGBToHSY`) and two values of it.
+    flag: (&'static str, &'static str, &'static str, &'static str),
+}
+
+const RGB: CurveClass = CurveClass {
+    class: "GradingRGBCurveTransform",
+    value: "GradingRGBCurve",
+    curve: "red",
+    curve_type: "RGB_RED",
+    curve_enum: "RGBCurveType",
+    valid: [0.0, 0.1, 0.5, 0.6, 1.0, 0.9],
+    invalid: [0.0, 0.1, 0.5, 0.6, 0.4, 0.9],
+    flag: ("getBypassLinToLog", "setBypassLinToLog", "True", "False"),
+};
+
+const HUE: CurveClass = CurveClass {
+    class: "GradingHueCurveTransform",
+    value: "GradingHueCurve",
+    curve: "lum_sat",
+    curve_type: "LUM_SAT",
+    curve_enum: "HueCurveType",
+    valid: [0.0, 1.2, 0.5, 0.8, 1.0, 1.0],
+    invalid: [0.0, 1.2, 0.5, 0.8, 0.4, 1.0],
+    flag: (
+        "getRGBToHSY",
+        "setRGBToHSY",
+        "OCIO.HSY_TRANSFORM_NONE",
+        "OCIO.HSY_TRANSFORM_1",
+    ),
+};
+
+/// A flag value: `True`/`False`, or a name.
+fn flag_value(v: &str) -> serde_json::Value {
+    match v {
+        "True" => b(true),
+        "False" => b(false),
+        name => n(name),
+    }
+}
+
+/// `curve` of the value object `v` set to the points `p` through its control point iterator
+/// (the curve has three points).
+fn set_points(sc: &mut Script, v: usize, curve: &str, p: &[f64; 6]) {
+    let it = sc.call(ra(v, &format!("{curve}.getControlPoints")), vec![]);
+    for k in 0..3 {
+        let point = sc.call(
+            n("OCIO.GradingControlPoint"),
+            vec![f(p[2 * k]), f(p[2 * k + 1])],
+        );
+        sc.call(ra(it, "__setitem__"), vec![i(k as i128), r(point)]);
+    }
+}
+
+fn curve_transform_script(c: &CurveClass) -> Script {
+    let mut sc = Script::new();
+    let cls = format!("OCIO.{}", c.class);
+    let t = sc.call(n(&cls), vec![]);
+    sc.eval(r(t), &CURVE_ALL);
+    base_methods(&mut sc, t, true);
+    metadata(&mut sc, t);
+    // getValue: the transform's own curves, the same object each time.
+    let v = sc.call(ra(t, "getValue"), vec![]);
+    let v2 = sc.call(ra(t, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(v), r(v2)]);
+    let before = sc.call(n("copy.deepcopy"), vec![r(t)]);
+    // Changed through it: the transform shows it, unvalidated.
+    set_points(&mut sc, v, c.curve, &c.valid);
+    sc.eval(r(t), &CURVE_ALL);
+    let copy = sc.call(n("copy.deepcopy"), vec![r(t)]);
+    sc.repr(r(before));
+    let group = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(group, "appendTransform"), vec![r(t)]);
+    set_points(&mut sc, v, c.curve, &c.invalid);
+    sc.repr(r(t));
+    sc.repr(r(group));
+    sc.raises(ra(t, "validate"), vec![]);
+    sc.raises(ra(group, "validate"), vec![]);
+    sc.repr(r(copy));
+    let curve = format!("OCIO.{}", c.curve_type);
+    sc.call(ra(t, "getSlope"), vec![n(&curve), i(1)]);
+    sc.call(ra(t, "slopesAreDefault"), vec![n(&curve)]);
+    // A slope the copy refuses (it doesn't validate): the curves stay the object's.
+    sc.raises(ra(t, "setSlope"), vec![n(&curve), i(1), f(0.5)]);
+    sc.raises(ra(t, "setSlope"), vec![n(&curve), i(7), f(0.5)]);
+    let v3 = sc.call(ra(t, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(v), r(v3)]);
+    // A value refused: the same.
+    let bad = sc.call(n(&format!("OCIO.{}", c.value)), vec![n("OCIO.GRADING_LOG")]);
+    set_points(&mut sc, bad, c.curve, &c.invalid);
+    sc.raises(ra(t, "setValue"), vec![r(bad)]);
+    let v4 = sc.call(ra(t, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(v), r(v4)]);
+    // Made valid again; a slope set: a copy of the curves replaces them.
+    set_points(&mut sc, v, c.curve, &c.valid);
+    sc.call(ra(t, "validate"), vec![]);
+    sc.call(ra(t, "setSlope"), vec![n(&curve), i(1), f(0.5)]);
+    sc.eval(r(t), &CURVE_ALL);
+    let v5 = sc.call(ra(t, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(v), r(v5)]);
+    set_points(&mut sc, v, c.curve, &c.invalid);
+    sc.call(ra(t, "validate"), vec![]);
+    sc.call(ra(t, "getSlope"), vec![n(&curve), i(1)]);
+    sc.call(ra(t, "slopesAreDefault"), vec![n(&curve)]);
+    // setValue: a copy of the value given, the object given not the transform's.
+    let w = sc.call(n(&format!("OCIO.{}", c.value)), vec![n("OCIO.GRADING_LOG")]);
+    set_points(&mut sc, w, c.curve, &c.valid);
+    sc.call(ra(t, "setValue"), vec![r(w)]);
+    let v6 = sc.call(ra(t, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(w), r(v6)]);
+    set_points(&mut sc, w, c.curve, &c.invalid);
+    sc.call(ra(t, "validate"), vec![]);
+    sc.call(ra(t, "setValue"), vec![r(v6)]);
+    let v7 = sc.call(ra(t, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(v6), r(v7)]);
+    // The same style keeps the curves; another resets them.
+    sc.call(ra(t, "setStyle"), vec![n("OCIO.GRADING_LOG")]);
+    let v8 = sc.call(ra(t, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(v7), r(v8)]);
+    sc.call(ra(t, "setStyle"), vec![n("OCIO.GRADING_LIN")]);
+    let v9 = sc.call(ra(t, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(v8), r(v9)]);
+    sc.eval(r(t), &CURVE_ALL);
+    for style in ["GRADING_VIDEO", "GRADING_LOG"] {
+        sc.call(ra(t, "setStyle"), vec![n(&format!("OCIO.{style}"))]);
+        sc.eval(r(t), &CURVE_ALL);
+    }
+    // Curve types outside the curves, and the casters.
+    let odd = sc.call(n(&format!("OCIO.{}", c.curve_enum)), vec![i(9)]);
+    sc.raises(ra(t, "getSlope"), vec![r(odd), i(0)]);
+    sc.raises(ra(t, "setSlope"), vec![r(odd), i(0), f(1.0)]);
+    sc.raises(ra(t, "slopesAreDefault"), vec![r(odd)]);
+    sc.raises(ra(t, "getSlope"), vec![i(0), i(0)]);
+    sc.raises(ra(t, "getSlope"), vec![n(&curve), i(-1)]);
+    sc.raises(ra(t, "getSlope"), vec![n(&curve), i(3)]);
+    sc.call_kw(
+        ra(t, "getSlope"),
+        vec![],
+        vec![
+            ("index", i(0)),
+            (
+                if c.class == RGB.class {
+                    "channel"
+                } else {
+                    "curve"
+                },
+                n(&curve),
+            ),
+        ],
+        Expect::Value,
+    );
+    // The flag.
+    let (get, set, on, off) = c.flag;
+    sc.call(ra(t, get), vec![]);
+    sc.call(ra(t, set), vec![flag_value(on)]);
+    sc.eval(r(t), &[get, "__repr__"]);
+    sc.call(ra(t, set), vec![flag_value(off)]);
+    sc.eval(r(t), &[get, "__repr__"]);
+    sc.call(ra(t, "makeDynamic"), vec![]);
+    sc.eval(r(t), &CURVE_ALL);
+    sc.call(ra(t, "makeNonDynamic"), vec![]);
+    // The constructors (of values made valid again).
+    set_points(&mut sc, w, c.curve, &c.valid);
+    set_points(&mut sc, v, c.curve, &c.valid);
+    let full = sc.call(
+        n(&cls),
+        vec![
+            r(w),
+            n("OCIO.GRADING_LIN"),
+            b(true),
+            n("OCIO.TRANSFORM_DIR_INVERSE"),
+        ],
+    );
+    sc.eval(r(full), &CURVE_ALL);
+    let fv = sc.call(ra(full, "getValue"), vec![]);
+    sc.call(n("operator.is_"), vec![r(fv), r(w)]);
+    let kw = sc.call_kw(
+        n(&cls),
+        vec![],
+        vec![("dir", n("OCIO.TRANSFORM_DIR_INVERSE")), ("values", r(v))],
+        Expect::Value,
+    );
+    sc.eval(r(kw), &CURVE_ALL);
+    let kw = sc.call_kw(
+        n(&cls),
+        vec![],
+        vec![("style", n("OCIO.GRADING_VIDEO")), ("dynamic", b(true))],
+        Expect::Value,
+    );
+    sc.eval(r(kw), &CURVE_ALL);
+    let bad = sc.call(n(&format!("OCIO.{}", c.value)), vec![n("OCIO.GRADING_LOG")]);
+    set_points(&mut sc, bad, c.curve, &c.invalid);
+    sc.raises(n(&cls), vec![r(bad)]);
+    for args in [vec![i(0)], vec![n("OCIO.GRADING_LOG"), s("x")], vec![r(t)]] {
+        sc.raises(n(&cls), args);
+    }
+    sc.raises(ra(t, "setValue"), vec![i(0)]);
+    sc
+}
+
+/// The classes behave as the wheel's.
+#[test]
+fn curve_transforms_behave_as_the_wheels() {
+    compare(&[curve_transform_script(&RGB), curve_transform_script(&HUE)]);
+}
+
+/// An `HSYTransformStyle` outside the enumerators, which the wheel's hue curve transform stores
+/// (its getter giving the number back), is the port's error (U-112).
+#[test]
+fn an_hsy_style_outside_the_enumerators_is_the_ports_error() {
+    let mut sc = Script::new();
+    let st = sc.call(n("OCIO.HSYTransformStyle"), vec![i(7)]);
+    let t = sc.call(n("OCIO.GradingHueCurveTransform"), vec![]);
+    let refused = sc.call(ra(t, "setRGBToHSY"), vec![r(st)]);
+    let getter = sc.call(ra(t, "getRGBToHSY"), vec![]);
+    let theirs = common::wheel(&[sc.json()]);
+    let theirs = theirs[0]["steps"].as_array().unwrap();
+    let ours = common::port(&sc.json());
+    let ours = ours["steps"].as_array().unwrap();
+    assert_eq!(theirs.len(), 4);
+    assert!(
+        theirs.iter().all(|s| s.get("value").is_some()),
+        "{theirs:?}"
+    );
+    let repr = String::from_utf8(ocio_testkit::oracle_values::bytes(
+        &theirs[getter]["value"]["repr"],
+    ))
+    .unwrap();
+    assert_eq!(repr, "<HSYTransformStyle.???: 7>");
+    assert_eq!(ours[refused]["raised"]["type"], "builtins.ValueError");
+    let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
+        &ours[refused]["raised"]["message"],
+    ))
+    .unwrap();
+    assert_eq!(
+        message,
+        "PyOpenColorIO.PyOpenColorIO.HSYTransformStyle(7): the wheel stores an enum value \
+         outside its enumerators, which the port's library can't hold \
+         (docs/improvements.md, U-112)"
+    );
+}
+
+/// `None` for a curve transform's values (`setValue`, the constructor), which the wheel
+/// dereferences (its process dies), is the port's error (U-167). Each script runs in a process
+/// of its own in the wheel, which dies at its last step, and only there.
+#[test]
+fn null_values_are_the_ports_error() {
+    let mut scripts = Vec::new();
+    for (class, value) in [
+        ("GradingRGBCurveTransform", "GradingRGBCurve"),
+        ("GradingHueCurveTransform", "GradingHueCurve"),
+    ] {
+        let mut sc = Script::new();
+        let t = sc.call(n(&format!("OCIO.{class}")), vec![]);
+        sc.call(ra(t, "setValue"), vec![none()]);
+        scripts.push((sc, value));
+        let mut sc = Script::new();
+        sc.call(
+            n(&format!("OCIO.{class}")),
+            vec![none(), n("OCIO.GRADING_LOG")],
+        );
+        scripts.push((sc, value));
+    }
+    let json: Vec<serde_json::Value> = scripts.iter().map(|(sc, _)| sc.json()).collect();
+    let result = ocio_testkit::Oracle::get()
+        .call("py_eval", serde_json::json!({ "scripts": json }), &[])
+        .result;
+    let reports = result["scripts"].as_array().unwrap();
+    assert_eq!(reports.len(), 4);
+    let mut shortened = Vec::new();
+    for (k, report) in reports.iter().enumerate() {
+        let code = report["crashed"]["returncode"].as_i64();
+        assert!(code.is_some_and(|c| c != 0), "script {k}: {report}");
+        let mut steps = scripts[k].0.json();
+        steps["steps"].as_array_mut().unwrap().pop();
+        if !steps["steps"].as_array().unwrap().is_empty() {
+            shortened.push(steps);
+        }
+    }
+    for report in common::wheel(&shortened) {
+        for step in report["steps"].as_array().unwrap() {
+            assert!(step.get("value").is_some(), "{step}");
+        }
+    }
+    for (sc, value) in &scripts {
+        let ours = common::port(&sc.json());
+        let steps = ours["steps"].as_array().unwrap();
+        let last = steps.last().unwrap();
+        for step in &steps[..steps.len() - 1] {
+            assert!(step.get("value").is_some(), "{step}");
+        }
+        assert_eq!(last["raised"]["type"], "builtins.ValueError", "{last}");
+        let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
+            &last["raised"]["message"],
+        ))
+        .unwrap();
+        assert_eq!(
+            message,
+            format!(
+                "PyOpenColorIO.PyOpenColorIO.{value}: None for a curve, a null pointer the wheel \
+                 dereferences (its process dies; docs/improvements.md, U-167)"
+            )
+        );
+    }
 }

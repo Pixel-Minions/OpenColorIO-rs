@@ -894,18 +894,46 @@ impl HueCurveNode {
 }
 
 /// The library's value of the hue curve `rc` now, as it is (not validated).
-pub(crate) fn hue_curve_value(rc: &HueCurveRc) -> PyResult<GradingHueCurve> {
+pub(crate) fn hue_curve_value(rc: &HueCurveRc) -> GradingHueCurve {
     let (curves, draw) = {
         let node = rc.lock();
         (node.curves.clone(), node.draw_curve_only)
     };
     let mut value = GradingHueCurve::new(GradingStyle::Log);
     for (c, curve) in HueCurveType::CURVES.into_iter().zip(curves) {
-        let copy = curve.lock().clone();
-        *unreachable_error(value.curve_mut(c))? = copy;
+        // Each curve of the enumerators has its place.
+        if let Ok(slot) = value.curve_mut(c) {
+            *slot = curve.lock().clone();
+        }
     }
     value.set_draw_curve_only(draw);
-    Ok(value)
+    value
+}
+
+/// The value object that `getValue` of a `GradingRGBCurveTransform` or
+/// `GradingHueCurveTransform` returned: the transform's own curves, as upstream's
+/// `getValue` returns them, which Python changes in place (chunk 6.7b). The transform's node
+/// holds it until the library replaces the value (`setValue`, `setSlope`, a new style).
+#[derive(Debug, Clone)]
+pub(crate) enum CurveValue {
+    Rgb(RgbCurveRc),
+    Hue(HueCurveRc),
+}
+
+impl CurveValue {
+    /// The curves now into the transform `t`, as they are (not validated:
+    /// `set_value_as_is`), as upstream's transform holds what Python changed.
+    pub(crate) fn write_back(&self, t: &mut ocio::Transform) {
+        match (self, t) {
+            (CurveValue::Rgb(rc), ocio::Transform::GradingRgbCurve(t)) => {
+                t.set_value_as_is(&rgb_curve_value(rc));
+            }
+            (CurveValue::Hue(rc), ocio::Transform::GradingHueCurve(t)) => {
+                t.set_value_as_is(&hue_curve_value(rc));
+            }
+            _ => {}
+        }
+    }
 }
 
 /// A library result whose error can't happen here (a curve of the enumerators, an index below
@@ -1600,7 +1628,7 @@ fn hue_repr<'py>(
     a: &[Bound<'py, PyAny>],
     _: bool,
 ) -> PyResult<Option<Py<PyAny>>> {
-    let value = hue_curve_value(&this_hue!(o, a))?;
+    let value = hue_curve_value(&this_hue!(o, a));
     repr_out(py, |os| value.write_to(os))
 }
 
@@ -1698,25 +1726,25 @@ static HUE_INIT: Function = Function {
 
 // .def("__eq__", ...), .def("__ne__", ...) (PyGradingData.cpp:493-500 @ v2.5.2).
 static HUE_EQ: Function = operator_def!("__eq__", HUE_SELF, HUE_ARG0, |py, o, a, _| {
-    let lhs = hue_curve_value(&this_hue!(o, a))?;
-    let rhs = hue_curve_value(&shared_arg!(o, a, 1, HueCurveNode))?;
+    let lhs = hue_curve_value(&this_hue!(o, a));
+    let rhs = hue_curve_value(&shared_arg!(o, a, 1, HueCurveNode));
     ok(py, lhs == rhs)
 });
 static HUE_NE: Function = operator_def!("__ne__", HUE_SELF, HUE_ARG0, |py, o, a, _| {
-    let lhs = hue_curve_value(&this_hue!(o, a))?;
-    let rhs = hue_curve_value(&shared_arg!(o, a, 1, HueCurveNode))?;
+    let lhs = hue_curve_value(&this_hue!(o, a));
+    let rhs = hue_curve_value(&shared_arg!(o, a, 1, HueCurveNode));
     ok(py, lhs != rhs)
 });
 
 // .def("validate", ...), .def("isIdentity", ...), .def("getDrawCurveOnly", ...),
 // .def("setDrawCurveOnly", ..., "drawcurveonly"_a) (PyGradingData.cpp:502-509 @ v2.5.2).
 static HUE_VALIDATE: Function = method_def!("validate", [HUE_SELF], "None", |py, o, a, _| {
-    let value = hue_curve_value(&this_hue!(o, a))?;
+    let value = hue_curve_value(&this_hue!(o, a));
     py_result(py, value.validate())?;
     none(py)
 });
 static HUE_IS_IDENTITY: Function = method_def!("isIdentity", [HUE_SELF], "bool", |py, o, a, _| {
-    let value = hue_curve_value(&this_hue!(o, a))?;
+    let value = hue_curve_value(&this_hue!(o, a));
     ok(py, value.is_identity())
 });
 static HUE_GET_DRAW: Function =

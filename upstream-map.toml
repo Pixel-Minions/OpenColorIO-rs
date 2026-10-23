@@ -4104,7 +4104,7 @@ note = "p6-transforms 6.3c"
 path = "src/bindings/python/transforms/PyGradingHueCurveTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_grading_hue_curve_transform.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/transforms/PyGradingPrimaryTransform.cpp"
@@ -4116,7 +4116,7 @@ status = "done"
 path = "src/bindings/python/transforms/PyGradingRGBCurveTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_grading_rgb_curve_transform.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/transforms/PyGradingToneTransform.cpp"

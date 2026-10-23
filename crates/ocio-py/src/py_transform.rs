@@ -103,6 +103,10 @@ pub(crate) struct Node {
     /// How many times the node was changed: taken mutably ([`NodeGuard`]) other than in a
     /// call that only reads ([`crate::shared::changes_count`]).
     pub(crate) version: u64,
+    /// The value object `getValue` of a curve transform returned, the transform's own curves
+    /// while the library hasn't replaced them ([`crate::py_grading_data::CurveValue`]):
+    /// written back into the transform, as it is, each time the node is locked.
+    pub(crate) curve_value: Option<crate::py_grading_data::CurveValue>,
 }
 
 impl TransformRc {
@@ -131,18 +135,25 @@ impl TransformRc {
             direction,
             metadata_heap: Default::default(),
             version: 0,
+            curve_value: None,
         })))
     }
 
-    /// The node, locked. The binding runs under the GIL, and never locks a node while it holds
-    /// another's lock, so the lock is never contended (but by the current config's write-back
-    /// for an embedding host, [`crate::embed`], which locks each node briefly).
+    /// The node, locked, its transform holding the curves `getValue` gave Python as they are
+    /// now ([`Node::curve_value`]; the curves' locks are taken and released while the node's is
+    /// held, never the other way round). The binding runs under the GIL, and never locks a node
+    /// while it holds another's lock, so the lock is never contended (but by the current
+    /// config's write-back for an embedding host, [`crate::embed`], which locks each node
+    /// briefly).
     pub(crate) fn lock(&self) -> NodeGuard<'_> {
-        NodeGuard(
-            self.0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        )
+        let mut node = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(value) = node.curve_value.clone() {
+            value.write_back(&mut node.transform);
+        }
+        NodeGuard(node)
     }
 
     /// The node's address, which pybind11's registry keys an instance by.
@@ -600,7 +611,9 @@ variant!(ocio::ExponentWithLinearTransform, ExponentWithLinear);
 variant!(ocio::ExposureContrastTransform, ExposureContrast);
 variant!(ocio::FileTransform, File);
 variant!(ocio::FixedFunctionTransform, FixedFunction);
+variant!(ocio::GradingHueCurveTransform, GradingHueCurve);
 variant!(ocio::GradingPrimaryTransform, GradingPrimary);
+variant!(ocio::GradingRgbCurveTransform, GradingRgbCurve);
 variant!(ocio::GradingToneTransform, GradingTone);
 variant!(ocio::GroupTransform, Group);
 variant!(ocio::LogAffineTransform, LogAffine);
@@ -893,6 +906,7 @@ pub(crate) fn create_editable_copy(py: Python<'_>, rc: &TransformRc) -> PyResult
         direction: node.direction,
         metadata_heap: Default::default(),
         version: 0,
+        curve_value: None,
     }))))
 }
 
@@ -1149,6 +1163,8 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::transforms::py_file_transform::bind(m)?;
     crate::transforms::py_fixed_function_transform::bind(m)?;
     crate::transforms::py_grading_primary_transform::bind(m)?;
+    crate::transforms::py_grading_rgb_curve_transform::bind(m)?;
+    crate::transforms::py_grading_hue_curve_transform::bind(m)?;
     crate::transforms::py_grading_tone_transform::bind(m)?;
     crate::transforms::py_group_transform::bind(m)?;
     crate::transforms::py_log_affine_transform::bind(m)?;

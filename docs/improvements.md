@@ -2162,13 +2162,15 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   and "vector::_M_default_append" (`resize`) on Linux (libstdc++); one the allocator can't
   serve raises `MemoryError` "bad allocation" or "std::bad_alloc"; and the limits differ as
   for I-236 (`2**61` points is "vector too long" on Windows, beyond libstdc++'s `2**60 - 1`
-  on Linux).
+  on Linux). The Linux texts and limits are libstdc++'s as its sources write them: to be
+  confirmed on Linux, through the Linux wheel.
 - **Who notices:** Python code that asks for a curve of an absurd number of points.
 - **A fix:** refuse sizes beyond a sane bound, with one text on both platforms.
 - **Status:** matched in `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`,
   `vector_alloc`: the same limits and texts, the memory reserved through the allocator before
   the library allocates, whose failure would abort the process instead);
-  `grading_data_oracle.rs`, `bspline_script` (`2**40`, `2**61`, `2**63`).
+  `grading_data_oracle.rs`, `bspline_script` (`2**40`, `2**61`, `2**63`), against the Windows
+  wheel; on Linux to be confirmed.
 
 ## Platform, environment and paths
 
@@ -5310,6 +5312,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `GRADING_VIDEO` is), so their error comes first, as the wheel's; in `p6-after-p5` (6.7b,
   `crates/ocio-py/src/transforms/py_grading_primary_transform.rs`, `grading_style`);
   `grading_transforms_oracle.rs`, `a_grading_style_outside_the_enumerators_is_the_ports_error`.
+  The same for `GradingRGBCurveTransform` and `GradingHueCurveTransform`, and the hue curve
+  transform's `setRGBToHSY` (`an_hsy_style_outside_the_enumerators_is_the_ports_error`).
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -5801,15 +5805,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   curve's and the hue curve's curve properties (`GradingRGBCurve.red.fget(None)`, 429-468,
   511-590), their setters given `None` (`rgb.red = None`, `CopyGradingBSpline`, 22-33), and
   `GradingHueCurve(...)` given `None` among its eight curves (`GradingHueCurveImpl`'s
-  constructor copies each through its pointer, GradingHueCurve.cpp:99-117). The wheel's
-  process dies. (`GradingRGBCurve(..., None)` checks its curves: "All curves have to be
+  constructor copies each through its pointer, GradingHueCurve.cpp:99-117); and
+  `GradingRGBCurveTransform` and `GradingHueCurveTransform` given `None` for their values
+  (`setValue(None)`, the constructor's `values`: the property validates through the pointer,
+  DynamicProperty.cpp:216-223, 315-322). The wheel's process dies. (`GradingRGBCurve(..., None)` checks its curves: "All curves have to be
   defined", matched. The methods bound without argument names are U-134's.)
 - **Who notices:** Python code that passes `None` for a curve.
 - **A fix:** refuse `None` there (`py::arg().none(false)`), or check the pointers.
 - **Status:** the port raises ValueError "<class>: None for a curve, a null pointer the wheel
   dereferences (its process dies; docs/improvements.md, U-167)" (`null_curve`), in
-  `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`); `grading_data_oracle.rs`,
-  `a_null_curve_is_the_ports_error` (each case's process dies in the wheel, and only at that
+  `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`; 6.7b,
+  `transforms/py_grading_rgb_curve_transform.rs`, `py_grading_hue_curve_transform.rs`);
+  `grading_data_oracle.rs`, `a_null_curve_is_the_ports_error`, `grading_transforms_oracle.rs`,
+  `null_values_are_the_ports_error` (each case's process dies in the wheel, and only at that
   step).
 
 ### U-171. The heuristics turn a shared config's processor cache off while other threads use it
