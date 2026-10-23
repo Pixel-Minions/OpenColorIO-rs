@@ -3855,7 +3855,7 @@ path = "src/bindings/python/PyGradingData.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_grading_data.rs"]
 status = "partial"
-note = "p6-after-p5 6.7a: the values (GradingRGBM, GradingPrimary, GradingRGBMSW, GradingTone, GradingControlPoint); the curves next"
+note = "p6-after-p5 6.7a: the values and the curves; done with the dynamic property chunk"
 
 [[file]]
 path = "src/bindings/python/PyImageDesc.cpp"

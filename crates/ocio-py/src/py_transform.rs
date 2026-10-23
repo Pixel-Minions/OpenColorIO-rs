@@ -750,6 +750,23 @@ pub(crate) fn def_readwrite(
     cls.setattr(name, prop)
 }
 
+/// `cls.def_property(name, getter, setter)` of two lambdas: a property over two functions
+/// pybind11 makes before it knows their class (no scope: `__module__` None, not methods), each
+/// without a name.
+pub(crate) fn def_property(
+    cls: &Bound<'_, PyType>,
+    name: &str,
+    get: &'static Function,
+    set: &'static Function,
+) -> PyResult<()> {
+    let py = cls.py();
+    let prop = property(
+        pybind11::builtin_unscoped(py, get, true)?,
+        pybind11::builtin_unscoped(py, set, true)?,
+    )?;
+    cls.setattr(name, prop)
+}
+
 /// `cls.def_property_readonly_static(name, getter)`: pybind11's static property over a function
 /// without a scope or a name.
 pub(crate) fn def_property_readonly_static(

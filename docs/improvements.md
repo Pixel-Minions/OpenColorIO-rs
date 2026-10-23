@@ -2152,6 +2152,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `image_desc_oracle.rs`, `lut_transforms_oracle.rs`, against the wheel. Values that this
   reads past the buffer's items are U-148.
 
+### I-366. A curve's size beyond memory fails with the C++ runtime's texts
+
+- **Upstream:** `GradingBSplineCurve(size)` and `setNumControlPoints(size)` take any `size_t`
+  and make (`std::vector(n)`) or grow (`resize`) the curve's control points (8 bytes each)
+  and slopes (4 bytes each) (GradingBSplineCurve.cpp:556-559, 602-606 @ v2.5.2). A size beyond
+  the vector's `max_size()` raises `ValueError` with the C++ runtime's text, "vector too long"
+  on Windows (MSVC's STL), "cannot create std::vector larger than max_size()" (constructor)
+  and "vector::_M_default_append" (`resize`) on Linux (libstdc++); one the allocator can't
+  serve raises `MemoryError` "bad allocation" or "std::bad_alloc"; and the limits differ as
+  for I-236 (`2**61` points is "vector too long" on Windows, beyond libstdc++'s `2**60 - 1`
+  on Linux).
+- **Who notices:** Python code that asks for a curve of an absurd number of points.
+- **A fix:** refuse sizes beyond a sane bound, with one text on both platforms.
+- **Status:** matched in `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`,
+  `vector_alloc`: the same limits and texts, the memory reserved through the allocator before
+  the library allocates, whose failure would abort the process instead);
+  `grading_data_oracle.rs`, `bspline_script` (`2**40`, `2**61`, `2**63`).
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."
@@ -5280,6 +5298,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `p6-config` (6.6a, `crates/ocio-py/src/py_open_color_io.rs`, `logging_level`);
   `callbacks_oracle.rs`, `where_the_wheel_fails_the_port_raises`. `LogMessage` given such a
   level logs nothing, as upstream's `switch` (Logging.cpp:131-160), matched.
+  Also a `GradingBSplineCurve`'s spline type (`GradingBSplineCurve(size, OCIO.BSplineType(9))`
+  and `setSplineType`), which the wheel stores and its getter gives back as
+  `<BSplineType.???: 9>`, in `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`,
+  `spline_type`); `grading_data_oracle.rs`,
+  `a_spline_type_outside_the_enumerators_is_the_ports_error`. (A `HueCurveType` outside the
+  enumerators is read at once, as the `default` of `GetBSplineTypeForHueCurveType`: matched.)
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -5761,6 +5785,26 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (docs/improvements.md, U-157)", once the export is made, which it then releases
   (`crates/ocio-py/ffi/src/lib.rs`, `Buffer::request`), in `p6-buffers` (6.5a). Not reachable
   from Python code, so not tested through an exporter.
+
+### U-167. `None` for a grading curve that the wheel dereferences
+
+- **Upstream:** pybind11's holder caster takes `None` as a null `GradingBSplineCurveRcPtr`,
+  `GradingRGBCurveRcPtr` or `GradingHueCurveRcPtr` when it may convert (a function of one
+  overload, or the second pass), and these lambdas dereference it
+  (src/bindings/python/PyGradingData.cpp @ v2.5.2): the getters and setters of the RGB
+  curve's and the hue curve's curve properties (`GradingRGBCurve.red.fget(None)`, 429-468,
+  511-590), their setters given `None` (`rgb.red = None`, `CopyGradingBSpline`, 22-33), and
+  `GradingHueCurve(...)` given `None` among its eight curves (`GradingHueCurveImpl`'s
+  constructor copies each through its pointer, GradingHueCurve.cpp:99-117). The wheel's
+  process dies. (`GradingRGBCurve(..., None)` checks its curves: "All curves have to be
+  defined", matched. The methods bound without argument names are U-134's.)
+- **Who notices:** Python code that passes `None` for a curve.
+- **A fix:** refuse `None` there (`py::arg().none(false)`), or check the pointers.
+- **Status:** the port raises ValueError "<class>: None for a curve, a null pointer the wheel
+  dereferences (its process dies; docs/improvements.md, U-167)" (`null_curve`), in
+  `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`); `grading_data_oracle.rs`,
+  `a_null_curve_is_the_ports_error` (each case's process dies in the wheel, and only at that
+  step).
 
 ### U-171. The heuristics turn a shared config's processor cache off while other threads use it
 

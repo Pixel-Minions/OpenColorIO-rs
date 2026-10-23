@@ -128,8 +128,9 @@ fn wheel_unnamed() -> Vec<Unnamed> {
 }
 
 /// The table is the wheel's unnamed overloads, exactly; the parameters of the pointers and
-/// holders of the classes the port binds are of the types the dispatcher loads (`str` and
-/// classes; a later card binding a class adds its types to `dispatch.rs`'s `rest_loads`).
+/// holders of the classes the port binds are of the types the dispatcher loads (`str`,
+/// classes and `GradingBSplineCurve.setSlopes`' sequence; a later card binding a class adds its
+/// types to `dispatch.rs`'s `rest_loads`).
 #[test]
 fn the_table_is_the_wheels_unnamed_overloads() {
     let wheel = wheel_unnamed();
@@ -164,7 +165,9 @@ fn the_table_is_the_wheels_unnamed_overloads() {
         {
             for t in types {
                 assert!(
-                    t == "str" || t.starts_with("PyOpenColorIO.PyOpenColorIO."),
+                    t == "str"
+                        || t.starts_with("PyOpenColorIO.PyOpenColorIO.")
+                        || t == "collections.abc.Sequence[typing.SupportsFloat]",
                     "{c}.{n}: {t}"
                 );
             }
@@ -320,6 +323,14 @@ fn argument(ty: &str) -> Option<&'static str> {
         "PyOpenColorIO.PyOpenColorIO.GradingRGBMSW" => Some("OCIO.GradingRGBMSW()"),
         "PyOpenColorIO.PyOpenColorIO.GradingTone" => Some("OCIO.GradingTone(OCIO.GRADING_LOG)"),
         "PyOpenColorIO.PyOpenColorIO.GradingControlPoint" => Some("OCIO.GradingControlPoint()"),
+        "PyOpenColorIO.PyOpenColorIO.GradingBSplineCurve" => Some("OCIO.GradingBSplineCurve(2)"),
+        "PyOpenColorIO.PyOpenColorIO.GradingRGBCurve" => {
+            Some("OCIO.GradingRGBCurve(OCIO.GRADING_LOG)")
+        }
+        "PyOpenColorIO.PyOpenColorIO.GradingHueCurve" => {
+            Some("OCIO.GradingHueCurve(OCIO.GRADING_LOG)")
+        }
+        "collections.abc.Sequence[typing.SupportsFloat]" => Some("[0.5, 0.25]"),
         _ => None,
     }
 }
@@ -357,6 +368,7 @@ fn every_bound_overload_with_none_as_self() {
                 .3;
             let args: Option<Vec<&str>> = types.iter().map(|t| argument(t)).collect();
             let Some(args) = args else {
+                eprintln!("SKIP {c}.{name}[{k}] {types:?}");
                 skipped += 1;
                 continue;
             };
@@ -443,7 +455,9 @@ fn every_bound_overload_with_none_as_self() {
     // the errors before U-134's iterators.)
     assert!(errors >= 205, "{errors}");
     assert!(refused >= 231, "{refused}");
-    assert!(skipped <= 2, "{skipped}");
+    // vector_of_uint8_t's slice overloads, and GradingHueCurve's second `__repr__`
+    // (PyGradingData.cpp:592 @ v2.5.2), which the first always takes.
+    assert!(skipped <= 3, "{skipped}");
     assert!(iterators >= 26, "{iterators}");
 }
 

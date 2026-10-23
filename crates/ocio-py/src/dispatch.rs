@@ -255,17 +255,25 @@ fn bind<'py>(
 /// Whether the arguments after `self` of the overload `o` load as pybind11's casters load them
 /// with conversions, for the parameter types of the overloads [`crate::self_kind`] lists with a
 /// null `self` (a `const char *`: a `str`, `bytes` or `None`; a class's holder: an instance or
-/// `None`).
-fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> bool {
-    o.params.iter().zip(values).skip(1).all(|(p, v)| {
-        if p.ty == "str" {
+/// `None`; a `std::vector<float>`: a sequence of numbers, whose caster may raise instead of
+/// refusing, as when loading the call's arguments).
+fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> PyResult<bool> {
+    for (p, v) in o.params.iter().zip(values).skip(1) {
+        let loads = if p.ty == "str" {
             v.is_none() || v.is_instance_of::<PyString>() || v.is_instance_of::<PyBytes>()
         } else if p.ty.starts_with("PyOpenColorIO.PyOpenColorIO.") {
             v.is_none() || crate::pybind11::instance_of(v, p.ty).is_some()
+        } else if p.ty == "collections.abc.Sequence[typing.SupportsFloat]" {
+            // `GradingBSplineCurve.setSlopes` (PyGradingData.cpp:353 @ v2.5.2).
+            <Vec<f32> as Cast>::try_load(v, true)?.is_some()
         } else {
             false
+        };
+        if !loads {
+            return Ok(false);
         }
-    })
+    }
+    Ok(true)
 }
 
 /// The overload `index` of `f`, `o`, called: where pybind11 would call it with a null `self`
@@ -291,13 +299,13 @@ fn call<'py>(
         if matches!(
             kind,
             Some(crate::self_kind::SelfKind::Pointer | crate::self_kind::SelfKind::Holder)
-        ) && rest_loads(o, values)
+        ) && rest_loads(o, values)?
         {
             return Err(crate::self_kind::null_self(class, f.name));
         }
         // An overload that only builds an iterator of `self`: the iterator of the null
         // pointer, an instance of the class it returns.
-        if kind == Some(crate::self_kind::SelfKind::Iterator) && rest_loads(o, values) {
+        if kind == Some(crate::self_kind::SelfKind::Iterator) && rest_loads(o, values)? {
             let it = crate::py_utils::new_null_iterator(py, o.ret, class, f.name)?;
             return Ok(Some(it.unbind()));
         }
