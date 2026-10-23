@@ -3509,8 +3509,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** the CTF reader reads every GradingPrimary control into the op, "even those
   that are not used by the current style" (`fileformats/ctf/CTFReaderHelper.cpp:2521-2568` @
-  v2.5.2), and the op's cache ID and `equals` hold all of them
-  (`ops/gradingprimary/GradingPrimaryOpData.cpp:187-207`). `GradingPrimaryWriter::writeContent`
+  v2.5.2), and the op's `equals` holds all of them (`GradingPrimaryOpData::equals`,
+  `ops/gradingprimary/GradingPrimaryOpData.cpp:249-263`, `operator==` at 265-268; the value
+  comparison is `operator==(GradingPrimary)`, `ops/gradingprimary/GradingPrimary.cpp:26-41`).
+  So does the cache ID of a non-dynamic op (`GradingPrimaryOpData::getCacheID`,
+  `GradingPrimaryOpData.cpp:187-207`); a dynamic op's cache ID leaves the values out (the
+  `isDynamic()` test at 201-204). `GradingPrimaryWriter::writeContent`
   writes only the style's controls: brightness, contrast and gamma for log, offset, exposure
   and contrast for linear (and no pivot black or white), lift, gamma, gain and offset for video
   (`fileformats/ctf/CTFTransform.cpp:1394-1499`). The same holds for a GradingPrimaryTransform

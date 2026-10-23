@@ -4207,6 +4207,12 @@ fn op_cases_i_ec() -> Vec<Case> {
             style("video"),
             ec("exposure=\"0.2\" contrast=\"0.65\""),
         ),
+        (
+            "only an exposure",
+            "2",
+            style("video"),
+            ec("exposure=\"1\""),
+        ),
         ("no parameter", "2", style("video"), ec("")),
         (
             "a NaN exposure",
@@ -4425,7 +4431,7 @@ fn op_cases_i_ec() -> Vec<Case> {
 #[test]
 fn exposure_contrast_files_read_as_in_the_wheel() {
     let cases = op_cases_i_ec();
-    assert_eq!(cases.len(), 57);
+    assert_eq!(cases.len(), 58);
     check_processors(&cases);
 }
 
