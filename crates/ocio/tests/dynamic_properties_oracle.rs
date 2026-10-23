@@ -5,17 +5,21 @@
 //! a property with whom, through `Config::getProcessor`, `Processor`, `CPUProcessor` and
 //! `GpuShaderDesc` (WP 5.6a).
 //!
-//! - `sharing_matches_the_wheel` (`object_calls`): per dynamic property type (exposure,
-//!   contrast, gamma, grading primary, RGB curve, tone and hue curve, and two dynamic
-//!   exposures in one group), one script of calls on both sides: the processor's property,
-//!   which its optimized processors share; CPU processors and GPU descriptions, which take a
-//!   copy when they are made; the CPU processor cache, which hands out a made CPU processor
-//!   again unless the config's flags don't share dynamic properties
-//!   (`PROCESSOR_CACHE_SHARE_DYN_PROPERTIES`); `OPTIMIZATION_NO_DYNAMIC_PROPERTIES`; and the
-//!   config's cache fallback, which hands out a cached processor of the same cache ID, with
-//!   the values set on it. Each call's result (processors as `processor_ops` writes them, the
-//!   group of their ops included, CPU and GPU processors by their getters, property values,
-//!   pixels by their bits), exception and log.
+//! - `sharing_matches_the_wheel` (`object_calls`): per kind of transform, one script of calls
+//!   on both sides. The kinds: each dynamic property type (exposure, contrast, gamma, grading
+//!   primary, RGB curve, tone and hue curve); two ops of one type in a group (exposure,
+//!   contrast, gamma, primary and tone, each type with its own warning, and a description
+//!   that refuses the second property); and several properties in one description (the order
+//!   of its list). The script: the processor's property, which its optimized processors
+//!   share; CPU processors and GPU descriptions, which take a copy when they are made; the
+//!   CPU processor cache, which hands out a made CPU processor again unless the config's flags
+//!   don't share dynamic properties (`PROCESSOR_CACHE_SHARE_DYN_PROPERTIES`); the config's
+//!   cache fallback, which hands out a cached processor of the same cache ID, with the values
+//!   set on it; `OPTIMIZATION_NO_DYNAMIC_PROPERTIES` alone, on the optimized, CPU and GPU
+//!   processors; and the properties a description holds, counted and read by index. Each
+//!   call's result (processors as `processor_ops` writes them, the group of their ops
+//!   included, CPU and GPU processors by their getters, property values, pixels by their
+//!   bits), exception and log.
 //! - `uniforms_and_pixels_follow_their_own_property` (`dynamic_apply`): a processor's CPU
 //!   processor and GPU description, each property taken from the processor, the CPU processor
 //!   and the description, set in turn, with the CPU processor's pixels and the description's
@@ -258,13 +262,22 @@ struct Kind {
     transform: fn(&DynValue) -> (Value, Transform),
     /// Four values: the transform's, two to set, and the other transform's.
     values: [DynValue; 4],
+    /// Two ops with a dynamic property of the same type: the processor keeps the first one's,
+    /// and the GPU description takes the first one's and refuses the second one's.
+    duplicates: bool,
+    /// How many dynamic properties the GPU description holds after extracting: the properties
+    /// the script reads one by one, after comparing the wheel's own count.
+    gpu_props: usize,
 }
 
-fn ec_transform(
+/// An exposure and contrast transform of `style` with the value `v` set for `ty`, and the
+/// properties flagged in `dynamic` (exposure, contrast, gamma) made dynamic.
+fn ec_build(
     style: ExposureContrastStyle,
     style_name: &str,
     ty: DynamicPropertyType,
     v: f64,
+    dynamic: [bool; 3],
 ) -> (Value, Transform) {
     let mut t = ExposureContrastTransform::new();
     t.set_style(style);
@@ -276,26 +289,61 @@ fn ec_transform(
     match ty {
         DynamicPropertyType::Exposure => {
             t.set_exposure(v);
-            t.make_exposure_dynamic();
             calls.push(json!(["setExposure", f64_spec(v)]));
-            calls.push(json!(["makeExposureDynamic"]));
         }
         DynamicPropertyType::Contrast => {
             t.set_contrast(v);
-            t.make_contrast_dynamic();
             calls.push(json!(["setContrast", f64_spec(v)]));
-            calls.push(json!(["makeContrastDynamic"]));
         }
         _ => {
             t.set_gamma(v);
-            t.make_gamma_dynamic();
             calls.push(json!(["setGamma", f64_spec(v)]));
-            calls.push(json!(["makeGammaDynamic"]));
         }
+    }
+    if dynamic[0] {
+        t.make_exposure_dynamic();
+        calls.push(json!(["makeExposureDynamic"]));
+    }
+    if dynamic[1] {
+        t.make_contrast_dynamic();
+        calls.push(json!(["makeContrastDynamic"]));
+    }
+    if dynamic[2] {
+        t.make_gamma_dynamic();
+        calls.push(json!(["makeGammaDynamic"]));
     }
     (
         json!({"class": "ExposureContrastTransform", "calls": calls}),
         Transform::from(t),
+    )
+}
+
+/// An exposure and contrast transform whose one property `ty` is dynamic.
+fn ec_transform(
+    style: ExposureContrastStyle,
+    style_name: &str,
+    ty: DynamicPropertyType,
+    v: f64,
+) -> (Value, Transform) {
+    let dynamic = [
+        ty == DynamicPropertyType::Exposure,
+        ty == DynamicPropertyType::Contrast,
+        ty == DynamicPropertyType::Gamma,
+    ];
+    ec_build(style, style_name, ty, v, dynamic)
+}
+
+/// The transforms in a group, in order.
+fn group(parts: Vec<(Value, Transform)>) -> (Value, Transform) {
+    let mut g = GroupTransform::new();
+    let mut specs = Vec::new();
+    for (spec, t) in parts {
+        specs.push(spec);
+        g.append_transform(t);
+    }
+    (
+        json!({"class": "GroupTransform", "children": specs}),
+        Transform::from(g),
     )
 }
 
@@ -336,15 +384,62 @@ fn gamma_transform(v: &DynValue) -> (Value, Transform) {
 /// Two dynamic exposures in a group: the first one's property is the processor's, and the
 /// processor logs that the property can only be there once.
 fn two_exposures_transform(v: &DynValue) -> (Value, Transform) {
-    let (spec1, t1) = exposure_transform(v);
-    let (spec2, t2) = exposure_transform(&DynValue::Double(0.25));
-    let mut group = GroupTransform::new();
-    group.append_transform(t1);
-    group.append_transform(t2);
-    (
-        json!({"class": "GroupTransform", "children": [spec1, spec2]}),
-        Transform::from(group),
+    group(vec![
+        exposure_transform(v),
+        exposure_transform(&DynValue::Double(0.25)),
+    ])
+}
+
+/// Two dynamic contrasts in a group.
+fn two_contrasts_transform(v: &DynValue) -> (Value, Transform) {
+    group(vec![
+        contrast_transform(v),
+        contrast_transform(&DynValue::Double(1.3)),
+    ])
+}
+
+/// Two dynamic gammas in a group.
+fn two_gammas_transform(v: &DynValue) -> (Value, Transform) {
+    group(vec![
+        gamma_transform(v),
+        gamma_transform(&DynValue::Double(1.3)),
+    ])
+}
+
+/// Two dynamic grading primaries in a group.
+fn two_primaries_transform(v: &DynValue) -> (Value, Transform) {
+    group(vec![
+        primary_transform(v),
+        primary_transform(&primary(GradingStyle::Log, 3.0)),
+    ])
+}
+
+/// Two dynamic grading tones in a group.
+fn two_tones_transform(v: &DynValue) -> (Value, Transform) {
+    group(vec![
+        tone_transform(v),
+        tone_transform(&tone(GradingStyle::Video, 3.0)),
+    ])
+}
+
+/// One exposure and contrast transform with its three properties dynamic, the exposure set:
+/// the GPU description holds three properties.
+fn exposure_contrast_gamma_transform(v: &DynValue) -> (Value, Transform) {
+    ec_build(
+        ExposureContrastStyle::Logarithmic,
+        "EXPOSURE_CONTRAST_LOGARITHMIC",
+        DynamicPropertyType::Exposure,
+        double(v),
+        [true; 3],
     )
+}
+
+/// A dynamic exposure in one transform and a dynamic contrast in the next.
+fn exposure_then_contrast_transform(v: &DynValue) -> (Value, Transform) {
+    group(vec![
+        exposure_transform(v),
+        contrast_transform(&DynValue::Double(1.3)),
+    ])
 }
 
 /// A grading transform's spec: the class, made dynamic, with the value set.
@@ -471,6 +566,7 @@ fn hue_curve(k: f32) -> DynValue {
 fn kinds() -> Vec<Kind> {
     use DynValue::Double;
     let log = GradingStyle::Log;
+    let video = GradingStyle::Video;
     vec![
         Kind {
             label: "exposure",
@@ -478,6 +574,8 @@ fn kinds() -> Vec<Kind> {
             style: log,
             transform: exposure_transform,
             values: [Double(0.5), Double(1.25), Double(-0.75), Double(2.0)],
+            duplicates: false,
+            gpu_props: 1,
         },
         Kind {
             label: "contrast",
@@ -485,6 +583,8 @@ fn kinds() -> Vec<Kind> {
             style: log,
             transform: contrast_transform,
             values: [Double(1.2), Double(0.8), Double(1.5), Double(0.6)],
+            duplicates: false,
+            gpu_props: 1,
         },
         Kind {
             label: "gamma",
@@ -492,6 +592,8 @@ fn kinds() -> Vec<Kind> {
             style: log,
             transform: gamma_transform,
             values: [Double(1.1), Double(0.9), Double(1.3), Double(0.7)],
+            duplicates: false,
+            gpu_props: 1,
         },
         Kind {
             label: "two exposures",
@@ -499,6 +601,28 @@ fn kinds() -> Vec<Kind> {
             style: log,
             transform: two_exposures_transform,
             values: [Double(0.5), Double(1.25), Double(-0.75), Double(2.0)],
+            duplicates: true,
+            gpu_props: 1,
+        },
+        // The other types in pairs: each has its own place in `validate_dynamic_properties`
+        // and its own warning.
+        Kind {
+            label: "two contrasts",
+            ty: DynamicPropertyType::Contrast,
+            style: log,
+            transform: two_contrasts_transform,
+            values: [Double(1.2), Double(0.8), Double(1.5), Double(0.6)],
+            duplicates: true,
+            gpu_props: 1,
+        },
+        Kind {
+            label: "two gammas",
+            ty: DynamicPropertyType::Gamma,
+            style: log,
+            transform: two_gammas_transform,
+            values: [Double(1.1), Double(0.9), Double(1.3), Double(0.7)],
+            duplicates: true,
+            gpu_props: 1,
         },
         Kind {
             label: "grading primary",
@@ -511,6 +635,22 @@ fn kinds() -> Vec<Kind> {
                 primary(log, -1.0),
                 primary(log, 0.5),
             ],
+            duplicates: false,
+            gpu_props: 1,
+        },
+        Kind {
+            label: "two grading primaries",
+            ty: DynamicPropertyType::GradingPrimary,
+            style: log,
+            transform: two_primaries_transform,
+            values: [
+                primary(log, 1.0),
+                primary(log, 2.0),
+                primary(log, -1.0),
+                primary(log, 0.5),
+            ],
+            duplicates: true,
+            gpu_props: 1,
         },
         Kind {
             label: "grading RGB curve",
@@ -523,18 +663,36 @@ fn kinds() -> Vec<Kind> {
                 rgb_curve(-1.0),
                 rgb_curve(0.5),
             ],
+            duplicates: false,
+            gpu_props: 1,
         },
         Kind {
             label: "grading tone",
             ty: DynamicPropertyType::GradingTone,
-            style: GradingStyle::Video,
+            style: video,
             transform: tone_transform,
             values: [
-                tone(GradingStyle::Video, 1.0),
-                tone(GradingStyle::Video, 2.0),
-                tone(GradingStyle::Video, -1.0),
-                tone(GradingStyle::Video, 0.5),
+                tone(video, 1.0),
+                tone(video, 2.0),
+                tone(video, -1.0),
+                tone(video, 0.5),
             ],
+            duplicates: false,
+            gpu_props: 1,
+        },
+        Kind {
+            label: "two grading tones",
+            ty: DynamicPropertyType::GradingTone,
+            style: video,
+            transform: two_tones_transform,
+            values: [
+                tone(video, 1.0),
+                tone(video, 2.0),
+                tone(video, -1.0),
+                tone(video, 0.5),
+            ],
+            duplicates: true,
+            gpu_props: 1,
         },
         Kind {
             label: "grading hue curve",
@@ -547,6 +705,27 @@ fn kinds() -> Vec<Kind> {
                 hue_curve(-1.0),
                 hue_curve(0.5),
             ],
+            duplicates: false,
+            gpu_props: 1,
+        },
+        // Several properties in one description: the order of its list.
+        Kind {
+            label: "exposure, contrast and gamma of one op",
+            ty: DynamicPropertyType::Exposure,
+            style: log,
+            transform: exposure_contrast_gamma_transform,
+            values: [Double(0.5), Double(1.25), Double(-0.75), Double(2.0)],
+            duplicates: false,
+            gpu_props: 3,
+        },
+        Kind {
+            label: "an exposure op and a contrast op",
+            ty: DynamicPropertyType::Exposure,
+            style: log,
+            transform: exposure_then_contrast_transform,
+            values: [Double(0.5), Double(1.25), Double(-0.75), Double(2.0)],
+            duplicates: false,
+            gpu_props: 2,
         },
     ]
 }
@@ -575,10 +754,21 @@ enum Step {
     Cpu(&'static str, &'static str, Option<&'static str>),
     /// `from.getDefaultGPUProcessor()`.
     Gpu(&'static str, &'static str),
+    /// `from.getOptimizedGPUProcessor(flags)`.
+    OptGpu(&'static str, &'static str, &'static str),
     /// `GpuShaderDesc.CreateShaderDesc()`.
     Desc(&'static str),
     /// `gpu.extractGpuShaderInfo(desc)`.
     Extract(&'static str, &'static str),
+    /// `desc.getDynamicProperties()`: the iterator, which the binding writes out by the
+    /// properties' getters, and those of the other types raise.
+    DescProps(&'static str, &'static str),
+    /// `len(iterator)`.
+    Len(&'static str),
+    /// `iterator[i]`.
+    Item(&'static str, &'static str, usize),
+    /// `property.getType()`.
+    Type(&'static str),
     /// `from.hasDynamicProperty(type)`.
     Has(&'static str),
     /// `from.getDynamicProperty(type)`.
@@ -595,9 +785,9 @@ enum Step {
     ClearCache,
 }
 
-fn script() -> Vec<Step> {
+fn script(kind: &Kind) -> Vec<Step> {
     use Step::*;
-    vec![
+    let mut steps = vec![
         // The processor's property.
         Processor("p", 0),
         Has("p"),
@@ -647,6 +837,16 @@ fn script() -> Vec<Step> {
         Gpu("g", "p"),
         Desc("d"),
         Extract("g", "d"),
+        // The description's list: its length, and the type of each property in order.
+        DescProps("d", "l"),
+        Len("l"),
+    ];
+    const ITEMS: [&str; 3] = ["item0", "item1", "item2"];
+    for (i, name) in ITEMS.iter().enumerate().take(kind.gpu_props) {
+        steps.push(Item(name, "l", i));
+        steps.push(Type(name));
+    }
+    steps.extend([
         Has("d"),
         Get("dd", "d"),
         Read("dd"),
@@ -692,7 +892,40 @@ fn script() -> Vec<Step> {
         Cpu("s2", "s", None),
         Apply("s1"),
         Apply("s2"),
-    ]
+        // OPTIMIZATION_NO_DYNAMIC_PROPERTIES alone drops the dynamic properties from the
+        // optimized processor, the CPU processor and the GPU description, and other flags
+        // don't. A property that isn't there raises on each of them in its own words.
+        CacheFlags("PROCESSOR_CACHE_DEFAULT"),
+        Processor("n", 0),
+        Optimized("on", "n", "OPTIMIZATION_NO_DYNAMIC_PROPERTIES"),
+        Has("on"),
+        Get("don", "on"),
+        Optimized("on2", "n", "OPTIMIZATION_NONE"),
+        Has("on2"),
+        Get("don2", "on2"),
+        Read("don2"),
+        Cpu("cn", "n", Some("OPTIMIZATION_NO_DYNAMIC_PROPERTIES")),
+        Has("cn"),
+        Get("dcn", "cn"),
+        Apply("cn"),
+        OptGpu("gn", "n", "OPTIMIZATION_NO_DYNAMIC_PROPERTIES"),
+        Desc("dn"),
+        Extract("gn", "dn"),
+        Has("dn"),
+        Get("ddn", "dn"),
+        OptGpu("gv", "n", "OPTIMIZATION_VERY_GOOD"),
+        Desc("dv"),
+        Extract("gv", "dv"),
+        Has("dv"),
+        Get("ddv", "dv"),
+        Read("ddv"),
+        Cpu("cv", "n", Some("OPTIMIZATION_VERY_GOOD")),
+        Has("cv"),
+        Get("dcv", "cv"),
+        Read("dcv"),
+        Apply("cv"),
+    ]);
+    steps
 }
 
 /// The wheel's calls of the script.
@@ -717,11 +950,21 @@ fn wheel_calls(kind: &Kind, steps: &[Step]) -> Vec<Value> {
             Step::Gpu(name, from) => {
                 json!({"call": "getDefaultGPUProcessor", "on": from, "as": name})
             }
+            Step::OptGpu(name, from, flags) => json!({"call": "getOptimizedGPUProcessor",
+                "on": from, "args": [{"enum": flags}], "as": name}),
             Step::Desc(name) => {
                 json!({"call": "CreateShaderDesc", "on": "GpuShaderDesc", "as": name})
             }
             Step::Extract(gpu, desc) => json!({"call": "extractGpuShaderInfo", "on": gpu,
                 "args": [{"ref": desc}]}),
+            Step::DescProps(desc, list) => {
+                json!({"call": "getDynamicProperties", "on": desc, "as": list})
+            }
+            Step::Len(list) => json!({"call": "__len__", "on": list}),
+            Step::Item(name, list, i) => {
+                json!({"call": "__getitem__", "on": list, "args": [i], "as": name})
+            }
+            Step::Type(prop) => json!({"call": "getType", "on": prop}),
             Step::Has(from) => json!({"call": "hasDynamicProperty", "on": from, "args": [ty]}),
             Step::Get(name, from) => {
                 json!({"call": "getDynamicProperty", "on": from, "args": [ty], "as": name})
@@ -745,6 +988,8 @@ enum Obj {
     Gpu(Arc<GpuProcessor>),
     Desc(Box<GpuShaderDesc>),
     Prop(DynamicPropertyRcPtr),
+    /// The iterator of a description's properties: the description it reads.
+    List(&'static str),
 }
 
 /// What a step gave on the port's side.
@@ -767,6 +1012,9 @@ fn flags(name: &str) -> OptimizationFlags {
         "OPTIMIZATION_DEFAULT" => OptimizationFlags::DEFAULT,
         "OPTIMIZATION_LOSSLESS" => OptimizationFlags::LOSSLESS,
         "OPTIMIZATION_ALL" => OptimizationFlags::ALL,
+        "OPTIMIZATION_NONE" => OptimizationFlags::NONE,
+        "OPTIMIZATION_NO_DYNAMIC_PROPERTIES" => OptimizationFlags::NO_DYNAMIC_PROPERTIES,
+        "OPTIMIZATION_VERY_GOOD" => OptimizationFlags::VERY_GOOD,
         other => panic!("flags {other}"),
     }
 }
@@ -865,6 +1113,22 @@ fn port_step(
             objects.insert(name, Obj::Gpu(g));
             Outcome::Getters(getters)
         }
+        Step::OptGpu(name, from, f) => {
+            let g = processor(objects, from).optimized_gpu_processor(flags(f))?;
+            let getters = vec![
+                (
+                    "getCacheID",
+                    Dumped::Str(String::from_utf8_lossy(g.get_cache_id()).into_owned()),
+                ),
+                (
+                    "hasChannelCrosstalk",
+                    Dumped::Bool(g.has_channel_crosstalk()),
+                ),
+                ("isNoOp", Dumped::Bool(g.is_no_op())),
+            ];
+            objects.insert(name, Obj::Gpu(g));
+            Outcome::Getters(getters)
+        }
         Step::Desc(name) => {
             // `CreateShaderDesc()`: the defaults, GLSL 1.2 among them.
             let d = GpuShaderDesc::default();
@@ -889,6 +1153,36 @@ fn port_step(
             g.extract_gpu_shader_info(d)?;
             Outcome::Unit
         }
+        Step::DescProps(desc, list) => {
+            assert!(
+                matches!(objects[desc], Obj::Desc(_)),
+                "{desc} isn't a shader description"
+            );
+            objects.insert(list, Obj::List(desc));
+            Outcome::Property
+        }
+        Step::Len(list) => {
+            let Obj::List(desc) = &objects[list] else {
+                panic!("{list} isn't a property list")
+            };
+            let Obj::Desc(d) = &objects[desc] else {
+                panic!("{desc} isn't a shader description")
+            };
+            Outcome::Value(Dumped::Int(i64::from(d.num_dynamic_properties())))
+        }
+        Step::Item(name, list, i) => {
+            let Obj::List(desc) = &objects[list] else {
+                panic!("{list} isn't a property list")
+            };
+            let Obj::Desc(d) = &objects[desc] else {
+                panic!("{desc} isn't a shader description")
+            };
+            let got = d.dynamic_property(*i as u32);
+            objects.remove(name);
+            objects.insert(name, Obj::Prop(got?));
+            Outcome::Property
+        }
+        Step::Type(name) => Outcome::Value(dumped_enum(type_name(prop(objects, name).get_type()))),
         Step::Has(from) => Outcome::Value(Dumped::Bool(match &objects[from] {
             Obj::Proc(p) => p.has_dynamic_property(kind.ty),
             Obj::Cpu(c) => c.has_dynamic_property(kind.ty),
@@ -999,10 +1293,12 @@ fn compare(entry: &Value, port: &ocio::Result<Outcome>, blobs: &[Vec<u8>]) -> Op
 #[test]
 fn sharing_matches_the_wheel() {
     let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
-    let steps = script();
     let mut failures = Vec::new();
     let mut compared = 0;
+    let mut expected = 0;
     for kind in kinds() {
+        let steps = script(&kind);
+        expected += steps.len();
         let response = Oracle::get().call(
             "object_calls",
             json!({"config": "raw", "calls": wheel_calls(&kind, &steps)}),
@@ -1018,6 +1314,10 @@ fn sharing_matches_the_wheel() {
         for (i, (step, entry)) in steps.iter().zip(entries).enumerate() {
             let (outcome, port_log) = capture(|| port_step(&kind, step, &config, &mut objects));
             compared += 1;
+            if matches!(step, Step::Len(_)) {
+                // The script reads every property of the description, one by one.
+                assert_eq!(entry["result"], json!(kind.gpu_props), "{}", kind.label);
+            }
             if let Some(diff) = compare(entry, &outcome, &response.blobs) {
                 failures.push(format!("{} step {i} {step:?}: {diff}", kind.label));
             }
@@ -1039,7 +1339,7 @@ fn sharing_matches_the_wheel() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    assert_eq!(compared, kinds().len() * script().len());
+    assert_eq!(compared, expected);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1136,7 +1436,7 @@ fn uniforms_and_pixels_follow_their_own_property() {
 
         // Two ops of one dynamic property type: the description takes the first one's
         // property, and refuses the second one's.
-        if kind.label == "two exposures" {
+        if kind.duplicates {
             assert_eq!(result["stage"], "extract", "{}: {result}", kind.label);
             let message = result["exception"]["message"].as_str().expect("a message");
             assert_eq!(extracted.unwrap_err().to_string(), message);
@@ -1220,6 +1520,10 @@ fn uniforms_and_pixels_follow_their_own_property() {
         assert_eq!(k, steps.len(), "{}", kind.label);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    // The two exposures compare the refusal only.
-    assert_eq!(compared, (kinds().len() - 1) * (2 + 3 * 2 * 3) + 1);
+    // The kinds with two ops of one type compare the refusal only.
+    let duplicates = kinds().iter().filter(|k| k.duplicates).count();
+    assert_eq!(
+        compared,
+        (kinds().len() - duplicates) * (2 + 3 * 2 * 3) + duplicates
+    );
 }
