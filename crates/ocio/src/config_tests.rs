@@ -6984,6 +6984,60 @@ colorspaces:
     }
 }
 
+/// Port of `OCIO_ADD_TEST(Config, dynamic_properties)` @ v2.5.2.
+#[test]
+fn dynamic_properties() {
+    use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
+    use crate::transforms::grading_primary_transform::GradingPrimaryTransform;
+    use ocio_ops::open_color_types::GradingStyle;
+
+    let _env = EnvGuard::new();
+    let mut config = (*Config::create_raw().unwrap()).clone();
+
+    let mut cs = ColorSpace::new();
+    cs.set_name("test");
+
+    let mut ec = ExposureContrastTransform::new();
+    ec.make_exposure_dynamic();
+    cs.set_transform(Some(&Transform::from(ec)), ColorSpaceDirection::ToReference)
+        .unwrap();
+
+    config.add_color_space(&cs).unwrap();
+    config.validate().unwrap();
+
+    let mut gp = GradingPrimaryTransform::new(GradingStyle::Log);
+    gp.make_dynamic();
+    cs.set_transform(
+        Some(&Transform::from(gp)),
+        ColorSpaceDirection::FromReference,
+    )
+    .unwrap();
+
+    config.add_color_space(&cs).unwrap();
+    config.validate().unwrap();
+
+    // Save config and load it back.
+
+    let os = config.serialize().unwrap();
+
+    let config_back = Config::create_from_stream(&os).unwrap();
+    let cs_back = config_back.color_space("test").unwrap();
+    let to_tr = cs_back.transform(ColorSpaceDirection::ToReference).unwrap();
+    let Transform::ExposureContrast(ec_back) = to_tr else {
+        panic!("not an ExposureContrastTransform: {to_tr:?}");
+    };
+    // Exposure contrast is dynamic when loaded back.
+    assert!(ec_back.is_exposure_dynamic());
+    let from_tr = cs_back
+        .transform(ColorSpaceDirection::FromReference)
+        .unwrap();
+    let Transform::GradingPrimary(gp_back) = from_tr else {
+        panic!("not a GradingPrimaryTransform: {from_tr:?}");
+    };
+    // Grading primary is not dynamic when loaded back.
+    assert!(!gp_back.is_dynamic());
+}
+
 /// Port of `OCIO_ADD_TEST(Config, builtin_transforms)` @ v2.5.2.
 #[test]
 fn builtin_transforms() {

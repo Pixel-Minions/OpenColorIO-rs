@@ -573,6 +573,8 @@ variant!(ocio::GroupTransform, Group);
 variant!(ocio::LogAffineTransform, LogAffine);
 variant!(ocio::LogCameraTransform, LogCamera);
 variant!(ocio::LogTransform, Log);
+variant!(ocio::Lut1DTransform, Lut1D);
+variant!(ocio::Lut3DTransform, Lut3D);
 variant!(ocio::transforms::matrix_transform::MatrixTransform, Matrix);
 variant!(ocio::transforms::range_transform::RangeTransform, Range);
 
@@ -1059,6 +1061,8 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::transforms::py_log_affine_transform::bind(m)?;
     crate::transforms::py_log_camera_transform::bind(m)?;
     crate::transforms::py_log_transform::bind(m)?;
+    crate::transforms::py_lut1d_transform::bind(m)?;
+    crate::transforms::py_lut3d_transform::bind(m)?;
     crate::transforms::py_matrix_transform::bind(m)?;
     crate::transforms::py_range_transform::bind(m)?;
     Ok(())

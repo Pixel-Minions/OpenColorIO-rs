@@ -131,7 +131,7 @@ impl PartialEq for Dumped {
 
 impl Dumped {
     /// Reads a value of the oracle's `checks.dump` format, arrays from `blobs`.
-    pub(crate) fn parse(value: &Value, blobs: &[Vec<u8>]) -> Dumped {
+    pub fn parse(value: &Value, blobs: &[Vec<u8>]) -> Dumped {
         match value {
             Value::Null => Dumped::Null,
             Value::Bool(b) => Dumped::Bool(*b),
@@ -292,7 +292,8 @@ pub struct ProcessorDump {
 }
 
 impl ProcessorDump {
-    fn parse(value: &Value, blobs: &[Vec<u8>]) -> ProcessorDump {
+    /// Reads a processor as the oracle's `processor_ops` writes it out, arrays from `blobs`.
+    pub fn parse(value: &Value, blobs: &[Vec<u8>]) -> ProcessorDump {
         let flag = |key: &str| {
             value[key]
                 .as_bool()

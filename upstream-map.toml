@@ -17,9 +17,9 @@ note = "build system"
 [[file]]
 path = "include/OpenColorIO/OpenColorAppHelpers.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio/src/apphelpers/color_space_helpers.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio/src/apphelpers/color_space_helpers.rs", "crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs", "crates/ocio/src/apphelpers/display_view_helpers.rs"]
 status = "partial"
-note = "p5-helpers-1 5.7b: ColorSpaceMenuParameters, ColorSpaceMenuHelper and ColorSpaceHelpers::AddColorSpace (15-293) in apphelpers/color_space_helpers.rs, re-exported by lib.rs (operator<< as to_bytes)"
+note = "p5-helpers-1 5.7b: ColorSpaceMenuParameters, ColorSpaceMenuHelper and ColorSpaceHelpers::AddColorSpace (15-293) in apphelpers/color_space_helpers.rs, re-exported by lib.rs (operator<< as to_bytes); p5-helpers-2 5.7d: LegacyViewingPipeline (350-432) in apphelpers/legacy_viewing_pipeline.rs, re-exported by lib.rs (operator<< as to_bytes and Display; getProcessor overloads as processor(config, Option<&Context>), owner decision 2026-10-22); p5-helpers-2 5.7c: DisplayViewHelpers (295-348) as the module apphelpers/display_view_helpers.rs (processor with context: Option<&Context>, identity_processor, add_display_view, remove_display_view), re-exported by lib.rs"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
@@ -547,7 +547,7 @@ path = "src/OpenColorIO/Processor.cpp"
 kind = "src"
 target = ["crates/ocio/src/processor.rs"]
 status = "partial"
-note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h2: createGroupTransform over every family ported so far (Allocation, CDL, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, Lut1D, Matrix, Range), the processor and its optimized processor checked against the wheel by every family's oracle test (crates/ocio/tests/common/transforms.rs, check_processors), and the optimized processors of integer and half input, whose LUTs the optimizer bakes or folds (check_optimized_processors), the format metadata createGroupTransform copies (a config per group) and the output bit depth of getOptimizedProcessor (processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). getOptimizedLegacyGPUProcessor comes with the 3D LUT op (PartitionGPUOps, Create3DLut), setColorSpaceConversion and concatenate with the config (Phase 3). To test once ExposureContrastTransform exists: the verifier's surviving mutant M11 (the CPU cache ignoring dynamic ops) (card p1-processor verification, 2026-10-04); its M36 (the fallback taking the first entry), M42 (a copy keeping the processor's cache ID) and M47 (no optimizeForBitdepth) are killed by processors_of_ops_match_the_wheel (crates/ocio/tests/processor_cache_oracle.rs, p1-tests-catchup)"
+note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h2: createGroupTransform over every family ported so far (Allocation, CDL, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, Lut1D, Matrix, Range), the processor and its optimized processor checked against the wheel by every family's oracle test (crates/ocio/tests/common/transforms.rs, check_processors), and the optimized processors of integer and half input, whose LUTs the optimizer bakes or folds (check_optimized_processors), the format metadata createGroupTransform copies (a config per group) and the output bit depth of getOptimizedProcessor (processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). getOptimizedLegacyGPUProcessor comes with the 3D LUT op (PartitionGPUOps, Create3DLut), setColorSpaceConversion and concatenate with the config (Phase 3). p5-dynamic 5.6a: the verifier's mutant M11 (the CPU cache ignoring dynamic ops, card p1-processor verification, 2026-10-04) is killed by cache_cpu_processors and crates/ocio/tests/dynamic_properties_oracle.rs, which compares the sharing of every dynamic property type with the wheel; M36 (the fallback taking the first entry), M42 (a copy keeping the processor's cache ID) and M47 (no optimizeForBitdepth) are killed by processors_of_ops_match_the_wheel (crates/ocio/tests/processor_cache_oracle.rs, p1-tests-catchup)"
 
 [[file]]
 path = "src/OpenColorIO/Processor.h"
@@ -677,31 +677,31 @@ status = "done"
 path = "src/OpenColorIO/apphelpers/DisplayViewHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/display_view_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/LegacyViewingPipeline.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/LegacyViewingPipeline.h"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/MixingHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mixing_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/MixingHelpers.h"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mixing_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/mergeconfigs/MergeConfigsHelpers.cpp"
@@ -890,8 +890,8 @@ note = "p4-readers 4.3e: the reader (the cubic prelut interpolator in each wheel
 path = "src/OpenColorIO/fileformats/FileFormatCTF.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_ctf.rs"]
-status = "partial"
-note = "p4-ctf-read-1 4.5b: 1-1216 (the format infos, I-180; isLoadableCTF; XMLParserHelper; read); 4.5c: BuildOp, HandleLUTInterpolation, HandleLUT, buildFileOps (1219-1341); 4.5e: the GammaParams, LogParams, SatNode, Saturation, SOPNode and SOP value elements; 4.5f: the IndexMap element; the operators' readers 4.5g-4.5i; p4-ctf-read-3 4.6a: write (1555-1590); 4.6d: its second half (1577-1591) apart as write_ops; p4-ctf-bake 4.8d: bake (1343-1553)"
+status = "done"
+note = "p4-ctf-read-1 4.5b: 1-1216 (the format infos, I-180; isLoadableCTF; XMLParserHelper; read); 4.5c: BuildOp, HandleLUTInterpolation, HandleLUT, buildFileOps (1219-1341); 4.5e: the GammaParams, LogParams, SatNode, Saturation, SOPNode and SOP value elements; 4.5f: the IndexMap element; the operators' readers 4.5g-4.5h; p4-after-p5 4.5i: the ECParams, GradingPrimary and GradingTone parameter elements; p4-ctf-read-3 4.6a: write (1555-1590); 4.6d: its second half (1577-1591) apart as write_ops; p4-ctf-bake 4.8d: bake (1343-1553)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatDiscreet1DL.cpp"
@@ -1061,15 +1061,15 @@ note = "p4-cdl 4.4e (I-173)"
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
-status = "partial"
-note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-261), CTFReaderMetadataElt and CTFReaderInfoElt (675-798), GetReader's version table (997-1183); 4.5c: CTFReaderArrayElt and CTFArrayMgt (265-418), CTFReaderOpElt (802-957, 1185-1195), the Matrix and Range readers and CTFReaderRangeValueElt (4561-5010); p4-ctf-read-2 4.5e: the ASC_CDL reader and its SatNode and SOPNode (1327-1413), the Gamma readers and GammaParams (1862-2200), the Log readers and LogParams (3545-4081); 4.5f: CTFReaderIndexMapElt and CTFIndexMapMgt (433-671), the Lut1D readers (4085-4385) and CTFReaderInvLut1DElt (3245-3429), RangeOpData's constructor from an IndexMap (as range_from_index_mapping, I-181 for raw halfs), the Lut3D readers (4389-4557) and CTFReaderInvLut3DElt (3433-3541); p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt (1556-1695), whose ExposureContrast and grading branches wait for their readers; 4.5g: the ACES reader and ACESParams (1199-1323), the FixedFunction and Function readers (1417-1548), the GradingRGBCurve reader (2580-2650) and its curve, control points and slopes elements (2738-2970); 4.5h: the Reference reader (5014-5109); the rest 4.5i"
+status = "done"
+note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-261), CTFReaderMetadataElt and CTFReaderInfoElt (675-798), GetReader's version table (997-1183); 4.5c: CTFReaderArrayElt and CTFArrayMgt (265-418), CTFReaderOpElt (802-957, 1185-1195), the Matrix and Range readers and CTFReaderRangeValueElt (4561-5010); p4-ctf-read-2 4.5e: the ASC_CDL reader and its SatNode and SOPNode (1327-1413), the Gamma readers and GammaParams (1862-2200), the Log readers and LogParams (3545-4081); 4.5f: CTFReaderIndexMapElt and CTFIndexMapMgt (433-671), the Lut1D readers (4085-4385) and CTFReaderInvLut1DElt (3245-3429), RangeOpData's constructor from an IndexMap (as range_from_index_mapping, I-181 for raw halfs), the Lut3D readers (4389-4557) and CTFReaderInvLut3DElt (3433-3541); p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt (1556-1695), whose ExposureContrast and grading branches wait for their readers; 4.5g: the ACES reader and ACESParams (1199-1323), the FixedFunction and Function readers (1417-1548), the GradingRGBCurve reader (2580-2650) and its curve, control points and slopes elements (2738-2970); 4.5h: the Reference reader (5014-5109); p4-after-p5 4.5i: the ExposureContrast reader and ECParams (1699-1849), the GradingPrimary reader and its parameter element (2204-2576), the GradingHueCurve reader and GetHueCurveType (2659-2729, 2801-2838), the GradingTone reader and its parameter element (2974-3241), and the ExposureContrast and grading branches of CTFReaderDynamicParamElt"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.h"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
-status = "partial"
-note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; 4.5c: CTFReaderArrayElt, CTFArrayMgt, CTFReaderOpElt, the Matrix and Range readers, CTFReaderRangeValueElt; p4-ctf-read-2 4.5e: the CDL, Gamma and Log readers and their parameter elements; 4.5f: the IndexMap element and manager, the Lut1D, InverseLUT1D, Lut3D and InverseLUT3D readers; p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt; 4.5g: the ACES reader and ACESParams, the FixedFunction and Function readers, the GradingRGBCurve reader and its curve, control points and slopes elements; 4.5h: the Reference reader; the rest 4.5i"
+status = "done"
+note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; 4.5c: CTFReaderArrayElt, CTFArrayMgt, CTFReaderOpElt, the Matrix and Range readers, CTFReaderRangeValueElt; p4-ctf-read-2 4.5e: the CDL, Gamma and Log readers and their parameter elements; 4.5f: the IndexMap element and manager, the Lut1D, InverseLUT1D, Lut3D and InverseLUT3D readers; p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt; 4.5g: the ACES reader and ACESParams, the FixedFunction and Function readers, the GradingRGBCurve reader and its curve, control points and slopes elements; 4.5h: the Reference reader; p4-after-p5 4.5i: the ExposureContrast, GradingPrimary, GradingHueCurve and GradingTone readers and their parameter elements"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderUtils.cpp"
@@ -1089,8 +1089,8 @@ note = "p4-ctf-read-1 4.5a: the element and attribute names"
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs", "crates/ocio/src/fileformats/ctf/ctf_writer.rs"]
-status = "partial"
-note = "p4-ctf-read-1 4.5a (1-505): CTFVersion, CTFReaderTransform, GetElementsValues, fromMetadata, toMetadata; p4-ctf-read-3 4.6a (ctf_writer.rs): GetOpMinimumVersion and GetMinimumVersion (225-403), WriteDescriptions, WriteValue, SetOStream, WriteValues, OpWriter, BitDepthToCLFString, GetValidatedFileBitDepth (509-811), MatrixWriter (2284-2430), TransformWriter (2518-3004); 4.6b: CDLWriter (813-933), GammaWriter and AddGammaParams (1123-1276, Exponent ops written as gammas), LogWriter, AddLogParam, AddLogParams (1896-2037), RangeWriter and WriteTag (2434-2512); 4.6c: Lut1DWriter (2042-2179), Lut3DWriter (2183-2280); 4.6d: FixedFunctionWriter (1053-1119), GradingRGBCurveWriter (1502-1630); the ExposureContrast and grading ones but the RGB curves' WP 4.6f"
+status = "done"
+note = "p4-ctf-read-1 4.5a (1-505): CTFVersion, CTFReaderTransform, GetElementsValues, fromMetadata, toMetadata; p4-ctf-read-3 4.6a (ctf_writer.rs): GetOpMinimumVersion and GetMinimumVersion (225-403), WriteDescriptions, WriteValue, SetOStream, WriteValues, OpWriter, BitDepthToCLFString, GetValidatedFileBitDepth (509-811), MatrixWriter (2284-2430), TransformWriter (2518-3004); 4.6b: CDLWriter (813-933), GammaWriter and AddGammaParams (1123-1276, Exponent ops written as gammas), LogWriter, AddLogParam, AddLogParams (1896-2037), RangeWriter and WriteTag (2434-2512); 4.6c: Lut1DWriter (2042-2179), Lut3DWriter (2183-2280); 4.6d: FixedFunctionWriter (1053-1119), GradingRGBCurveWriter (1502-1630); p4-after-p5 4.6f: ExposureContrastWriter (937-1050), GradingPrimaryWriter (1280-1499), GradingHueCurveWriter (1634-1772, its writeCurve as GradingRGBCurveWriter::writeCurve), GradingToneWriter (1776-1893)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.h"
@@ -3752,7 +3752,8 @@ note = "p6-transforms 6.3c"
 path = "src/bindings/python/PyCPUProcessor.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_cpu_processor.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5b: apply, applyRGB and applyRGBA with the GIL released (ocio-py-ffi with_bytes); images that share memory as one image, or the port's error (U-150); read-only buffers refused after the library's checks (U-156)"
 
 [[file]]
 path = "src/bindings/python/PyColorSpace.cpp"
@@ -3797,7 +3798,8 @@ status = "todo"
 path = "src/bindings/python/PyDynamicProperty.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_dynamic_property.rs"]
-status = "todo"
+status = "partial"
+note = "p6-buffers 6.5b: the value an instance holds (m_prop), which CPUProcessor.getDynamicProperty returns; the class's methods come with 6.7a"
 
 [[file]]
 path = "src/bindings/python/PyFileRules.cpp"
@@ -3848,13 +3850,15 @@ status = "todo"
 path = "src/bindings/python/PyImageDesc.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_image_desc.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5a: AutoStride, ImageDesc (its getters and repr); an Image keeps the buffer objects and their data pointers, and describes their memory again with the library whenever it is used (U-147)"
 
 [[file]]
 path = "src/bindings/python/PyImageDesc.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_image_desc.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5a: PyImageDesc (33-66) is py_image_desc.rs Image and ImageHolder"
 
 [[file]]
 path = "src/bindings/python/PyLook.cpp"
@@ -3888,13 +3892,15 @@ note = "6.1a: the module's declarations; the classes it declares come with their
 path = "src/bindings/python/PyPackedImageDesc.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_packed_image_desc.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5a"
 
 [[file]]
 path = "src/bindings/python/PyPlanarImageDesc.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_planar_image_desc.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5a: getBufferData (12-18) checked from the last plane to the first, as the wheels evaluate the arguments (I-327)"
 
 [[file]]
 path = "src/bindings/python/PyProcessor.cpp"
@@ -3946,15 +3952,15 @@ note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class dec
 path = "src/bindings/python/PyUtils.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_utils.rs"]
-status = "todo"
-note = "checkBufferType (165-180): ocio-ops image_desc.rs gives its message for a typed slice of the wrong type, naming the expected type cleanly (uint16, where the binding writes 'u' (16-bit): improvement candidate I-23)"
+status = "done"
+note = "p6-buffers 6.5a-6.5b: the buffer checks and types, in py_utils.rs; py::buffer's request is ocio-py-ffi Buffer, py::array of a copy is array_of. checkBufferType names the expected integer types as upstream does (I-23); ocio-ops image_desc.rs gives its own message for a typed slice of the wrong type"
 
 [[file]]
 path = "src/bindings/python/PyUtils.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_utils.rs"]
-status = "partial"
-note = "p6-transforms 6.3a: PyIterator (40-61); defRepr (17-35) is py_transform.rs's repr_def; the buffer helpers come with 6.5a"
+status = "done"
+note = "p6-transforms 6.3a: PyIterator (40-61); defRepr (17-35) is py_transform.rs's repr_def; p6-buffers 6.5a-6.5b: the buffer helpers (63-93)"
 
 [[file]]
 path = "src/bindings/python/PyViewTransform.cpp"
@@ -4142,13 +4148,15 @@ status = "todo"
 path = "src/bindings/python/transforms/PyLut1DTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_lut1d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5b"
 
 [[file]]
 path = "src/bindings/python/transforms/PyLut3DTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_lut3d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p6-buffers 6.5b"
 
 [[file]]
 path = "src/bindings/python/transforms/PyMatrixTransform.cpp"
@@ -4360,8 +4368,8 @@ note = "build system"
 path = "tests/cpu/CPUProcessor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/cpu_processor_tests.rs", "crates/ocio/tests/cpu_processor_tests.rs"]
-status = "partial"
-note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). dynamic_properties waits for ExposureContrastTransform (Phase 5), p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target)"
+status = "done"
+note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target); p5-dynamic 5.6a: dynamic_properties (crates/ocio/tests/cpu_processor_tests.rs)"
 
 [[file]]
 path = "tests/cpu/Caching_tests.cpp"
@@ -4395,7 +4403,7 @@ path = "tests/cpu/Config_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_tests.rs"]
 status = "partial"
-note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107), set_major_version, without a marker. p3-yaml-load-2 3.3l-m: group A (roles, colorspace_duplicate, cdltransform_duplicate, searchpath_duplicate, key_value_error, unknown_key_error, faulty_config_file, display_color_spaces_errors); view, completed with its serialization checks in p3-yaml-save. p3-yaml-save 3.7: group C's serialize_group_transform, serialize_searchpath, serialize_environment, active_displayview_lists, file_transform_serialization_v1, transform_versions, description_and_name; internal_raw_profile (3.7d); p3-validate 3.8: simple_config, validation, version, version_validation, config_v1, not_case_sensitive, look_transform, add_remove_display, family_separator, alias_validation, colorspacename_with_reserved_token, serialize_colorspace_displayview_transforms, matrix_serialization, cdl_serialization, file_transform_serialization, add_color_space, remove_color_space, display_color_spaces_serialization, categories, display, display_view, display_view_order, view_transforms, is_colorspace_used, inactive_color_space_precedence, inactive_color_space_read_write, virtual_display_v2_only, virtual_display_exceptions, interchange_attributes; range_serialization, exponent_serialization, exponent_with_linear_serialization, log_serialization, fixed_function_serialization (with PROFILE_V21_START), required_roles_for_version_2_2. Later: virtual_display_with_active_displays and virtual_display (their Windows and macOS blocks instantiate a display from the machine's monitor, SystemMonitor, Phase 9; virtual_display's Linux block reads an ICC profile, WP 4.7). p3-loading 3.10a: is_inactive. p3-builders 3.2c: create_raw_config, look_is_noop; p4-baker 4.9a: create_from_archive; 3.2d: group D (context_variable_v1, context_variable_faulty_cases, context_variable, context_variable_unresolved, context_variable_with_role, context_variable_with_display_view, env_colorspace_name, exponent_vs_config_version, transform_with_roles, processor_cache_with_context_variables), context_variable_with_colorspacename, builtin_transforms, get_processor_alias, inactive_color_space. p4-ctf-bake 4.10b: context_variable_with_sanity_check, context_variable_with_search_path_v1/v2, look_fallback, create_from_config_io_proxy, set_config_io_proxy. Later: config_context_cacheids and context_variables_typical_use_cases build processors of exposure_contrast_*.ctf files (the CTF ExposureContrast reader, Phase 5, 4.5i); optimization_with_bitdepths builds a dynamic ExposureContrastTransform (5.6b); p5-transforms 5.5a: exposure_contrast_serialization; get_processor_from_two_configs needs Config::GetProcessorFromConfigs (ConfigUtils, Phase 9)"
+note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107), set_major_version, without a marker. p3-yaml-load-2 3.3l-m: group A (roles, colorspace_duplicate, cdltransform_duplicate, searchpath_duplicate, key_value_error, unknown_key_error, faulty_config_file, display_color_spaces_errors); view, completed with its serialization checks in p3-yaml-save. p3-yaml-save 3.7: group C's serialize_group_transform, serialize_searchpath, serialize_environment, active_displayview_lists, file_transform_serialization_v1, transform_versions, description_and_name; internal_raw_profile (3.7d); p3-validate 3.8: simple_config, validation, version, version_validation, config_v1, not_case_sensitive, look_transform, add_remove_display, family_separator, alias_validation, colorspacename_with_reserved_token, serialize_colorspace_displayview_transforms, matrix_serialization, cdl_serialization, file_transform_serialization, add_color_space, remove_color_space, display_color_spaces_serialization, categories, display, display_view, display_view_order, view_transforms, is_colorspace_used, inactive_color_space_precedence, inactive_color_space_read_write, virtual_display_v2_only, virtual_display_exceptions, interchange_attributes; range_serialization, exponent_serialization, exponent_with_linear_serialization, log_serialization, fixed_function_serialization (with PROFILE_V21_START), required_roles_for_version_2_2. Later: virtual_display_with_active_displays and virtual_display (their Windows and macOS blocks instantiate a display from the machine's monitor, SystemMonitor, Phase 9; virtual_display's Linux block reads an ICC profile, WP 4.7). p3-loading 3.10a: is_inactive. p3-builders 3.2c: create_raw_config, look_is_noop; p4-baker 4.9a: create_from_archive; 3.2d: group D (context_variable_v1, context_variable_faulty_cases, context_variable, context_variable_unresolved, context_variable_with_role, context_variable_with_display_view, env_colorspace_name, exponent_vs_config_version, transform_with_roles, processor_cache_with_context_variables), context_variable_with_colorspacename, builtin_transforms, get_processor_alias, inactive_color_space. p4-ctf-bake 4.10b: context_variable_with_sanity_check, context_variable_with_search_path_v1/v2, look_fallback, create_from_config_io_proxy, set_config_io_proxy. Later: config_context_cacheids and context_variables_typical_use_cases build processors of exposure_contrast_*.ctf files (the CTF ExposureContrast reader, Phase 5, 4.5i); optimization_with_bitdepths uses a LegacyViewingPipeline (5.7d, card p5-helpers-2); p5-dynamic 5.6b: dynamic_properties; p5-transforms 5.5a: exposure_contrast_serialization; get_processor_from_two_configs needs Config::GetProcessorFromConfigs (ConfigUtils, Phase 9)"
 
 [[file]]
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
@@ -4449,7 +4457,7 @@ path = "tests/cpu/GpuShader_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-gpu/src/gpu_shader_tests.rs", "crates/ocio/tests/gpu_shader_tests.rs"]
 status = "partial"
-note = "1.7c: generic_shader (its uniform too); gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones. p4-ctf-bake 4.10b: MetalLutTest2, MetalSupport3-6 and VulkanSupport, which extract the shaders of config and LUT file processors (crates/ocio/tests/gpu_shader_tests.rs). Later: MetalLutTest uses the legacy GPU processor (Phase 7); MetalSupport7 an ExposureContrastTransform, MetalSupport8 a GradingRGBCurveTransform in a config and MetalSupport9 a dynamic one (Phase 5)"
+note = "1.7c: generic_shader (its uniform too); gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones. p4-ctf-bake 4.10b: MetalLutTest2, MetalSupport3-6 and VulkanSupport, which extract the shaders of config and LUT file processors (crates/ocio/tests/gpu_shader_tests.rs). Later: MetalLutTest uses the legacy GPU processor (Phase 7); p5-dynamic 5.6b: MetalSupport7 (an ExposureContrastTransform), MetalSupport8 (a GradingRGBCurveTransform in a config) and MetalSupport9 (a dynamic one), in crates/ocio/tests/gpu_shader_tests.rs"
 
 [[file]]
 path = "tests/cpu/Logging_tests.cpp"
@@ -4490,14 +4498,14 @@ path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs", "crates/ocio/src/file_tests/op_optimizers_tests.rs"]
 status = "partial"
-note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. p5-ec 5.1b: dynamic_ops. Not yet: opt_prefix_test1 (its file has an ExposureContrast op, read with 4.5i) and dyn_properties_prefix"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. p5-ec 5.1b: dynamic_ops. p5-dynamic 5.6a: dyn_properties_prefix. Not yet: opt_prefix_test1 (its file has an ExposureContrast op, read with 4.5i)"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_tests.rs"]
-status = "partial"
-note = "all but OpRcPtrVec/is_noop; p5-ec 5.1b: OpRcPtrVec/dynamic_property"
+status = "done"
+note = "all but OpRcPtrVec/is_noop; p5-ec 5.1b: OpRcPtrVec/dynamic_property; p5-dynamic 5.6a: OpRcPtrVec/is_noop"
 
 [[file]]
 path = "tests/cpu/ParseUtils_tests.cpp"
@@ -4524,8 +4532,8 @@ note = "string_compare; envVariable, getenv, setenv (without their checks throug
 path = "tests/cpu/Processor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/processor_tests.rs"]
-status = "partial"
-note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut. cache_optimized_processors, cache_cpu_processors, cache_gpu_processors, is_noop and dynamic_properties wait for ExposureContrastTransform (Phase 5); unique_dynamic_properties for the ExposureContrast op (Phase 5). Cache tests on ops built directly stand in meanwhile (cache_optimized_processors, cache_cpu_processors in crates/ocio/src/processor_tests.rs), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs"
+status = "done"
+note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut; p5-dynamic 5.6a: unique_dynamic_properties, dynamic_properties, is_noop, cache_optimized_processors, cache_cpu_processors and cache_gpu_processors. Cache tests on ops built directly add checks (cache_optimized_processors_of_ops, cache_cpu_processors_of_ops), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs and, for dynamic properties, crates/ocio/tests/dynamic_properties_oracle.rs"
 
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
@@ -4623,14 +4631,14 @@ status = "done"
 [[file]]
 path = "tests/cpu/apphelpers/DisplayViewHelpers_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/apphelpers/display_view_helpers_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/apphelpers/display_view_helpers_tests.rs", "crates/ocio/tests/display_view_helpers_oracle.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/apphelpers/LegacyViewingPipeline_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/apphelpers/legacy_viewing_pipeline_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/apphelpers/legacy_viewing_pipeline_tests.rs", "crates/ocio/tests/legacy_viewing_pipeline_oracle.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp"
@@ -4641,8 +4649,8 @@ status = "todo"
 [[file]]
 path = "tests/cpu/apphelpers/MixingHelpers_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/apphelpers/mixing_helpers_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/apphelpers/mixing_helpers_tests.rs", "crates/ocio/tests/mixing_helpers_oracle.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/builtinconfigs/BuiltinConfig_tests.cpp"
@@ -4690,8 +4698,8 @@ note = "p4-readers 4.3e: simple_1d, simple_3d, less_strict_parse, failures_1d, f
 path = "tests/cpu/fileformats/FileFormatCTF_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_ctf_tests.rs"]
-status = "partial"
-note = "p4-ctf-read-1 4.5b: missing_file, wrong_format, binary_file, process_list_invalid_version, clf_process_list_bad_version, process_list_higher_version, clf_process_list_higher_version, process_list_missing, transform_missing, transform_missing_id, transform_empty, transform_id_empty; 4.5c: matrix4x4, matrix_with_offset, matrix_with_offset_1_3, matrix_1_3_3x3, matrix_1_3_4x4, matrix_1_3_offsets, matrix_1_3_alpha_offsets, matrix_identity, matrix_windows_eol, matrix_no_newlines, check_utf8, info_example, process_list_valid_version, process_list_version_revision, process_list_no_version, info_element_version_test, transform_element_end_missing, array_missing_values, array_bad_value, array_bad_dimension, array_too_many_values, matrix_end_missing, transform_bad_outdepth, transform_end_missing, transform_corrupted_tag, range_default, range_test1_clamp, range_test1_noclamp, range_test2, range_nonmatching_clamp, range_empty, range_bad_noclamp, range_bad_values; 4.5e: gamma_test1-6, gamma_alpha_test1-6, exponent_bad_value, exponent_bad_param, exponent_all_styles, clf2_exponent_parse, cdl_clamp_fwd, cdl_missing_style, cdl_all_styles, cdl_bad_slope, cdl_bad_sat, cdl_bad_power, cdl_missing_slope, cdl_missing_offset, cdl_missing_power, cdl_bad_style, cdl_missing_sop, cdl_missing_sat, cdl_various_in_ctf, log_all_styles, log_logtolin, log_logtolinv2, log_lintolog_3chan, log_bad_style, log_bad_version, log_bad_param, log_missing_breakpnt, log_ocio_params_channels, log_ocio_params_base_missmatch, log_default_params; 4.5f: lut_1d, lut1d_hue_adjust_invalid_style, lut_3by1d_with_nan_infinity, lut1d_half_domain_set_false, lut1d_raw_half_set_false, lut1d_half_domain_raw_half_set, lut1d_half_domain_missing_values, 3by1d_lut, lut1d_long_lut, lut1d_inv, lut1d_inv_scaling, invlut1d_clf, indexMap_test, indexMap_test1_clfv2, indexMap_test3, indexMap_test4_clfv2, transform_missing_inbitdepth, transform_missing_outbitdepth, transform_with_bitdepth_mismatch, inverse_of_id_test, lut3d, lut3d_inv, lut3d_unequal_size, tabluation_support, indexMap_test2_clfv2; p4-ctf-read-3 (verifier fixes): difficult_syntax, difficult_xml_unknown_elements, unknown_elements, clf3_index_map, multiple_ops, clf_examples, lut_interpolation_option; 4.5g: load_deprecated_ops_file, load_fixed_function_file, load_ff_fail_version, load_ff_fail_params, load_ff_fail_style, load_ff_aces_fail_gamma_param, load_ff_aces_fail_gamma_twice, load_ff_aces_fail_missing_param, load_grading_rgbcurves_lin, load_grading_rgbcurves_log (load_grading_curves_errors reads GradingHueCurve elements, 4.5i); 4.5h: reference_load_alias, reference_load_path, reference_load_multiple, reference_load_path_utf8, reference_load_alias_path; 4.6a: CTFTransform load_edit_save_matrix, save_matrix, load_save_matrix, save_matrix_444, load_edit_save_matrix_clf, matrix3x3_clf, matrix_offset_alpha_ctf, matrix_offset_alpha_bitdepth_ctf, matrix_offset_alpha_inverse_ctf, no_ops_ctf; 4.6b: CTFTransform save_cdl, save_log, save_log_affine, save_log_camera, save_range, save_group, legacy_cdl, cdl_clf, cdl_ctf, range_ctf, range1_clf, range2_clf, range3_clf, range4_clf, exponent_ctf, gamma1_ctf, gamma1_mirror_ctf, gamma1_pass_thru_ctf, gamma2_ctf, gamma3_ctf, gamma4_ctf, gamma5_ctf, gamma6_ctf, log_lin_to_log_ctf, log_log_to_lin_ctf, log_antilog2_ctf; 4.6c: CTFTransform save_lut_1d_1component, save_lut_1d_3components, save_invlut_1d_3components, save_lut1d_halfdomain, save_lut1d_f16_raw, save_lut1d_f32, save_lut1d_interpolation, save_invalid_lut_1d, save_lut_3d, lut1d_clf, lut1d_inverse_clf, lut1d_ctf, lut1d_attributes_ctf, lut1d_array_16x1_ctf, lut1d_array_16x3_ctf, lut1d_10i_ctf, lut1d_inverse_ctf, lut3d_array_ctf, lut3d_inverse_clf, lut3d_inverse_ctf, save_lut3d_interpolation, bitdepth_ctf; 4.6d: CTFTransform fixed_function_aces_gamut_comp_13_ctf, fixed_function_aces_gamut_comp_13_inverse_ctf, fixed_function_rec2100_ctf, fixed_function_rec2100_inverse_ctf, fixed_function_lin_to_gammalog_ctf, fixed_function_lin_to_doublelog_ctf (grading_rgbcurve_log_ctf, grading_rgbcurve_video_ctf and grading_rgbcurve_lin_ctf, and a full-path oracle check of the GradingRGBCurve writer through GroupTransform::write, need GradingRGBCurveTransform, WP 3.1); 4.6e: FileFormatCTF ff_load_save_ctf; the rest with the operators' readers and the writer"
+status = "done"
+note = "p4-ctf-read-1 4.5b: missing_file, wrong_format, binary_file, process_list_invalid_version, clf_process_list_bad_version, process_list_higher_version, clf_process_list_higher_version, process_list_missing, transform_missing, transform_missing_id, transform_empty, transform_id_empty; 4.5c: matrix4x4, matrix_with_offset, matrix_with_offset_1_3, matrix_1_3_3x3, matrix_1_3_4x4, matrix_1_3_offsets, matrix_1_3_alpha_offsets, matrix_identity, matrix_windows_eol, matrix_no_newlines, check_utf8, info_example, process_list_valid_version, process_list_version_revision, process_list_no_version, info_element_version_test, transform_element_end_missing, array_missing_values, array_bad_value, array_bad_dimension, array_too_many_values, matrix_end_missing, transform_bad_outdepth, transform_end_missing, transform_corrupted_tag, range_default, range_test1_clamp, range_test1_noclamp, range_test2, range_nonmatching_clamp, range_empty, range_bad_noclamp, range_bad_values; 4.5e: gamma_test1-6, gamma_alpha_test1-6, exponent_bad_value, exponent_bad_param, exponent_all_styles, clf2_exponent_parse, cdl_clamp_fwd, cdl_missing_style, cdl_all_styles, cdl_bad_slope, cdl_bad_sat, cdl_bad_power, cdl_missing_slope, cdl_missing_offset, cdl_missing_power, cdl_bad_style, cdl_missing_sop, cdl_missing_sat, cdl_various_in_ctf, log_all_styles, log_logtolin, log_logtolinv2, log_lintolog_3chan, log_bad_style, log_bad_version, log_bad_param, log_missing_breakpnt, log_ocio_params_channels, log_ocio_params_base_missmatch, log_default_params; 4.5f: lut_1d, lut1d_hue_adjust_invalid_style, lut_3by1d_with_nan_infinity, lut1d_half_domain_set_false, lut1d_raw_half_set_false, lut1d_half_domain_raw_half_set, lut1d_half_domain_missing_values, 3by1d_lut, lut1d_long_lut, lut1d_inv, lut1d_inv_scaling, invlut1d_clf, indexMap_test, indexMap_test1_clfv2, indexMap_test3, indexMap_test4_clfv2, transform_missing_inbitdepth, transform_missing_outbitdepth, transform_with_bitdepth_mismatch, inverse_of_id_test, lut3d, lut3d_inv, lut3d_unequal_size, tabluation_support, indexMap_test2_clfv2; p4-ctf-read-3 (verifier fixes): difficult_syntax, difficult_xml_unknown_elements, unknown_elements, clf3_index_map, multiple_ops, clf_examples, lut_interpolation_option; 4.5g: load_deprecated_ops_file, load_fixed_function_file, load_ff_fail_version, load_ff_fail_params, load_ff_fail_style, load_ff_aces_fail_gamma_param, load_ff_aces_fail_gamma_twice, load_ff_aces_fail_missing_param, load_grading_rgbcurves_lin, load_grading_rgbcurves_log; 4.5h: reference_load_alias, reference_load_path, reference_load_multiple, reference_load_path_utf8, reference_load_alias_path; 4.6a: CTFTransform load_edit_save_matrix, save_matrix, load_save_matrix, save_matrix_444, load_edit_save_matrix_clf, matrix3x3_clf, matrix_offset_alpha_ctf, matrix_offset_alpha_bitdepth_ctf, matrix_offset_alpha_inverse_ctf, no_ops_ctf; 4.6b: CTFTransform save_cdl, save_log, save_log_affine, save_log_camera, save_range, save_group, legacy_cdl, cdl_clf, cdl_ctf, range_ctf, range1_clf, range2_clf, range3_clf, range4_clf, exponent_ctf, gamma1_ctf, gamma1_mirror_ctf, gamma1_pass_thru_ctf, gamma2_ctf, gamma3_ctf, gamma4_ctf, gamma5_ctf, gamma6_ctf, log_lin_to_log_ctf, log_log_to_lin_ctf, log_antilog2_ctf; 4.6c: CTFTransform save_lut_1d_1component, save_lut_1d_3components, save_invlut_1d_3components, save_lut1d_halfdomain, save_lut1d_f16_raw, save_lut1d_f32, save_lut1d_interpolation, save_invalid_lut_1d, save_lut_3d, lut1d_clf, lut1d_inverse_clf, lut1d_ctf, lut1d_attributes_ctf, lut1d_array_16x1_ctf, lut1d_array_16x3_ctf, lut1d_10i_ctf, lut1d_inverse_ctf, lut3d_array_ctf, lut3d_inverse_clf, lut3d_inverse_ctf, save_lut3d_interpolation, bitdepth_ctf; 4.6d: CTFTransform fixed_function_aces_gamut_comp_13_ctf, fixed_function_aces_gamut_comp_13_inverse_ctf, fixed_function_rec2100_ctf, fixed_function_rec2100_inverse_ctf, fixed_function_lin_to_gammalog_ctf, fixed_function_lin_to_doublelog_ctf; 4.6e: FileFormatCTF ff_load_save_ctf; p4-after-p5 4.5i: exposure_contrast_video, exposure_contrast_log, exposure_contrast_linear, exposure_contrast_no_gamma, exposure_contrast_failures, attribute_float_parse_extra_values, attribute_float_parse_leading_spaces, load_grading_primary_log, load_grading_primary_lin, load_grading_primary_video, load_grading_primary_errors, load_grading_huecurves_log, load_grading_curves_errors, CTFTransform load_grading_tone, load_grading_tone_errors; p4-after-p5 4.6f: CTFTransform exposure_contrast_video_ctf, exposure_contrast_log_ctf, exposure_contrast_linear_ctf, exposure_contrast_not_dynamic_ctf, exposure_contrast_log_params_ctf, grading_primary_log_ctf, grading_primary_lin_ctf, grading_primary_video_ctf, grading_rgbcurve_log_ctf, grading_rgbcurve_video_ctf, grading_rgbcurve_lin_ctf, grading_huecurve_lin_ctf, grading_tone_log_ctf, grading_tone_lin_ctf, grading_tone_video_ctf"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatDiscreet1DL_tests.cpp"
@@ -5169,8 +5177,8 @@ note = "p3-transforms (3.1a): basic; p3-builders 3.2a: build_colorspace_ops, bui
 path = "tests/cpu/transforms/DisplayViewTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/display_view_transform_tests.rs"]
-status = "partial"
-note = "p3-transforms (3.1a): basic; build_ops_with_looks, config_load, apply_fwd_inv and context_variables come with 3.2c, build_ops uses ExposureContrast (Phase 5); p3-builders 3.2c: build_ops_with_looks, config_load, apply_fwd_inv, context_variables; build_ops uses an ExposureContrastTransform (Phase 5)"
+status = "done"
+note = "p3-transforms (3.1a): basic; build_ops_with_looks, config_load, apply_fwd_inv and context_variables come with 3.2c, build_ops uses ExposureContrast (Phase 5); p3-builders 3.2c: build_ops_with_looks, config_load, apply_fwd_inv, context_variables; p5-dynamic 5.6b: build_ops"
 
 [[file]]
 path = "tests/cpu/transforms/ExponentTransform_tests.cpp"

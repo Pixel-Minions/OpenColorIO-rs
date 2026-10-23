@@ -1803,7 +1803,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   O1.2).
 - **Who notices:** Python scripts that pass the channel order positionally.
 - **A fix:** choose the constructor by the argument's type.
-- **Status:** to be matched in Phase 6 (D13).
+- **Status:** matched in `p6-buffers` (6.5a): pybind11's integer caster takes an object with
+  `__index__` (an enum value) for a C++ `long` before conversions
+  (`crates/ocio-py/src/dispatch.rs`, `int_caster!`), so the first overload takes the channel
+  order as a count, as the wheel's; `image_desc_oracle.rs`, `packed_script`.
 
 ### I-13. Read-only NumPy arrays are written to
 
@@ -1811,7 +1814,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   wheel in O1.2).
 - **Who notices:** scripts that rely on a read-only array staying unchanged.
 - **A fix:** refuse read-only destinations.
-- **Status:** to be matched in Phase 6 (D13).
+- **Status:** the port refuses to write them, as undefined behaviour: U-156 (owner, 2026-10-22).
 
 ### I-23. The buffer-type error names integer types oddly
 
@@ -1821,8 +1824,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   Float types print correctly.
 - **Who notices:** Python users who read the message.
 - **A fix:** name the expected type as `uint16`, like the received one.
-- **Status:** to be matched in Phase 6 (D13). The Rust API's own error for a slice of the wrong
-  type uses the clean names.
+- **Status:** matched in `p6-buffers` (6.5a, `crates/ocio-py/src/py_utils.rs`,
+  `check_buffer_type`); `image_desc_oracle.rs`, `packed_script`, against the wheel. The Rust
+  API's own error for a slice of the wrong type uses the clean names.
 
 ### I-31. A shading language made from a number can abort the process
 
@@ -1981,6 +1985,61 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `REMOVE_COLOR_SPACES`): the set is emptied, the color space held from Python unchanged;
   `color_space_oracle.rs`, `color_spaces_behave_as_the_wheels` (`set_script`), against the
   wheel.
+
+### I-326. The buffer checks count entries in 32 bits on Windows
+
+- **Upstream:** the binding counts the entries an image needs in C++ `long`
+  (`width*height*numChannels`, `PyPackedImageDesc.cpp:22, 43, 66, 87`; `width * height` for
+  each plane, `PyPlanarImageDesc.cpp:39-142`), a 3D LUT's grid in `unsigned long`
+  (`gs*gs*gs*3`, `PyUtils.cpp:225-250`; the entry index, `PyLut3DTransform.cpp:95`), and a 1D
+  LUT's entries as `static_cast<unsigned long>(info.size)` (`PyLut1DTransform.cpp:86`). These
+  are 32 bits in the Windows wheel and 64 in the Linux one, and the products wrap. A packed
+  image of 65536 x 65536 x 4 "expects 0 entries" on Windows and 17179869184 on Linux; a 3D
+  LUT buffer of shape (2048, 0) passes the grid check on Windows (2048^3 * 3 wraps to 0) and
+  fails in the library ("Grid size '2048' must not be greater than '129'."), where Linux's
+  binding refuses the shape; a packed image of (2^30 + 4) x 1 x 4 over 16 entries passes the
+  entry check on Windows only.
+- **Who notices:** Python code that passes huge dimensions and reads the message.
+- **A fix:** count in `py::ssize_t` and refuse a product that overflows.
+- **Status:** matched in `p6-buffers` (6.5a, 6.5b): the binding computes in `c_long` and
+  `c_ulong`, the platform's `long` (`crates/ocio-py/src/py_packed_image_desc.rs`,
+  `py_planar_image_desc.rs`, `py_utils.rs`, `transforms/py_lut1d_transform.rs`,
+  `py_lut3d_transform.rs`); `image_desc_oracle.rs` and `lut_transforms_oracle.rs`, against the
+  wheel of each platform. The port's image then refuses a layout past its buffer (D-2) where
+  the Windows wheel makes one.
+
+### I-327. A planar image checks its planes from the last to the first
+
+- **Upstream:** `PlanarImageDesc`'s constructors check each plane's type and entries in the
+  arguments of one call, `std::make_shared<PlanarImageDesc>(getBufferData(rData, ...),
+  getBufferData(gData, ...), ...)` (`PyPlanarImageDesc.cpp:12-18, 28-152`), whose order C++
+  leaves unspecified. Both wheels (MSVC's and GCC's builds) evaluate them from the last to the
+  first, so with two bad planes the error names the alpha (or blue) plane's problem, not the
+  red one's.
+- **Who notices:** Python code that passes several bad planes and reads the message.
+- **A fix:** check the planes one by one, in order, before the call.
+- **Status:** matched in `p6-buffers` (6.5a, `crates/ocio-py/src/py_planar_image_desc.rs`,
+  `LAST_TO_FIRST`); `image_desc_oracle.rs`, `planar_script`, against the wheel of each
+  platform.
+
+### I-328. An image's data and a LUT's buffer are read without their strides
+
+- **Upstream:** `PackedImageDesc.getData` copies `height*width*numChannels` items one channel
+  stride apart from the image's data pointer, and the planar getters `height*width` items one
+  item apart from each plane's (`PyPackedImageDesc.cpp:102-110`,
+  `PyPlanarImageDesc.cpp:154-189`), whatever the image's x and y strides; the LUTs' `setData`
+  reads its values one after another from the buffer's data pointer
+  (`PyLut1DTransform.cpp:78-96`, `PyLut3DTransform.cpp:76-104`), whatever the buffer's strides.
+  A view of every other value of an array gives the first half of the array's values; an image
+  with padded rows gives the padding among its items.
+- **Who notices:** Python code that describes, or loads a LUT from, a NumPy view that isn't
+  contiguous.
+- **A fix:** read the items by the image's strides (and the buffer's), or refuse buffers that
+  aren't C-contiguous, as `applyRGB` does.
+- **Status:** matched in `p6-buffers` (6.5a, 6.5b: `crates/ocio-py/src/py_image_desc.rs`,
+  `read_items`; `transforms/py_lut1d_transform.rs`, `py_lut3d_transform.rs`, `SET_DATA`);
+  `image_desc_oracle.rs`, `lut_transforms_oracle.rs`, against the wheel. Values that this
+  reads past the buffer's items are U-148.
 
 ## Platform, environment and paths
 
@@ -3487,6 +3546,48 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`grading_hue_curve_transforms_save_in_version_1_as_in_the_wheel`) checks it against the
   wheel.
 
+### I-346. A CTF ECParams value of NaN counts as missing
+
+- **Upstream:** `CTFReaderECParamsElt::start` starts each parameter at a quiet NaN, parses
+  the attributes into them, then takes a NaN as an absent attribute
+  (`fileformats/ctf/CTFReaderHelper.cpp:1777-1849` @ v2.5.2). An `exposure`, `contrast` or
+  `pivot` written as `nan` is refused as missing ("ExposureContrast element: exposure
+  missing."), and a `gamma`, `logExposureStep` or `logMidGray` written as `nan` is ignored:
+  the op keeps its default (1, 0.088, 0.435).
+- **Who notices:** a CTF file whose ExposureContrast parameters hold `nan` (as a writer of
+  a NaN value would write it): the read fails with a message naming a parameter that is
+  there, or reads a different op than the one written.
+- **A fix:** keep a found flag per parameter, as the grading parameter elements do, and
+  accept NaN values (or refuse them with their own message).
+- **Status:** ported as upstream in `p4-after-p5` (4.5i, `crates/ocio/src/fileformats/ctf/
+  ctf_reader_helper.rs`, `CtfReaderEcParamsElt::start`); checked against the wheel
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`, `exposure_contrast_files_read_as_in_the_wheel`,
+  cases "a NaN exposure" and "a NaN gamma").
+
+### I-347. A written CTF GradingPrimary leaves out the controls its style doesn't use
+
+- **Upstream:** the CTF reader reads every GradingPrimary control into the op, "even those
+  that are not used by the current style" (`fileformats/ctf/CTFReaderHelper.cpp:2521-2568` @
+  v2.5.2), and the op's `equals` holds all of them (`GradingPrimaryOpData::equals`,
+  `ops/gradingprimary/GradingPrimaryOpData.cpp:249-263`, `operator==` at 265-268; the value
+  comparison is `operator==(GradingPrimary)`, `ops/gradingprimary/GradingPrimary.cpp:26-41`).
+  So does the cache ID of a non-dynamic op (`GradingPrimaryOpData::getCacheID`,
+  `GradingPrimaryOpData.cpp:187-207`); a dynamic op's cache ID leaves the values out (the
+  `isDynamic()` test at 201-204). `GradingPrimaryWriter::writeContent`
+  writes only the style's controls: brightness, contrast and gamma for log, offset, exposure
+  and contrast for linear (and no pivot black or white), lift, gamma, gain and offset for video
+  (`fileformats/ctf/CTFTransform.cpp:1394-1499`). The same holds for a GradingPrimaryTransform
+  whose values were set through the API.
+- **Who notices:** a GradingPrimary read from a CTF file (or set through the API) with a
+  control of another style, written and read back: the values, the cache ID and `equals`
+  differ from the original's, though the pixels don't.
+- **A fix:** write every control that differs from its default, or drop the unused controls
+  on reading.
+- **Status:** ported as upstream in `p4-after-p5` (4.5i and 4.6f, `crates/ocio/src/
+  fileformats/ctf/ctf_reader_helper.rs` and `ctf_writer.rs`, `GradingPrimaryWriter`); checked
+  against the wheel (`crates/ocio/tests/file_format_ctf_write_oracle.rs`,
+  `processors_of_exposure_contrast_and_grading_files_write_as_in_the_wheel`, `gp.ctf`).
+
 ## App helpers
 
 ### I-316. A menu's last fall-back lists color spaces the parameters exclude
@@ -3529,6 +3630,96 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   asked for again against the wheel. `OCIO_DISABLE_ALL_CACHES` is read as upstream reads it but
   not checked against the wheel: the oracle refuses to set it per request (it is read once per
   process), and no command runs menus in a child process of their own.
+
+### I-336. `AddDisplayView` keeps what it changed before an error
+
+- **Upstream:** `DisplayViewHelpers::AddDisplayView` adds the display and view to the config's
+  active lists, then adds the color space, then the (display, view) pair
+  (`DisplayViewHelpers.cpp:437-448` @ v2.5.2), with nothing undone when a later step throws:
+  a color space name `Config::addColorSpace` refuses (empty), or a pair `addDisplayView`
+  refuses (a shared view of that name), leaves the active lists changed, and the color space
+  added in the second case. `RemoveDisplayView` likewise removes the pair before it checks the
+  environment that controls the active lists, so "Forbidden to remove an active display as
+  'OCIO_ACTIVE_DISPLAYS' controls the active list." comes after the pair is gone.
+- **Who notices:** an application that recovers from the exception and goes on with the config
+  (and saves it).
+- **A fix:** check every step's preconditions before the first change, or work on a copy and
+  swap it in at the end.
+- **Status:** ported as upstream in `p5-helpers-2` (5.7c, `apphelpers/display_view_helpers.rs`,
+  `add_display_view`, `remove_display_view`); `display_view_helpers_oracle.rs`
+  (`edits_match_the_wheel`) compares the config's text after every case, failed ones too.
+
+### I-337. A slider's `sliderToMixing` differs on Windows and Linux (a NaN, and the square)
+
+- **Upstream:** `MixingSliderImpl::sliderToMixing` computes `getSliderMinEdge() + sliderUnits
+  * (getSliderMaxEdge() - getSliderMinEdge())` (`MixingHelpers.cpp:87-93` @ v2.5.2), and in a
+  linear mixing space squares the result of that with `std::pow(percept, GAMMA)`
+  (`perceptualToLinear`, `MixingHelpers.cpp:39-47`). The wheels differ in two ways.
+  - **The order of the sum.** MSVC compiles it as `min + ((max - min) * units)`, GCC as
+    `(units * (max - min)) + min` (Windows `0x180043f62`-`0x180043f77`, Linux
+    `0x15af83`-`0x15af98`). Where NaNs meet (a NaN edge and NaN slider units, or NaN edges of
+    different payloads), x86 returns the first operand's NaN, so the wheels return different
+    NaNs: with the edges NaN `a` and `b` and the units NaN `c`, in a linear mixing space,
+    Windows returns `a`, Linux `c`.
+  - **The square, for ordinary values.** `powf(x, 2.0f)` is a call of the C runtime's `powf`
+    on Windows (`0x180043fb9`-`0x180043fc4`) and `x * x` (`mulss`) on Linux (`0x15b018`). The
+    Windows `powf` is not correctly rounded, so the two differ by one ulp for 3,535,522
+    values of `x` in (0, 0.42426]. For the range (0, 1), `sliderToMixing(f32 0x3c448128)` is
+    `0x38d1c2f0` on the Windows wheel (a `powf`) and `0x38d1c2f1` on the Linux wheel (a
+    product); `0x3c449480` and `0x3c44acb0` differ in the same way.
+  - **The square root.** `linearToPerceptual` (`mixingToSlider`) calls `powf(x, 0.5f)` for
+    values up to 0.18 on both wheels, which is not `sqrt(x)` on either: on Windows for 90,752
+    values in (0, 0.18] (`powf(0.010001217, 0.5)` is `0x3dcccffd`, `sqrt` gives `0x3dcccffe`;
+    `mixingToSlider(0x3c23dc25)` is `0x3df59e54`, a `sqrt` would give `0x3df59e55`), on Linux
+    (glibc, Rocky Linux 9) for 663,525 values (`0x3c005972`, `0x3c0066c3`, `0x3c0068ea`,
+    ...). A port that used a square root, or `x * x` for the Windows square, would give other
+    bits for such values.
+- **Who notices:** nobody in practice for the NaNs (a slider whose edges or units are NaN); an
+  application that compares a slider's values across platforms, for the last bit of the
+  others.
+- **A fix:** none needed beyond picking one order (or refusing NaN edges, I-338) and one
+  correctly rounded square.
+- **Status:** ported per platform in `p5-helpers-2` (5.7e, `apphelpers/mixing_helpers.rs`,
+  `MixingSlider::slider_to_mixing` with `sse_add`/`sse_mul`, `square`, and `crt_powf`, which
+  keeps the C runtime's `powf` calls); `mixing_helpers_oracle.rs`
+  (`slider_specials_match_the_wheel`: every pair of edges with NaNs of their own payloads,
+  and the units and values named above) on both platforms.
+
+### I-338. A slider's edges aren't checked
+
+- **Upstream:** `MixingSliderImpl::setSliderMinEdge` and `setSliderMaxEdge` take any float
+  (`MixingHelpers.cpp:70-85` @ v2.5.2). In a linear mixing space the edges are kept 0.01 apart
+  by `std::min(min, max - 0.01f)` and `std::max(max, min + 0.01f)`, each against the other
+  edge as set, so edges set the wrong way round give other edges (a minimum of 1 and a maximum
+  of 0 give the range from -0.01 to 1.01, before the perceptual mapping), and a NaN edge stays NaN
+  (`std::min` keeps its first operand). In a perceptually uniform mixing space (the display
+  space, the color picking role's) the edges are used as set: equal edges make
+  `mixingToSlider` divide by zero (infinities and NaN) and `sliderToMixing` return the edge
+  whatever the units; infinite edges give NaN.
+- **Who notices:** an application that lets its users type a slider's range.
+- **A fix:** refuse (or swap) edges that aren't finite and increasing, in every mixing space.
+- **Status:** ported as upstream in `p5-helpers-2` (5.7e, `apphelpers/mixing_helpers.rs`,
+  `MixingSlider`); `mixing_helpers_oracle.rs` (`slider_specials_match_the_wheel`) compares
+  every ordered pair of a list of edges (equal, swapped, infinite, NaN) in both kinds of
+  mixing space.
+
+### I-339. The mixing spaces are fixed
+
+- **Upstream:** `MixingColorSpaceManagerImpl::refresh` offers the color picking role's color
+  space alone when the config has that role, else `Rendering Space` and `Display Space`, with
+  a TODO to list the config's display color spaces instead (`MixingHelpers.cpp:141-167` @
+  v2.5.2); `isPerceptuallyUniform` is true for the display space and for the color picking
+  role, with TODOs saying that it should depend on the space and that the role's color space
+  isn't always perceptually uniform (`227-236`). The rendering space's processor is an identity
+  (a MatrixTransform) whatever the working space is called, even a name the config doesn't
+  have (`296-325`).
+- **Who notices:** a color picker that mixes in a scene-linear color picking role (its slider
+  isn't compensated), or that expects the working space's name to be checked.
+- **A fix:** the TODOs: list the display color spaces, and decide perceptual uniformity from
+  the color space (its encoding, or a config setting).
+- **Status:** ported as upstream in `p5-helpers-2` (5.7e, `apphelpers/mixing_helpers.rs`,
+  `MixingColorSpaceManager`); `mixing_helpers_oracle.rs` (`managers_match_the_wheel`,
+  `builtin_config_managers_match_the_wheel`).
 
 ## Undefined behaviour upstream
 
@@ -4873,7 +5064,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   wheel's reference dangles the port raises RuntimeError "the FormatMetadata element was freed
   (its transform freed, or the vector of child elements holding it reallocated, cleared or
   shortened), and the wheel reads its memory anyway (docs/improvements.md, U-121)"; a lookup
-  never returns a stale object. In `p6-objects` (6.3d,
+  never returns a stale object, but a new one. The wheel's answer to a lookup into a buffer
+  allocated after it freed one that held an element with a live Python object depends on where
+  its allocator puts the new buffer, and isn't deterministic: a child's vector reallocated while
+  its first child had an object, then the parent's grown (`nested_growth_script` in
+  `format_metadata_oracle.rs`), the copied first child is that stale object in some runs and a
+  new one in the others (Windows, 2026-10-22: in 1 and 8 of 20 runs of the test for 4 and 6
+  children; one failure of the test before, `same_as` [18] for 9). The test compares those
+  lookups' identities up to the stale object, the rest exactly. A lookup into a buffer
+  allocated before such a free (a reallocation allocates the new buffer before it frees the
+  old one) is deterministic. In `p6-objects` (6.3d,
   `crates/ocio-py/src/py_format_metadata.rs`, `MetadataHeap`); `format_metadata_oracle.rs`.
 
 ### U-122. A context collecting the variables it uses into itself
@@ -4994,3 +5194,197 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`a_role_set_to_the_empty_name_is_refused_when_the_menu_is_made`, which compares with the
   wheel what doesn't build that menu: the same config without the roles included, and an added
   color space the config doesn't have).
+
+### U-146. An `ImageDesc()` used
+
+- **Upstream:** `ImageDesc()` makes an image description whose image (`m_img`) is null
+  (`PyImageDesc.cpp:16-17`). Its getters (`getBitDepth`, `getWidth`, ...) and
+  `CPUProcessor.apply` of it, as the source or the destination, call through the null pointer,
+  and the wheel's process dies (probed on Windows: `apply`). Its `repr` prints the null
+  pointer.
+- **Who notices:** Python code that makes an `ImageDesc` itself, as a placeholder.
+- **A fix:** no public constructor for the base class, or refuse an empty description.
+- **Status:** the port raises ValueError "...: ImageDesc() describes no image, and the wheel
+  dereferences its null image (its process dies; docs/improvements.md, U-146)" where the wheel
+  dereferences it (`crates/ocio-py/src/py_image_desc.rs`, `null_image`; and
+  `py_cpu_processor.rs`, `APPLY`), in `p6-buffers` (6.5a, 6.5b); `image_desc_oracle.rs` and
+  `cpu_processor_oracle.rs` check it, and `repr` against the wheel.
+
+### U-147. An image description over memory that moved
+
+- **Upstream:** an image description keeps its buffer objects and the data pointer each had
+  when it was made (`PyImageDesc.h:33-66`), and releases the buffer request at once: nothing
+  keeps the memory where it was. A `bytearray` resized afterwards, or an exporter that gives
+  new memory to each request, leaves the description pointing at freed memory, which
+  `getData`, the planes' getters and `CPUProcessor.apply` read and write.
+- **Who notices:** Python code that resizes a buffer an image description was made over.
+- **A fix:** hold the buffer request (`py::buffer_info`) for the description's life, as
+  CPython then refuses the resize.
+- **Status:** the port requests each buffer again when the description is used and raises
+  BufferError "the buffer's memory moved since the image description was made over it ...
+  (docs/improvements.md, U-147)" when its data pointer differs
+  (`crates/ocio-py/src/py_image_desc.rs`, `Image::request`), in `p6-buffers` (6.5a);
+  `image_desc_oracle.rs`.
+
+### U-148. Items read past a buffer
+
+- **Upstream:** `PackedImageDesc.getData` and the planar getters copy items forward from the
+  data pointer (I-328), as do the LUTs' `setData`: for a view whose data pointer is its last
+  item (a reversed NumPy view, negative strides), or whose items repeat (a stride of 0), they
+  read past the buffer's items. That memory may still be inside the exporter's allocation, a
+  larger array the view is of: with `big = np.arange(100, dtype=np.float32)`,
+  `Lut1DTransform().setData(big[10:34][::-1])` reads forward from `big[33]` and returns
+  `[33.0, 34.0, ...]` in the wheel, and a stride-0 `as_strided` view of `big[50:]` returns
+  `[50.0, 51.0, ...]`; or past its end.
+- **Who notices:** Python code that passes reversed or otherwise backward views.
+- **A fix:** read the items by their strides (I-328's fix).
+- **Status:** the port raises BufferError "...: the items reach outside the buffer's memory,
+  which the wheel reads past (docs/improvements.md, U-148)" when a byte it reads isn't in the
+  span of the buffer's items, the bytes from its lowest item to its highest
+  (`crates/ocio-py/src/py_image_desc.rs`, `read_items`; `transforms/py_lut1d_transform.rs`,
+  `py_lut3d_transform.rs`), in `p6-buffers` (6.5a, 6.5b); `image_desc_oracle.rs`,
+  `lut_transforms_oracle.rs`. The span is all the buffer protocol says of the memory: the
+  exporter's allocation, which the wheel may stay inside of (the examples above), isn't known
+  to the binding, so the port refuses every read outside the span, those the wheel answers
+  included (sound, not the wheel's answer). An image layout that reaches outside its buffer,
+  which the wheel's binding doesn't check (only the entry count), is refused when the
+  description is made (D-2).
+
+### U-149. The alpha plane of a planar image without one
+
+- **Upstream:** `PlanarImageDesc.getAData` of an image made without an alpha plane passes a
+  null pointer to `py::array`, which then makes a new array without copying: NumPy leaves its
+  memory uninitialized, and the values are whatever the allocator gives
+  (`PyPlanarImageDesc.cpp:181-189`).
+- **Who notices:** Python code that reads `getAData` of a three-plane image.
+- **A fix:** return `None` for an image without alpha.
+- **Status:** the port raises ValueError "PlanarImageDesc.getAData: the image has no alpha
+  plane, and the wheel returns a new array of uninitialized memory (docs/improvements.md,
+  U-149)" (`crates/ocio-py/src/py_planar_image_desc.rs`), in `p6-buffers` (6.5a);
+  `image_desc_oracle.rs`.
+
+### U-150. Memory shared between images, or between threads
+
+- **Upstream:** `CPUProcessor.apply(src, dst)` processes rows from one image into the other with
+  the GIL released, whatever memory they share: a source and a destination that partly
+  overlap are read after they are written; planes some of which share memory are read and
+  written through different pointers; and another thread can run Python code meanwhile, which
+  may apply to, or write into, the same memory at the same time, a data race.
+- **Who notices:** Python code that passes overlapping views, or processes the same array on
+  several threads.
+- **A fix:** refuse images that share memory without being the same image, and document that
+  a buffer must not be used elsewhere while it is processed.
+- **Status:** the port's library describes an image over borrowed memory, which it can't alias.
+  The port gives the wheel's result in these cases: images that share memory and are the same
+  image (the same description, or descriptions of the same memory and layout) are processed as one
+  image; a source and a destination whose spans overlap but whose bytes don't (no byte the
+  destination writes is one the source reads, checked byte by byte: the left and right halves of
+  an image's rows, even and odd pixels) are processed from a copy of the bytes the source reads;
+  planes some of which share memory (`PlanarImageDesc(b, g, b, ...)`, planes shifted in one array)
+  are processed over a copy of the bytes they touch, in one buffer as C++ passes pointers into one
+  allocation, and written back (the value the wheel writes last stays). A source and a destination
+  whose bytes overlap, by a single byte too, which the wheel processes with a result that depends
+  on the order in which it reads and writes them, are refused once the library's own checks passed
+  (on copies of the memory, so its error comes first, as the wheel's): BufferError
+  "CPUProcessor.apply: the destination image writes bytes that the source image reads, without
+  being the same image ... (docs/improvements.md, U-150)". The copies hold only the bytes the
+  images read or write, not the gaps between items, which the wheel doesn't read.
+  Between threads, memory that a call of the port's binding writes on one thread is refused to
+  its calls on others meanwhile, judged by the span of each buffer's items (the bytes from its
+  lowest item to its highest): "another call (of another thread) is using memory in the span
+  of the buffer's items ... (docs/improvements.md, U-150)" (`ocio-py-ffi`, `with_bytes`). So
+  two threads applying in place to the left and right halves of one image's rows, whose items
+  are disjoint but whose spans interleave, are refused, though the wheel doesn't race there
+  (its threads touch different bytes); this stays an error. An image description's
+  constructor reads no memory, as the wheel's, and runs meanwhile.
+  What the port relies on and can't check, as the wheel's raw pointer does: that the exporter
+  keeps the memory where it is while the export lasts (not all do: `ctypes.resize(obj, n)` and
+  `ndarray.resize(..., refcheck=False)` reallocate under an export, so another thread can free
+  the memory under a live slice of the port, as under the wheel's pointer); and that Python
+  code another thread runs meanwhile doesn't write the memory itself, a data race with the
+  wheel too. The port's slices cover the bytes between items as well (the gaps of a strided
+  view), which the wheel doesn't touch: another thread writing them races with nothing in the
+  wheel, and writes under a slice of the port that it doesn't access there. In `p6-buffers`
+  (6.5a: the lending, `buffer_ffi.rs`; 6.5b: `crates/ocio-py/src/py_cpu_processor.rs`,
+  `cpu_processor_oracle.rs`).
+
+### U-151. A pipeline given an invalid FixedFunctionTransform
+
+- **Upstream:** `LegacyViewingPipelineImpl::setLinearCC`, `setColorTimingCC`, `setChannelView`
+  and `setDisplayCC` are `noexcept`, and keep `cc->createEditableCopy()`
+  (`LegacyViewingPipeline.cpp:53-114` @ v2.5.2). A FixedFunctionTransform's copy is made by
+  `FixedFunctionTransform::Create(style, params)`, which validates the parameters
+  (`FixedFunctionTransform.cpp:54-73`): for a transform whose parameters were made invalid
+  after it was built (`setParams`), the copy throws, the exception leaves a `noexcept`
+  function, and `std::terminate` ends the process (probed on Windows, 2026-10-22:
+  `FixedFunctionTransform(ACES_GAMUT_COMP_13, 7 params)`, `setParams([1.0])`, then
+  `pipeline.setLinearCC(ff)` ends the wheel's process without a Python exception).
+- **Who notices:** an application handing the pipeline a fixed function transform it changed
+  to parameters the style refuses.
+- **A fix:** let the setters throw (drop `noexcept`), as `ColorSpace::setTransform` does.
+- **Status:** the port's setters return the copy's error, and the pipeline keeps the transform
+  it had (owner decision 2026-10-22, P5-3 c: setters taking `Option<&Transform>` and returning
+  `Result`, as `ColorSpace::set_transform`). In `p5-helpers-2` (5.7d,
+  `apphelpers/legacy_viewing_pipeline.rs`, `editable_copy`); `legacy_viewing_pipeline_oracle.rs`
+  (`setters_refuse_an_invalid_fixed_function`).
+
+### U-152. A color picking role that names no color space
+
+- **Upstream:** `MixingColorSpaceManagerImpl::refresh` calls
+  `ColorSpaceInfo::CreateFromSingleRole(config, ROLE_COLOR_PICKING)` when the config has the
+  role (`MixingHelpers.cpp:150-154` @ v2.5.2), which reads the name of the color space
+  `config->getColorSpace("color_picking")` returns, null when the role names no color space (a
+  name the config doesn't have, or another role's name: `getColorSpace` doesn't follow a role
+  to a role) (`ColorSpaceHelpers.cpp:78-94`, the path of U-141). Making a
+  `MixingColorSpaceManager` of such a config, or refreshing one with it, reads through a null
+  pointer, and the wheel's process dies (probed on Windows on 2026-10-22, and through
+  `py_eval`'s crash report on both platforms).
+- **Who notices:** an application with a color picker on a config whose `color_picking` role
+  names a missing color space (`config.setRole('color_picking', 'missing')`, a hand-written
+  config, or a role renamed after the fact).
+- **A fix:** treat the role as missing (fall back to the rendering and display spaces), or
+  throw.
+- **Status:** the port returns an error ("MixingColorSpaceManager: the role 'color_picking'
+  refers to the color space '<name>', which doesn't exist: OCIO 2.5.2 reads a null color space
+  there, and its process dies (docs/improvements.md, U-152).") from
+  `MixingColorSpaceManager::new` and `refresh`; a manager whose refresh fails is left as it was
+  (owner decision 2026-10-22, P5-3 d: `new` and `refresh` return `Result`). In `p5-helpers-2`
+  (5.7e, `apphelpers/mixing_helpers.rs`, `color_picker_of`); `mixing_helpers_oracle.rs`
+  (`a_color_picking_role_naming_no_color_space_is_refused`, against the wheel's crash in
+  `py_eval`).
+
+### U-156. Read-only buffers are written
+
+- **Upstream:** the binding requests buffers without asking for write access
+  (`py::buffer::request()`) and writes into them: `CPUProcessor.apply` into a destination,
+  `applyRGB` and `applyRGBA` into their buffer, whatever the exporter marked read-only (I-13).
+  `np.frombuffer(b"...")` is an array over a `bytes` object, which Python treats as immutable
+  (and may share, or intern): writing it changes every holder of that object.
+- **Who notices:** Python code that processes a read-only array, or a `bytes` object.
+- **A fix:** request the buffers to write as writable (`request(true)`), which raises
+  BufferError for a read-only one.
+- **Status:** the port runs the processing on a copy of the memory, so that the library's error
+  comes first, as the wheel's (a bit-depth mismatch, say), and otherwise raises BufferError
+  "...: the buffer is read-only, and the wheel writes into it (docs/improvements.md, U-156)"
+  without writing (`crates/ocio-py/src/py_cpu_processor.rs`, `dry_run`; `ocio-py-ffi`,
+  `with_bytes`, refuses to lend such memory to write), in `p6-buffers` (6.5a: `buffer_ffi.rs`;
+  6.5b: `cpu_processor_oracle.rs`). Reading a read-only buffer (an image's source,
+  `setData`) is as the wheel's.
+
+### U-157. Buffer views that break the buffer protocol
+
+- **Upstream:** pybind11's `buffer_info` copies what the exporter filled into the view
+  unchecked: a null `format` into a `std::string` (undefined, a crash), a null `shape` or
+  `strides` with dimensions; it ignores `suboffsets`, which the request doesn't ask for, so
+  the items aren't where the binding addresses them.
+- **Who notices:** C extensions whose buffer export is broken. Python's own exporters (and
+  memoryviews over a `__buffer__` method) never give such a view for this request.
+- **A fix:** none in OCIO: pybind11 trusts the exporter.
+- **Status:** the port refuses such a view (and a negative number of dimensions, dimension or
+  item size, items without memory, items whose span doesn't fit in the address space, or
+  whose span's sums leave 128 bits: a view of 16 or more dimensions of about 2^62 items, which
+  no memory holds, checked) with
+  BufferError "...: the view breaks the buffer protocol where pybind11 reads it
+  (docs/improvements.md, U-157)", once the export is made, which it then releases
+  (`crates/ocio-py/ffi/src/lib.rs`, `Buffer::request`), in `p6-buffers` (6.5a). Not reachable
+  from Python code, so not tested through an exporter.

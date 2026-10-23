@@ -4107,3 +4107,1359 @@ fn context_variables_in_references_share_a_processor_as_in_the_wheel() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// An element `tag` of the attributes `attrs`, empty.
+fn elt(tag: &str, attrs: &str) -> String {
+    format!("        <{tag} {attrs}/>\n")
+}
+
+/// A DynamicParameter of `param`.
+fn dyn_param(param: &str) -> String {
+    format!("        <DynamicParameter param=\"{param}\"/>\n")
+}
+
+/// The ExposureContrast reader's files and its ECParams.
+fn op_cases_i_ec() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let style = |s: &str| format!("{f32s} style=\"{s}\"");
+    let ec = |attrs: &str| elt("ECParams", attrs);
+    let params = ec("exposure=\"0.65\" contrast=\"1.2\" gamma=\"0.5\" pivot=\"1\"");
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, the ExposureContrast's attributes, its body).
+    let mut files: Vec<(String, &str, String, String)> = Vec::new();
+    for s in [
+        "linear",
+        "linearRev",
+        "video",
+        "videoRev",
+        "log",
+        "logRev",
+        "LOG",
+        "Video",
+    ] {
+        files.push((format!("style {s}"), "2", style(s), params.clone()));
+    }
+    for (label, version, attrs, body) in [
+        ("no ECParams", "2", style("linear"), String::new()),
+        ("in CTF 1.3", "1.3", style("video"), params.clone()),
+        ("in CTF 1.7", "1.7", style("log"), params.clone()),
+        ("an unknown style", "2", style("lin"), params.clone()),
+        ("an empty style", "2", style(""), params.clone()),
+        ("a missing style", "2", f32s.to_owned(), params.clone()),
+        (
+            "two styles",
+            "2",
+            format!("{} Style=\"log\"", style("video")),
+            params.clone(),
+        ),
+        (
+            "a second, bad style",
+            "2",
+            format!("{} STYLE=\"x\"", style("video")),
+            params.clone(),
+        ),
+        (
+            "an unknown attribute",
+            "2",
+            format!("{} gamma=\"2\"", style("log")),
+            params.clone(),
+        ),
+        (
+            "every parameter, log",
+            "2",
+            style("log"),
+            ec(
+                "exposure=\"-1.5\" contrast=\"0.5\" gamma=\"1.2\" pivot=\"0.18\" \
+                logExposureStep=\"0.1\" logMidGray=\"0.5\"",
+            ),
+        ),
+        (
+            "parameters of another case",
+            "2",
+            style("logRev"),
+            ec(
+                "EXPOSURE=\"-1.5\" Contrast=\"0.5\" GAMMA=\"1.2\" Pivot=\"0.18\" \
+                LOGEXPOSURESTEP=\"0.2\" logmidgray=\"0.4\"",
+            ),
+        ),
+        (
+            "no gamma",
+            "2",
+            style("video"),
+            ec("exposure=\"0.2\" contrast=\"0.65\" pivot=\"0.23\""),
+        ),
+        (
+            "no exposure",
+            "2",
+            style("video"),
+            ec("contrast=\"0.65\" pivot=\"0.23\""),
+        ),
+        (
+            "no contrast",
+            "2",
+            style("video"),
+            ec("exposure=\"0.2\" pivot=\"0.23\""),
+        ),
+        (
+            "no pivot",
+            "2",
+            style("video"),
+            ec("exposure=\"0.2\" contrast=\"0.65\""),
+        ),
+        (
+            "only an exposure",
+            "2",
+            style("video"),
+            ec("exposure=\"1\""),
+        ),
+        ("no parameter", "2", style("video"), ec("")),
+        (
+            "a NaN exposure",
+            "2",
+            style("video"),
+            ec("exposure=\"nan\" contrast=\"0.65\" pivot=\"0.23\""),
+        ),
+        (
+            "a NaN gamma",
+            "2",
+            style("video"),
+            ec("exposure=\"0.2\" contrast=\"0.65\" gamma=\"nan\" pivot=\"0.23\""),
+        ),
+        (
+            "infinite parameters",
+            "2",
+            style("linear"),
+            ec("exposure=\"inf\" contrast=\"-inf\" gamma=\"1e400\" pivot=\"0.23\""),
+        ),
+        (
+            "extra values",
+            "1.7",
+            style("log"),
+            ec("exposure=\"-1.5 1.2\" contrast=\"0.5\" gamma=\"1.2\" pivot=\"0.18\""),
+        ),
+        (
+            "leading and trailing spaces",
+            "1.7",
+            style("log"),
+            ec("exposure=\"    -1.5 \" contrast=\" 0.5\" gamma=\"1.2  \" pivot=\"0.18\""),
+        ),
+        (
+            "an illegal value",
+            "2",
+            style("log"),
+            ec("exposure=\"-1.5x\" contrast=\"0.5\" pivot=\"0.18\""),
+        ),
+        (
+            "an empty value",
+            "2",
+            style("log"),
+            ec("exposure=\"\" contrast=\"0.5\" pivot=\"0.18\""),
+        ),
+        (
+            "an illegal value after a missing one",
+            "2",
+            style("log"),
+            ec("contrast=\"0.5\" pivot=\"a\""),
+        ),
+        (
+            "an unknown parameter",
+            "2",
+            style("log"),
+            ec("exposure=\"1\" contrast=\"0.5\" pivot=\"0.18\" foo=\"x\""),
+        ),
+        (
+            "an unknown parameter, then a missing one",
+            "2",
+            style("log"),
+            ec("foo=\"x\" contrast=\"0.5\" pivot=\"0.18\""),
+        ),
+        (
+            "ECParams twice",
+            "2",
+            style("linear"),
+            format!(
+                "{params}{}",
+                ec("exposure=\"0.1\" contrast=\"1.1\" pivot=\"0.5\"")
+            ),
+        ),
+        (
+            "a zero pivot and contrast",
+            "2",
+            style("linear"),
+            ec("exposure=\"0\" contrast=\"0\" pivot=\"0\""),
+        ),
+        (
+            "text in the ECParams",
+            "2",
+            style("linear"),
+            "        <ECParams exposure=\"0.1\" contrast=\"1\" pivot=\"0.18\">text</ECParams>\n"
+                .to_owned(),
+        ),
+        (
+            "an element in the ECParams",
+            "2",
+            style("linear"),
+            "        <ECParams exposure=\"0.1\" contrast=\"1\" pivot=\"0.18\">\
+             <Description>d</Description></ECParams>\n"
+                .to_owned(),
+        ),
+        (
+            "a description and metadata",
+            "2",
+            format!("{} id=\"ec1\" name=\"exposure\"", style("video")),
+            format!("        <Description>ec</Description>\n{params}"),
+        ),
+        // Dynamic parameters.
+        (
+            "dynamic exposure",
+            "2",
+            style("video"),
+            format!("{params}{}", dyn_param("EXPOSURE")),
+        ),
+        (
+            "dynamic contrast and gamma",
+            "2",
+            style("logRev"),
+            format!("{}{params}{}", dyn_param("contrast"), dyn_param("Gamma")),
+        ),
+        (
+            "every dynamic parameter",
+            "2",
+            style("linear"),
+            format!(
+                "{params}{}{}{}",
+                dyn_param("EXPOSURE"),
+                dyn_param("CONTRAST"),
+                dyn_param("GAMMA")
+            ),
+        ),
+        (
+            "dynamic exposure twice, no ECParams",
+            "2",
+            style("linear"),
+            format!("{}{}", dyn_param("EXPOSURE"), dyn_param("EXPOSURE")),
+        ),
+        (
+            "a PRIMARY dynamic parameter",
+            "2",
+            style("video"),
+            format!("{params}{}", dyn_param("PRIMARY")),
+        ),
+        (
+            "a TONE dynamic parameter",
+            "2",
+            style("video"),
+            format!("{params}{}", dyn_param("TONE")),
+        ),
+        (
+            "a LOOK_SWITCH dynamic parameter",
+            "2",
+            style("video"),
+            format!("{params}{}", dyn_param("LOOK_SWITCH")),
+        ),
+        (
+            "an unknown dynamic parameter",
+            "2",
+            style("video"),
+            format!("{params}{}", dyn_param("EXPOSUREX")),
+        ),
+    ] {
+        files.push((label.to_owned(), version, attrs, body));
+    }
+    for (label, version, attrs, body) in files {
+        cases.push(ctf(
+            &format!("an ExposureContrast: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("ExposureContrast", &attrs, &body),
+        ));
+    }
+    cases.push(ctf(
+        "ECParams in a Matrix",
+        "id=\"a\" version=\"2\"",
+        &op(
+            "Matrix",
+            f32s,
+            &format!(
+                "        <Array dim=\"3 3 3\">1 0 0 0 1 0 0 0 1</Array>\n{}",
+                elt("ECParams", "exposure=\"1\" contrast=\"1\" pivot=\"0.18\"")
+            ),
+        ),
+    ));
+    cases.push(ctf(
+        "ECParams under the ProcessList",
+        "id=\"a\" version=\"2\"",
+        &format!(
+            "{}{}",
+            elt("ECParams", "exposure=\"1\" contrast=\"1\" pivot=\"0.18\""),
+            op("ExposureContrast", &style("linear"), &params)
+        ),
+    ));
+    cases.push(ctf(
+        "two ExposureContrasts",
+        "id=\"a\" version=\"2\"",
+        &format!(
+            "{}{}",
+            op("ExposureContrast", &style("video"), &params),
+            op(
+                "ExposureContrast",
+                &style("videoRev"),
+                &format!("{params}{}", dyn_param("GAMMA"))
+            )
+        ),
+    ));
+    for name in [
+        "exposure_contrast_video.ctf",
+        "exposure_contrast_log.ctf",
+        "exposure_contrast_linear.ctf",
+        "exposure_contrast_no_gamma.ctf",
+        "exposure_contrast_bad_style.ctf",
+        "exposure_contrast_missing_param.ctf",
+        "exposure_contrast_video_dp.ctf",
+    ] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the ExposureContrast reader's files, in both directions.
+#[test]
+fn exposure_contrast_files_read_as_in_the_wheel() {
+    let cases = op_cases_i_ec();
+    assert_eq!(cases.len(), 58);
+    check_processors(&cases);
+}
+
+/// The warnings of reading the ExposureContrast reader's files, message by message.
+#[test]
+fn exposure_contrast_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_i_ec());
+}
+
+/// The GradingPrimary reader's files and its parameter elements.
+fn op_cases_i_gp() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let style = |s: &str| format!("{f32s} style=\"{s}\"");
+    let log_params = format!(
+        "{}{}{}{}{}{}",
+        elt("Brightness", "rgb=\"0.1 0 0\" master=\"0\""),
+        elt("Contrast", "rgb=\"1 1.1 1\" master=\"1\""),
+        elt("Gamma", "rgb=\"1 1 1\" master=\"1.1\""),
+        elt("Saturation", "master=\"1.1\""),
+        elt("Pivot", "contrast=\"-0.1\" black=\"0.1\" white=\"1.1\""),
+        elt("Clamp", "black=\"0\" white=\"1\""),
+    );
+    let lin_params = format!(
+        "{}{}{}{}{}",
+        elt("Offset", "rgb=\"0.1 0 0\" master=\"0\""),
+        elt("Exposure", "rgb=\"0 0 0\" master=\"0.1\""),
+        elt("Contrast", "rgb=\"1 1.1 1\" master=\"1\""),
+        elt("Saturation", "master=\"1.1\""),
+        elt("Pivot", "contrast=\"0.28\""),
+    );
+    let video_params = format!(
+        "{}{}{}{}{}{}",
+        elt("Lift", "rgb=\"0.1 0 0\" master=\"0\""),
+        elt("Gamma", "rgb=\"1 1 1\" master=\"1.1\""),
+        elt("Gain", "rgb=\"1 1.1 1\" master=\"1\""),
+        elt("Offset", "rgb=\"0 0.1 0\" master=\"0\""),
+        elt("Pivot", "black=\"0.1\" white=\"1.1\""),
+        elt("Clamp", "black=\"0\" white=\"1\""),
+    );
+    let one = |tag: &str, attrs: &str| elt(tag, attrs);
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, the GradingPrimary's attributes, its body).
+    let mut files: Vec<(String, &str, String, String)> = Vec::new();
+    for (s, p) in [
+        ("log", &log_params),
+        ("logRev", &log_params),
+        ("linear", &lin_params),
+        ("linearRev", &lin_params),
+        ("video", &video_params),
+        ("videoRev", &video_params),
+        ("Video", &video_params),
+    ] {
+        files.push((format!("style {s}"), "2", style(s), p.clone()));
+    }
+    for (label, version, attrs, body) in [
+        ("the log defaults", "2", style("log"), String::new()),
+        (
+            "the linear defaults",
+            "2.5",
+            style("linearRev"),
+            String::new(),
+        ),
+        ("in CTF 1.8", "1.8", style("log"), String::new()),
+        ("an unknown style", "2", style("logx"), String::new()),
+        ("an empty style", "2", style(""), String::new()),
+        ("a missing style", "2", f32s.to_owned(), log_params.clone()),
+        (
+            "two styles",
+            "2",
+            format!("{} Style=\"video\"", style("log")),
+            video_params.clone(),
+        ),
+        (
+            "an unknown attribute",
+            "2",
+            format!("{} bypassLinToLog=\"true\"", style("log")),
+            String::new(),
+        ),
+        // Controls the style doesn't use are read too.
+        (
+            "video controls in the log style",
+            "2",
+            style("log"),
+            video_params.clone(),
+        ),
+        (
+            "log controls in the linear style",
+            "2",
+            style("linear"),
+            log_params.clone(),
+        ),
+        (
+            "controls of another case",
+            "2",
+            style("video"),
+            format!(
+                "{}{}",
+                one("LIFT", "RGB=\"0.1 0.2 0.3\" Master=\"0.05\""),
+                one("saturation", "MASTER=\"0.9\"")
+            ),
+        ),
+        (
+            "a control twice",
+            "2",
+            style("log"),
+            format!(
+                "{}{}",
+                one("Brightness", "rgb=\"0.1 0 0\" master=\"0\""),
+                one("Brightness", "rgb=\"0 0.2 0\" master=\"0.1\"")
+            ),
+        ),
+        (
+            "rgb twice",
+            "2",
+            style("log"),
+            one(
+                "Brightness",
+                "rgb=\"0.1 0 0\" master=\"0\" RGB=\"0.3 0.2 0.1\"",
+            ),
+        ),
+        (
+            "number forms",
+            "2",
+            style("video"),
+            format!(
+                "{}{}{}",
+                one("Lift", "rgb=\"0.25 -.015625 .03125\" master=\"0\""),
+                one("Gamma", "rgb=\".75 .625 1.25\" master=\".09e2\""),
+                one("Offset", "rgb=\"02.5 +0.5 -.125\" master=\"1\"")
+            ),
+        ),
+        (
+            "commas between values",
+            "2",
+            style("log"),
+            one("Brightness", "rgb=\"0.1, 0.2, 0.3\" master=\"0\""),
+        ),
+        // Errors of the controls.
+        (
+            "a Pivot of master",
+            "2",
+            style("video"),
+            one("Pivot", "master=\"1\""),
+        ),
+        (
+            "two rgb values",
+            "2",
+            style("log"),
+            one("Brightness", "rgb=\"0.25 0.5\" master=\"1\""),
+        ),
+        (
+            "four rgb values",
+            "2",
+            style("log"),
+            one("Contrast", "rgb=\"0.25 0.5 1 2\" master=\"1\""),
+        ),
+        (
+            "two master values",
+            "2",
+            style("log"),
+            one("Gamma", "rgb=\"1 1 1\" master=\"1 2\""),
+        ),
+        (
+            "no master",
+            "2",
+            style("log"),
+            one("Brightness", "rgb=\"0.25 0.5 0.25\""),
+        ),
+        (
+            "no rgb",
+            "2",
+            style("log"),
+            one("Brightness", "master=\"1\""),
+        ),
+        ("no attribute", "2", style("log"), one("Gamma", "")),
+        (
+            "an illegal value",
+            "2",
+            style("log"),
+            one("Gamma", "rgb=\"1 1 x\" master=\"1\""),
+        ),
+        (
+            "a long illegal value",
+            "2",
+            style("log"),
+            one(
+                "Gamma",
+                "rgb=\"1.0000000 1.0000000 1.0000000 1.0000000 1.0000000 x\" master=\"1\"",
+            ),
+        ),
+        (
+            "an unknown attribute with an illegal value",
+            "2",
+            style("log"),
+            one("Gamma", "rgb=\"1 1 1\" foo=\"x\" master=\"1\""),
+        ),
+        (
+            "an unknown attribute with a number",
+            "2",
+            style("log"),
+            one("Gamma", "rgb=\"1 1 1\" foo=\"2\" master=\"1\""),
+        ),
+        (
+            "an empty value",
+            "2",
+            style("log"),
+            one("Gamma", "rgb=\"\" master=\"1\""),
+        ),
+        (
+            "a Pivot without attributes",
+            "2",
+            style("log"),
+            one("Pivot", ""),
+        ),
+        (
+            "a Pivot of two contrasts",
+            "2",
+            style("log"),
+            one("Pivot", "contrast=\"1 2\""),
+        ),
+        (
+            "a Pivot of two blacks",
+            "2",
+            style("video"),
+            one("Pivot", "black=\"1 2\""),
+        ),
+        (
+            "a Pivot of two whites",
+            "2",
+            style("video"),
+            one("Pivot", "white=\"1 2\""),
+        ),
+        (
+            "a Clamp without attributes",
+            "2",
+            style("log"),
+            one("Clamp", ""),
+        ),
+        (
+            "a Clamp of two blacks",
+            "2",
+            style("log"),
+            one("Clamp", "black=\"0 1\""),
+        ),
+        (
+            "a Clamp of two whites",
+            "2",
+            style("log"),
+            one("Clamp", "white=\"0 1\""),
+        ),
+        (
+            "a Clamp of contrast",
+            "2",
+            style("log"),
+            one("Clamp", "contrast=\"1\""),
+        ),
+        (
+            "a Saturation of rgb",
+            "2",
+            style("log"),
+            one("Saturation", "rgb=\"1 1 1\""),
+        ),
+        (
+            "a Saturation of two values",
+            "2",
+            style("log"),
+            one("Saturation", "master=\"1 1\""),
+        ),
+        (
+            "a Saturation without attributes",
+            "2",
+            style("log"),
+            one("Saturation", ""),
+        ),
+        // Values the GradingPrimary refuses.
+        (
+            "gamma below its bound",
+            "2",
+            style("video"),
+            one("Gamma", "rgb=\"0 0 0\" master=\"1\""),
+        ),
+        (
+            "a negative saturation",
+            "2",
+            style("linear"),
+            one("Saturation", "master=\"-1\""),
+        ),
+        (
+            "a NaN master",
+            "2",
+            style("log"),
+            one("Contrast", "rgb=\"1 1 1\" master=\"nan\""),
+        ),
+        (
+            "an infinite brightness",
+            "2",
+            style("log"),
+            one("Brightness", "rgb=\"inf 0 0\" master=\"0\""),
+        ),
+        (
+            "clamp black above white",
+            "2",
+            style("video"),
+            one("Clamp", "black=\"1\" white=\"0\""),
+        ),
+        (
+            "an element in a control",
+            "2",
+            style("video"),
+            "        <Lift rgb=\"0.1 0 0\" master=\"0\"><Description>d</Description></Lift>\n"
+                .to_owned(),
+        ),
+        (
+            "text in a control",
+            "2",
+            style("video"),
+            "        <Lift rgb=\"0.1 0 0\" master=\"0\">text</Lift>\n".to_owned(),
+        ),
+        // Dynamic parameters.
+        (
+            "dynamic",
+            "2",
+            style("log"),
+            format!("{log_params}{}", dyn_param("PRIMARY")),
+        ),
+        (
+            "dynamic first, of another case",
+            "2",
+            style("videoRev"),
+            format!("{}{video_params}", dyn_param("primary")),
+        ),
+        (
+            "a CONTRAST dynamic parameter",
+            "2",
+            style("video"),
+            dyn_param("CONTRAST"),
+        ),
+        (
+            "an RGB_CURVE dynamic parameter",
+            "2",
+            style("video"),
+            dyn_param("RGB_CURVE"),
+        ),
+    ] {
+        files.push((label.to_owned(), version, attrs, body));
+    }
+    for (label, version, attrs, body) in files {
+        cases.push(ctf(
+            &format!("a GradingPrimary: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("GradingPrimary", &attrs, &body),
+        ));
+    }
+    cases.push(ctf(
+        "a Brightness under the ProcessList",
+        "id=\"a\" version=\"2\"",
+        &format!(
+            "{}{}",
+            elt("Brightness", "rgb=\"0.1 0 0\" master=\"0\""),
+            op("GradingPrimary", &style("log"), "")
+        ),
+    ));
+    cases.push(ctf(
+        "a Lift under a GradingTone",
+        "id=\"a\" version=\"2\"",
+        &op(
+            "GradingTone",
+            &style("video"),
+            &elt("Lift", "rgb=\"0.1 0 0\" master=\"0\""),
+        ),
+    ));
+    cases.push(clf(
+        "a CLF GradingPrimary",
+        "id=\"a\" compCLFversion=\"3\"",
+        &op("GradingPrimary", &style("video"), ""),
+    ));
+    cases
+}
+
+/// The processors of the GradingPrimary reader's files, in both directions.
+#[test]
+fn grading_primary_files_read_as_in_the_wheel() {
+    let cases = op_cases_i_gp();
+    assert_eq!(cases.len(), 59);
+    check_processors(&cases);
+}
+
+/// The warnings of reading the GradingPrimary reader's files, message by message.
+#[test]
+fn grading_primary_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_i_gp());
+}
+
+/// The GradingTone reader's files and its parameter elements.
+fn op_cases_i_gt() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let style = |s: &str| format!("{f32s} style=\"{s}\"");
+    let params = format!(
+        "{}{}{}{}{}{}",
+        elt(
+            "Blacks",
+            "rgb=\"1.1 1 1\" master=\"1\" start=\"0\" width=\"0.98765432198\""
+        ),
+        elt(
+            "Shadows",
+            "rgb=\"1 1.1 1\" master=\"1\" start=\"1\" pivot=\"0\""
+        ),
+        elt(
+            "Midtones",
+            "rgb=\"1 1 1\" master=\"1.1\" center=\"0\" width=\"1\""
+        ),
+        elt(
+            "Highlights",
+            "rgb=\"1 1 1\" master=\"1.1\" start=\"0\" pivot=\"1\""
+        ),
+        elt(
+            "Whites",
+            "rgb=\"1 1 1.1\" master=\"1\" start=\"0\" width=\"1\""
+        ),
+        elt("SContrast", "master=\"1.1\""),
+    );
+    let one = |tag: &str, attrs: &str| elt(tag, attrs);
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, the GradingTone's attributes, its body).
+    let mut files: Vec<(String, &str, String, String)> = Vec::new();
+    for s in [
+        "log",
+        "logRev",
+        "linear",
+        "linearRev",
+        "video",
+        "videoRev",
+        "LINEAR",
+    ] {
+        files.push((format!("style {s}"), "2", style(s), params.clone()));
+    }
+    for (label, version, attrs, body) in [
+        ("the video defaults", "2", style("video"), String::new()),
+        ("in CTF 1.8", "1.8", style("log"), String::new()),
+        ("an unknown style", "2", style("vid"), String::new()),
+        ("an empty style", "2", style(""), String::new()),
+        ("a missing style", "2", f32s.to_owned(), params.clone()),
+        (
+            "two styles",
+            "2",
+            format!("{} STYLE=\"log\"", style("linear")),
+            params.clone(),
+        ),
+        (
+            "a second, bad style",
+            "2",
+            format!("{} STYLE=\"x\"", style("linear")),
+            params.clone(),
+        ),
+        (
+            "an unknown attribute",
+            "2",
+            format!("{} hsyTransform=\"none\"", style("log")),
+            String::new(),
+        ),
+        (
+            "an SContrast",
+            "2",
+            style("linearRev"),
+            one("SContrast", "master=\"1.12345678912\""),
+        ),
+        (
+            "a Shadows",
+            "2",
+            style("videoRev"),
+            one(
+                "Shadows",
+                "rgb=\"1 1 1.12345678912\" master=\"1\" start=\"0.6\" pivot=\"0\"",
+            ),
+        ),
+        (
+            "controls of another case",
+            "2",
+            style("log"),
+            format!(
+                "{}{}",
+                one(
+                    "MIDTONES",
+                    "RGB=\"1 1.2 1\" Master=\"1\" CENTER=\"0.1\" Width=\"0.8\""
+                ),
+                one("scontrast", "MASTER=\"0.9\"")
+            ),
+        ),
+        (
+            "a control twice",
+            "2",
+            style("log"),
+            format!(
+                "{}{}",
+                one("SContrast", "master=\"1.1\""),
+                one("SContrast", "master=\"0.9\"")
+            ),
+        ),
+        // Errors of the controls.
+        (
+            "a Midtones with start",
+            "2",
+            style("log"),
+            one(
+                "Midtones",
+                "rgb=\"1 1 1\" master=\"1\" start=\"0\" width=\"1\"",
+            ),
+        ),
+        (
+            "a Blacks with center",
+            "2",
+            style("log"),
+            one(
+                "Blacks",
+                "rgb=\"1 1 1\" master=\"1\" center=\"0\" width=\"1\"",
+            ),
+        ),
+        (
+            "a Shadows with width",
+            "2",
+            style("log"),
+            one(
+                "Shadows",
+                "rgb=\"1 1 1\" master=\"1\" start=\"1\" width=\"0\"",
+            ),
+        ),
+        (
+            "a Highlights without pivot",
+            "2",
+            style("log"),
+            one("Highlights", "rgb=\"1 1 1\" master=\"1\" start=\"0\""),
+        ),
+        (
+            "a Whites without start",
+            "2",
+            style("log"),
+            one("Whites", "rgb=\"1 1 1\" master=\"1\" width=\"1\""),
+        ),
+        (
+            "a Midtones without center",
+            "2",
+            style("log"),
+            one("Midtones", "rgb=\"1 1 1\" master=\"1\" width=\"1\""),
+        ),
+        (
+            "a Blacks without width",
+            "2",
+            style("log"),
+            one("Blacks", "rgb=\"1 1 1\" master=\"1\" start=\"0\""),
+        ),
+        (
+            "a Blacks without rgb",
+            "2",
+            style("log"),
+            one("Blacks", "master=\"1\" start=\"0\" width=\"1\""),
+        ),
+        (
+            "a Blacks without master",
+            "2",
+            style("log"),
+            one("Blacks", "rgb=\"1 1 1\" start=\"0\" width=\"1\""),
+        ),
+        (
+            "a Blacks without attributes",
+            "2",
+            style("log"),
+            one("Blacks", ""),
+        ),
+        (
+            "two rgb values",
+            "2",
+            style("log"),
+            one("Whites", "rgb=\"1 1\" master=\"1\" start=\"0\" width=\"1\""),
+        ),
+        (
+            "two master values",
+            "2",
+            style("log"),
+            one(
+                "Whites",
+                "rgb=\"1 1 1\" master=\"1 1\" start=\"0\" width=\"1\"",
+            ),
+        ),
+        (
+            "two start values",
+            "2",
+            style("log"),
+            one(
+                "Whites",
+                "rgb=\"1 1 1\" master=\"1\" start=\"0 1\" width=\"1\"",
+            ),
+        ),
+        (
+            "two center values",
+            "2",
+            style("log"),
+            one(
+                "Midtones",
+                "rgb=\"1 1 1\" master=\"1\" center=\"0 1\" width=\"1\"",
+            ),
+        ),
+        (
+            "two width values",
+            "2",
+            style("log"),
+            one(
+                "Whites",
+                "rgb=\"1 1 1\" master=\"1\" start=\"0\" width=\"1 2\"",
+            ),
+        ),
+        (
+            "two pivot values",
+            "2",
+            style("log"),
+            one(
+                "Shadows",
+                "rgb=\"1 1 1\" master=\"1\" start=\"1\" pivot=\"0 1\"",
+            ),
+        ),
+        (
+            "an illegal value",
+            "2",
+            style("log"),
+            one(
+                "Whites",
+                "rgb=\"1 1 1\" master=\"z\" start=\"0\" width=\"1\"",
+            ),
+        ),
+        (
+            "an unknown attribute with an illegal value",
+            "2",
+            style("log"),
+            one("Whites", "rgb=\"1 1 1\" foo=\"z\" master=\"1\""),
+        ),
+        (
+            "an unknown attribute with a number",
+            "2",
+            style("log"),
+            one("Whites", "rgb=\"1 1 1\" foo=\"1\" master=\"1\""),
+        ),
+        (
+            "an SContrast of two values",
+            "2",
+            style("log"),
+            one("SContrast", "master=\"1 2\""),
+        ),
+        (
+            "an SContrast of rgb",
+            "2",
+            style("log"),
+            one("SContrast", "rgb=\"1 1 1\""),
+        ),
+        (
+            "an SContrast without attributes",
+            "2",
+            style("log"),
+            one("SContrast", ""),
+        ),
+        // Values the GradingTone refuses, which each control's start checks.
+        (
+            "an rgb below its bound",
+            "2",
+            style("log"),
+            one(
+                "Blacks",
+                "rgb=\"0 1 1\" master=\"1\" start=\"0\" width=\"1\"",
+            ),
+        ),
+        (
+            "an rgb above its bound",
+            "2",
+            style("log"),
+            one(
+                "Whites",
+                "rgb=\"1 1 2.5\" master=\"1\" start=\"0\" width=\"1\"",
+            ),
+        ),
+        (
+            "an SContrast above its bound",
+            "2",
+            style("log"),
+            one("SContrast", "master=\"2.5\""),
+        ),
+        (
+            "a refused control, then a valid one",
+            "2",
+            style("log"),
+            format!(
+                "{}{}",
+                one("SContrast", "master=\"1.1\""),
+                one(
+                    "Blacks",
+                    "rgb=\"0 1 1\" master=\"1\" start=\"0\" width=\"1\""
+                )
+            ),
+        ),
+        (
+            "a NaN width",
+            "2",
+            style("log"),
+            one(
+                "Whites",
+                "rgb=\"1 1 1\" master=\"1\" start=\"0\" width=\"nan\"",
+            ),
+        ),
+        (
+            "an infinite start",
+            "2",
+            style("linear"),
+            one(
+                "Blacks",
+                "rgb=\"1 1 1\" master=\"1\" start=\"-inf\" width=\"1\"",
+            ),
+        ),
+        (
+            "text in a control",
+            "2",
+            style("video"),
+            "        <SContrast master=\"1.1\">text</SContrast>\n".to_owned(),
+        ),
+        // Dynamic parameters.
+        (
+            "dynamic",
+            "2",
+            style("linear"),
+            format!("{params}{}", dyn_param("TONE")),
+        ),
+        (
+            "dynamic first, of another case",
+            "2",
+            style("logRev"),
+            format!("{}{params}", dyn_param("tone")),
+        ),
+        (
+            "a HUE_CURVE dynamic parameter",
+            "2",
+            style("video"),
+            dyn_param("HUE_CURVE"),
+        ),
+        (
+            "an EXPOSURE dynamic parameter",
+            "2",
+            style("video"),
+            dyn_param("EXPOSURE"),
+        ),
+    ] {
+        files.push((label.to_owned(), version, attrs, body));
+    }
+    for (label, version, attrs, body) in files {
+        cases.push(ctf(
+            &format!("a GradingTone: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("GradingTone", &attrs, &body),
+        ));
+    }
+    cases.push(ctf(
+        "an empty GradingTone element",
+        "id=\"a\" version=\"2\"",
+        &format!("    <GradingTone {} />\n", style("video")),
+    ));
+    cases.push(ctf(
+        "a Blacks under a GradingPrimary",
+        "id=\"a\" version=\"2\"",
+        &op(
+            "GradingPrimary",
+            &style("log"),
+            &elt(
+                "Blacks",
+                "rgb=\"1 1 1\" master=\"1\" start=\"0\" width=\"1\"",
+            ),
+        ),
+    ));
+    cases
+}
+
+/// The processors of the GradingTone reader's files, in both directions.
+#[test]
+fn grading_tone_files_read_as_in_the_wheel() {
+    let cases = op_cases_i_gt();
+    assert_eq!(cases.len(), 54);
+    check_processors(&cases);
+}
+
+/// The warnings of reading the GradingTone reader's files, message by message.
+#[test]
+fn grading_tone_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_i_gt());
+}
+
+/// The GradingHueCurve reader's files.
+fn op_cases_i_ghc() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let style = |s: &str| format!("{f32s} style=\"{s}\"");
+    let every_curve = format!(
+        "{}{}{}{}{}{}{}{}",
+        curve("HueHue", &points("0.015625 0 0.5 0.6 0.9 0.8")),
+        curve("HueSat", &points("0.015625 1 0.5 0.5 0.9 1.5")),
+        curve(
+            "HueLum",
+            &points("0.1, 1.5, 0.2, 0.7, 0.4, 1.4, 0.5, 0.8, 0.8, 0.5")
+        ),
+        curve("LumSat", &points("-0.1 1.0 0.5 1.5 1.0 0.9 1.1 1.2")),
+        curve("SatSat", &points("0., 0.1, 0.5, 0.45, 1., 1.1")),
+        curve("LumLum", &points("0. -0.0005 0.5 0.3 1. 0.9")),
+        curve("SatLum", &points("0., 1.2, 0.6, 0.8, 0.9, 1.1")),
+        curve(
+            "HueFx",
+            &points("0.2, 0.05, .4, -0.09, .6, -0.2, .8, 0.05, 0.99, -0.02")
+        ),
+    );
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, the GradingHueCurve's attributes, its body).
+    let mut files: Vec<(String, &str, String, String)> = Vec::new();
+    for s in ["log", "logRev", "linear", "linearRev", "video", "videoRev"] {
+        files.push((format!("the {s} defaults"), "2.5", style(s), String::new()));
+        files.push((
+            format!("every {s} curve"),
+            "2.5",
+            style(s),
+            every_curve.clone(),
+        ));
+    }
+    for (label, version, attrs, body) in [
+        ("in CTF 2.4", "2.4", style("log"), String::new()),
+        ("an unknown style", "2.5", style("logx"), String::new()),
+        ("an empty style", "2.5", style(""), String::new()),
+        ("a missing style", "2.5", f32s.to_owned(), String::new()),
+        (
+            "two styles",
+            "2.5",
+            format!("{} Style=\"video\"", style("linear")),
+            curve("HueSat", &points("0 1 0.5 1.5 0.9 1")),
+        ),
+        (
+            "hsyTransform none",
+            "2.5",
+            format!("{} hsyTransform=\"none\"", style("logRev")),
+            every_curve.clone(),
+        ),
+        (
+            "hsyTransform of another case",
+            "2.5",
+            format!("{} HSYTRANSFORM=\"NONE\"", style("video")),
+            String::new(),
+        ),
+        (
+            "hsyTransform before the style",
+            "2.5",
+            format!("{f32s} hsyTransform=\"none\" style=\"log\""),
+            String::new(),
+        ),
+        (
+            "hsyTransform hsy1",
+            "2.5",
+            format!("{} hsyTransform=\"hsy1\"", style("linear")),
+            String::new(),
+        ),
+        (
+            "an empty hsyTransform",
+            "2.5",
+            format!("{} hsyTransform=\"\"", style("linear")),
+            String::new(),
+        ),
+        (
+            "an unknown attribute",
+            "2.5",
+            format!("{} bypassLinToLog=\"true\"", style("log")),
+            String::new(),
+        ),
+        (
+            "curve names of another case",
+            "2.5",
+            style("video"),
+            format!(
+                "{}{}",
+                curve("huehue", &points("0 0 0.5 0.6 0.9 0.8")),
+                curve("SATSAT", &points("0 0 0.5 0.6 1 1"))
+            ),
+        ),
+        (
+            "slopes",
+            "2.5",
+            style("video"),
+            curve(
+                "HueSat",
+                &format!("{}{}", points("0 1 0.5 1.5 0.9 1"), slopes("0 0.5 0")),
+            ),
+        ),
+        (
+            "too many slopes",
+            "2.5",
+            style("video"),
+            curve(
+                "LumLum",
+                &format!("{}{}", points("0 0 0.5 0.6 1 1"), slopes("1 1 1 1")),
+            ),
+        ),
+        (
+            "an odd number of values",
+            "2.5",
+            style("linear"),
+            curve("HueHue", &points("0 0 0.5")),
+        ),
+        (
+            "one control point",
+            "2.5",
+            style("linear"),
+            curve("SatLum", &points("0 1")),
+        ),
+        (
+            "no control point",
+            "2.5",
+            style("linear"),
+            curve("SatLum", "            <ControlPoints/>\n"),
+        ),
+        (
+            "decreasing x",
+            "2.5",
+            style("log"),
+            curve("LumSat", &points("0 1 0.5 1 0.4 1")),
+        ),
+        (
+            "a hue x past 1",
+            "2.5",
+            style("log"),
+            curve("HueHue", &points("0 0 0.5 0.5 1.2 1.2")),
+        ),
+        (
+            "a NaN y coordinate",
+            "2.5",
+            style("video"),
+            curve("HueLum", &points("0 1 0.5 nan 0.9 1")),
+        ),
+        (
+            "illegal values",
+            "2.5",
+            style("video"),
+            curve("HueFx", &points("0 0 0.5 x")),
+        ),
+        (
+            "an RGB curve",
+            "2.5",
+            style("linear"),
+            curve("Red", &points("0 0 1 1")),
+        ),
+        (
+            "an unknown curve",
+            "2.5",
+            style("linear"),
+            curve("HueHu", &points("0 0 1 1")),
+        ),
+        (
+            "control points in the operator",
+            "2.5",
+            style("linear"),
+            points("0 0 1 1"),
+        ),
+        (
+            "a curve twice",
+            "2.5",
+            style("video"),
+            format!(
+                "{}{}",
+                curve("HueSat", &points("0 1 0.5 1.5 0.9 1")),
+                curve("HueSat", &slopes("0 0 0"))
+            ),
+        ),
+        // Dynamic parameters.
+        (
+            "dynamic",
+            "2.5",
+            style("log"),
+            format!("{every_curve}{}", dyn_param("HUE_CURVE")),
+        ),
+        (
+            "dynamic first, of another case",
+            "2.5",
+            style("linearRev"),
+            format!(
+                "{}{}",
+                dyn_param("hue_curve"),
+                curve("HueSat", &points("0 1 0.5 1.5 0.9 1"))
+            ),
+        ),
+        (
+            "an RGB_CURVE dynamic parameter",
+            "2.5",
+            style("video"),
+            dyn_param("RGB_CURVE"),
+        ),
+        (
+            "a TONE dynamic parameter",
+            "2.5",
+            style("video"),
+            dyn_param("TONE"),
+        ),
+    ] {
+        files.push((label.to_owned(), version, attrs, body));
+    }
+    for (label, version, attrs, body) in files {
+        cases.push(ctf(
+            &format!("a GradingHueCurve: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("GradingHueCurve", &attrs, &body),
+        ));
+    }
+    cases.push(file_case(
+        "grading_hue_curve.ctf",
+        &upstream_file("grading_hue_curve.ctf"),
+        Interpolation::Default,
+        TransformDirection::Forward,
+    ));
+    cases
+}
+
+/// The processors of the GradingHueCurve reader's files, in both directions.
+#[test]
+fn grading_hue_curve_files_read_as_in_the_wheel() {
+    let cases = op_cases_i_ghc();
+    assert_eq!(cases.len(), 42);
+    check_processors(&cases);
+}
+
+/// The warnings of reading the GradingHueCurve reader's files, message by message.
+#[test]
+fn grading_hue_curve_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_i_ghc());
+}

@@ -65,11 +65,12 @@ use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::ctf::ctf_reader_helper::{
     CtfReaderAcesParamsElt, CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderDynamicParamElt,
-    CtfReaderGammaParamsElt, CtfReaderGradingCurveElt, CtfReaderGradingCurvePointsElt,
-    CtfReaderGradingCurveSlopesElt, CtfReaderIndexMapElt, CtfReaderKind, CtfReaderLogParamsElt,
-    CtfReaderMetadataElt, CtfReaderOpElt, CtfReaderOpType, CtfReaderRangeValueElt,
-    CtfReaderSatNodeElt, CtfReaderSopNodeElt, CtfReaderTransformElt, CtfReaderTransformRc,
-    Descriptor, equal_ignoring_case, get_reader,
+    CtfReaderEcParamsElt, CtfReaderGammaParamsElt, CtfReaderGradingCurveElt,
+    CtfReaderGradingCurvePointsElt, CtfReaderGradingCurveSlopesElt,
+    CtfReaderGradingPrimaryParamElt, CtfReaderGradingToneParamElt, CtfReaderIndexMapElt,
+    CtfReaderLogParamsElt, CtfReaderMetadataElt, CtfReaderOpElt, CtfReaderOpType,
+    CtfReaderRangeValueElt, CtfReaderSatNodeElt, CtfReaderSopNodeElt, CtfReaderTransformElt,
+    CtfReaderTransformRc, Descriptor, equal_ignoring_case, get_reader,
 };
 use crate::fileformats::ctf::ctf_reader_utils::{
     TAG_ACES, TAG_ACES_PARAMS, TAG_ARRAY, TAG_CDL, TAG_CURVE_CTRL_PNTS, TAG_CURVE_SLOPES,
@@ -780,10 +781,7 @@ impl State {
     /// of the ProcessList (else a dummy is pushed); a version that doesn't support the
     /// operator is an error.
     ///
-    /// Port of `XMLParserHelper::AddOpReader` (FileFormatCTF.cpp:283-323 @ v2.5.2). The
-    /// readers of ACES, FixedFunction, Function, Reference and the grading and
-    /// exposure-contrast operators come with WP 4.5g-4.5i; until then, such an operator is
-    /// refused as not ported yet.
+    /// Port of `XMLParserHelper::AddOpReader` (FileFormatCTF.cpp:283-323 @ v2.5.2).
     fn add_op_reader(&mut self, op_type: CtfReaderOpType, xml_tag: &[u8]) -> Result<()> {
         if self.elms.size() != 1 {
             let mut ss = OStringStream::new(Crt::NATIVE);
@@ -820,9 +818,7 @@ impl State {
             return Err(self.throw_message(ss.str()));
         };
 
-        let Some(mut p_op) = CtfReaderOpElt::create(kind) else {
-            return Err(self.throw_message(&not_ported(kind, xml_tag)));
-        };
+        let mut p_op = CtfReaderOpElt::create(kind);
 
         p_op.set_context(
             xml_tag,
@@ -834,16 +830,6 @@ impl State {
         self.elms.push_back(Rc::new(RefCell::new(p_op)));
         Ok(())
     }
-}
-
-/// The port's error for an operator whose reader isn't ported yet.
-fn not_ported(kind: CtfReaderKind, xml_tag: &[u8]) -> Vec<u8> {
-    [
-        b"The reader of the operator '".as_slice(),
-        xml_tag,
-        format!("' ({kind:?}) is not ported yet").as_bytes(),
-    ]
-    .concat()
 }
 
 /// Determines if the element name is supported in the current context: `name` is `tag`
@@ -985,13 +971,6 @@ const GRADING_HUE_CURVE_SUB_ELEMENTS: [&[u8]; 8] = [
     TAG_HUE_CURVE_SAT_LUM,
     TAG_HUE_CURVE_HUE_FX,
 ];
-
-/// The elements of operators whose readers come with WP 4.5c-4.5i (upstream's class
-/// `class`): their parent is the reader of an operator, which this chunk never makes, so
-/// they are refused as not ported.
-fn operator_part_not_ported(state: &State, class: &str) -> Exception {
-    state.throw_message(format!("The CTF reader's {class} is not ported yet").as_bytes())
-}
 
 /// Whether `elt` is an operator's reader (`dynamic_pointer_cast<CTFReaderOpElt>`).
 fn is_op_elt(elt: &ElementRcPtr) -> bool {
@@ -1173,7 +1152,12 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
             st.get_xml_filename(),
         )))
     } else if supported_element(name, &p_elt, TAG_EC_PARAMS, TAG_EXPOSURE_CONTRAST, r) {
-        return Err(operator_part_not_ported(st, "CTFReaderECParamsElt"));
+        Rc::new(RefCell::new(CtfReaderEcParamsElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element(name, &p_elt, TAG_GAMMA_PARAMS, TAG_GAMMA, r)
         || supported_element(name, &p_elt, TAG_EXPONENT_PARAMS, TAG_EXPONENT, r)
     {
@@ -1312,10 +1296,12 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
             st.get_xml_filename(),
         )))
     } else if supported_element_tags(name, &p_elt, &GRADING_PRIMARY_SUB_ELEMENTS, TAG_PRIMARY, r) {
-        return Err(operator_part_not_ported(
-            st,
-            "CTFReaderGradingPrimaryParamElt",
-        ));
+        Rc::new(RefCell::new(CtfReaderGradingPrimaryParamElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element_tags(
         name,
         &p_elt,
@@ -1374,7 +1360,12 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
             st.get_xml_filename(),
         )))
     } else if supported_element_tags(name, &p_elt, &GRADING_TONE_SUB_ELEMENTS, TAG_TONE, r) {
-        return Err(operator_part_not_ported(st, "CTFReaderGradingToneParamElt"));
+        Rc::new(RefCell::new(CtfReaderGradingToneParamElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if recognized_name {
         let mut oss = OStringStream::new(Crt::NATIVE);
         oss.put_str("'");

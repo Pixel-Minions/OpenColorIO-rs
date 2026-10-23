@@ -9,8 +9,8 @@
 //!
 //! The tests of that file that read files (`BuildOpsTest`: the readers and `FileTransform` of
 //! the `ocio` crate) are in `crates/ocio/src/file_tests/op_optimizers_tests.rs` (WP 4.10a).
-//! The others that aren't here aren't ported yet: `dyn_properties_prefix`, and
-//! `opt_prefix_test1`, whose file holds an ExposureContrast op.
+//! The one that isn't here isn't ported yet: `opt_prefix_test1`, whose file holds an
+//! ExposureContrast op.
 
 use ocio_testkit::upstream::check_close;
 
@@ -1034,6 +1034,76 @@ fn multi_op_prefix() {
     // Although finalized for UINT8, the transform may still be evaluated at 32f to verify that
     // it is a good approximation to the original.
     compare_render(&original_ops, &optimized_ops, 5e-5f32);
+}
+
+/// Port of `OCIO_ADD_TEST(OpOptimizers, dyn_properties_prefix)` @ v2.5.2.
+#[test]
+fn dyn_properties_prefix() {
+    use crate::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
+    use crate::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
+
+    // Test prefix optimization of a complex transform.
+
+    let mut original_ops = OpVec::new();
+
+    let mut matrix = MatrixOpData::new();
+    matrix.set_array_value(0, 2.);
+
+    create_matrix_op(&mut original_ops, matrix, TransformDirection::Forward);
+    assert_eq!(original_ops.len(), 1);
+
+    let mut exposure = ExposureContrastOpData::default();
+
+    exposure.set_exposure(1.2);
+    exposure.set_pivot(0.5);
+
+    create_exposure_contrast_op(
+        &mut original_ops,
+        exposure.clone(),
+        TransformDirection::Forward,
+    );
+    assert_eq!(original_ops.len(), 2);
+
+    let exposure = exposure.clone();
+    exposure.get_exposure_property().make_dynamic();
+
+    create_exposure_contrast_op(&mut original_ops, exposure, TransformDirection::Forward);
+    assert_eq!(original_ops.len(), 3);
+
+    let mut optimized_ops = original_ops.clone_ops().unwrap();
+
+    // Optimize it.
+    optimized_ops.finalize().unwrap();
+    optimized_ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    optimized_ops
+        .optimize_for_bitdepth(
+            BitDepth::Uint8,
+            BitDepth::F32,
+            OptimizationFlags::COMP_SEPARABLE_PREFIX,
+        )
+        .unwrap();
+
+    // Validate the result.
+
+    assert_eq!(optimized_ops.len(), 2);
+
+    let o = &optimized_ops[0];
+    let OpData::Lut1D(o_data) = &**o.data() else {
+        panic!("a Lut1D op")
+    };
+    assert_eq!(o_data.get_type(), OpDataType::Lut1D);
+    assert_eq!(o_data.get_array().get_length(), 256);
+    check_close(o_data.get_array()[255 * 3], 4.5947948f32, 1.0e-6f32);
+    check_close(o_data.get_array()[255 * 3 + 1], 2.2973969f32, 1.0e-6f32);
+    check_close(o_data.get_array()[255 * 3 + 2], 2.2973969f32, 1.0e-6f32);
+
+    let o = &optimized_ops[1];
+    let OpData::ExposureContrast(exp) = &**o.data() else {
+        panic!("an ExposureContrast op")
+    };
+
+    assert_eq!(exp.get_type(), OpDataType::ExposureContrast);
+    assert!(exp.is_dynamic());
 }
 
 /// Port of `OCIO_ADD_TEST(OpOptimizers, dynamic_ops)` @ v2.5.2.

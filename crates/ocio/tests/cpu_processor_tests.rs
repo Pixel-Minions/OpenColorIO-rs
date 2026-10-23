@@ -5,9 +5,9 @@
 //! from configs: `with_one_matrix`, `with_one_1d_lut`, `with_several_ops`, `image_desc`,
 //! `planar_vs_packed`, the `scanline_*` tests, `one_pixel` and `optimizations`, with their
 //! helpers (`ComputeValues`, `BuildProcessor`, `BuildCPUProcessor`, `Process`, `ComputeImage`).
-//! `flag_composition` is in `crates/ocio-ops/src/cpu_processor_tests.rs`. `dynamic_properties`
-//! waits for `ExposureContrastTransform` (Phase 5). The 1D LUTs render with the machine's SIMD
-//! kernels, so this target is one of the `cpu-tests`.
+//! `flag_composition` is in `crates/ocio-ops/src/cpu_processor_tests.rs`; `dynamic_properties`
+//! is here. The 1D LUTs render with the machine's SIMD kernels, so this target is one of the
+//! `cpu-tests`.
 //!
 //! Upstream passes its buffers as `void *`; the port passes their bytes ([`Bytes`]), with
 //! [`At`] where upstream passes a pointer into a buffer. Its `std::vector`s stay `Vec`s.
@@ -16,8 +16,8 @@
 use std::sync::Arc;
 
 use ocio::{
-    BitDepth, Config, FileTransform, GroupTransform, Interpolation, MatrixTransform, Processor,
-    Transform,
+    BitDepth, Config, DynamicPropertyType, ExposureContrastTransform, FileTransform,
+    GroupTransform, Interpolation, MatrixTransform, Processor, Transform,
 };
 use ocio::{OptimizationFlags, TransformDirection};
 use ocio_ops::bit_depth_utils::{
@@ -126,6 +126,38 @@ where
     }
 
     cpu_processor
+}
+
+/// Port of `OCIO_ADD_TEST(CPUProcessor, dynamic_properties)` @ v2.5.2.
+#[test]
+fn dynamic_properties() {
+    let mut ec = ExposureContrastTransform::new();
+
+    ec.set_exposure(1.2);
+    ec.set_pivot(0.5);
+    ec.make_contrast_dynamic();
+
+    let config = Config::new().unwrap();
+    let cpu_proc = config
+        .processor(&Transform::from(ec))
+        .unwrap()
+        .default_cpu_processor()
+        .unwrap();
+    assert!(cpu_proc.is_dynamic());
+    assert!(cpu_proc.has_dynamic_property(DynamicPropertyType::Contrast));
+    assert!(!cpu_proc.has_dynamic_property(DynamicPropertyType::Exposure));
+    let dpc = cpu_proc
+        .get_dynamic_property(DynamicPropertyType::Contrast)
+        .unwrap();
+    assert_eq!(dpc.get_type(), DynamicPropertyType::Contrast);
+    let err = cpu_proc
+        .get_dynamic_property(DynamicPropertyType::Exposure)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Cannot find dynamic property; not used by CPU processor."),
+        "{err}"
+    );
 }
 
 /// Port of `OCIO_ADD_TEST(CPUProcessor, with_one_matrix)` @ v2.5.2.

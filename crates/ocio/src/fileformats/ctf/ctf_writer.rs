@@ -9,8 +9,8 @@
 //! `OpWriter` and its bit depths, the operators' writers, and `TransformWriter`. Upstream's
 //! writers hold their formatter; here each `write` is given it. The operators' writers came
 //! chunk by chunk: the Matrix (WP 4.6a); the CDL, Gamma (and Exponent), Log and Range (WP
-//! 4.6b); the LUTs (WP 4.6c); the FixedFunction and RGB curves (WP 4.6d). The ExposureContrast
-//! and other grading writers (WP 4.6f) come with their op data (Phase 5).
+//! 4.6b); the LUTs (WP 4.6c); the FixedFunction and RGB curves (WP 4.6d); the ExposureContrast
+//! and the other grading writers (WP 4.6f).
 
 use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     METADATA_SAT_DESCRIPTION, METADATA_SOP_DESCRIPTION,
@@ -31,15 +31,22 @@ use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::imath_half::float_to_half;
 use ocio_ops::op_data::{OpData, OpDataRcPtr, OpDataType, get_type_name};
 use ocio_ops::open_color_types::{
-    BitDepth, GradingStyle, Lut1DHueAdjust, RgbCurveType, TransformDirection,
+    BitDepth, GradingStyle, HsyTransformStyle, HueCurveType, Lut1DHueAdjust, RgbCurveType,
+    TransformDirection,
 };
 use ocio_ops::ops::cdl::cdl_op_data::CdlOpData;
 use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpStyle;
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::gradinghuecurve::grading_hue_curve::default_curve as default_hue_curve;
+use ocio_ops::ops::gradinghuecurve::grading_hue_curve_op_data::GradingHueCurveOpData;
+use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
+use ocio_ops::ops::gradingprimary::grading_primary_op_data::GradingPrimaryOpData;
 use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::GradingBSplineCurve;
 use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::{default_curve, default_lin_curve};
 use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
+use ocio_ops::ops::gradingtone::grading_tone::{GradingRgbmsw, GradingTone};
+use ocio_ops::ops::gradingtone::grading_tone_op_data::GradingToneOpData;
 use ocio_ops::ops::log::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
 };
@@ -65,6 +72,19 @@ use super::ctf_reader_utils::{
     TAG_RANGE, TAG_RGB_CURVE, TAG_RGB_CURVE_BLUE, TAG_RGB_CURVE_GREEN, TAG_RGB_CURVE_MASTER,
     TAG_RGB_CURVE_RED, convert_grading_style_and_dir_to_string, get_interpolation_1d_name,
     get_interpolation_3d_name,
+};
+use super::ctf_reader_utils::{
+    ATTR_CENTER, ATTR_CONTRAST, ATTR_EXPOSURE, ATTR_LOGEXPOSURESTEP, ATTR_LOGMIDGRAY, ATTR_MASTER,
+    ATTR_PIVOT, ATTR_PRIMARY_BLACK, ATTR_PRIMARY_CONTRAST, ATTR_PRIMARY_WHITE, ATTR_RGB,
+    ATTR_RGB_TO_HSY, ATTR_START, ATTR_WIDTH, TAG_DYN_PROP_CONTRAST, TAG_DYN_PROP_EXPOSURE,
+    TAG_DYN_PROP_GAMMA, TAG_DYN_PROP_HUECURVE, TAG_DYN_PROP_PRIMARY, TAG_DYN_PROP_TONE,
+    TAG_EC_PARAMS, TAG_EXPOSURE_CONTRAST, TAG_HUE_CURVE, TAG_HUE_CURVE_HUE_FX,
+    TAG_HUE_CURVE_HUE_HUE, TAG_HUE_CURVE_HUE_LUM, TAG_HUE_CURVE_HUE_SAT, TAG_HUE_CURVE_LUM_LUM,
+    TAG_HUE_CURVE_LUM_SAT, TAG_HUE_CURVE_SAT_LUM, TAG_HUE_CURVE_SAT_SAT, TAG_PRIMARY,
+    TAG_PRIMARY_BRIGHTNESS, TAG_PRIMARY_CLAMP, TAG_PRIMARY_CONTRAST, TAG_PRIMARY_EXPOSURE,
+    TAG_PRIMARY_GAIN, TAG_PRIMARY_GAMMA, TAG_PRIMARY_LIFT, TAG_PRIMARY_OFFSET, TAG_PRIMARY_PIVOT,
+    TAG_PRIMARY_SATURATION, TAG_TONE, TAG_TONE_BLACKS, TAG_TONE_HIGHLIGHTS, TAG_TONE_MIDTONES,
+    TAG_TONE_SCONTRAST, TAG_TONE_SHADOWS, TAG_TONE_WHITES,
 };
 use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
 
@@ -836,6 +856,640 @@ impl OpWriter for GradingRgbCurveWriter<'_> {
         if curves.is_dynamic() {
             let attributes: Attributes =
                 vec![(ATTR_PARAM.to_vec(), TAG_DYN_PROP_RGBCURVE.to_vec())];
+            formatter.write_empty_tag(TAG_DYNAMIC_PARAMETER, &attributes);
+        }
+        Ok(())
+    }
+}
+
+/// `os << value` of a `double` at [`DOUBLE_PRECISION`], appended to `os`.
+fn put_double(os: &mut OStringStream, value: f64) {
+    os.precision = DOUBLE_PRECISION;
+    os.put_f64(value);
+}
+
+/// The writer of an ExposureContrast (CTF only): its style, its ECParams, and which of its
+/// properties are dynamic.
+///
+/// Port of `ExposureContrastWriter` (CTFTransform.cpp:937-1050 @ v2.5.2).
+struct ExposureContrastWriter<'a> {
+    /// `m_ec`.
+    ec: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl ExposureContrastWriter<'_> {
+    fn ec(&self) -> &ExposureContrastOpData {
+        let OpData::ExposureContrast(ec) = self.ec else {
+            unreachable!("an ExposureContrast writer writes an ExposureContrast");
+        };
+        ec
+    }
+}
+
+impl OpWriter for ExposureContrastWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.ec
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_EXPOSURE_CONTRAST
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `ExposureContrastWriter::getAttributes` (CTFTransform.cpp:979-984 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+        let style = ExposureContrastOpData::convert_style_to_string(self.ec().get_style());
+        attributes.push((ATTR_STYLE.to_vec(), style.as_bytes().to_vec()));
+        Ok(())
+    }
+
+    /// The ECParams (the log exposure step and mid-gray only when not their defaults), then
+    /// a DynamicParameter for each dynamic property.
+    ///
+    /// Port of `ExposureContrastWriter::writeContent` (CTFTransform.cpp:986-1050 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let ec = self.ec();
+        let value = |v: f64| {
+            let mut oss = OStringStream::new(Crt::NATIVE);
+            oss.precision = DOUBLE_PRECISION;
+            write_value(v, &mut oss);
+            oss.into_bytes()
+        };
+
+        let mut attributes: Attributes = vec![
+            (ATTR_EXPOSURE.to_vec(), value(ec.get_exposure())),
+            (ATTR_CONTRAST.to_vec(), value(ec.get_contrast())),
+            (ATTR_GAMMA.to_vec(), value(ec.get_gamma())),
+            (ATTR_PIVOT.to_vec(), value(ec.get_pivot())),
+        ];
+
+        if ec.get_log_exposure_step() != ExposureContrastOpData::LOGEXPOSURESTEP_DEFAULT {
+            attributes.push((
+                ATTR_LOGEXPOSURESTEP.to_vec(),
+                value(ec.get_log_exposure_step()),
+            ));
+        }
+
+        if ec.get_log_mid_gray() != ExposureContrastOpData::LOGMIDGRAY_DEFAULT {
+            attributes.push((ATTR_LOGMIDGRAY.to_vec(), value(ec.get_log_mid_gray())));
+        }
+
+        formatter.write_empty_tag(TAG_EC_PARAMS, &attributes);
+
+        for (dynamic, param) in [
+            (
+                ec.get_exposure_property().is_dynamic(),
+                TAG_DYN_PROP_EXPOSURE,
+            ),
+            (
+                ec.get_contrast_property().is_dynamic(),
+                TAG_DYN_PROP_CONTRAST,
+            ),
+            (ec.get_gamma_property().is_dynamic(), TAG_DYN_PROP_GAMMA),
+        ] {
+            if dynamic {
+                let attributes: Attributes = vec![(ATTR_PARAM.to_vec(), param.to_vec())];
+                formatter.write_empty_tag(TAG_DYNAMIC_PARAMETER, &attributes);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The writer of a GradingPrimary (CTF only): its style and direction, the controls of its
+/// style that differ from their defaults, its clamp, and whether it is dynamic.
+///
+/// Port of `GradingPrimaryWriter` (CTFTransform.cpp:1280-1499 @ v2.5.2).
+struct GradingPrimaryWriter<'a> {
+    /// `m_primary`.
+    primary: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl GradingPrimaryWriter<'_> {
+    fn primary(&self) -> &GradingPrimaryOpData {
+        let OpData::GradingPrimary(primary) = self.primary else {
+            unreachable!("a GradingPrimary writer writes a GradingPrimary");
+        };
+        primary
+    }
+
+    /// The element `tag` of `val`'s rgb and master, unless `val` is `default_val`.
+    ///
+    /// Port of `GradingPrimaryWriter::writeRGBM` (CTFTransform.cpp:1340-1359 @ v2.5.2).
+    fn write_rgbm(
+        formatter: &mut XmlFormatter<'_>,
+        tag: &[u8],
+        default_val: &GradingRgbm,
+        val: &GradingRgbm,
+    ) {
+        if val != default_val {
+            let mut attributes = Attributes::new();
+
+            let mut rgb = OStringStream::new(Crt::NATIVE);
+            put_double(&mut rgb, val.red);
+            rgb.put_str(" ");
+            rgb.put_f64(val.green);
+            rgb.put_str(" ");
+            rgb.put_f64(val.blue);
+            attributes.push((ATTR_RGB.to_vec(), rgb.into_bytes()));
+            let mut master = OStringStream::new(Crt::NATIVE);
+            put_double(&mut master, val.master);
+            attributes.push((ATTR_MASTER.to_vec(), master.into_bytes()));
+
+            formatter.write_empty_tag(tag, &attributes);
+        }
+    }
+
+    /// The element `tag` of `val` as its master, unless `val` is `default_val`.
+    ///
+    /// Port of `GradingPrimaryWriter::writeScalarElement` (CTFTransform.cpp:1361-1374) and
+    /// `GradingToneWriter::writeScalarElement` (1860-1872) @ v2.5.2, which are the same.
+    fn write_scalar_element(
+        formatter: &mut XmlFormatter<'_>,
+        tag: &[u8],
+        default_val: f64,
+        val: f64,
+    ) {
+        if val != default_val {
+            let mut stream = OStringStream::new(Crt::NATIVE);
+            put_double(&mut stream, val);
+            let attributes: Attributes = vec![(ATTR_MASTER.to_vec(), stream.into_bytes())];
+            formatter.write_empty_tag(tag, &attributes);
+        }
+    }
+
+    /// The attribute `attr` of `val`, unless `val` is `default_val`.
+    ///
+    /// Port of `GradingPrimaryWriter::addAttribute(Attributes &, const char *, double,
+    /// double)` (CTFTransform.cpp:1376-1383 @ v2.5.2).
+    fn add_attribute_unless(attributes: &mut Attributes, attr: &[u8], default_val: f64, val: f64) {
+        if val != default_val {
+            Self::add_attribute(attributes, attr, val);
+        }
+    }
+
+    /// The attribute `attr` of `val`.
+    ///
+    /// Port of `GradingPrimaryWriter::addAttribute(Attributes &, const char *, double)`
+    /// (CTFTransform.cpp:1385-1392 @ v2.5.2).
+    fn add_attribute(attributes: &mut Attributes, attr: &[u8], val: f64) {
+        let mut master = OStringStream::new(Crt::NATIVE);
+        put_double(&mut master, val);
+        attributes.push((attr.to_vec(), master.into_bytes()));
+    }
+}
+
+impl OpWriter for GradingPrimaryWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.primary
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_PRIMARY
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `GradingPrimaryWriter::getAttributes` (CTFTransform.cpp:1329-1338 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+
+        let primary = self.primary();
+        let style = primary.get_style();
+        let dir = primary.get_direction();
+
+        let style_str = convert_grading_style_and_dir_to_string(style, dir);
+        attributes.push((ATTR_STYLE.to_vec(), style_str.to_vec()));
+        Ok(())
+    }
+
+    /// Port of `GradingPrimaryWriter::writeContent` (CTFTransform.cpp:1394-1499 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let primary = self.primary();
+        let style = primary.get_style();
+        let vals = primary.get_value();
+        match style {
+            GradingStyle::Log => {
+                let default_vals = GradingPrimary::new(style);
+                Self::write_rgbm(
+                    formatter,
+                    TAG_PRIMARY_BRIGHTNESS,
+                    &default_vals.brightness,
+                    &vals.brightness,
+                );
+                Self::write_rgbm(
+                    formatter,
+                    TAG_PRIMARY_CONTRAST,
+                    &default_vals.contrast,
+                    &vals.contrast,
+                );
+                Self::write_rgbm(
+                    formatter,
+                    TAG_PRIMARY_GAMMA,
+                    &default_vals.gamma,
+                    &vals.gamma,
+                );
+
+                Self::write_scalar_element(
+                    formatter,
+                    TAG_PRIMARY_SATURATION,
+                    default_vals.saturation,
+                    vals.saturation,
+                );
+
+                // Pivot.
+                let mut attributes = Attributes::new();
+                if default_vals.contrast != vals.contrast {
+                    // Always write pivot contrast when constrast is not default.
+                    Self::add_attribute(&mut attributes, ATTR_PRIMARY_CONTRAST, vals.pivot);
+                } else {
+                    Self::add_attribute_unless(
+                        &mut attributes,
+                        ATTR_PRIMARY_CONTRAST,
+                        default_vals.pivot,
+                        vals.pivot,
+                    );
+                }
+                Self::add_attribute_unless(
+                    &mut attributes,
+                    ATTR_PRIMARY_BLACK,
+                    default_vals.pivot_black,
+                    vals.pivot_black,
+                );
+                Self::add_attribute_unless(
+                    &mut attributes,
+                    ATTR_PRIMARY_WHITE,
+                    default_vals.pivot_white,
+                    vals.pivot_white,
+                );
+                if !attributes.is_empty() {
+                    formatter.write_empty_tag(TAG_PRIMARY_PIVOT, &attributes);
+                }
+            }
+            GradingStyle::Lin => {
+                let default_vals = GradingPrimary::new(style);
+                Self::write_rgbm(
+                    formatter,
+                    TAG_PRIMARY_OFFSET,
+                    &default_vals.offset,
+                    &vals.offset,
+                );
+                Self::write_rgbm(
+                    formatter,
+                    TAG_PRIMARY_EXPOSURE,
+                    &default_vals.exposure,
+                    &vals.exposure,
+                );
+                Self::write_rgbm(
+                    formatter,
+                    TAG_PRIMARY_CONTRAST,
+                    &default_vals.contrast,
+                    &vals.contrast,
+                );
+
+                Self::write_scalar_element(
+                    formatter,
+                    TAG_PRIMARY_SATURATION,
+                    default_vals.saturation,
+                    vals.saturation,
+                );
+
+                // Pivot.
+                let mut attributes = Attributes::new();
+                if default_vals.contrast != vals.contrast {
+                    // Always write pivot contrast when constrast is not default.
+                    Self::add_attribute(&mut attributes, ATTR_PRIMARY_CONTRAST, vals.pivot);
+                } else {
+                    Self::add_attribute_unless(
+                        &mut attributes,
+                        ATTR_PRIMARY_CONTRAST,
+                        default_vals.pivot,
+                        vals.pivot,
+                    );
+                }
+                if !attributes.is_empty() {
+                    formatter.write_empty_tag(TAG_PRIMARY_PIVOT, &attributes);
+                }
+            }
+            GradingStyle::Video => {
+                let default_vals = GradingPrimary::new(style);
+                Self::write_rgbm(formatter, TAG_PRIMARY_LIFT, &default_vals.lift, &vals.lift);
+                Self::write_rgbm(
+                    formatter,
+                    TAG_PRIMARY_GAMMA,
+                    &default_vals.gamma,
+                    &vals.gamma,
+                );
+                Self::write_rgbm(formatter, TAG_PRIMARY_GAIN, &default_vals.gain, &vals.gain);
+                Self::write_rgbm(
+                    formatter,
+                    TAG_PRIMARY_OFFSET,
+                    &default_vals.offset,
+                    &vals.offset,
+                );
+
+                Self::write_scalar_element(
+                    formatter,
+                    TAG_PRIMARY_SATURATION,
+                    default_vals.saturation,
+                    vals.saturation,
+                );
+
+                // Pivot.
+                let mut attributes = Attributes::new();
+                Self::add_attribute_unless(
+                    &mut attributes,
+                    ATTR_PRIMARY_BLACK,
+                    default_vals.pivot_black,
+                    vals.pivot_black,
+                );
+                Self::add_attribute_unless(
+                    &mut attributes,
+                    ATTR_PRIMARY_WHITE,
+                    default_vals.pivot_white,
+                    vals.pivot_white,
+                );
+                if !attributes.is_empty() {
+                    formatter.write_empty_tag(TAG_PRIMARY_PIVOT, &attributes);
+                }
+            }
+        }
+        // Clamp.
+        {
+            let default_vals = GradingPrimary::new(GradingStyle::Log);
+            let mut attributes = Attributes::new();
+            Self::add_attribute_unless(
+                &mut attributes,
+                ATTR_PRIMARY_BLACK,
+                default_vals.clamp_black,
+                vals.clamp_black,
+            );
+            Self::add_attribute_unless(
+                &mut attributes,
+                ATTR_PRIMARY_WHITE,
+                default_vals.clamp_white,
+                vals.clamp_white,
+            );
+            if !attributes.is_empty() {
+                formatter.write_empty_tag(TAG_PRIMARY_CLAMP, &attributes);
+            }
+        }
+        if primary.is_dynamic() {
+            let attributes: Attributes = vec![(ATTR_PARAM.to_vec(), TAG_DYN_PROP_PRIMARY.to_vec())];
+            formatter.write_empty_tag(TAG_DYNAMIC_PARAMETER, &attributes);
+        }
+        Ok(())
+    }
+}
+
+/// The writer of a GradingHueCurve (CTF only): its style and direction, `hsyTransform` when
+/// it is none, the curves that differ from the style's default (their control points, and
+/// their slopes unless default), and whether it is dynamic.
+///
+/// Port of `GradingHueCurveWriter` (CTFTransform.cpp:1634-1772 @ v2.5.2).
+struct GradingHueCurveWriter<'a> {
+    /// `m_curves`.
+    curves: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl GradingHueCurveWriter<'_> {
+    fn curves(&self) -> &GradingHueCurveOpData {
+        let OpData::GradingHueCurve(curves) = self.curves else {
+            unreachable!("a GradingHueCurve writer writes a GradingHueCurve");
+        };
+        curves
+    }
+}
+
+impl OpWriter for GradingHueCurveWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.curves
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_HUE_CURVE
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `GradingHueCurveWriter::getAttributes` (CTFTransform.cpp:1675-1689 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+
+        let curves = self.curves();
+        let style = curves.get_style();
+        let dir = curves.get_direction();
+
+        let style_str = convert_grading_style_and_dir_to_string(style, dir);
+        attributes.push((ATTR_STYLE.to_vec(), style_str.to_vec()));
+
+        if curves.get_rgb_to_hsy() == HsyTransformStyle::None {
+            attributes.push((ATTR_RGB_TO_HSY.to_vec(), b"none".to_vec()));
+        }
+        Ok(())
+    }
+
+    /// Port of `GradingHueCurveWriter::writeContent` (CTFTransform.cpp:1737-1770 @ v2.5.2).
+    /// Its `writeCurve` (1691-1735) is `GradingRGBCurveWriter::writeCurve`'s code, which
+    /// [`GradingRgbCurveWriter::write_curve`] ports.
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let curves = self.curves();
+        let vals = curves.get_value();
+        let style = curves.get_style();
+
+        const CURVE_TAGS: [&[u8]; 8] = [
+            TAG_HUE_CURVE_HUE_HUE,
+            TAG_HUE_CURVE_HUE_SAT,
+            TAG_HUE_CURVE_HUE_LUM,
+            TAG_HUE_CURVE_LUM_SAT,
+            TAG_HUE_CURVE_SAT_SAT,
+            TAG_HUE_CURVE_LUM_LUM,
+            TAG_HUE_CURVE_SAT_LUM,
+            TAG_HUE_CURVE_HUE_FX,
+        ];
+        for (c, tag) in [
+            HueCurveType::HueHue,
+            HueCurveType::HueSat,
+            HueCurveType::HueLum,
+            HueCurveType::LumSat,
+            HueCurveType::SatSat,
+            HueCurveType::LumLum,
+            HueCurveType::SatLum,
+            HueCurveType::HueFx,
+        ]
+        .into_iter()
+        .zip(CURVE_TAGS)
+        {
+            let curve = vals.curve(c)?;
+            if *curve != default_hue_curve(c, style) || !curve.slopes_are_default() {
+                GradingRgbCurveWriter::write_curve(formatter, tag, curve);
+            }
+        }
+        if curves.is_dynamic() {
+            let attributes: Attributes =
+                vec![(ATTR_PARAM.to_vec(), TAG_DYN_PROP_HUECURVE.to_vec())];
+            formatter.write_empty_tag(TAG_DYNAMIC_PARAMETER, &attributes);
+        }
+        Ok(())
+    }
+}
+
+/// The writer of a GradingTone (CTF only): its style and direction, the controls that differ
+/// from the style's defaults, and whether it is dynamic.
+///
+/// Port of `GradingToneWriter` (CTFTransform.cpp:1776-1893 @ v2.5.2).
+struct GradingToneWriter<'a> {
+    /// `m_tone`.
+    tone: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl GradingToneWriter<'_> {
+    fn tone(&self) -> &GradingToneOpData {
+        let OpData::GradingTone(tone) = self.tone else {
+            unreachable!("a GradingTone writer writes a GradingTone");
+        };
+        tone
+    }
+
+    /// The element `tag` of `val`'s rgb, master, start (`center` if `center`) and width
+    /// (`pivot` if `pivot`), unless `val` is `default_val`.
+    ///
+    /// Port of `GradingToneWriter::writeRGBMSW` (CTFTransform.cpp:1828-1858 @ v2.5.2).
+    fn write_rgbmsw(
+        formatter: &mut XmlFormatter<'_>,
+        tag: &[u8],
+        default_val: &GradingRgbmsw,
+        val: &GradingRgbmsw,
+        center: bool,
+        pivot: bool,
+    ) {
+        if val != default_val {
+            let mut attributes = Attributes::new();
+
+            let mut oss = OStringStream::new(Crt::NATIVE);
+            put_double(&mut oss, val.red);
+            oss.put_str(" ");
+            oss.put_f64(val.green);
+            oss.put_str(" ");
+            oss.put_f64(val.blue);
+            attributes.push((ATTR_RGB.to_vec(), oss.into_bytes()));
+
+            for (attr, v) in [
+                (ATTR_MASTER, val.master),
+                (if center { ATTR_CENTER } else { ATTR_START }, val.start),
+                (if pivot { ATTR_PIVOT } else { ATTR_WIDTH }, val.width),
+            ] {
+                let mut oss = OStringStream::new(Crt::NATIVE);
+                put_double(&mut oss, v);
+                attributes.push((attr.to_vec(), oss.into_bytes()));
+            }
+
+            formatter.write_empty_tag(tag, &attributes);
+        }
+    }
+}
+
+impl OpWriter for GradingToneWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.tone
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_TONE
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `GradingToneWriter::getAttributes` (CTFTransform.cpp:1817-1826 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+
+        let tone = self.tone();
+        let style = tone.get_style();
+        let dir = tone.get_direction();
+
+        let style_str = convert_grading_style_and_dir_to_string(style, dir);
+        attributes.push((ATTR_STYLE.to_vec(), style_str.to_vec()));
+        Ok(())
+    }
+
+    /// Port of `GradingToneWriter::writeContent` (CTFTransform.cpp:1874-1891 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let tone = self.tone();
+        let vals = tone.get_value();
+        let default_vals = GradingTone::new(tone.get_style());
+
+        Self::write_rgbmsw(
+            formatter,
+            TAG_TONE_BLACKS,
+            &default_vals.blacks,
+            &vals.blacks,
+            false,
+            false,
+        );
+        Self::write_rgbmsw(
+            formatter,
+            TAG_TONE_SHADOWS,
+            &default_vals.shadows,
+            &vals.shadows,
+            false,
+            true,
+        );
+        Self::write_rgbmsw(
+            formatter,
+            TAG_TONE_MIDTONES,
+            &default_vals.midtones,
+            &vals.midtones,
+            true,
+            false,
+        );
+        Self::write_rgbmsw(
+            formatter,
+            TAG_TONE_HIGHLIGHTS,
+            &default_vals.highlights,
+            &vals.highlights,
+            false,
+            true,
+        );
+        Self::write_rgbmsw(
+            formatter,
+            TAG_TONE_WHITES,
+            &default_vals.whites,
+            &vals.whites,
+            false,
+            false,
+        );
+        GradingPrimaryWriter::write_scalar_element(
+            formatter,
+            TAG_TONE_SCONTRAST,
+            default_vals.scontrast,
+            vals.scontrast,
+        );
+
+        if tone.is_dynamic() {
+            let attributes: Attributes = vec![(ATTR_PARAM.to_vec(), TAG_DYN_PROP_TONE.to_vec())];
             formatter.write_empty_tag(TAG_DYNAMIC_PARAMETER, &attributes);
         }
         Ok(())
@@ -1733,23 +2387,29 @@ impl<'t> TransformWriter<'t> {
                         };
                         op_writer.write(formatter)?;
                     }
-                    // CTFTransform.cpp:2776-2789: `ExposureContrastWriter` comes with WP 4.6f.
                     OpData::ExposureContrast(_) => {
                         if self.is_clf {
                             return Err(throw_write_op("ExposureContrast"));
                         }
-                        return Err(Exception::new(
-                            "ExposureContrastWriter is not ported yet (WP 4.6f).",
-                        ));
+
+                        let op_writer = ExposureContrastWriter {
+                            ec: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
                     }
-                    // CTFTransform.cpp:2821-2834: `GradingPrimaryWriter` comes with WP 4.6f.
                     OpData::GradingPrimary(_) => {
                         if self.is_clf {
                             return Err(throw_write_op("GradingPrimary"));
                         }
-                        return Err(Exception::new(
-                            "GradingPrimaryWriter is not ported yet (WP 4.6f).",
-                        ));
+
+                        let op_writer = GradingPrimaryWriter {
+                            primary: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
                     }
                     OpData::GradingRgbCurve(_) => {
                         if self.is_clf {
@@ -1763,23 +2423,29 @@ impl<'t> TransformWriter<'t> {
                         };
                         op_writer.write(formatter)?;
                     }
-                    // CTFTransform.cpp:2849-2862: `GradingHueCurveWriter` comes with WP 4.6f.
                     OpData::GradingHueCurve(_) => {
                         if self.is_clf {
                             return Err(throw_write_op("GradingHueCurve"));
                         }
-                        return Err(Exception::new(
-                            "GradingHueCurveWriter is not ported yet (WP 4.6f).",
-                        ));
+
+                        let op_writer = GradingHueCurveWriter {
+                            curves: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
                     }
-                    // CTFTransform.cpp:2863-2876: `GradingToneWriter` comes with WP 4.6f.
                     OpData::GradingTone(_) => {
                         if self.is_clf {
                             return Err(throw_write_op("GradingTone"));
                         }
-                        return Err(Exception::new(
-                            "GradingToneWriter is not ported yet (WP 4.6f).",
-                        ));
+
+                        let op_writer = GradingToneWriter {
+                            tone: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
                     }
                     OpData::Log(_) => {
                         let op_writer = LogWriter {

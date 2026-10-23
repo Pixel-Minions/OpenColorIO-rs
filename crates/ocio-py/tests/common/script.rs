@@ -92,6 +92,9 @@ pub(crate) struct Script {
     /// Steps whose log isn't compared (until the logging functions are bound, 6.6a, the port's
     /// messages don't reach the step interpreter).
     pub(crate) unlog: Vec<usize>,
+    /// Steps whose result isn't compared, only their outcome (a stand-in for a class the port
+    /// doesn't bind yet makes the value on its side).
+    pub(crate) uncompared: Vec<usize>,
 }
 
 impl Script {
@@ -156,6 +159,11 @@ impl Script {
         self.unlog.push(i);
     }
 
+    /// Leaves step `i`'s result out of the comparison, but its outcome.
+    pub(crate) fn uncompare(&mut self, i: usize) {
+        self.uncompared.push(i);
+    }
+
     /// The script as the step interpreter reads it.
     pub(crate) fn json(&self) -> Value {
         json!({ "steps": self.steps })
@@ -210,6 +218,16 @@ pub(crate) fn compare_with(scripts: &[Script], theirs: &[Value]) {
                 "script {k} step {j}: the wheel's outcome is not the expected one: {b}\n{}",
                 script.steps[j]
             );
+            if script.uncompared.contains(&j) {
+                assert_eq!(
+                    a.get("raised").is_some(),
+                    raised,
+                    "script {k} step {j}: {}
+{a}",
+                    script.steps[j]
+                );
+                continue;
+            }
             let (mut a, mut b) = (a.clone(), b.clone());
             if script.unlog.contains(&j) {
                 for v in [&mut a, &mut b] {

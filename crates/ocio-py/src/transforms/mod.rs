@@ -15,5 +15,7 @@ pub(crate) mod py_group_transform;
 pub(crate) mod py_log_affine_transform;
 pub(crate) mod py_log_camera_transform;
 pub(crate) mod py_log_transform;
+pub(crate) mod py_lut1d_transform;
+pub(crate) mod py_lut3d_transform;
 pub(crate) mod py_matrix_transform;
 pub(crate) mod py_range_transform;

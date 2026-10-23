@@ -89,8 +89,9 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 /// `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as minizip-ng does (owner
 /// decisions 2026-10-17), and, for the Python binding, the crate `ocio-py-ffi`, one file that
 /// calls `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
-/// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), and `PyType_GetSlot` for four number
-/// slots (2026-10-21, p6-core re-check round 4), each named here by its file;
+/// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), `PyType_GetSlot` for four number
+/// slots (2026-10-21, p6-core re-check round 4), and the views of Python buffers (P6-10), each
+/// named here by its file;
 /// [`check_py_ffi`] checks that file's calls and [`PY_FFI_SHA256`] pins it. The keyword
 /// `unsafe` appears nowhere else in the workspace's Rust sources ([`unsafe_tokens`]), and these
 /// files pull in no other source ([`source_problems`]).
@@ -717,7 +718,7 @@ const PY_FFI_DIR: &str = "crates/ocio-py/ffi/";
 /// SHA-256 of [`PY_FFI`]'s bytes. Changing that file requires updating this pin, so that every
 /// change to the Python binding's `unsafe` code shows in review as a change of this line (the
 /// coordinator's decision, p6-core re-check round 3).
-const PY_FFI_SHA256: &str = "81322615105ae41d0c5b3aa2175f1720a535b7137ae6132f5fd516667e472c9c";
+const PY_FFI_SHA256: &str = "3fb244f63643e64de8a7358f858398c2a2339852af2a5944e8d28048406b6168";
 /// The Python binding's crate root, which must forbid `unsafe_code`: no attribute or macro
 /// inside the crate can relax a `forbid`, so the compiler holds the binding to safe code.
 const PY_ROOT: &str = "crates/ocio-py/src/lib.rs";
@@ -730,8 +731,22 @@ const PY_FFI_NEW: [&str; 3] = [
     "PyInstanceMethod_New",
     "ffi::PyCFunction_NewEx",
 ];
-/// The owner's other call, which returns an int.
-const PY_FFI_CHECK: &str = "ffi::PySequence_Check";
+/// The owner's other calls, each the whole of an `unsafe` block anywhere: `PySequence_Check`,
+/// which returns an int; and the views of Python buffers (owner decision P6-10, card
+/// p6-buffers): `PyObject_CheckBuffer`, `PyObject_GetBuffer` and `PyBuffer_Release`, the copy of
+/// the view the exporter filled and of its format, shape and strides, the slices over a
+/// buffer's memory, and the freeing of the view's allocation.
+const PY_FFI_CALLS: [&str; 9] = [
+    "ffi::PySequence_Check",
+    "ffi::PyObject_CheckBuffer",
+    "ffi::PyObject_GetBuffer",
+    "ffi::PyBuffer_Release",
+    "std::ptr::read",
+    "CStr::from_ptr",
+    "std::slice::from_raw_parts",
+    "std::slice::from_raw_parts_mut",
+    "Box::from_raw",
+];
 /// The owner's call that reads a type's slot (owner decision 2026-10-21, p6-core re-check
 /// round 4), whose result, a function pointer, is only compared against null: the whole of an
 /// `unsafe` block bound by `let <name> = unsafe { <call> };`, followed by `!<name>.is_null()`,
@@ -793,7 +808,7 @@ const PY_FFI_EXTERN: [&str; 18] = [
 ///   ([`plain_argument`]): `let <name> = unsafe { <one of PY_FFI_NEW> };`, followed by the
 ///   statement `unsafe { Bound::from_owned_ptr_or_err(<py>, <name>) }` (alone or bound by
 ///   `let`), its only wrapping; a [`PY_FFI_SLOT`] bound by `let <name> = unsafe { .. };` and
-///   followed by `!<name>.is_null() }` only; or a [`PY_FFI_CHECK`] anywhere.
+///   followed by `!<name>.is_null() }` only; or one of [`PY_FFI_CALLS`] anywhere.
 fn check_py_ffi(rel: &str, text: &str) -> Vec<String> {
     let toks = tokenize(text).tokens;
     let mut problems = Vec::new();
@@ -925,7 +940,7 @@ fn check_py_ffi(rel: &str, text: &str) -> Vec<String> {
                      only compared against null, `!<name>.is_null()` ending the function"
                 ));
             }
-        } else if name != PY_FFI_CHECK {
+        } else if !PY_FFI_CALLS.contains(&name.as_str()) {
             problem(format!("an `unsafe` call of `{name}`"));
         }
     }
@@ -1787,7 +1802,16 @@ mod tests {
                     unsafe { Bound::from_owned_ptr_or_err(record.py(), r) }\n}\n\
                     fn b(ty: &Bound<PyType>) -> bool {\n    \
                     let pointer = unsafe { ffi::PyType_GetSlot(ty.as_type_ptr(), id) };\n    \
-                    !pointer.is_null()\n}\n";
+                    !pointer.is_null()\n}\n\
+                    fn c(o: &Bound<PyAny>) {\n    \
+                    let k = unsafe { ffi::PyObject_CheckBuffer(o.as_ptr()) };\n    \
+                    let s = unsafe { ffi::PyObject_GetBuffer(o.as_ptr(), view, flags) };\n    \
+                    let raw = unsafe { std::ptr::read(view) };\n    \
+                    let f = unsafe { CStr::from_ptr(format_ptr) }.to_bytes();\n    \
+                    let a = unsafe { std::slice::from_raw_parts(shape_ptr, count) };\n    \
+                    let b = unsafe { std::slice::from_raw_parts_mut(start, len) };\n    \
+                    unsafe { ffi::PyBuffer_Release(view) };\n    \
+                    let boxed = unsafe { Box::from_raw(view) };\n}\n";
         assert_eq!(ffi_problems(good), Vec::<String>::new());
         for bad in [
             "fn a() { let x = unsafe { *p }; }",
@@ -1845,6 +1869,17 @@ mod tests {
             "#[export_name = \"f\"]\nfn f() {}",
             "#[link_section = \".x\"]\nfn f() {}",
             "macro m() {}",
+            // The buffer calls (P6-10): plain arguments only, no other path to them, and no
+            // other call of the standard library's.
+            "fn a() { let b = unsafe { std::slice::from_raw_parts_mut(p.add(1), n) }; }",
+            "fn a() { let b = unsafe { std::slice::from_raw_parts(p, n + 1) }; }",
+            "fn a() { let b = unsafe { core::slice::from_raw_parts(p, n) }; }",
+            "fn a() { let b = unsafe { slice::from_raw_parts(p, n) }; }",
+            "fn a() { let b = unsafe { std::mem::transmute(p) }; }",
+            "fn a() { let b = unsafe { std::ptr::write(p, v) }; }",
+            "fn a() { let b = unsafe { Box::from_raw(p.cast()) }; }",
+            "fn a() { let b = unsafe { ffi::PyObject_GetBuffer(o.as_ptr(), &mut v, f) }; }",
+            "fn a() { unsafe { ffi::PyBuffer_Release(std::ptr::from_mut(v).add(1)) }; }",
             // A `from_mut` of something else than a variable.
             "fn a() { let c = unsafe { ffi::PySequence_Check(std::ptr::from_mut(F)) }; }",
             // The wrapping takes the previous statement's owner's call result, once.

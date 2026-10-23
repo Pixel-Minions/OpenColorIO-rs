@@ -7,6 +7,7 @@
 
 pub(crate) mod api;
 pub(crate) mod api_cases;
+pub(crate) mod app_helpers;
 pub(crate) mod built_config;
 pub(crate) mod lut_files;
 pub(crate) mod transforms;
