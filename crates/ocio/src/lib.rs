@@ -14,6 +14,7 @@ pub mod color_space;
 pub mod color_space_set;
 pub mod config;
 pub mod config_io_proxy;
+pub(crate) mod config_utils;
 pub mod context;
 pub mod context_variable_utils;
 pub(crate) mod custom_keys;

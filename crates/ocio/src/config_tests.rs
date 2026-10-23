@@ -2659,6 +2659,331 @@ fn add_color_space() {
     assert_eq!(config.num_color_spaces(), 0);
 }
 
+/// Port of `OCIO_ADD_TEST(Config, get_processor_from_two_configs)` @ v2.5.2.
+#[test]
+fn get_processor_from_two_configs() {
+    let _env = EnvGuard::new();
+    const SIMPLE_CONFIG1: &str = r#"
+ocio_profile_version: 2
+
+environment:
+  {}
+
+roles:
+  default: raw1
+  aces_interchange: aces1
+  cie_xyz_d65_interchange: display1
+
+displays:
+  displayname:
+    - !<View> {name: view1, colorspace: displaytest1}
+    - !<View> {name: view2, view_transform: vt1, display_colorspace: display2}
+    - !<View> {name: view3, colorspace: data_space}
+
+view_transforms:
+  - !<ViewTransform>
+    name: vt1
+    from_scene_reference: !<RangeTransform> {min_in_value: 0., min_out_value: 0.}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw1
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: test1
+    allocation: uniform
+    to_scene_reference: !<MatrixTransform> {offset: [0.01, 0.02, 0.03, 0]}
+
+  - !<ColorSpace>
+    name: displaytest1
+    allocation: uniform
+    to_scene_reference: !<LogTransform> {base: 2}
+
+  - !<ColorSpace>
+    name: aces1
+    allocation: uniform
+    from_scene_reference: !<ExponentTransform> {value: [1.101, 1.202, 1.303, 1.404]}
+
+  - !<ColorSpace>
+    name: data_space
+    isdata: true
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: display1
+    allocation: uniform
+    from_display_reference: !<CDLTransform> {slope: [1, 2, 1]}
+
+  - !<ColorSpace>
+    name: display2
+    allocation: uniform
+    from_display_reference: !<FixedFunctionTransform> {style: ACES_RedMod03}
+
+"#;
+
+    const SIMPLE_CONFIG2: &str = r#"
+ocio_profile_version: 2
+
+environment:
+  {}
+
+roles:
+  default: raw2
+  aces_interchange: aces2
+  cie_xyz_d65_interchange: display3
+  test_role: test2
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw2
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: test2
+    allocation: uniform
+    from_scene_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}
+
+  - !<ColorSpace>
+    name: aces2
+    allocation: uniform
+    to_scene_reference: !<RangeTransform> {min_in_value: -0.0109, max_in_value: 1.0505, min_out_value: 0.0009, max_out_value: 2.5001}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: display3
+    allocation: uniform
+    from_display_reference: !<ExponentTransform> {value: 2.4}
+
+  - !<ColorSpace>
+    name: display4
+    allocation: uniform
+    from_display_reference: !<LogTransform> {base: 5}
+"#;
+
+    let config1 = Config::create_from_stream(SIMPLE_CONFIG1.as_bytes()).unwrap();
+    let config2 = Config::create_from_stream(SIMPLE_CONFIG2.as_bytes()).unwrap();
+
+    // Just specify color spaces and have OCIO use the interchange roles.
+    let p = Config::processor_from_configs(&config1, "test1", &config2, "test2").unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 4);
+    let t0 = group.transform(0).unwrap();
+    assert!(matches!(t0, Transform::Matrix(_)));
+    let t1 = group.transform(1).unwrap();
+    assert!(matches!(t1, Transform::Exponent(_)));
+    let t2 = group.transform(2).unwrap();
+    assert!(matches!(t2, Transform::Range(_)));
+    let t3 = group.transform(3).unwrap();
+    assert!(matches!(t3, Transform::Matrix(_)));
+
+    // Or interchange spaces can be specified.
+    let p = Config::processor_from_configs_with_interchange(
+        &config1, "test1", "aces1", &config2, "test2", "aces2",
+    )
+    .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 4);
+
+    // Or interchange space can be specified using role.
+    let p = Config::processor_from_configs_with_interchange(
+        &config1,
+        "test1",
+        ROLE_INTERCHANGE_SCENE,
+        &config2,
+        "test2",
+        "aces2",
+    )
+    .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 4);
+
+    // Or color space can be specified using role.
+    let p = Config::processor_from_configs_with_interchange(
+        &config1,
+        "test1",
+        ROLE_INTERCHANGE_SCENE,
+        &config2,
+        "test_role",
+        "aces2",
+    )
+    .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 4);
+
+    // Display-referred interchange space.
+    let p = Config::processor_from_configs(&config1, "display2", &config2, "display4").unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 4);
+    let t0 = group.transform(0).unwrap();
+    assert!(matches!(t0, Transform::FixedFunction(_)));
+    let t1 = group.transform(1).unwrap();
+    let c1 = matches!(t1, Transform::Cdl(_));
+    assert!(c1);
+    let t2 = group.transform(2).unwrap();
+    assert!(matches!(t2, Transform::Exponent(_)));
+    let t3 = group.transform(3).unwrap();
+    assert!(matches!(t3, Transform::Log(_)));
+
+    // If one of the spaces is a data space, the whole result must be a no-op.
+    let p = Config::processor_from_configs(&config1, "data_space", &config2, "test2").unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 0);
+
+    // Mixed Scene- and Display-referred interchange spaces.
+    let p = Config::processor_from_configs(&config1, "display2", &config2, "test2").unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 5);
+    let t0 = group.transform(0).unwrap();
+    assert!(matches!(t0, Transform::FixedFunction(_)));
+    let t1 = group.transform(1).unwrap();
+    let _r1 = matches!(t1, Transform::Range(_));
+    // Upstream checks c1 here (the CDL of the display-referred case above), not r1.
+    assert!(c1);
+    let t2 = group.transform(2).unwrap();
+    assert!(matches!(t2, Transform::Exponent(_)));
+    let t3 = group.transform(3).unwrap();
+    assert!(matches!(t3, Transform::Range(_)));
+    let t4 = group.transform(4).unwrap();
+    assert!(matches!(t4, Transform::Matrix(_)));
+
+    // Second config has no view transform but is asked to connect a display color space to
+    // aces_interchange.
+    check_throw_what(
+        Config::processor_from_configs(&config1, "test1", &config2, "display3"),
+        "There is no view transform between the main scene-referred space and the \
+         display-referred space",
+    );
+
+    // Using the display-view getters
+    let p = Config::processor_from_configs_to_display_view_with_interchange(
+        &config2,
+        "test2",
+        "aces2",
+        &config1,
+        "displayname",
+        "view1",
+        "aces1",
+        TransformDirection::Forward,
+    )
+    .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 4);
+    let t0 = group.transform(0).unwrap();
+    assert!(matches!(t0, Transform::Matrix(_)));
+    let t1 = group.transform(1).unwrap();
+    assert!(matches!(t1, Transform::Range(_)));
+    let t2 = group.transform(2).unwrap();
+    assert!(matches!(t2, Transform::Exponent(_)));
+    let t3 = group.transform(3).unwrap();
+    assert!(matches!(t3, Transform::Log(_)));
+
+    // Inverse direction reverses the entire chain
+    let p = Config::processor_from_configs_to_display_view_with_interchange(
+        &config2,
+        "test2",
+        "aces2",
+        &config1,
+        "displayname",
+        "view1",
+        "aces1",
+        TransformDirection::Inverse,
+    )
+    .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 4);
+    let t0 = group.transform(0).unwrap();
+    assert!(matches!(t0, Transform::Log(_)));
+    let t1 = group.transform(1).unwrap();
+    assert!(matches!(t1, Transform::Exponent(_)));
+    let t2 = group.transform(2).unwrap();
+    assert!(matches!(t2, Transform::Range(_)));
+    let t3 = group.transform(3).unwrap();
+    assert!(matches!(t3, Transform::Matrix(_)));
+
+    // Implicit interchange spaces, using the view transform
+    let p = Config::processor_from_configs_to_display_view(
+        &config2,
+        "test2",
+        &config1,
+        "displayname",
+        "view2",
+        TransformDirection::Forward,
+    )
+    .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 5);
+    let t0 = group.transform(0).unwrap();
+    assert!(matches!(t0, Transform::Matrix(_)));
+    let t1 = group.transform(1).unwrap();
+    assert!(matches!(t1, Transform::Range(_)));
+    let t2 = group.transform(2).unwrap();
+    assert!(matches!(t2, Transform::Exponent(_)));
+    let t3 = group.transform(3).unwrap();
+    assert!(matches!(t3, Transform::Range(_)));
+    let t4 = group.transform(4).unwrap();
+    assert!(matches!(t4, Transform::FixedFunction(_)));
+
+    // If one of the spaces is a data space, the whole result must be a no-op.
+    let p = Config::processor_from_configs_to_display_view(
+        &config2,
+        "test2",
+        &config1,
+        "displayname",
+        "view3",
+        TransformDirection::Forward,
+    )
+    .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 0);
+
+    const SIMPLE_CONFIG3: &str = r#"
+ocio_profile_version: 2
+
+environment:
+  {}
+
+roles:
+  default: raw
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: test
+    allocation: uniform
+    from_scene_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: display5
+    allocation: uniform
+    from_display_reference: !<ExponentTransform> {value: 2.4}
+"#;
+
+    let config3 = Config::create_from_stream(SIMPLE_CONFIG3.as_bytes()).unwrap();
+
+    check_throw_what(
+        Config::processor_from_configs(&config1, "test1", &config3, "test"),
+        "The required role 'aces_interchange' is missing from the source and/or destination \
+         config.",
+    );
+
+    check_throw_what(
+        Config::processor_from_configs(&config1, "display1", &config3, "test"),
+        "The required role 'aces_interchange' is missing from the source and/or destination \
+         config.",
+    );
+
+    check_throw_what(
+        Config::processor_from_configs(&config1, "display1", &config3, "display5"),
+        "The required role 'cie_xyz_d65_interchange' is missing from the source and/or \
+         destination config.",
+    );
+}
+
 /// Port of `OCIO_ADD_TEST(Config, display_color_spaces_serialization)` @ v2.5.2.
 #[test]
 fn display_color_spaces_serialization() {

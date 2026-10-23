@@ -43,6 +43,9 @@ use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, ProcessorCache, std_hash_strin
 use crate::color_space::ColorSpace;
 use crate::color_space_set::ColorSpaceSet;
 use crate::config_io_proxy::ConfigIoProxy;
+use crate::config_utils::{
+    get_interchange_roles_for_color_space_conversion, interchange_role_name,
+};
 use crate::context::Context;
 use crate::context_variable_utils::{
     collect_context_variables, contains_context_variable_token, contains_context_variables,
@@ -6502,6 +6505,464 @@ impl Config {
             return Ok(processor);
         }
         create_processor()
+    }
+}
+
+/// The processors between two configs (`Config::GetProcessorFromConfigs`), associated
+/// functions as upstream's statics are (owner decision P9-1, 2026-10-23). The configs are
+/// references: upstream never checks its config pointers for null.
+impl Config {
+    /// The processor from the color space `src_name` of `src_config` to the color space
+    /// `dst_name` of `dst_config`, through their interchange roles, in each config's current
+    /// context.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstConfigRcPtr &, const char *, const
+    /// ConstConfigRcPtr &, const char *)` (Config.cpp:4889-4896 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    pub fn processor_from_configs(
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        Config::processor_from_configs_with_contexts(
+            &src_config.current_context().get(),
+            src_config,
+            src_name,
+            &dst_config.current_context().get(),
+            dst_config,
+            dst_name,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the color space
+    /// `dst_name` of `dst_config` (see [`Config::processor_from_configs`]), each config in
+    /// its context: the interchange roles of the two color spaces' reference space type
+    /// ([`get_interchange_roles_for_color_space_conversion`], no heuristics), which both
+    /// configs must have.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const ConstContextRcPtr &, const ConstConfigRcPtr &,
+    /// const char *)` (Config.cpp:4898-4927 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    pub fn processor_from_configs_with_contexts(
+        src_context: &Context,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_context: &Context,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        let (src_name, dst_name) = (src_name.as_ref(), dst_name.as_ref());
+        // Extract the appropriate interchange roles based on the reference space type of the
+        // source and destination color spaces. Note that no heuristics are attempted. If these
+        // roles are missing, an exception is raised. (Note that the names of the returned color
+        // spaces should not depend on the context arguments above.)
+        let roles = get_interchange_roles_for_color_space_conversion(
+            src_config, src_name, dst_config, dst_name,
+        )?;
+        let Some((src_interchange_name, dst_interchange_name)) = roles.names else {
+            let interchange_role_name = interchange_role_name(roles.interchange_type);
+            return Err(Exception::new(format!(
+                "The required role '{interchange_role_name}' is missing from the source and/or \
+                 destination config."
+            )));
+        };
+
+        Config::processor_from_configs_with_interchange_with_contexts(
+            src_context,
+            src_config,
+            src_name,
+            src_interchange_name,
+            dst_context,
+            dst_config,
+            dst_name,
+            dst_interchange_name,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the color space
+    /// `dst_name` of `dst_config`, through the interchange color spaces `src_interchange_name`
+    /// and `dst_interchange_name` (names, aliases or roles), in each config's current context.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstConfigRcPtr &, const char *, const
+    /// char *, const ConstConfigRcPtr &, const char *, const char *)` (Config.cpp:4929-4938 @
+    /// v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    pub fn processor_from_configs_with_interchange(
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        Config::processor_from_configs_with_interchange_with_contexts(
+            &src_config.current_context().get(),
+            src_config,
+            src_name,
+            src_interchange_name,
+            &dst_config.current_context().get(),
+            dst_config,
+            dst_name,
+            dst_interchange_name,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the color space
+    /// `dst_name` of `dst_config` through the interchange color spaces (see
+    /// [`Config::processor_from_configs_with_interchange`]), each config in its context: the
+    /// source config's processor to its interchange space, then the destination config's from
+    /// its interchange space, concatenated. When either color space is a data space, the
+    /// processor is empty.
+    ///
+    /// The names are C strings (`const char *`): each up to its first NUL.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const char *, const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const char *)` (Config.cpp:4940-5004 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_with_interchange_with_contexts(
+        src_context: &Context,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_context: &Context,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        let src_name = c_str(src_name.as_ref());
+        let src_interchange_name = c_str(src_interchange_name.as_ref());
+        let dst_name = c_str(dst_name.as_ref());
+        let dst_interchange_name = c_str(dst_interchange_name.as_ref());
+
+        let Some(src_color_space) = src_config.color_space(src_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source color space '".as_slice(),
+                    src_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let Some(src_ex_cs) = src_config.color_space(src_interchange_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source interchange color space '".as_slice(),
+                    src_interchange_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let Some(dst_color_space) = dst_config.color_space(dst_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find destination color space '".as_slice(),
+                    dst_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let Some(dst_ex_cs) = dst_config.color_space(dst_interchange_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find destination interchange color space '".as_slice(),
+                    dst_interchange_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        // Upstream's checks that p1 and p2 aren't null can't fail: getProcessor returns a
+        // processor or throws.
+        let p1 = src_config.processor_between_color_spaces_with_context(
+            src_context,
+            Some(src_color_space),
+            Some(src_ex_cs),
+        )?;
+
+        let p2 = dst_config.processor_between_color_spaces_with_context(
+            dst_context,
+            Some(dst_ex_cs),
+            Some(dst_color_space),
+        )?;
+
+        let mut processor = Processor::new();
+        processor.set_processor_cache_flags(src_config.processor_cache_flags());
+
+        // If either of the color spaces are data spaces, its corresponding processor will be
+        // empty, but need to make sure the entire result is also empty to better match the
+        // semantics of how data spaces are handled.
+        if !src_color_space.is_data() && !dst_color_space.is_data() {
+            processor.concatenate(&p1, &p2)?;
+        }
+        Ok(Arc::new(processor))
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the view `dst_view` of
+    /// the display `dst_display` of `dst_config`, in the direction `direction`, through their
+    /// interchange roles, in each config's current context.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstConfigRcPtr &, const char *, const
+    /// ConstConfigRcPtr &, const char *, const char *, TransformDirection)`
+    /// (Config.cpp:5006-5015 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    pub fn processor_from_configs_to_display_view(
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        Config::processor_from_configs_to_display_view_with_contexts(
+            &src_config.current_context().get(),
+            src_config,
+            src_name,
+            &dst_config.current_context().get(),
+            dst_config,
+            dst_display,
+            dst_view,
+            direction,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to a (display, view) pair
+    /// of `dst_config` (see [`Config::processor_from_configs_to_display_view`]), each config in
+    /// its context: through the interchange role of the source color space's reference space
+    /// type, which both configs must have, and which must name a color space of each.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const ConstContextRcPtr &, const ConstConfigRcPtr &,
+    /// const char *, const char *, TransformDirection)` (Config.cpp:5017-5068 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_to_display_view_with_contexts(
+        src_context: &Context,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_context: &Context,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let src_name = c_str(src_name.as_ref());
+        let Some(src_color_space) = src_config.color_space(src_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source color space '".as_slice(),
+                    src_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let scene_referred = src_color_space.reference_space_type() == ReferenceSpaceType::Scene;
+        let exchange_role_name = if scene_referred {
+            ROLE_INTERCHANGE_SCENE
+        } else {
+            ROLE_INTERCHANGE_DISPLAY
+        };
+        let src_ex_name = lookup_role(&src_config.roles, exchange_role_name.as_bytes());
+        if src_ex_name.is_empty() {
+            return Err(Exception::new(format!(
+                "The role '{exchange_role_name}' is missing in the source config."
+            )));
+        }
+        if src_config.color_space(src_ex_name).is_none() {
+            return Err(Exception::new(
+                [
+                    b"The role '".as_slice(),
+                    exchange_role_name.as_bytes(),
+                    b"' refers to color space '",
+                    c_str(src_ex_name),
+                    b"' that is missing in the source config.",
+                ]
+                .concat(),
+            ));
+        }
+
+        let dst_ex_name = lookup_role(&dst_config.roles, exchange_role_name.as_bytes());
+        if dst_ex_name.is_empty() {
+            return Err(Exception::new(format!(
+                "The role '{exchange_role_name}' is missing in the destination config."
+            )));
+        }
+        if dst_config.color_space(dst_ex_name).is_none() {
+            return Err(Exception::new(
+                [
+                    b"The role '".as_slice(),
+                    exchange_role_name.as_bytes(),
+                    b"' refers to color space '",
+                    c_str(dst_ex_name),
+                    b"' that is missing in the destination config.",
+                ]
+                .concat(),
+            ));
+        }
+
+        Config::processor_from_configs_to_display_view_with_interchange_with_contexts(
+            src_context,
+            src_config,
+            src_name,
+            src_ex_name,
+            dst_context,
+            dst_config,
+            dst_display,
+            dst_view,
+            dst_ex_name,
+            direction,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the view `dst_view` of
+    /// the display `dst_display` of `dst_config`, in the direction `direction`, through the
+    /// interchange color spaces `src_interchange_name` and `dst_interchange_name`, in each
+    /// config's current context.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstConfigRcPtr &, const char *, const
+    /// char *, const ConstConfigRcPtr &, const char *, const char *, const char *,
+    /// TransformDirection)` (Config.cpp:5070-5081 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_to_display_view_with_interchange(
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        Config::processor_from_configs_to_display_view_with_interchange_with_contexts(
+            &src_config.current_context().get(),
+            src_config,
+            src_name,
+            src_interchange_name,
+            &dst_config.current_context().get(),
+            dst_config,
+            dst_display,
+            dst_view,
+            dst_interchange_name,
+            direction,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to a (display, view) pair
+    /// of `dst_config` through the interchange color spaces (see
+    /// [`Config::processor_from_configs_to_display_view_with_interchange`]), each config in its
+    /// context: the source config's processor between the color space and its interchange
+    /// space, and the destination config's display view processor from its interchange space,
+    /// concatenated in the order of `direction` (inverse: the display view first, inverted,
+    /// then the source side from its interchange space). When the source color space or the
+    /// view's display color space is a data space, the processor is empty.
+    ///
+    /// The names are C strings (`const char *`): each up to its first NUL.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const char *, const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const char *, const char *, TransformDirection)`
+    /// (Config.cpp:5083-5145 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_to_display_view_with_interchange_with_contexts(
+        src_context: &Context,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_context: &Context,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let src_name = c_str(src_name.as_ref());
+        let src_interchange_name = c_str(src_interchange_name.as_ref());
+        let dst_display = c_str(dst_display.as_ref());
+        let dst_view = c_str(dst_view.as_ref());
+        let dst_interchange_name = c_str(dst_interchange_name.as_ref());
+
+        let Some(mut src_color_space) = src_config.color_space(src_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source color space '".as_slice(),
+                    src_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let Some(mut src_ex_cs) = src_config.color_space(src_interchange_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source interchange color space '".as_slice(),
+                    src_interchange_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        if direction == TransformDirection::Inverse {
+            std::mem::swap(&mut src_color_space, &mut src_ex_cs);
+        }
+        // Upstream's checks that p1 and p2 aren't null can't fail: getProcessor returns a
+        // processor or throws.
+        let mut p1 = src_config.processor_between_color_spaces_with_context(
+            src_context,
+            Some(src_color_space),
+            Some(src_ex_cs),
+        )?;
+
+        let cs_name = dst_config.display_view_color_space_name(dst_display, dst_view);
+        let display_color_space_name = if View::use_display_name(cs_name) {
+            dst_display
+        } else {
+            c_str(cs_name)
+        };
+        let Some(display_color_space) = dst_config.color_space(display_color_space_name) else {
+            return Err(Exception::new(
+                "Can't create the processor for the destination config: display color space \
+                 not found.",
+            ));
+        };
+
+        let mut p2 = dst_config.processor_for_display_view_with_context(
+            dst_context,
+            dst_interchange_name,
+            dst_display,
+            dst_view,
+            direction,
+        )?;
+
+        let mut processor = Processor::new();
+        processor.set_processor_cache_flags(src_config.processor_cache_flags());
+
+        // If either of the color spaces are data spaces, its corresponding processor will be
+        // empty, but need to make sure the entire result is also empty to better match the
+        // semantics of how data spaces are handled. (After the swap above, upstream's
+        // srcColorSpace is the source interchange space in the inverse direction.)
+        if !src_color_space.is_data() && !display_color_space.is_data() {
+            if direction == TransformDirection::Inverse {
+                std::mem::swap(&mut p1, &mut p2);
+            }
+            processor.concatenate(&p1, &p2)?;
+        }
+        Ok(Arc::new(processor))
     }
 }
 

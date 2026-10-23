@@ -615,6 +615,20 @@ impl Processor {
         self.ops.validate_dynamic_properties()
     }
 
+    /// Sets the ops to those of `p1` then `p2`, shared (their metadata combined), collects
+    /// their files and looks, and checks their dynamic properties together.
+    ///
+    /// Port of `Processor::Impl::concatenate` (Processor.cpp:643-652 @ v2.5.2).
+    pub(crate) fn concatenate(&mut self, p1: &Processor, p2: &Processor) -> Result<()> {
+        self.ops = p1.ops.clone();
+        self.ops.append(&p2.ops)?;
+
+        self.compute_metadata();
+
+        // Ops have been validated by p1 & p2.
+        self.ops.validate_dynamic_properties()
+    }
+
     /// Collects the files and looks the ops read, before the no-ops are removed: each op's
     /// `dumpMetadata` (a `FileNoOp`'s file, a `LookNoOp`'s look; nothing for the others).
     ///

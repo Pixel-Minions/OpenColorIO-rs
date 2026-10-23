@@ -677,6 +677,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   replaces the error with the reader and removes this entry.
 - **Status:** interim, in `p3-loading` (3.10b).
 
+### I-376. A data color space converted to a display and view in the inverse direction isn't a no-op
+
+- **Upstream:** `Config::GetProcessorFromConfigs` to a display and view, with interchange
+  spaces (`Config.cpp:5083-5145`), swaps the source color space and its interchange space for
+  `TRANSFORM_DIR_INVERSE` (5106-5109), then tests `srcColorSpace->isData()` (5138) to give an
+  empty processor: in the inverse direction that tests the interchange space instead. A data
+  source color space then gets the inverted view and its interchange conversion, and a data
+  interchange space an empty processor. Probed on the Windows wheel (2026-10-23): a data
+  source color space gives an empty processor forward and a one-transform processor inverse;
+  the same color space as the interchange space gives an empty processor inverse.
+- **Who notices:** callers that convert from a data color space to a display and view in the
+  inverse direction (from the view back to the data space), or that name a data space as the
+  source interchange space.
+- **A fix:** test the color space named `srcName` whatever the direction.
+- **Status:** matched in `p9-config-utils` (9.1b, `Config::processor_from_configs_to_display_view_with_interchange_with_contexts`),
+  checked against the wheel in `crates/ocio/tests/config_from_configs_oracle.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
