@@ -34,6 +34,8 @@ pub(crate) fn error_already_set_what(py: Python<'_>, err: &PyErr) -> Vec<u8> {
     let mut out = crate::pybind11::tp_name(&ty)
         .unwrap_or_default()
         .into_bytes();
+    // `PyObject_HasAttrString`: an error reading the attribute is no mark. Python 3.13's
+    // reports it as unraisable first, which the port doesn't (docs/improvements.md, I-302).
     if value.hasattr("__notes__").unwrap_or(false) {
         out.extend_from_slice(b"[WITH __notes__]");
     }
@@ -42,10 +44,14 @@ pub(crate) fn error_already_set_what(py: Python<'_>, err: &PyErr) -> Vec<u8> {
     out
 }
 
-/// The text of `obj` as pybind11 reads it: `str()` (or the object itself, a note), encoded as
-/// UTF-8 with backslashreplace.
+/// The text of `obj` (a `str`, or an instance of a subclass) as pybind11 reads it: `str()`
+/// (or the object itself, a note), encoded as UTF-8 with backslashreplace
+/// (`PyUnicode_AsEncodedString`: `str`'s own `encode`, never a subclass's).
 fn utf8(obj: &Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
-    obj.call_method1("encode", ("utf-8", "backslashreplace"))?
+    obj.py()
+        .get_type::<pyo3::types::PyString>()
+        .getattr("encode")?
+        .call1((obj, "utf-8", "backslashreplace"))?
         .extract::<Vec<u8>>()
 }
 

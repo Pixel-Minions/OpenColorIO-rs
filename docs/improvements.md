@@ -2002,6 +2002,31 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched per platform in `p6-config` (6.6a, `crates/ocio-py/src/py_open_color_io.rs`,
   `python_hash_function`); `callbacks_oracle.rs`, `callbacks_as_the_wheels` (`hash_script`).
 
+### I-302. A callback exception's `__notes__` that raises is reported as unraisable
+
+- **Upstream:** the `what()` pybind11 3.0 gives a Python callback's exception (in the message
+  of the library's error for a failing logging function, hash function or `PyConfigIOProxy`
+  override) asks `PyObject_HasAttrString(value, "__notes__")` for its `[WITH __notes__]` mark
+  (`error_fetch_and_normalize`). Under Python 3.13, when reading the attribute raises something
+  other than AttributeError (a `__notes__` property, or a class's `__getattr__`, that raises),
+  that function reports the error as unraisable before it answers no: `sys.unraisablehook`
+  gets it with the text "Exception ignored in PyObject_HasAttrString(); consider using
+  PyObject_HasAttrStringWithError(), PyObject_GetOptionalAttrString() or
+  PyObject_GetAttrString()", and the default hook prints that and the error's traceback to
+  stderr. The message itself has no mark and no notes (pybind11 reads the notes with
+  `PyObject_GetAttrString` and clears its error). Probe: the re-check verifier's `what2.py`,
+  `note_prop_raises`.
+- **Who notices:** Python code whose callback raises an exception with such a `__notes__`, and
+  that watches stderr or sets `sys.unraisablehook`.
+- **A fix:** read the attribute without the report (`PyObject_HasAttrStringWithError`, as later
+  pybind11 versions do), as the port does. Matching the report would take a call of
+  `PyObject_HasAttrString` itself: the hook's argument type (`UnraisableHookArgs`) isn't reachable
+  from Python without raising an unraisable error first, and the binding's FFI file
+  (`crates/ocio-py/ffi`) doesn't make that call (a new FFI call is the owner's decision).
+- **Status:** not matched, for the owner (`p6-config` 6.6a, `crates/ocio-py/src/callback.rs`,
+  `error_already_set_what`): the message is the wheel's, and the port reports nothing;
+  `callbacks_oracle.rs`, `callbacks_as_the_wheels` (`what_script`).
+
 ### I-326. The buffer checks count entries in 32 bits on Windows
 
 - **Upstream:** the binding counts the entries an image needs in C++ `long`

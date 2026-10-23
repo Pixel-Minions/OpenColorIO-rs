@@ -268,8 +268,11 @@ fn raising_class(sc: &mut Script, name: &str, base: Vec<Value>, slot: &str, exc:
 /// `error_already_set::what()` of a logging function's exceptions, in the message of the
 /// config reader that catches them: an empty message, notes (one not UTF-8), a message not
 /// UTF-8, and a `str()` that raises (`__str__` a dict's `popitem`, without a traceback, or
-/// raising in a Python frame), notes too. The logging function is
-/// `operator.methodcaller("join", y)`, whose `iter(y)` copies `y` and raises.
+/// raising in a Python frame), notes too; a `str` subclass whose `encode` answers otherwise (a
+/// note, and what `str()` gives: `str`'s own `encode` reads them), and an exception whose
+/// `__notes__` raises KeyError (no mark, no notes; the wheel's report of it on stderr is I-302).
+/// The logging function is `operator.methodcaller("join", y)`, whose `iter(y)` copies `y` and
+/// raises.
 fn what_script() -> Script {
     let mut sc = Script::new();
     let popitem = sc.call(n("dict"), vec![]);
@@ -303,6 +306,64 @@ fn what_script() -> Script {
                 "value": common::script::l(vec![s("a"), i(5)]) }),
         Expect::Value,
     );
+    // A `str` subclass whose `encode` answers otherwise: pybind11 encodes with `str`'s own
+    // (`PyUnicode_AsEncodedString`), a note of it and a `str()` giving one.
+    let encodes = sc.call(n("dict"), vec![d(vec![(s("utf-8"), by(b"OVERRIDDEN"))])]);
+    let s_class = sc.call(
+        n("type"),
+        vec![
+            s("S"),
+            t(vec![n("str")]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("encode"), ra(encodes, "get")),
+            ]),
+        ],
+    );
+    let n1 = sc.call(r(s_class), vec![s("n1")]);
+    let sub_noted = sc.call(n("ValueError"), vec![s("v")]);
+    sc.step(
+        json!({ "setattr": r(sub_noted), "name": "__notes__",
+                "value": common::script::l(vec![r(n1), s("n2")]) }),
+        Expect::Value,
+    );
+    let strsub = sc.call(r(s_class), vec![s("strsub")]);
+    let strsubs = sc.call(
+        n("iter"),
+        vec![common::script::l(vec![
+            r(strsub),
+            r(strsub),
+            r(strsub),
+            r(strsub),
+        ])],
+    );
+    let ss_class = sc.call(
+        n("type"),
+        vec![
+            s("SS"),
+            t(vec![n("Exception")]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("__str__"), ra(strsubs, "__next__")),
+            ]),
+        ],
+    );
+    let sub_str = sc.call(r(ss_class), vec![s("v")]);
+    // Reading `__notes__` raises KeyError (a `__getattr__` that is a dict's `__getitem__`): no
+    // mark and no notes (the wheel's report of it as unraisable, on stderr: I-302).
+    let missing = sc.call(n("dict"), vec![]);
+    let r_class = sc.call(
+        n("type"),
+        vec![
+            s("R"),
+            t(vec![n("Exception")]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("__getattr__"), ra(missing, "__getitem__")),
+            ]),
+        ],
+    );
+    let notes_raise = sc.call(r(r_class), vec![s("v")]);
     for exc in [
         empty,
         noted,
@@ -311,6 +372,9 @@ fn what_script() -> Script {
         no_str_noted,
         no_str_framed,
         bad_note,
+        sub_noted,
+        sub_str,
+        notes_raise,
     ] {
         let class = raising_class(&mut sc, "Y", vec![], "__iter__", exc);
         let y = sc.call(r(class), vec![]);
@@ -719,7 +783,7 @@ fn callbacks_as_the_wheels() {
         .filter(|st| st.get("raised").is_some())
         .map(message)
         .collect();
-    assert_eq!(messages.len(), 7, "{theirs}");
+    assert_eq!(messages.len(), 10, "{theirs}");
     let at = "\n\nAt:\n  ";
     for (m, parts) in messages.iter().zip([
         &["ValueError: <EMPTY MESSAGE>", at][..],
@@ -745,6 +809,9 @@ fn callbacks_as_the_wheels() {
             "ValueError[WITH __notes__]: t\n__notes__ (len=2):\na\nFAILURE obtaining __notes__[1]: \
            TypeError: bad argument type for built-in operation\n\nAt:\n  ",
         ],
+        &["ValueError[WITH __notes__]: v\n__notes__ (len=2):\nn1\nn2\n\nAt:\n  "],
+        &["SS: strsub\n\nAt:\n  "],
+        &["R: v\n\nAt:\n  "],
     ]) {
         for part in parts {
             assert!(m.contains(part), "{part:?} in {m:?}");
