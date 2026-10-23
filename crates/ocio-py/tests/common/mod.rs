@@ -16,7 +16,7 @@
 pub(crate) mod processors;
 pub(crate) mod script;
 
-use std::sync::Once;
+use std::sync::{Once, OnceLock};
 
 use ocio_testkit::{Oracle, paths};
 use pyo3::prelude::*;
@@ -25,8 +25,13 @@ use serde_json::{Value, json};
 
 static START: Once = Once::new();
 
+/// The port's module as py_surface_walk.py's `surface()` reports it (its `"module"`), walked
+/// once, right after the module's import and before any script runs (`start_python`).
+static PORT_SURFACE: OnceLock<Value> = OnceLock::new();
+
 /// Starts the embedded interpreter once, with the module registered, the oracle's step
-/// interpreter importable, and target/py-port's site-packages (NumPy) on its path.
+/// interpreter importable, and target/py-port's site-packages (NumPy) on its path; walks the
+/// module's surface ([`port_surface`]).
 pub(crate) fn start_python() {
     START.call_once(|| {
         ocio_py::embed::append_to_inittab();
@@ -47,8 +52,42 @@ pub(crate) fn start_python() {
             if let Some(site) = site_packages() {
                 path.append(site).unwrap();
             }
+            let ocio = py.import("PyOpenColorIO").unwrap();
+            PORT_SURFACE.set(walk_module(py, &ocio)).unwrap();
         });
     });
+}
+
+/// py_surface_walk.py's `_module` of the port's module, as its `surface()` starts the walk
+/// (`seen` holding the module). The wheel's py_surface walks a module no script has used, in a
+/// process of its own; scripts change what a class holds (`copy.copy` makes CPython's
+/// `copyreg` add `__slotnames__` to the class, reading `__annotations__` adds it), so the
+/// port's module is walked before any script runs, once.
+fn walk_module(py: Python<'_>, module: &Bound<'_, PyModule>) -> Value {
+    let walk = py.import("py_surface_walk").unwrap();
+    let seen = py
+        .eval(c"lambda m: {id(m): 'PyOpenColorIO'}", None, None)
+        .unwrap()
+        .call1((module,))
+        .unwrap();
+    let report = walk
+        .call_method1("_module", (module, "PyOpenColorIO", seen))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let text: String = py
+        .import("json")
+        .unwrap()
+        .call_method1("dumps", (report,))
+        .unwrap()
+        .extract()
+        .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The port's module as py_surface_walk.py reports it (the `"module"` of its `surface()`),
+/// walked when the interpreter started, before any script ran.
+pub(crate) fn port_surface() -> &'static Value {
+    start_python();
+    PORT_SURFACE.get().unwrap()
 }
 
 /// target/py-port's site-packages, from the interpreter PyO3 built against (PYO3_PYTHON).
@@ -165,33 +204,16 @@ pub(crate) fn wheel_member(report: &Value, n: &str) -> Value {
         .clone()
 }
 
-/// The port's entry for `OCIO.<n>`, as py_surface_walk.py reports a class (`_class`) or a value
-/// (`_value`), with the name the module's walk gives it.
+/// The port's entry for `OCIO.<n>` among the module's members, from the walk of the module
+/// made before any script ran ([`port_surface`]), as the wheel's ([`wheel_member`]).
 pub(crate) fn port_member(n: &str) -> Value {
-    start_python();
-    Python::attach(|py| {
-        let walk = py.import("py_surface_walk").unwrap();
-        let ocio = py.import("PyOpenColorIO").unwrap();
-        let v = ocio.getattr(n).unwrap();
-        let entry = if v.is_instance_of::<pyo3::types::PyType>() {
-            let seen = pyo3::types::PyDict::new(py);
-            walk.call_method1("_class", (v, format!("PyOpenColorIO.{n}"), seen))
-                .unwrap()
-        } else {
-            walk.call_method1("_value", (v,)).unwrap()
-        };
-        entry
-            .set_item("name", walk.call_method1("_text", (n,)).unwrap())
-            .unwrap();
-        let text: String = py
-            .import("json")
-            .unwrap()
-            .call_method1("dumps", (entry,))
-            .unwrap()
-            .extract()
-            .unwrap();
-        serde_json::from_str(&text).unwrap()
-    })
+    port_surface()["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| String::from_utf8(ocio_testkit::oracle_values::bytes(&e["name"])).unwrap() == n)
+        .unwrap_or_else(|| panic!("{n} is not a member of the port's module"))
+        .clone()
 }
 
 /// `report` with each spelling of the directory `dir` in its text (the bytes of its

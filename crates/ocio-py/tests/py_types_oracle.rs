@@ -22,7 +22,6 @@ mod common;
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle_values::bytes;
-use pyo3::prelude::*;
 use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
@@ -107,47 +106,13 @@ fn wheel_members() -> Vec<Value> {
     report["module"]["members"].as_array().unwrap().clone()
 }
 
-/// The port's module members, as py_surface_walk.py's `_members` reports them.
+/// The port's module members, as py_surface_walk.py's `_members` reports them, from the walk
+/// of the module made before any script ran (`common::port_surface`).
 fn port_members() -> Vec<Value> {
-    common::start_python();
-    Python::attach(|py| {
-        let walk = py.import("py_surface_walk").unwrap();
-        let module = py.import("PyOpenColorIO").unwrap();
-        // The walk's `seen`, keyed by id(), as py_surface_walk.surface() starts it.
-        let seen = py
-            .eval(c"lambda m: {id(m): 'PyOpenColorIO'}", None, None)
-            .unwrap()
-            .call1((&module,))
-            .unwrap();
-        let namespace = py
-            .eval(c"lambda m: dict(vars(m))", None, None)
-            .unwrap()
-            .call1((&module,))
-            .unwrap();
-        let skip = walk.getattr("RUNTIME_NAMES").unwrap();
-        let skip = py
-            .import("builtins")
-            .unwrap()
-            .getattr("set")
-            .unwrap()
-            .call1((skip,))
-            .unwrap();
-        let members = walk
-            .call_method1("_members", (namespace, "PyOpenColorIO", seen, skip))
-            .unwrap();
-        let text: String = py
-            .import("json")
-            .unwrap()
-            .call_method1("dumps", (members,))
-            .unwrap()
-            .extract()
-            .unwrap();
-        serde_json::from_str::<Value>(&text)
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .clone()
-    })
+    common::port_surface()["members"]
+        .as_array()
+        .unwrap()
+        .clone()
 }
 
 /// Every name of the port's module is the wheel's, in the wheel's order.
