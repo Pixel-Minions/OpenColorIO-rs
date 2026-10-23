@@ -183,15 +183,15 @@ note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getM
 path = "src/OpenColorIO/ConfigUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/config_utils.rs"]
-status = "partial"
-note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion (59-162). 9.1a: the heuristics (14-58, 164-805: getSRGBColorSpaceName, getBuiltinLinearSpaceName, containsSRGB with I-377, getRefSpaceName, getDataSpaceName, isIdentityTransform, hasNonTrivialMatrixTransform, containsBlockedTransform, excludeColorSpaceFromHeuristics, getReferenceSpaceFromLinearSpace, getReferenceSpaceFromSRGBSpace with I-378, IdentifyInterchangeSpace, IdentifyBuiltinColorSpace), checked against the wheel in crates/ocio/tests/config_utils_oracle.rs. The reference-space converters and fingerprints with 9.1c"
+status = "done"
+note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion (59-162). 9.1a: the heuristics (14-58, 164-805: getSRGBColorSpaceName, getBuiltinLinearSpaceName, containsSRGB with I-377, getRefSpaceName, getDataSpaceName, isIdentityTransform, hasNonTrivialMatrixTransform, containsBlockedTransform, excludeColorSpaceFromHeuristics, getReferenceSpaceFromLinearSpace, getReferenceSpaceFromSRGBSpace with I-378, IdentifyInterchangeSpace, IdentifyBuiltinColorSpace), checked against the wheel in crates/ocio/tests/config_utils_oracle.rs. 9.1c: the reference-space converters and fingerprints (843-1478: simplifyTransform, invertTransform with I-379, getTransformForDir, getRefSpaceConverter, transformIsEmpty, updateReferenceColorspace, updateReferenceView, hasColorSpaceRefType, initializeRefSpaceConverters, calcColorSpaceFingerprint, initializeTestVals, initializeColorSpaceFingerprints, findEquivalentColorspace), with upstream's two ConfigUtils_tests; the Python module doesn't expose them, so the merge sweep (9.2j) checks them against the wheel"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.h"
 kind = "src"
 target = ["crates/ocio/src/config_utils.rs"]
-status = "partial"
-note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion's declaration (config_utils.rs: the function, and InterchangeRoles for its out-parameters). 9.1a: IdentifyInterchangeSpace, IdentifyBuiltinColorSpace and SuspendCacheGuard (U-171). The rest with 9.1c"
+status = "done"
+note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion's declaration (config_utils.rs: the function, and InterchangeRoles for its out-parameters). 9.1a: IdentifyInterchangeSpace, IdentifyBuiltinColorSpace and SuspendCacheGuard (U-171). 9.1c: Fingerprint, ColorSpaceFingerprints and the rest of the declarations"
 
 [[file]]
 path = "src/OpenColorIO/Context.cpp"
@@ -4406,7 +4406,8 @@ note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transfo
 path = "tests/cpu/ConfigUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_utils_tests.rs"]
-status = "todo"
+status = "done"
+note = "p9-config-utils 9.1c: MergeConfigs/config_utils_update_reference and MergeConfigs/config_utils_find_equivalent_colorspace"
 
 [[file]]
 path = "tests/cpu/Config_tests.cpp"

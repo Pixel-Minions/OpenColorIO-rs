@@ -726,6 +726,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `reference_space_from_srgb_space`), checked against the wheel in
   `crates/ocio/tests/config_utils_oracle.rs` (`the_srgb_heuristic_quirks_match_the_wheel`).
 
+### I-379. Config merging doesn't invert a transform whose direction is inverse
+
+- **Upstream:** `ConfigUtils::invertTransform` (`ConfigUtils.cpp:857-862`) copies a transform
+  and sets its direction to `TRANSFORM_DIR_INVERSE`, which inverts it only if it was forward.
+  Config merging uses it where a color space has only the other direction's transform
+  (`getTransformForDir`, so the fingerprints of the duplicate search and the reference-space
+  converters) and to invert the reference-space converters (`updateReferenceColorspace`,
+  `updateReferenceView`). Probed on the Windows wheel (2026-10-23): merging, with
+  `ConfigMergingHelpers.MergeColorSpace` into `cg-config-v1.0.0_aces-v1.3_ocio-v2.1`, a color
+  space whose only transform is `to_scene_reference` with the AP1 to AP0 matrix replaces the
+  base config's `ACEScg` as its equivalent ("Equivalent input color space 'my cg' replaces
+  'ACEScg' ..."); written as the AP0 to AP1 matrix with `direction: inverse` (the same pixels),
+  it is added beside `ACEScg`.
+- **Who notices:** merges of configs whose color spaces have a transform in one direction only,
+  written with `direction: inverse`.
+- **A fix:** invert the direction (`GetInverseTransformDirection`), as `CombineTransformDirections`
+  does.
+- **Status:** matched in `p9-config-utils` (9.1c, `config_utils.rs`, `invert_transform`); the
+  wheel shows it only through merges, checked with the merge sweep (9.2j).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
