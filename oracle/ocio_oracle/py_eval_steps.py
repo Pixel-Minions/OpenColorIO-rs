@@ -47,7 +47,8 @@ Report: {"interpreter": {"isolated", "dont_write_bytecode", "utf8_mode"} (sys.fl
 or {"raised": exception, "log": [...]}: "same_as" lists the earlier steps whose result is this
 very object (every result stays alive until the script ends, so identity is id() equality;
 immutable builtins, which the interpreter may share whoever made them, list none); "log" holds
-the library's messages during the step (SetLoggingFunction, set before the first step); an
+the library's messages during the step (SetLoggingFunction, set before the first step), from
+any thread: a message another thread logs is the log of the step running when it arrives; an
 outcome is {"value": value} or {"raised": exception}.
 
 A value is {"type": qualified name, "repr": text} (or "repr_raised": exception, when repr()
