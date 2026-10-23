@@ -302,6 +302,9 @@ fn call<'py>(
             return Ok(Some(it.unbind()));
         }
     }
+    // What the call changes counts as changes, unless it only reads (the current config an
+    // embedding host reads, crate::embed).
+    let _reading = crate::shared::Reading::enter(crate::shared::reads_only(f.name));
     match ocio_ops::foreign_exception::try_foreign(|| (o.call)(py, o, values, convert)) {
         Ok(result) => result,
         Err(e) => Err(crate::callback::into_py_err(e)),

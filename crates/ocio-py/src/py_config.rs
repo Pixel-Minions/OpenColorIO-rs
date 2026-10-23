@@ -352,7 +352,7 @@ fn locks() -> MutexGuard<'static, Locks> {
 
 /// A config locked by a call of this thread, its owner recorded until the guard drops.
 struct ConfigGuard<'a> {
-    node: Option<MutexGuard<'a, ConfigNode>>,
+    node: Option<crate::shared::SharedGuard<'a, ConfigNode>>,
     key: usize,
 }
 
@@ -418,6 +418,17 @@ fn lock_config(rc: &ConfigRc) -> PyResult<ConfigGuard<'_>> {
         })
     });
     Ok(ConfigGuard::new(rc))
+}
+
+/// The config `rc`, locked for this thread without waiting: `None` while a call holds it.
+fn try_lock_config(rc: &ConfigRc) -> Option<ConfigGuard<'_>> {
+    let mut locks = locks();
+    if locks.owner(rc.key()).is_some() {
+        return None;
+    }
+    locks.owners.push((rc.key(), std::thread::current().id()));
+    drop(locks);
+    Some(ConfigGuard::new(rc))
 }
 
 /// `f` of the config `rc`, its objects written back first.
@@ -3465,12 +3476,15 @@ fn iterator_functions(qualified: &'static str, item_ty: &'static str) -> [&'stat
 /// change made through it is the current config's. The node is made again from the library's
 /// current config when that changed (`ocio::set_current_config` from Rust), and Python's
 /// changes are written back to the library when it is read (`ocio::get_current_config` calls
-/// [`publish_current_config`] first). A Rust holder of an earlier `Arc<Config>` keeps that
-/// snapshot (owner decision 2026-10-22).
+/// [`publish_current_config`] first) and they changed something since the last time
+/// ([`state`]): else the library keeps the same `Arc<Config>`, with its processors. A Rust
+/// holder of an earlier `Arc<Config>` keeps that snapshot (owner decision 2026-10-22).
 struct Current {
     node: ConfigRc,
     /// The library's current config the node was made from or last written back to.
     published: Arc<Config>,
+    /// The node's [`state`] when `published` was made from it, or it from `published`.
+    seen: Vec<(usize, u64)>,
 }
 
 static CURRENT: Mutex<Option<Current>> = Mutex::new(None);
@@ -3479,6 +3493,71 @@ fn current_lock() -> std::sync::MutexGuard<'static, Option<Current>> {
     CURRENT
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// What the library's copy of the config `rc` (its node `node`) is made of, as counts of the
+/// changes Python made: the node's own (its config's methods), the objects of it Python holds
+/// and the transforms they hold, at every level, each by its key, and the changes made
+/// through any config's context and rules ([`crate::shared::cell_changes`]). Equal states:
+/// nothing changed (each change raises a count of an object the state lists then, and an
+/// object only joins it unchanged, or by a change of its holder).
+fn state(rc: &ConfigRc, node: &ConfigNode) -> Vec<(usize, u64)> {
+    fn transforms(
+        out: &mut Vec<(usize, u64)>,
+        seen: &mut Vec<usize>,
+        roots: &[&Option<crate::py_transform::TransformRc>],
+    ) {
+        let mut stack: Vec<crate::py_transform::TransformRc> =
+            roots.iter().filter_map(|t| (*t).clone()).collect();
+        while let Some(t) = stack.pop() {
+            // A group holding itself (U-111) is walked once.
+            if seen.contains(&t.key()) {
+                continue;
+            }
+            seen.push(t.key());
+            let n = t.lock();
+            out.push((t.key(), n.version));
+            stack.extend(n.children.iter().flatten().cloned());
+        }
+    }
+    let mut out = vec![(rc.key(), rc.version()), (0, crate::shared::cell_changes())];
+    let mut seen = Vec::new();
+    for (_, cs) in &node.color_spaces {
+        out.push((cs.key(), cs.version()));
+        let n = cs.lock();
+        transforms(&mut out, &mut seen, &[&n.to_ref, &n.from_ref]);
+    }
+    for (_, look) in &node.looks {
+        out.push((look.key(), look.version()));
+        let n = look.lock();
+        transforms(&mut out, &mut seen, &[&n.transform, &n.inverse]);
+    }
+    for (_, vt) in &node.view_transforms {
+        out.push((vt.key(), vt.version()));
+        let n = vt.lock();
+        transforms(&mut out, &mut seen, &[&n.to_ref, &n.from_ref]);
+    }
+    for (_, nt) in &node.named_transforms {
+        out.push((nt.key(), nt.version()));
+        let n = nt.lock();
+        transforms(&mut out, &mut seen, &[&n.forward, &n.inverse]);
+    }
+    // An object never changed is as the config has it (Python getting one makes its node): it
+    // counts for nothing. One whose change took it out of the state took a change of its
+    // holder with it.
+    out.retain(|(_, version)| *version > 0);
+    out
+}
+
+/// The current config's node and its [`state`], made from the library's config `library`.
+fn current_of(library: Arc<Config>) -> Current {
+    let node = Shared::new(ConfigNode::new(library.clone_as_is()));
+    let seen = state(&node, &node.lock());
+    Current {
+        node,
+        published: library,
+        seen,
+    }
 }
 
 /// The current config's node (`GetCurrentConfig`): the one Python has, while the library's
@@ -3493,39 +3572,49 @@ pub(crate) fn current_config(py: Python<'_>) -> PyResult<ConfigRc> {
     {
         return Ok(c.node.clone());
     }
-    let node = Shared::new(ConfigNode::new(library.clone_as_is()));
-    *current = Some(Current {
-        node: node.clone(),
-        published: library,
-    });
+    let c = current_of(library);
+    let node = c.node.clone();
+    *current = Some(c);
     Ok(node)
 }
 
-/// The hook `ocio::get_current_config` calls first (any thread): Python's current config,
-/// written back and made the library's, unless the library's changed since (a
-/// `set_current_config` wins), a call of this thread is using it (D-9: the library keeps what
-/// it has), an object of it can't be written back (U-110, U-111: likewise), or Python can't
-/// run (not started, or finalizing).
+/// The hook `ocio::get_current_config` calls first (any thread, without the GIL): Python's
+/// current config, written back and made the library's when Python changed it since
+/// ([`state`]). The library keeps what it has when its config changed since (a
+/// `set_current_config` wins), when a call (of any thread: a Python call on the config, or one
+/// whose callback this is) holds the node (D-9; it doesn't wait for the call), and when an
+/// object of it can't be written back (U-110, U-111).
 fn publish_current_config() {
-    let Some((node, published)) = current_lock()
+    // The write-back changes nothing Python holds.
+    let _reading = crate::shared::Reading::enter(true);
+    let Some((node, published, seen)) = current_lock()
         .as_ref()
-        .map(|c| (c.node.clone(), c.published.clone()))
+        .map(|c| (c.node.clone(), c.published.clone(), c.seen.clone()))
     else {
         return;
     };
-    let _ = Python::try_attach(|_| {
-        let Ok(config) = with_config(&node, |n| Ok(Arc::new(n.config.clone_as_is()))) else {
-            return;
-        };
-        let mut current = current_lock();
-        if let Some(c) = current.as_mut()
-            && c.node.same(&node)
-            && Arc::ptr_eq(&c.published, &published)
-            && ocio::config::replace_current_config_as_is(&published, config.clone())
-        {
-            c.published = config;
-        }
-    });
+    match ocio::config::current_config_as_is() {
+        Ok(library) if Arc::ptr_eq(&library, &published) => {}
+        _ => return,
+    }
+    let Some(mut guard) = try_lock_config(&node) else {
+        return;
+    };
+    let now = state(&node, guard.node());
+    if now == seen || guard.node().sync().is_err() {
+        return;
+    }
+    let config = Arc::new(guard.node().config.clone_as_is());
+    drop(guard);
+    let mut current = current_lock();
+    if let Some(c) = current.as_mut()
+        && c.node.same(&node)
+        && Arc::ptr_eq(&c.published, &published)
+        && ocio::config::replace_current_config_as_is(&published, config.clone())
+    {
+        c.published = config;
+        c.seen = now;
+    }
 }
 
 // m.def("GetCurrentConfig", &GetCurrentConfig).
@@ -3559,10 +3648,7 @@ static SET_CURRENT_CONFIG: Function = function(
                 ocio::config::set_current_config(&n.config);
                 py_result(py, ocio::config::current_config_as_is())
             })?;
-            *current_lock() = Some(Current {
-                node: Shared::new(ConfigNode::new(library.clone_as_is())),
-                published: library,
-            });
+            *current_lock() = Some(current_of(library));
             none(py)
         },
         pos_only: 0,

@@ -64,6 +64,27 @@ impl Clone for TransformRc {
     }
 }
 
+/// [`TransformRc::lock`]'s guard: taking the node mutably counts a change
+/// ([`Node::version`]), unless the binding's call only reads
+/// ([`crate::shared::changes_count`]; the transforms' getters take their node mutably too).
+pub(crate) struct NodeGuard<'a>(MutexGuard<'a, Node>);
+
+impl std::ops::Deref for NodeGuard<'_> {
+    type Target = Node;
+    fn deref(&self) -> &Node {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for NodeGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Node {
+        if crate::shared::changes_count() {
+            self.0.version += 1;
+        }
+        &mut self.0
+    }
+}
+
 /// What a [`TransformRc`] holds.
 #[derive(Debug)]
 pub(crate) struct Node {
@@ -79,6 +100,9 @@ pub(crate) struct Node {
     /// Where the wheel's vectors of the metadata's child elements live, for the references
     /// Python holds into them ([`crate::py_format_metadata`]).
     pub(crate) metadata_heap: crate::py_format_metadata::MetadataHeap,
+    /// How many times the node was changed: taken mutably ([`NodeGuard`]) other than in a
+    /// call that only reads ([`crate::shared::changes_count`]).
+    pub(crate) version: u64,
 }
 
 impl TransformRc {
@@ -106,15 +130,19 @@ impl TransformRc {
             children,
             direction,
             metadata_heap: Default::default(),
+            version: 0,
         })))
     }
 
     /// The node, locked. The binding runs under the GIL, and never locks a node while it holds
-    /// another's lock, so the lock is never contended.
-    pub(crate) fn lock(&self) -> MutexGuard<'_, Node> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    /// another's lock, so the lock is never contended (but by the current config's write-back
+    /// for an embedding host, [`crate::embed`], which locks each node briefly).
+    pub(crate) fn lock(&self) -> NodeGuard<'_> {
+        NodeGuard(
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     /// The node's address, which pybind11's registry keys an instance by.
@@ -808,6 +836,7 @@ pub(crate) fn create_editable_copy(py: Python<'_>, rc: &TransformRc) -> PyResult
         children: node.children.clone(),
         direction: node.direction,
         metadata_heap: Default::default(),
+        version: 0,
     }))))
 }
 

@@ -8,6 +8,8 @@
 //! instances return the Python object made for a holder while it lives ([`to_py`]).
 
 use std::any::Any;
+use std::cell::Cell;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use pyo3::prelude::*;
@@ -17,9 +19,16 @@ use pyo3::types::PyCFunction;
 use crate::py_transform::{Registry, lock, register_in};
 use crate::pybind11;
 
-/// A value as a `shared_ptr` holds it: cloning the handle shares it.
+/// A value as a `shared_ptr` holds it: cloning the handle shares it. It counts its changes
+/// ([`Shared::version`]).
 #[derive(Debug)]
-pub(crate) struct Shared<T>(Arc<Mutex<T>>);
+pub(crate) struct Shared<T>(Arc<SharedCell<T>>);
+
+#[derive(Debug)]
+struct SharedCell<T> {
+    value: Mutex<T>,
+    version: AtomicU64,
+}
 
 impl<T> Clone for Shared<T> {
     fn clone(&self) -> Self {
@@ -29,15 +38,25 @@ impl<T> Clone for Shared<T> {
 
 impl<T> Shared<T> {
     pub(crate) fn new(value: T) -> Shared<T> {
-        Shared(Arc::new(Mutex::new(value)))
+        Shared(Arc::new(SharedCell {
+            value: Mutex::new(value),
+            version: AtomicU64::new(0),
+        }))
     }
 
     /// The value, locked. The binding runs under the GIL and locks two values at once only
-    /// when they are different ones ([`Shared::same`]), so the lock is never contended.
-    pub(crate) fn lock(&self) -> MutexGuard<'_, T> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    /// when they are different ones ([`Shared::same`]), so the lock is never contended (but
+    /// by the current config's write-back for an embedding host, [`crate::embed`], which
+    /// locks each value briefly).
+    pub(crate) fn lock(&self) -> SharedGuard<'_, T> {
+        SharedGuard {
+            value: self
+                .0
+                .value
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            version: &self.0.version,
+        }
     }
 
     /// The address pybind11's registry keys an instance by.
@@ -48,6 +67,108 @@ impl<T> Shared<T> {
     /// Whether both are the same value.
     pub(crate) fn same(&self, other: &Shared<T>) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// How many times the value was changed: taken mutably ([`SharedGuard`]) other than in a
+    /// call that only reads ([`changes_count`]).
+    pub(crate) fn version(&self) -> u64 {
+        self.0.version.load(Ordering::SeqCst)
+    }
+}
+
+/// [`Shared::lock`]'s guard: taking the value mutably counts a change ([`Shared::version`]),
+/// unless the binding's call only reads ([`changes_count`]).
+pub(crate) struct SharedGuard<'a, T> {
+    value: MutexGuard<'a, T>,
+    version: &'a AtomicU64,
+}
+
+impl<T> std::ops::Deref for SharedGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.value
+    }
+}
+
+impl<T> std::ops::DerefMut for SharedGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        if changes_count() {
+            self.version.fetch_add(1, Ordering::SeqCst);
+        }
+        &mut self.value
+    }
+}
+
+thread_local! {
+    /// Whether the binding's call this thread runs only reads ([`Reading`]).
+    static READING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether a value taken mutably now counts as a change: not in a call that only reads
+/// ([`reads_only`]; such a call takes values mutably to read them, as the transforms'
+/// getters do, or to write back what didn't change, as a config's write-back of its objects).
+pub(crate) fn changes_count() -> bool {
+    !READING.with(Cell::get)
+}
+
+/// While it lives, this thread's calls only read (or not); the state before comes back when
+/// it drops. The dispatcher enters it around each call of a bound function, so a Python
+/// callback's own calls (a setter in a logging function) count as theirs do.
+pub(crate) struct Reading(bool);
+
+impl Reading {
+    pub(crate) fn enter(reading: bool) -> Reading {
+        Reading(READING.with(|r| r.replace(reading)))
+    }
+}
+
+impl Drop for Reading {
+    fn drop(&mut self) {
+        READING.with(|r| r.set(self.0));
+    }
+}
+
+/// Whether the bound function `name` only reads the objects it is given: upstream's getters
+/// (`get`, `is`, `has`, and the module's `Get`, `Is`, `Has`, each followed by a capital) and
+/// the protocols and methods that read (`__len__`, `__iter__`, `__next__`, `__getitem__`,
+/// `__contains__`, `__repr__`, `__str__`, `__eq__`, `__ne__`, `serialize`, `validate`). Every
+/// other call counts its changes; a name guessed wrong costs a needless copy of the current
+/// config for an embedding host, never a stale one, but for a getter that changes what it
+/// reads, which upstream has none of.
+pub(crate) fn reads_only(name: &str) -> bool {
+    let getter = ["get", "is", "has", "Get", "Is", "Has"].iter().any(|p| {
+        name.strip_prefix(p)
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_uppercase()))
+    });
+    getter
+        || matches!(
+            name,
+            "__len__"
+                | "__iter__"
+                | "__next__"
+                | "__getitem__"
+                | "__contains__"
+                | "__repr__"
+                | "__str__"
+                | "__eq__"
+                | "__ne__"
+                | "serialize"
+                | "validate"
+        )
+}
+
+/// How many times Python changed a config's context or rules through the config's own handle
+/// (a [`ConfigCell`]), any config's.
+static CELL_CHANGES: AtomicU64 = AtomicU64::new(0);
+
+/// [`CELL_CHANGES`].
+pub(crate) fn cell_changes() -> u64 {
+    CELL_CHANGES.load(Ordering::SeqCst)
+}
+
+fn count_cell_change() {
+    if changes_count() {
+        CELL_CHANGES.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -178,6 +299,7 @@ impl ConfigCell<ocio::Context> for ocio::CurrentContext {
     fn write<R>(&self, f: impl FnOnce(&mut ocio::Context) -> R) -> R {
         let mut out = None;
         self.update(|c| out = Some(f(c)));
+        count_cell_change();
         out.expect("update runs the change")
     }
     fn cell_key(&self) -> usize {
@@ -190,7 +312,9 @@ impl<T: Clone + Send + Sync + 'static> ConfigCell<T> for ocio::ConfigRules<T> {
         f(&self.get())
     }
     fn write<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
-        self.update(f)
+        let out = self.update(f);
+        count_cell_change();
+        out
     }
     fn cell_key(&self) -> usize {
         self.key()
@@ -283,7 +407,7 @@ impl<T: Clone + Send + 'static, C: ConfigCell<T>> Held<T, C> {
 
 /// [`Held::lock`]'s guard.
 pub(crate) enum HeldGuard<'a, T: Clone, C: ConfigCell<T>> {
-    Own(MutexGuard<'a, T>),
+    Own(SharedGuard<'a, T>),
     Config {
         cell: &'a C,
         value: Option<T>,

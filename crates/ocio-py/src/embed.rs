@@ -19,7 +19,18 @@
 //! Python's `GetCurrentConfig` returns next (a new object), `SetCurrentConfig` from Python is
 //! the one `ocio::get_current_config` returns, and what Python changes in place in its current
 //! config (through it, or the objects its getters return) is in the `Arc<Config>` the next
-//! `ocio::get_current_config` returns, a new snapshot (an earlier one keeps what it had).
+//! `ocio::get_current_config` returns, a new snapshot (an earlier one keeps what it had). While
+//! Python changed nothing, `ocio::get_current_config` returns the same `Arc<Config>`, with the
+//! processors it cached, as upstream's returns the same pointer. What counts as a change: a
+//! call of a bound function other than a getter (`get...`, `is...`, `has...`) or a protocol
+//! that reads (`__len__`, `__getitem__`, ...) that changes the config, an object of it Python
+//! holds or a transform those hold, or any config's context or rules; such a change costs a
+//! copy of the config at the next read.
+//!
+//! `ocio::get_current_config` neither takes the GIL nor waits for Python: called while a call
+//! (a Python call on the current config, of any thread, or the call whose callback calls it)
+//! holds Python's current config, it returns the config as last published, without what Python
+//! changed since; the next read after that call ends has it.
 
 /// The Python `PyOpenColorIO.CPUProcessor` of `cpu`, sharing it: the object the module made for
 /// that processor while it lives, else a new one (as pybind11 returns a `CPUProcessorRcPtr`).
