@@ -8,7 +8,7 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: under development, about 68% done.** Milestones M0 (the op engine and the analytic
+> **Status: under development, about 71% done.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs) and M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker) are complete: all of it is merged
 > and matches the official library on the CPU and the GPU. Next: dynamic properties, grading
@@ -86,12 +86,18 @@ one.
 
 ## Progress
 
-Status as of 2026-10-22: **milestones M0, M1 and M2 are complete**, about 68% of the planned
-work. Phase 5 (M3) in main: the grading values (GradingPrimary, GradingTone, GradingHueCurve)
-with their dynamic properties, and the ExposureContrast, GradingPrimary and GradingTone op
-families, CPU and GPU. Phase 6 (M4) in main: the `PyOpenColorIO` module's foundation (the
-module and its build, upstream's Python suite runner, pybind11's dispatcher, casters, classes
-and enums as the wheel shows them, every enum, constant and string conversion). Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
+Status as of 2026-10-23: **milestones M0, M1 and M2 are complete**, about 71% of the planned
+work (1,080 of 1,191 upstream C++ tests ported; 170 of 384 upstream Python tests pass
+unmodified). Phase 5 (M3) in main: the grading values (GradingPrimary, GradingTone,
+GradingHueCurve) with their dynamic properties; the ExposureContrast, GradingPrimary,
+GradingTone and GradingHueCurve op families, CPU and GPU; the ExposureContrast and grading
+transforms, with their builders and their YAML; and the first app helpers (color space
+categories and menus, `ColorSpaceMenuHelper`, `AddColorSpace`). Phase 6 (M4) in main: the
+`PyOpenColorIO` module's foundation (the module and its build, upstream's Python suite runner,
+pybind11's dispatcher, casters, classes and enums as the wheel shows them, every enum, constant
+and string conversion), every transform class, and the objects the config holds (context,
+file and viewing rules, color spaces and sets, looks, view and named transforms, format
+metadata). Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
 Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pandora, Nuke
@@ -232,8 +238,8 @@ Each milestone is a complete section of OCIO, byte-exact on CPU and GPU:
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
-| **M3** | Dynamic properties, grading ops, app helpers | In progress: the grading values, dynamic properties, ExposureContrast, GradingPrimary and GradingTone are merged | `0.4.0` |
-| **M4** | The `PyOpenColorIO`-compatible Python module | In progress: the module's foundation (build, suite runner, dispatcher, classes and enums) is merged | `0.5.0` |
+| **M3** | Dynamic properties, grading ops, app helpers | In progress: every grading op and ExposureContrast, their transforms and YAML, and the color space menus are merged; the display/view, viewing-pipeline and mixing helpers are next | `0.4.0` |
+| **M4** | The `PyOpenColorIO`-compatible Python module | In progress: the module's foundation, every transform class and the config's objects are merged (170 of 384 upstream Python tests pass); `Config`, NumPy buffers and processors are next | `0.5.0` |
 | **M5** | Full OCIO 2.5.2 parity | Not started | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
