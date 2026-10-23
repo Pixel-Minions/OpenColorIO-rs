@@ -6966,6 +6966,157 @@ impl Config {
     }
 }
 
+/// The processor from the color space `src_color_space_name` of `src_config` to the color space
+/// `builtin_color_space_name` of the default built-in config (`ocio://default`), or the reverse
+/// for `TransformDirection::Inverse`, through the interchange spaces the roles or the heuristics
+/// identify ([`Config::identify_interchange_space`]).
+///
+/// Port of `GetProcessorToBuiltinCS` (src/OpenColorIO/Config.cpp:5147-5208 @ v2.5.2).
+fn processor_to_builtin_cs(
+    src_config: &Config,
+    src_color_space_name: &[u8],
+    builtin_color_space_name: &[u8],
+    direction: TransformDirection,
+) -> Result<Arc<Processor>> {
+    let builtin_color_space_name = c_str(builtin_color_space_name);
+
+    // Use the Default config as the Built-in config to interpret the known color space name.
+    let builtin_config = Config::create_from_file("ocio://default")?;
+
+    if builtin_config
+        .color_space(builtin_color_space_name)
+        .is_none()
+    {
+        return Err(Exception::new(
+            [
+                b"Built-in config does not contain the requested color space: ".as_slice(),
+                builtin_color_space_name,
+                b".",
+            ]
+            .concat(),
+        ));
+    }
+
+    let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+        src_config,
+        src_color_space_name,
+        &builtin_config,
+        builtin_color_space_name,
+    )?;
+
+    if !builtin_interchange.is_empty() {
+        // Upstream leaves the processor null for a direction that is neither forward nor
+        // inverse; the port's directions are those two.
+        return match direction {
+            TransformDirection::Forward => Config::processor_from_configs_with_interchange(
+                src_config,
+                src_color_space_name,
+                src_interchange,
+                &builtin_config,
+                builtin_color_space_name,
+                builtin_interchange,
+            ),
+            TransformDirection::Inverse => Config::processor_from_configs_with_interchange(
+                &builtin_config,
+                builtin_color_space_name,
+                builtin_interchange,
+                src_config,
+                src_color_space_name,
+                src_interchange,
+            ),
+        };
+    }
+
+    Err(Exception::new(
+        "Heuristics were not able to find a known color space in the provided config.\nPlease \
+         set the interchange roles in the config.",
+    ))
+}
+
+/// The interchange spaces and built-in color spaces of a config (`ConfigUtils`' heuristics),
+/// associated functions as upstream's statics are (owner decision P9-1, 2026-10-23).
+impl Config {
+    /// The interchange spaces of `src_config` and `builtin_config` to convert from the color
+    /// space `src_color_space_name` to the color space `builtin_color_space_name` of the
+    /// built-in config, or the reverse, in the order the binding returns them (upstream's two
+    /// out-parameters): the interchange roles when both configs have them, else what the
+    /// heuristics find. An error when no suitable spaces are found.
+    ///
+    /// Port of `Config::IdentifyInterchangeSpace` (Config.cpp:2908-2922 @ v2.5.2), with
+    /// `ConfigUtils::IdentifyInterchangeSpace` (ConfigUtils.cpp:590-710).
+    #[doc(alias = "IdentifyInterchangeSpace")]
+    pub fn identify_interchange_space<'s, 'b>(
+        src_config: &'s Config,
+        src_color_space_name: impl AsRef<[u8]>,
+        builtin_config: &'b Config,
+        builtin_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<(&'s [u8], &'b [u8])> {
+        // This will throw if it is unable to identify the interchange spaces.
+        crate::config_utils::identify_interchange_space(
+            src_config,
+            src_color_space_name.as_ref(),
+            builtin_config,
+            builtin_color_space_name.as_ref(),
+        )
+    }
+
+    /// The name of the active color space of `src_config` equivalent to the color space
+    /// `builtin_color_space_name` of `builtin_config`, found by the heuristics. An error when
+    /// the interchange spaces or the equivalent space can't be found.
+    ///
+    /// Port of `Config::IdentifyBuiltinColorSpace` (Config.cpp:2924-2932 @ v2.5.2), with
+    /// `ConfigUtils::IdentifyBuiltinColorSpace` (ConfigUtils.cpp:712-805).
+    #[doc(alias = "IdentifyBuiltinColorSpace")]
+    pub fn identify_builtin_color_space<'s>(
+        src_config: &'s Config,
+        builtin_config: &Config,
+        builtin_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<&'s [u8]> {
+        // This will throw if it is unable to identify the interchange spaces.
+        crate::config_utils::identify_builtin_color_space(
+            src_config,
+            builtin_config,
+            builtin_color_space_name.as_ref(),
+        )
+    }
+
+    /// The processor from the color space `src_color_space_name` of `src_config` to the color
+    /// space `builtin_color_space_name` of the default built-in config.
+    ///
+    /// Port of `Config::GetProcessorToBuiltinColorSpace` (Config.cpp:5210-5218 @ v2.5.2).
+    #[doc(alias = "GetProcessorToBuiltinColorSpace")]
+    pub fn processor_to_builtin_color_space(
+        src_config: &Config,
+        src_color_space_name: impl AsRef<[u8]>,
+        builtin_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        processor_to_builtin_cs(
+            src_config,
+            src_color_space_name.as_ref(),
+            builtin_color_space_name.as_ref(),
+            TransformDirection::Forward,
+        )
+    }
+
+    /// The processor from the color space `builtin_color_space_name` of the default built-in
+    /// config to the color space `src_color_space_name` of `src_config`.
+    ///
+    /// Port of `Config::GetProcessorFromBuiltinColorSpace` (Config.cpp:5220-5228 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromBuiltinColorSpace")]
+    pub fn processor_from_builtin_color_space(
+        builtin_color_space_name: impl AsRef<[u8]>,
+        src_config: &Config,
+        src_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        processor_to_builtin_cs(
+            src_config,
+            src_color_space_name.as_ref(),
+            builtin_color_space_name.as_ref(),
+            TransformDirection::Inverse,
+        )
+    }
+}
+
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;

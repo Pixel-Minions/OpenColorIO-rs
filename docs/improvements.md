@@ -694,6 +694,38 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p9-config-utils` (9.1b, `Config::processor_from_configs_to_display_view_with_interchange_with_contexts`),
   checked against the wheel in `crates/ocio/tests/config_from_configs_oracle.rs`.
 
+### I-377. The heuristics look for "srgb" in a color space's aliases case-sensitively
+
+- **Upstream:** `ConfigUtils::containsSRGB` (`ConfigUtils.cpp:164-183`) lowers the color
+  space's name before it looks for `srgb`, but not its aliases. A space whose only sRGB
+  spelling is an alias such as `Tex_SRGB` isn't tried as an sRGB texture space by
+  `IdentifyInterchangeSpace` (and so `IdentifyBuiltinColorSpace` and
+  `GetProcessorTo/FromBuiltinColorSpace`). Probed on the Windows wheel (2026-10-23): a config
+  whose only candidate is such a space fails with "Heuristics were not able to find a known
+  color space in the provided config."; with the alias `tex_srgb` it is identified.
+- **Who notices:** configs without interchange roles whose sRGB texture space is named
+  otherwise and has an upper-case sRGB alias.
+- **A fix:** lower the aliases too.
+- **Status:** matched in `p9-config-utils` (9.1a, `config_utils.rs`, `contains_srgb`), checked
+  against the wheel in `crates/ocio/tests/config_utils_oracle.rs`
+  (`the_srgb_heuristic_quirks_match_the_wheel`).
+
+### I-378. The sRGB heuristic doesn't invert a from-reference transform whose direction is inverse
+
+- **Upstream:** `ConfigUtils::getReferenceSpaceFromSRGBSpace` (`ConfigUtils.cpp:483-504`)
+  turns a color space's from-reference transform into a to-reference one with
+  `setDirection(TRANSFORM_DIR_INVERSE)`, which inverts it only if its direction was forward. A
+  from-reference transform written in the inverse direction stays inverse, so the heuristic
+  tests the wrong direction and rejects the space. Probed on the Windows wheel (2026-10-23): an
+  sRGB texture space whose `from_scene_reference` is a group in the inverse direction (the same
+  pixels as the usual one) isn't identified.
+- **Who notices:** configs without interchange roles whose sRGB texture space's
+  from-reference transform has `direction: inverse`.
+- **A fix:** invert the transform's direction (`GetInverseTransformDirection`).
+- **Status:** matched in `p9-config-utils` (9.1a, `config_utils.rs`,
+  `reference_space_from_srgb_space`), checked against the wheel in
+  `crates/ocio/tests/config_utils_oracle.rs` (`the_srgb_heuristic_quirks_match_the_wheel`).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
@@ -5592,3 +5624,21 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (docs/improvements.md, U-157)", once the export is made, which it then releases
   (`crates/ocio-py/ffi/src/lib.rs`, `Buffer::request`), in `p6-buffers` (6.5a). Not reachable
   from Python code, so not tested through an exporter.
+
+### U-171. The heuristics turn a shared config's processor cache off while other threads use it
+
+- **Upstream:** `ConfigUtils::SuspendCacheGuard` (`ConfigUtils.h:78-101`) switches a config's
+  processor cache off for the heuristics and back on afterwards, through a const pointer
+  (`setProcessorCacheFlags` is `const`). The flags are a plain member: another thread using
+  the same config meanwhile (making processors, or running the heuristics too) races with the
+  guard, a data race, undefined behaviour; and a second guard on another thread can restore
+  the flags the first one set off.
+- **Who notices:** applications that call `IdentifyInterchangeSpace`,
+  `IdentifyBuiltinColorSpace` or `GetProcessorTo/FromBuiltinColorSpace` on a config other
+  threads use.
+- **A fix:** don't change the shared config; make the heuristics' processors without caching
+  instead.
+- **Status:** the port's flags are atomic (1.8g), so there is no data race: another thread sees
+  the cache off while a guard lives, and the guards restore flags in the order they end, as
+  upstream's would without the race (`config_utils.rs`, `SuspendCacheGuard`, in
+  `p9-config-utils` 9.1a). Nothing to refuse: no wheel behaviour is defined to compare.

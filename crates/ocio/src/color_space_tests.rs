@@ -2,9 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the color space: `tests/cpu/ColorSpace_tests.cpp` @ v2.5.2, with those that read,
-//! write and validate configs (WP 3.3j, 3.7b, 3.8). The processor ones come with Phase 2 and
-//! ConfigUtils (Phase 9). The text is compared with the wheel's in
-//! `tests/model_objects_oracle.rs`.
+//! write and validate configs (WP 3.3j, 3.7b, 3.8), and the two ConfigUtils ones (WP 9.1a). The
+//! text is compared with the wheel's in `tests/model_objects_oracle.rs`.
 
 use super::*;
 use ocio_testkit::upstream::check_throw_what;
@@ -1487,5 +1486,813 @@ colorspaces:
         test_display_referred("scene_ref", false);
         test_display_referred("linear_mtx_from_file", false);
         test_display_referred("linear_lut3d_from_file", false);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(ConfigUtils, processor_to_known_colorspace)` @ v2.5.2.
+#[test]
+fn processor_to_known_colorspace() {
+    use crate::config::Config;
+    use crate::fileformats::test_utils::get_test_files_dir;
+
+    const CONFIG: &str = r#"
+ocio_profile_version: 2
+
+roles:
+  default: raw data
+  scene_linear: ref_cs
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE-XYZ-D65
+    description: The CIE XYZ (D65) display connection colorspace.
+    isdata: false
+
+  - !<ColorSpace>
+    name: sRGB - Display CS
+    description: Convert CIE XYZ (D65 white) to sRGB (piecewise EOTF)
+    isdata: false
+    from_display_reference: !<BuiltinTransform> {style: DISPLAY - CIE-XYZ-D65_to_sRGB}
+
+colorspaces:
+  # Put a couple of test color space first in the config since the heuristics stop upon success.
+
+  - !<ColorSpace>
+    name: File color space AP0 to linear rec.709
+    description: Would be useable by the heuristics except for the clamping and the fact that it's a clf.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<GroupTransform>
+          children:
+            - !<FileTransform> {src: clf/lut3d_as_matrix.clf}
+
+  - !<ColorSpace>
+    name: CS Transform color space
+    description: Verify that that ColorSpaceTransforms load correctly when running the heuristics.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<ColorSpaceTransform> {src: ref_cs, dst: not sRGB}
+
+  - !<ColorSpace>
+    name: raw data
+    description: A data colorspace (should not be used).
+    isdata: true
+
+  - !<ColorSpace>
+    name: ref_cs
+    description: The reference colorspace, ACES2065-1.
+    isdata: false
+
+  - !<ColorSpace>
+    name: not sRGB
+    description: A color space that misleadingly has sRGB in the name, even though it's not.
+    isdata: false
+    to_scene_reference: !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: sRGB - curve
+    description: Just the sRGB gamma curve.  Note - None of the heuristics should be able to use this.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+
+  - !<ColorSpace>
+    name: sRGB - curve 2
+    description: Another sRGB curve the heuristics shouldn't use.  NB - the transform uses a matrix.
+    isdata: false
+    to_scene_reference: !<GroupTransform>
+      children:
+        - !<FileTransform> {src: sRGB_to_linear.spi1d, interpolation: linear}
+
+  - !<ColorSpace>
+    name: pseudo sRGB
+    description: Ensure that a gamma 2.2 Rec.709 space is not mistaken for an sRGB space.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+        - !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1], direction: inverse}
+
+  - !<ColorSpace>
+    name: ACES cg
+    description: An ACEScg space with an unusual spelling.
+    isdata: false
+    to_scene_reference: !<BuiltinTransform> {style: ACEScg_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: Linear ITU-R BT.709
+    description: A linear Rec.709 space with an unusual spelling.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to Linear Rec.709 (sRGB)
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: sRGB Encoded AP1 - Texture
+    description: Another space with "sRGB" in the name that is not actually an sRGB texture space.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to sRGB Encoded AP1 - Texture
+      children:
+        - !<MatrixTransform> {matrix: [1.45143931614567, -0.23651074689374, -0.214928569251925, 0, -0.0765537733960206, 1.17622969983357, -0.0996759264375522, 0, 0.00831614842569772, -0.00603244979102102, 0.997716301365323, 0, 0, 0, 0, 1]}
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+
+  - !<ColorSpace>
+    name: OCIO v1 -- sRGB
+    description: The sRGB texture space from the legacy v1 ACES config. Usable by the heuristics despite the file.
+    isdata: false
+    from_reference: !<GroupTransform>
+      children:
+        - !<MatrixTransform> {matrix: [0.952552, 0, 9.36786e-05, 0, 0.343966, 0.728166, -0.0721325, 0, 0, 0, 1.00883, 0, 0, 0, 0, 1]}
+        - !<MatrixTransform> {matrix: [3.2096, -1.55743, -0.495805, 0, -0.970989, 1.88517, 0.0394894, 0, 0.0597193, -0.210104, 1.14312, 0, 0, 0, 0, 1]}
+        - !<FileTransform> {src: sRGB_to_linear.spi1d, interpolation: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: Texture -- sRGB
+    description: An sRGB Texture space, spelled differently than in the built-in config.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to sRGB Rec.709
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+"#;
+
+    let cfg = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+
+    let mut editable_cfg = (*cfg).clone();
+
+    editable_cfg.set_search_path(get_test_files_dir());
+
+    let builtin_config = Config::create_from_file("ocio://default").unwrap();
+
+    // Make all color spaces suitable for the heuristics inactive.
+    // The heuristics don't look at inactive color spaces.
+    editable_cfg.set_inactive_color_spaces(
+        "ACES cg, Linear ITU-R BT.709, Texture -- sRGB, OCIO v1 -- sRGB",
+    );
+
+    let src_color_space_name = "not sRGB";
+    let builtin_color_space_name = "Gamma 2.2 AP1 - Texture";
+
+    // Test throw if no suitable spaces are present.
+    {
+        check_throw_what(
+            Config::processor_to_builtin_color_space(
+                &editable_cfg,
+                src_color_space_name,
+                builtin_color_space_name,
+            ),
+            "Heuristics were not able to find a known color space in the provided config. \
+             Please set the interchange roles.",
+        );
+    }
+
+    // Generate a reference Processor for the correct result.
+    let ref_proc = Config::processor_from_configs_with_interchange(
+        &editable_cfg,
+        src_color_space_name,
+        "ref_cs",
+        &builtin_config,
+        builtin_color_space_name,
+        "ACES2065-1",
+    )
+    .unwrap();
+
+    // Now make various spaces active and test that they enable the heuristics to find the
+    // appropriate interchange spaces.
+
+    editable_cfg.set_inactive_color_spaces("ACES cg, Linear ITU-R BT.709, OCIO v1 -- sRGB");
+    {
+        // Uses "sRGB Texture" to find the reference.
+        let proc = Config::processor_to_builtin_color_space(
+            &editable_cfg,
+            src_color_space_name,
+            builtin_color_space_name,
+        )
+        .unwrap();
+        assert_eq!(ref_proc.cache_id().unwrap(), proc.cache_id().unwrap());
+    }
+
+    // Test using linear color space from_ref direction.
+    editable_cfg.set_inactive_color_spaces("ACES cg, Texture -- sRGB, OCIO v1 -- sRGB");
+    {
+        // Uses "Linear Rec.709 (sRGB)" to find the reference.
+        let proc = Config::processor_to_builtin_color_space(
+            &editable_cfg,
+            src_color_space_name,
+            builtin_color_space_name,
+        )
+        .unwrap();
+        assert_eq!(ref_proc.cache_id().unwrap(), proc.cache_id().unwrap());
+    }
+
+    // Test linear color space to_ref direction.
+    editable_cfg.set_inactive_color_spaces("Linear ITU-R BT.709, Texture -- sRGB, OCIO v1 -- sRGB");
+    {
+        // Uses "ACEScg" to find the reference.
+        let proc = Config::processor_to_builtin_color_space(
+            &editable_cfg,
+            src_color_space_name,
+            builtin_color_space_name,
+        )
+        .unwrap();
+        assert_eq!(ref_proc.cache_id().unwrap(), proc.cache_id().unwrap());
+    }
+
+    // Generate a reference Processor for the correct result.
+    let inv_ref_proc = Config::processor_from_configs_with_interchange(
+        &builtin_config,
+        builtin_color_space_name,
+        "ACES2065-1",
+        &editable_cfg,
+        src_color_space_name,
+        "ref_cs",
+    )
+    .unwrap();
+
+    // Make the reference space inactive too.
+    editable_cfg.set_inactive_color_spaces("ACES cg, Linear ITU-R BT.709, ref_cs, OCIO v1 -- sRGB");
+    {
+        // Uses "sRGB Texture" to find the reference.
+        let proc = Config::processor_from_builtin_color_space(
+            builtin_color_space_name,
+            &editable_cfg,
+            src_color_space_name,
+        )
+        .unwrap();
+        assert_eq!(inv_ref_proc.cache_id().unwrap(), proc.cache_id().unwrap());
+    }
+
+    // Test using linear color space from_ref direction.
+    editable_cfg.set_inactive_color_spaces("ACES cg, Texture -- sRGB, ref_cs, OCIO v1 -- sRGB");
+    {
+        // Uses "Linear Rec.709 (sRGB)" to find the reference.
+        let proc = Config::processor_from_builtin_color_space(
+            builtin_color_space_name,
+            &editable_cfg,
+            src_color_space_name,
+        )
+        .unwrap();
+        assert_eq!(inv_ref_proc.cache_id().unwrap(), proc.cache_id().unwrap());
+    }
+
+    // Test linear color space to_ref direction.
+    editable_cfg
+        .set_inactive_color_spaces("Linear ITU-R BT.709, Texture -- sRGB, ref_cs, OCIO v1 -- sRGB");
+    {
+        // Uses "ACEScg" to find the reference.
+        let proc = Config::processor_from_builtin_color_space(
+            builtin_color_space_name,
+            &editable_cfg,
+            src_color_space_name,
+        )
+        .unwrap();
+        assert_eq!(inv_ref_proc.cache_id().unwrap(), proc.cache_id().unwrap());
+    }
+
+    //
+    // Test IdentifyInterchangeSpace.
+    //
+
+    {
+        // Uses "ACEScg" to find the reference.
+        let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+            &editable_cfg,
+            "Linear ITU-R BT.709",
+            &builtin_config,
+            "lin_rec709_srgb",
+        )
+        .unwrap();
+        assert_eq!(src_interchange, b"ref_cs");
+        assert_eq!(builtin_interchange, b"ACES2065-1");
+    }
+
+    editable_cfg.set_inactive_color_spaces("ACES cg, Linear ITU-R BT.709, OCIO v1 -- sRGB");
+    {
+        // Uses "sRGB Texture" to find the reference.
+        let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+            &editable_cfg,
+            "Linear ITU-R BT.709",
+            &builtin_config,
+            "lin_rec709_srgb",
+        )
+        .unwrap();
+        assert_eq!(src_interchange, b"ref_cs");
+        assert_eq!(builtin_interchange, b"ACES2065-1");
+    }
+
+    editable_cfg.set_inactive_color_spaces("ACES cg, Linear ITU-R BT.709, Texture -- sRGB");
+    {
+        // Uses "OCIO v1 -- sRGB" to find the reference.
+        let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+            &editable_cfg,
+            "Linear ITU-R BT.709",
+            &builtin_config,
+            "lin_rec709_srgb",
+        )
+        .unwrap();
+        assert_eq!(src_interchange, b"ref_cs");
+        assert_eq!(builtin_interchange, b"ACES2065-1");
+    }
+
+    // Set the interchange role. In order to prove that it is being used rather than the
+    // heuristics, set it to something wrong and check that it gets returned anyway.
+    editable_cfg
+        .set_role("aces_interchange", Some(b"Texture -- sRGB".as_slice()))
+        .unwrap();
+    {
+        let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+            &editable_cfg,
+            "Linear ITU-R BT.709",
+            &builtin_config,
+            "lin_rec709_srgb",
+        )
+        .unwrap();
+        assert_eq!(src_interchange, b"Texture -- sRGB");
+        assert_eq!(builtin_interchange, b"ACES2065-1");
+    }
+
+    // Unset the interchange role, so the heuristics will be used for the other tests.
+    editable_cfg
+        .set_role("aces_interchange", Some(b"".as_slice()))
+        .unwrap();
+
+    // Check what happens if a totally bogus config is passed for the built-in config.
+    let raw_cfg = Config::create_raw().unwrap();
+    {
+        check_throw_what(
+            Config::identify_interchange_space(&editable_cfg, "raw data", &raw_cfg, "raw"),
+            // (It fails in the first heuristic that tries to use one of the known built-in
+            //  spaces, hence the surprising error message.)
+            "Could not find destination color space 'sRGB - Texture'",
+        );
+    }
+
+    // Check what happens if the source color space doesn't exist.
+    {
+        check_throw_what(
+            Config::identify_interchange_space(&editable_cfg, "Foo", &raw_cfg, "raw"),
+            "Could not find source color space 'Foo'.",
+        );
+    }
+
+    // Check what happens if the destination color space doesn't exist.
+    {
+        check_throw_what(
+            Config::identify_interchange_space(&editable_cfg, "Foo", &raw_cfg, ""),
+            "Could not find destination color space ''.",
+        );
+    }
+
+    //
+    // Test IdentifyBuiltinColorSpace.
+    //
+
+    editable_cfg.set_inactive_color_spaces("OCIO v1 -- sRGB");
+
+    {
+        // Uses "Texture -- sRGB" to find the reference.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "ACEScg").unwrap();
+        assert_eq!(csname, b"ACES cg");
+    }
+
+    {
+        // Uses "Texture -- sRGB" to find the reference.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Texture")
+                .unwrap();
+        assert_eq!(csname, b"Texture -- sRGB");
+    }
+
+    {
+        // Uses "Texture -- sRGB" to find the reference.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "ACES2065-1")
+                .unwrap();
+        assert_eq!(csname, b"ref_cs");
+    }
+
+    editable_cfg.set_inactive_color_spaces("Texture -- sRGB");
+
+    {
+        // Uses "OCIO v1 -- sRGB" to find the reference.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Texture")
+                .unwrap();
+        assert_eq!(csname, b"OCIO v1 -- sRGB");
+    }
+
+    editable_cfg.set_inactive_color_spaces("Texture -- sRGB, ref_cs, OCIO v1 -- sRGB");
+
+    {
+        // Uses "ACEScg" to find the reference.
+        let csname = Config::identify_builtin_color_space(
+            &editable_cfg,
+            &builtin_config,
+            "Linear Rec.709 (sRGB)",
+        )
+        .unwrap();
+        assert_eq!(csname, b"Linear ITU-R BT.709");
+    }
+
+    {
+        // Uses "ACEScg" to find the reference.
+        // If ColorSpaceTransforms were allowed, this would find "CS Transform color space"
+        // instead.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "ACEScct")
+                .unwrap();
+        assert_eq!(csname, b"not sRGB");
+    }
+
+    // Aliases for built-in color spaces must work.
+    {
+        // Uses "ACEScg" to find the reference.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "lin_ap1")
+                .unwrap();
+        assert_eq!(csname, b"ACES cg");
+    }
+
+    // Test that a data space is handled properly.
+    {
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "Raw").unwrap();
+        assert_eq!(csname, b"raw data");
+    }
+
+    // Display-referred spaces are not supported unless the display-referred interchange role
+    // is present.
+    {
+        check_throw_what(
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Display"),
+            "The heuristics currently only support scene-referred color spaces. Please set the \
+             interchange roles.",
+        );
+    }
+
+    // The next three cases directly use the interchange roles rather than heuristics.
+
+    // With the required role, it then works.
+    editable_cfg
+        .set_role("cie_xyz_d65_interchange", Some(b"CIE-XYZ-D65".as_slice()))
+        .unwrap();
+    {
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Display")
+                .unwrap();
+        assert_eq!(csname, b"sRGB - Display CS");
+    }
+
+    // Must continue to work if the color space for the interchange role is inactive.
+    editable_cfg.set_inactive_color_spaces("CIE-XYZ-D65");
+    {
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Display")
+                .unwrap();
+        assert_eq!(csname, b"sRGB - Display CS");
+    }
+
+    // Test the scene-referred interchange role (and even make it inactive).
+    editable_cfg
+        .set_role("aces_interchange", Some(b"ref_cs".as_slice()))
+        .unwrap();
+    editable_cfg.set_inactive_color_spaces("ref_cs");
+    {
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "ACEScg").unwrap();
+        assert_eq!(csname, b"ACES cg");
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(ConfigUtils, processor_to_known_colorspace_alt_config)` @ v2.5.2.
+#[test]
+fn processor_to_known_colorspace_alt_config() {
+    use crate::config::Config;
+    use ocio_ops::utils::string_utils::find;
+
+    // This test uses a config that has a different reference space than the built-in config.
+
+    const CONFIG: &str = r#"
+ocio_profile_version: 2
+
+environment: {}
+
+roles:
+  default: sRGB
+  scene_linear: scene-linear Rec.709-sRGB
+  rendering: scene-linear Rec.709-sRGB
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+shared_views:
+  - !<View> {name: Un-tone-mapped, view_transform: Un-tone-mapped, display_colorspace: <USE_DISPLAY_NAME>}
+  - !<View> {name: Raw, colorspace: Raw}
+
+displays:
+  sRGB:
+    - !<Views> [Un-tone-mapped, Raw]
+  Gamma 2.2 / Rec.709:
+    - !<Views> [ Un-tone-mapped, Raw]
+
+view_transforms:
+  - !<ViewTransform>
+    name: Un-tone-mapped
+    from_scene_reference: !<MatrixTransform> {matrix: [ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 ]}
+
+inactive_colorspaces: [scene-linear Rec.709-sRGB, ACES2065-1]
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE-XYZ D65
+    encoding: display-linear
+    isdata: false
+    to_display_reference: !<MatrixTransform> {matrix: [ 3.240969941905, -1.537383177570, -0.498610760293, 0, -0.969243636281, 1.875967501508, 0.041555057407, 0, 0.055630079697, -0.203976958889, 1.056971514243, 0, 0, 0, 0, 1 ]}
+
+  - !<ColorSpace>
+    name: display-linear Rec.709-sRGB
+    description: |
+      Display reference space
+    isdata: false
+    encoding: display-linear
+
+  - !<ColorSpace>
+    name: sRGB
+    isdata: false
+    categories: [ file-io ]
+    encoding: sdr-video
+    from_display_reference: !<GroupTransform>
+      children:
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+        - !<RangeTransform> {min_in_value: 0., min_out_value: 0., max_in_value: 1., max_out_value: 1.}
+
+colorspaces:
+  - !<ColorSpace>
+    name: Raw
+    isdata: true
+    categories: [ file-io ]
+    encoding: data
+
+  - !<ColorSpace>
+    name: ACES2065-1
+    isdata: false
+    encoding: scene-linear
+    to_scene_reference: !<MatrixTransform> {matrix: [ 2.521686186744, -1.134130988240, -0.387555198504, 0, -0.276479914230, 1.372719087668, -0.096239173438, 0, -0.015378064966, -0.152975335867, 1.168353400833, 0, 0, 0, 0, 1 ]}
+
+  - !<ColorSpace>
+    name: scene-linear Rec.709-sRGB
+    description: |
+      Scene-linear Rec.709 or sRGB primaries -- ** This is the scene reference space **
+    isdata: false
+    categories: [ file-io, working-space ]
+    encoding: scene-linear
+
+  - !<ColorSpace>
+    name: scene-linear P3-D65
+    aliases: [lin_p3d65, Utility - Linear - P3-D65]
+    isdata: false
+    encoding: scene-linear
+    to_scene_reference: !<MatrixTransform> {matrix: [ 1.224940176281e+00, -2.249401762806e-01, 0, 0, -4.205695470969e-02,  1.042056954710e+00, 0, 0, -1.963755459033e-02, -7.863604555063e-02,  1.098273600141e+00, 0, 0, 0, 0, 1 ]}
+
+  - !<ColorSpace>
+    name: scene-linear Rec.2020
+    isdata: false
+    encoding: scene-linear
+    from_scene_reference: !<MatrixTransform> {matrix: [ 0.627403895935, 0.329283038378, 0.043313065687, 0 , 0.069097289358, 0.919540395075, 0.011362315566, 0, 0.016391438875, 0.088013307877, 0.895595253248, 0, 0, 0, 0, 1 ]}
+
+  - !<ColorSpace>
+    name: texture sRGB
+    isdata: false
+    categories: [ file-io ]
+    encoding: sdr-video
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+        - !<RangeTransform> {min_in_value: 0., min_out_value: 0., max_in_value: 1., max_out_value: 1.}
+"#;
+
+    let cfg = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+
+    let mut editable_cfg = (*cfg).clone();
+
+    let mut builtin_config = (*Config::create_from_file("ocio://default").unwrap()).clone();
+
+    // Make all of the supported linear color spaces in the built-in config inactive. These
+    // spaces are referenced by name in the heuristics, so it should all still work. This is
+    // different than the inactive color spaces in the user's config, which the heuristics
+    // generally ignore (unless it's the reference space). (This should not affect the tests
+    // below, it simply confirms that inactive spaces are working as expected.)
+    builtin_config.set_inactive_color_spaces(
+        "ACES2065-1, ACEScg, Linear Rec.709 (sRGB), Linear P3-D65, Linear Rec.2020, CIE XYZ-D65 - Display-referred, sRGB - Display",
+    );
+
+    //
+    // Test IdentifyBuiltinColorSpace.
+    //
+
+    // The initial editableCfg inactive color spaces are: "scene-linear Rec.709-sRGB,
+    // ACES2065-1".
+
+    {
+        // Uses "texture sRGB" to find the reference.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "Linear Rec.2020")
+                .unwrap();
+        assert_eq!(csname, b"scene-linear Rec.2020");
+    }
+
+    {
+        // Uses "texture sRGB" to find the reference.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "Linear P3-D65")
+                .unwrap();
+        assert_eq!(csname, b"scene-linear P3-D65");
+    }
+
+    editable_cfg.set_inactive_color_spaces("ACES2065-1");
+    {
+        // Uses "texture sRGB" to find the reference.
+        let csname = Config::identify_builtin_color_space(
+            &editable_cfg,
+            &builtin_config,
+            "Linear Rec.709 (sRGB)",
+        )
+        .unwrap();
+        assert_eq!(csname, b"scene-linear Rec.709-sRGB");
+    }
+
+    editable_cfg.set_inactive_color_spaces("ACES2065-1, texture sRGB");
+    {
+        // Uses "Linear P3-D65" to find the reference.
+        let csname = Config::identify_builtin_color_space(
+            &editable_cfg,
+            &builtin_config,
+            "Linear Rec.709 (sRGB)",
+        )
+        .unwrap();
+        assert_eq!(csname, b"scene-linear Rec.709-sRGB");
+    }
+
+    editable_cfg.set_inactive_color_spaces("ACES2065-1");
+    {
+        // Uses "texture sRGB" to find the reference.
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Texture")
+                .unwrap();
+        assert_eq!(csname, b"texture sRGB");
+    }
+
+    // The color space is present in editableCfg but it's inactive, so not found.
+    {
+        check_throw_what(
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "ACES2065-1"),
+            "Heuristics were not able to find an equivalent to the requested color space: \
+             ACES2065-1.",
+        );
+    }
+
+    // Use interchange role rather than heuristics.
+
+    editable_cfg
+        .set_role("aces_interchange", Some(b"ACES2065-1".as_slice()))
+        .unwrap();
+    {
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Texture")
+                .unwrap();
+        assert_eq!(csname, b"texture sRGB");
+    }
+
+    {
+        let csname = Config::identify_builtin_color_space(
+            &editable_cfg,
+            &builtin_config,
+            "Linear Rec.709 (sRGB)",
+        )
+        .unwrap();
+        assert_eq!(csname, b"scene-linear Rec.709-sRGB");
+    }
+
+    editable_cfg.set_inactive_color_spaces("");
+    {
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "lin_ap0")
+                .unwrap();
+        assert_eq!(csname, b"ACES2065-1");
+    }
+    editable_cfg
+        .set_role("aces_interchange", Some(b"".as_slice()))
+        .unwrap();
+
+    // Display-referred spaces won't work via heuristics, need the interchange role.
+    {
+        check_throw_what(
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Display"),
+            "The heuristics currently only support scene-referred color spaces. Please set the \
+             interchange roles.",
+        );
+    }
+    editable_cfg
+        .set_role("cie_xyz_d65_interchange", Some(b"CIE-XYZ D65".as_slice()))
+        .unwrap();
+    {
+        // Note that it still works even if the built-in color space is inactive (though not
+        // for the source).
+        let inactives = builtin_config.inactive_color_spaces().to_vec();
+        assert_eq!(find(&inactives, b"sRGB - Display"), Some(107));
+        let csname =
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "sRGB - Display")
+                .unwrap();
+        assert_eq!(csname, b"sRGB");
+    }
+    editable_cfg
+        .set_role("cie_xyz_d65_interchange", Some(b"".as_slice()))
+        .unwrap();
+
+    // Check handling of color space that isn't in the built-in config.
+    {
+        check_throw_what(
+            Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "does not exist"),
+            "Built-in config does not contain the requested color space: does not exist.",
+        );
+    }
+
+    //
+    // Test IdentifyInterchangeSpace.
+    //
+
+    editable_cfg.set_inactive_color_spaces("scene-linear Rec.709-sRGB, ACES2065-1");
+    {
+        // Uses "texture sRGB" to find the reference.
+        let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+            &editable_cfg,
+            "scene-linear Rec.709-sRGB",
+            &builtin_config,
+            "lin_rec709_srgb", // Aliases work.
+        )
+        .unwrap();
+        assert_eq!(src_interchange, b"scene-linear Rec.709-sRGB");
+        assert_eq!(builtin_interchange, b"Linear Rec.709 (sRGB)");
+    }
+
+    editable_cfg.set_inactive_color_spaces("texture sRGB, scene-linear Rec.709-sRGB, ACES2065-1");
+    {
+        // Uses "Linear P3-D65" to find the reference.
+        let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+            &editable_cfg,
+            "lin_p3d65",
+            &builtin_config,
+            "lin_rec709_srgb",
+        )
+        .unwrap();
+        assert_eq!(src_interchange, b"scene-linear Rec.709-sRGB");
+        assert_eq!(builtin_interchange, b"Linear Rec.709 (sRGB)");
+    }
+
+    editable_cfg.set_inactive_color_spaces(
+        "scene-linear P3-D65, texture sRGB, scene-linear Rec.709-sRGB, ACES2065-1",
+    );
+    {
+        // Uses "Linear Rec.2020" to find the reference.
+        let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+            &editable_cfg,
+            "Raw", // A data space, but it works.
+            &builtin_config,
+            "lin_rec709_srgb",
+        )
+        .unwrap();
+        assert_eq!(src_interchange, b"scene-linear Rec.709-sRGB");
+        assert_eq!(builtin_interchange, b"Linear Rec.709 (sRGB)");
+    }
+
+    editable_cfg
+        .set_inactive_color_spaces("scene-linear P3-D65, texture sRGB, scene-linear Rec.709-sRGB");
+    {
+        // Uses "ACES2065-1" to find the reference.
+        let (src_interchange, builtin_interchange) =
+            Config::identify_interchange_space(&editable_cfg, "Raw", &builtin_config, "Raw")
+                .unwrap();
+        assert_eq!(src_interchange, b"scene-linear Rec.709-sRGB");
+        assert_eq!(builtin_interchange, b"Linear Rec.709 (sRGB)");
+    }
+
+    {
+        check_throw_what(
+            Config::identify_interchange_space(
+                &editable_cfg,
+                "CIE-XYZ D65",
+                &builtin_config,
+                "CIE XYZ-D65 - Display-referred",
+            ),
+            "The heuristics currently only support scene-referred color spaces. Please set the \
+             interchange roles.",
+        );
     }
 }
