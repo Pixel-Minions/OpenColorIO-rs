@@ -2023,7 +2023,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `PyObject_HasAttrString` itself: the hook's argument type (`UnraisableHookArgs`) isn't reachable
   from Python without raising an unraisable error first, and the binding's FFI file
   (`crates/ocio-py/ffi`) doesn't make that call (a new FFI call is the owner's decision).
-- **Status:** not matched, for the owner (`p6-config` 6.6a, `crates/ocio-py/src/callback.rs`,
+- **Status:** not matched, by the owner's decision (2026-10-23, relayed by the coordinator: no
+  new FFI call; the entry stays as it is) (`p6-config` 6.6a, `crates/ocio-py/src/callback.rs`,
   `error_already_set_what`): the message is the wheel's, and the port reports nothing;
   `callbacks_oracle.rs`, `callbacks_as_the_wheels` (`what_script`).
 
