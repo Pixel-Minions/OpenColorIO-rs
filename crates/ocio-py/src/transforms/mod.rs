@@ -11,6 +11,7 @@ pub(crate) mod py_color_space_transform;
 pub(crate) mod py_display_view_transform;
 pub(crate) mod py_exponent_transform;
 pub(crate) mod py_exponent_with_linear_transform;
+pub(crate) mod py_exposure_contrast_transform;
 pub(crate) mod py_file_transform;
 pub(crate) mod py_fixed_function_transform;
 pub(crate) mod py_group_transform;

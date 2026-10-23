@@ -597,6 +597,7 @@ variant!(ocio::ColorSpaceTransform, ColorSpace);
 variant!(ocio::DisplayViewTransform, DisplayView);
 variant!(ocio::ExponentTransform, Exponent);
 variant!(ocio::ExponentWithLinearTransform, ExponentWithLinear);
+variant!(ocio::ExposureContrastTransform, ExposureContrast);
 variant!(ocio::FileTransform, File);
 variant!(ocio::FixedFunctionTransform, FixedFunction);
 variant!(ocio::GroupTransform, Group);
@@ -1142,6 +1143,7 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::transforms::py_display_view_transform::bind(m)?;
     crate::transforms::py_exponent_transform::bind(m)?;
     crate::transforms::py_exponent_with_linear_transform::bind(m)?;
+    crate::transforms::py_exposure_contrast_transform::bind(m)?;
     crate::transforms::py_file_transform::bind(m)?;
     crate::transforms::py_fixed_function_transform::bind(m)?;
     crate::transforms::py_group_transform::bind(m)?;

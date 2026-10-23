@@ -4084,7 +4084,7 @@ note = "p6-transforms 6.3b"
 path = "src/bindings/python/transforms/PyExposureContrastTransform.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/transforms/py_exposure_contrast_transform.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/transforms/PyFileTransform.cpp"
