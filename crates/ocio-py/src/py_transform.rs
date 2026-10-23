@@ -726,6 +726,42 @@ pub(crate) fn def_static(cls: &Bound<'_, PyType>, f: &'static Function) -> PyRes
     cls.setattr(f.name, sm)
 }
 
+/// `property(fget, fset, None, "")`, as pybind11 makes an instance property
+/// (`def_property_static_impl`): CPython's `property`, its docstring empty (the wheel's `DOC`
+/// strings are).
+fn property<'py>(fget: Bound<'py, PyAny>, fset: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = fget.py();
+    py.import("builtins")?
+        .getattr("property")?
+        .call1((fget, fset, py.None(), ""))
+}
+
+/// `cls.def_readwrite(name, ...)`: a property whose getter and setter pybind11 makes as methods
+/// of the class (`is_method`: instancemethods over functions with the module's scope), each
+/// without a name (`f.name` empty: its docstring is its signature alone).
+pub(crate) fn def_readwrite(
+    cls: &Bound<'_, PyType>,
+    name: &str,
+    get: &'static Function,
+    set: &'static Function,
+) -> PyResult<()> {
+    let py = cls.py();
+    let prop = property(pybind11::method(py, get)?, pybind11::method(py, set)?)?;
+    cls.setattr(name, prop)
+}
+
+/// `cls.def_property_readonly_static(name, getter)`: pybind11's static property over a function
+/// without a scope or a name.
+pub(crate) fn def_property_readonly_static(
+    cls: &Bound<'_, PyType>,
+    name: &str,
+    get: &'static Function,
+) -> PyResult<()> {
+    let py = cls.py();
+    let prop = pybind11::static_property(py, pybind11::builtin_unscoped(py, get, true)?)?;
+    cls.setattr(name, prop)
+}
+
 /// The module's class `qualified`.
 pub(crate) fn class<'py>(py: Python<'py>, qualified: &str) -> PyResult<Bound<'py, PyType>> {
     pybind11::class(py, qualified)

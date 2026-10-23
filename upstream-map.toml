@@ -3854,7 +3854,8 @@ status = "todo"
 path = "src/bindings/python/PyGradingData.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_grading_data.rs"]
-status = "todo"
+status = "partial"
+note = "p6-after-p5 6.7a: the values (GradingRGBM, GradingPrimary, GradingRGBMSW, GradingTone, GradingControlPoint); the curves next"
 
 [[file]]
 path = "src/bindings/python/PyImageDesc.cpp"

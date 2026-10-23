@@ -312,6 +312,14 @@ fn argument(ty: &str) -> Option<&'static str> {
         "typing.SupportsInt" => Some("0"),
         "PyOpenColorIO.PyOpenColorIO.ColorSpaceSet" => Some("OCIO.ColorSpaceSet()"),
         "PyOpenColorIO.PyOpenColorIO.vector_of_uint8_t" => Some("OCIO.vector_of_uint8_t()"),
+        "PyOpenColorIO.PyOpenColorIO.GradingStyle" => Some("OCIO.GRADING_LOG"),
+        "PyOpenColorIO.PyOpenColorIO.GradingRGBM" => Some("OCIO.GradingRGBM()"),
+        "PyOpenColorIO.PyOpenColorIO.GradingPrimary" => {
+            Some("OCIO.GradingPrimary(OCIO.GRADING_LOG)")
+        }
+        "PyOpenColorIO.PyOpenColorIO.GradingRGBMSW" => Some("OCIO.GradingRGBMSW()"),
+        "PyOpenColorIO.PyOpenColorIO.GradingTone" => Some("OCIO.GradingTone(OCIO.GRADING_LOG)"),
+        "PyOpenColorIO.PyOpenColorIO.GradingControlPoint" => Some("OCIO.GradingControlPoint()"),
         _ => None,
     }
 }

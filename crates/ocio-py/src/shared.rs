@@ -188,7 +188,19 @@ pub(crate) fn to_py<'py, R: Keyed>(
     qualified: &'static str,
     rc: &R,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let key = (qualified, rc.key());
+    to_py_with(py, qualified, rc.key(), || rc.clone())
+}
+
+/// A returned value of the class `qualified` that pybind11 registers under the address `key`:
+/// the Python object registered there while it lives, else a new instance holding `value()`
+/// (an instance's own `Shared` value, or a reference into another's, chunk 6.7a).
+pub(crate) fn to_py_with<'py, V: Send + Sync + 'static>(
+    py: Python<'py>,
+    qualified: &'static str,
+    key: usize,
+    value: impl FnOnce() -> V,
+) -> PyResult<Bound<'py, PyAny>> {
+    let key = (qualified, key);
     if let Some(obj) = lock(&INSTANCES).find(py, &key) {
         return Ok(obj);
     }
@@ -198,7 +210,7 @@ pub(crate) fn to_py<'py, R: Keyed>(
     pybind11::set_value(
         &obj,
         qualified,
-        Bound::new(py, Holder(Box::new(rc.clone())))?.into_any(),
+        Bound::new(py, Holder(Box::new(value())))?.into_any(),
     )?;
     register_in(&INSTANCES, &INSTANCES_CALLBACK, &obj, key)?;
     Ok(obj)
@@ -220,13 +232,24 @@ pub(crate) fn construct<R: Keyed>(
     qualified: &'static str,
     rc: R,
 ) -> PyResult<()> {
-    let key = (qualified, rc.key());
+    let key = rc.key();
+    construct_with(this, qualified, key, rc)
+}
+
+/// A constructor's result: `value` as the value of `this`, an instance of the class
+/// `qualified`, registered under the address `key`.
+pub(crate) fn construct_with<V: Send + Sync + 'static>(
+    this: &Bound<'_, PyAny>,
+    qualified: &'static str,
+    key: usize,
+    value: V,
+) -> PyResult<()> {
     pybind11::set_value(
         this,
         qualified,
-        Bound::new(this.py(), Holder(Box::new(rc)))?.into_any(),
+        Bound::new(this.py(), Holder(Box::new(value)))?.into_any(),
     )?;
-    register_in(&INSTANCES, &INSTANCES_CALLBACK, this, key)
+    register_in(&INSTANCES, &INSTANCES_CALLBACK, this, (qualified, key))
 }
 
 /// The holder `obj` holds as an instance of the class `qualified`, when it is one (`Ok(None)`:
@@ -241,6 +264,15 @@ pub(crate) fn holder<T: Send + 'static>(
 
 /// [`holder`] of a class whose holder is `R` (a [`Held`] value).
 pub(crate) fn holder_of<R: Keyed>(obj: &Bound<'_, PyAny>, qualified: &str) -> PyResult<Option<R>> {
+    holder_with::<R>(obj, qualified)
+}
+
+/// The value `obj` holds as an instance of the class `qualified` (see [`holder`]), as the type
+/// `V` its binding holds.
+pub(crate) fn holder_with<V: Clone + 'static>(
+    obj: &Bound<'_, PyAny>,
+    qualified: &str,
+) -> PyResult<Option<V>> {
     let Some(this) = pybind11::instance_of(obj, qualified) else {
         return Ok(None);
     };
@@ -249,7 +281,7 @@ pub(crate) fn holder_of<R: Keyed>(obj: &Bound<'_, PyAny>, qualified: &str) -> Py
     holder
         .get()
         .0
-        .downcast_ref::<R>()
+        .downcast_ref::<V>()
         .cloned()
         .map(Some)
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("a holder of another class"))

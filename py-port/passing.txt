@@ -153,6 +153,10 @@ FixedFunctionTransformTest.py::FixedFunctionTransformTest.test_validate_params
 FormatMetadataTest.py::FormatMetadataTest.test_attributes
 FormatMetadataTest.py::FormatMetadataTest.test_children
 FormatMetadataTest.py::FormatMetadataTest.test_default
+GradingDataTest.py::GradingDataTest.test_primary
+GradingDataTest.py::GradingDataTest.test_rgbm
+GradingDataTest.py::GradingDataTest.test_rgbmsw
+GradingDataTest.py::GradingDataTest.test_tone
 GroupTransformTest.py::GroupTransformTest.test_append_transform
 GroupTransformTest.py::GroupTransformTest.test_constructor_with_keywords
 GroupTransformTest.py::GroupTransformTest.test_constructor_with_positional
