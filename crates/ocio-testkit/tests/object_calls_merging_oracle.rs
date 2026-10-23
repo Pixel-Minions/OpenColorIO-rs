@@ -159,7 +159,9 @@ fn the_merging_helpers_run_on_the_configs() {
 /// Each of `MergeStrategies`' values, named with its class, reaches the library as that value:
 /// set as the default strategy then read back, in a call's arguments, in an object spec's
 /// calls (`spec.enum_member`) and through `config_calls` (`value_in`, shared). A value of the
-/// module (`TRANSFORM_DIR_INVERSE`) is still named alone.
+/// module (`TRANSFORM_DIR_INVERSE`) is still named alone. Values come back by their short name
+/// (`value_out` and `checks.dump` write `{"enum": "STRATEGY_REMOVE"}`), while a request names a
+/// class's value with its class.
 #[test]
 fn enum_values_named_with_their_class() {
     for name in STRATEGIES {
@@ -214,7 +216,8 @@ fn enum_values_named_with_their_class() {
 /// Names that aren't an enum member a class of the binding exports are refused, in a call's
 /// arguments (`value_in`), in an object spec (`spec.enum_member`) and in `config_calls`: the
 /// unqualified name of a value the module doesn't export, the nested enum's type, a static
-/// method, dunders, a class without that value, a class that isn't the binding's (Python's
+/// method, dunders, a class without that value (a module value qualified by a class that
+/// doesn't export it: no fallback to the module), a class that isn't the binding's (Python's
 /// `Exception`, the module's type), a submodule, a member named through another member, a
 /// path of three names, and empty parts. The submodule's names can't be taken by a request's
 /// object or a call's "as", and it has no function but its own.
@@ -227,6 +230,7 @@ fn bad_enum_names_and_submodule_uses_are_refused() {
         "ConfigMergingParameters.__class__",
         "ConfigMergingParameters.__init__",
         "Config.STRATEGY_PREFER_INPUT",
+        "Config.TRANSFORM_DIR_FORWARD",
         "NoSuchClass.STRATEGY_PREFER_INPUT",
         "Exception.STRATEGY_PREFER_INPUT",
         "Exception.args",
