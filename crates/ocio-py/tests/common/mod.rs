@@ -32,6 +32,9 @@ static PORT_SURFACE: OnceLock<Value> = OnceLock::new();
 /// Starts the embedded interpreter once, with the module registered, the oracle's step
 /// interpreter importable, and target/py-port's site-packages (NumPy) on its path; walks the
 /// module's surface ([`port_surface`]).
+///
+/// Call it without holding the GIL (outside `Python::attach`, or inside `py.detach`): a thread
+/// that waits here for another thread's start while holding the GIL deadlocks with it.
 pub(crate) fn start_python() {
     START.call_once(|| {
         ocio_py::embed::append_to_inittab();
@@ -148,7 +151,9 @@ pub(crate) fn wheel(scripts: &[Value]) -> Vec<Value> {
 /// The object an expression of the step interpreter makes, in the embedded interpreter: the
 /// last step's result of the steps `steps` ({"eval": ...} or {"call": ...}).
 pub(crate) fn port_object<'py>(py: Python<'py>, steps: &Value) -> Bound<'py, PyAny> {
-    start_python();
+    // The caller holds the GIL: waiting for another thread's start (which runs Python, the
+    // module's walk) while holding it would deadlock.
+    py.detach(start_python);
     let json = py.import("json").unwrap();
     let interpreter = py.import("py_eval_steps").unwrap();
     let ocio = py.import("PyOpenColorIO").unwrap();
