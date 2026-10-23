@@ -1,6 +1,7 @@
 # Phase 9 cards: ConfigUtils, config merging and the remaining library surface
 
-**Status: draft, 2026-10-23.** Owner decisions P9-1 to P9-7 are open. The owner pulled
+**Status: planned, 2026-10-23.** The owner decided P9-1 to P9-7 on 2026-10-23, all as
+recommended. The owner pulled
 ConfigUtils and config merging forward (P6-11, 2026-10-17): 9 of the 384 Python tests reach
 them, so these cards can start now, beside Phases 5 and 6. The other cards start as "Cards"
 says.
@@ -62,7 +63,8 @@ mutation testing. What changes in Phase 9:
   `addParams(None)` crash the wheel's process (segmentation fault). The checked ones keep
   their message (`Option`, D4(d)); the crashing ones are `U-` entries, and the port returns a
   deliberate error (the owner's general rule).
-- **Owner items** stop at the owner, labelled `api`, `dependency`, `deviation` or `n/a`. Oracle
+- **Owner items** stop at the owner, labelled `api`, `dependency`, `deviation` or `n/a` (P9-1 to
+  P9-7 decided on 2026-10-23). Oracle
   chunks are reviewed by a verifier agent (the owner's decision of 2026-10-05).
 
 **What Phase 9 needs from Phases 1–8.**
@@ -215,7 +217,10 @@ The existing commands reach most of Phase 9:
 
 ## Owner decisions
 
-| # | Decision | Recommendation |
+**Decided by the owner on 2026-10-23, all seven as recommended.** P9-3: one hand-written
+FFI file, `system_monitor_windows_ffi.rs`, added to the `unsafe` allowlist; no `windows-sys`.
+
+| # | Decision | Recommendation (decided) |
 |---|---|---|
 | P9-1 | **ConfigUtils' public API** (`api`) | **Associated functions on `Config`, named after D4(f)'s `getProcessor` overloads.** `Config::identify_builtin_color_space(src: &Config, builtin: &Config, name) -> Result<&[u8]>` (borrowing from `src`, as upstream returns its name); `Config::identify_interchange_space(src, src_name, builtin, builtin_name) -> Result<(&[u8], &[u8])>` (upstream's two out-parameters, in the order Python returns them); `processor_to_builtin_color_space(src, src_name, builtin_name)` and `processor_from_builtin_color_space(builtin_name, src, src_name)`; the 8 `GetProcessorFromConfigs` as `processor_from_configs`, `processor_from_configs_with_interchange`, `processor_from_configs_to_display_view`, `processor_from_configs_to_display_view_with_interchange`, each with a `_with_contexts` twin taking `&Context` before each config. All return `Result<Arc<Processor>>`. Configs by `&Config`: upstream never checks them for null, and the wheel crashes on `None` (a `U-` entry; the binding returns the error) |
 | P9-2 | **The merging API** (`api`) | (a) `MergeStrategies`, a public enum with upstream's values (`PreferInput` = 0 … `Unspecified`). (b) **`ConfigMergingParameters` is a shared handle**, as upstream's `RcPtr`: `ConfigMergingParameters::new()`; `Clone` shares; `create_editable_copy()` copies; setters take `&self` (a `Mutex` inside); getters return owned bytes (as `CurrentContext`'s do); `to_bytes()` is `operator<<`. Upstream's own tests need it: they add a parameters object to a merger, change it through `getParams(0)`, and merge with the first handle; Python sees the same object (P6-8). The alternative: a plain value the merger copies, and a second, shared type later for the binding. (c) `ConfigMerger` a value: `new()`; `from_file(path) -> Result<Arc<ConfigMerger>>` and `merge_configs(&self) -> Result<Arc<ConfigMerger>>` (upstream's const pointers, like `Config`'s loaders, D4(b)); `create_editable_copy()` a deep copy (parameters and merged configs copied, as upstream's `Impl::operator=`); `add_params(Option<ConfigMergingParameters>)` and `params(i) -> Option<ConfigMergingParameters>` (D4(d): the wheel accepts `None` and returns `None` out of range); `merged_config(i)` and `last_merged_config()` as `Option<Arc<Config>>`; `serialize() -> Result<Vec<u8>>`; search path getters keep `""` out of range. (d) `config_merging_helpers::merge_configs(params, base: Option<&Config>, input: Option<&Config>) -> Result<Config>` and `merge_color_space(params, base, color_space: Option<&ColorSpace>) -> Result<Config>`: `Option` because upstream checks for null with its own message; an editable `Config`, as upstream's `ConfigRcPtr` |
@@ -283,18 +288,18 @@ made, without waiting for other Phase 9 cards.
 | Card | Chunks | Size | Who | Needs | Owner items |
 |---|---|---|---|---|---|
 | `p9-oracle` | O9.1 | 1 | any | now | — (verifier-reviewed) |
-| `p9-config-utils` | 9.1a–9.1c | 3, ~1,390 | A | now | P9-1 |
-| `p9-merge-1` | 9.2a–9.2c | 3, ~1,330 | B | now (`p9-oracle` for its oracle tests) | P9-2 |
+| `p9-config-utils` | 9.1a–9.1c | 3, ~1,390 | A | now | — (P9-1 decided) |
+| `p9-merge-1` | 9.2a–9.2c | 3, ~1,330 | B | now (`p9-oracle` for its oracle tests) | — (P9-2 decided) |
 | `p9-merge-2` | 9.2d–9.2f | 3, ~1,500 | B | `p9-merge-1` | — |
 | `p9-merge-3` | 9.2g–9.2j | 4, ~1,530 | A | `p9-merge-2`, 9.1c | — |
-| `p9-monitors` | 9.3a | 1, ~330 | any | now | P9-3, P9-4, P9-5 |
+| `p9-monitors` | 9.3a | 1, ~330 | any | now | — (P9-3 to P9-5 decided) |
 | `p9-catchup` | 9.4a | 1 (tests) | any | now | — |
-| `p9-dashboard` | 9.5a and the chunks it finds | 1–3 | any | Phases 5, 7 and 8 landed | P9-6, P9-7 |
+| `p9-dashboard` | 9.5a and the chunks it finds | 1–3 | any | Phases 5, 7 and 8 landed | — (P9-6, P9-7 decided) |
 
 8 cards, about 18 chunks.
 
-**Can start now:** `p9-oracle`; `p9-config-utils` and `p9-merge-1` once P9-1 and P9-2 are
-decided; `p9-catchup`.
+**Can start now:** `p9-oracle`, `p9-config-utils`, `p9-merge-1`, `p9-monitors` and
+`p9-catchup` (their owner items are decided).
 
 **Waits for other phases:**
 - **Phase 5:** merge sweeps over configs with grading transforms (`p5-transforms`).
