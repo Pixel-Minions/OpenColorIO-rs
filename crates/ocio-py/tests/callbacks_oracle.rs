@@ -675,14 +675,27 @@ fn d9_script() -> Script {
 }
 
 /// A call on a config from the script's thread while another thread's call on it waits in
-/// its logging function (a semaphore's `acquire`, which releases the GIL; a timer releases
-/// the semaphore after the script's calls began): the wheel's calls run alongside it, the
-/// port's wait for its end, with the GIL released, and give the wheel's answers.
+/// its logging function: the wheel's calls run alongside it, the port's wait for its end, with
+/// the GIL released, and give the wheel's answers. The logging function is
+/// `operator.methodcaller("join", z)`, `z` a `zip` of `range(1)` (first, so that `join`, which
+/// reads `z` whole, stops after one round), `iter(barrier.wait, -1)` and
+/// `iter(sem.acquire, False)`: at the first message the worker meets the script's thread at
+/// the barrier (which the script waits at through `Thread(target=barrier.wait).run()`, whose
+/// result is `None` where `wait`'s is the order of arrival), so the script's calls begin while
+/// the worker is in its callback; it then waits on the semaphore, which a timer releases two
+/// seconds after the script's calls began. The join then refuses the pair `zip` gives (a
+/// TypeError, which ends the validation in the worker).
 fn threads_script() -> Script {
     let mut sc = Script::new();
     let c = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(LOGGING_CONFIG)]);
+    let barrier = sc.call(n("threading.Barrier"), vec![i(2), none(), f(30.0)]);
     let sem = sc.call(n("threading.Semaphore"), vec![i(0)]);
-    sc.call(n("OCIO.SetLoggingFunction"), vec![ra(sem, "acquire")]);
+    let meets = sc.call(n("iter"), vec![ra(barrier, "wait"), i(-1)]);
+    let waits = sc.call(n("iter"), vec![ra(sem, "acquire"), b(false)]);
+    let once = sc.call(n("range"), vec![i(1)]);
+    let both = sc.call(n("zip"), vec![r(once), r(meets), r(waits)]);
+    let logging = sc.call(n("operator.methodcaller"), vec![s("join"), r(both)]);
+    sc.call(n("OCIO.SetLoggingFunction"), vec![r(logging)]);
     let worker = sc.call_kw(
         n("threading.Thread"),
         vec![],
@@ -709,12 +722,20 @@ fn threads_script() -> Script {
         json!({ "setattr": r(timer), "name": "daemon", "value": b(false) }),
         Expect::Value,
     );
+    let meet = sc.call_kw(
+        n("threading.Thread"),
+        vec![],
+        vec![
+            ("target", ra(barrier, "wait")),
+            ("name", s("meet")),
+            ("daemon", b(false)),
+        ],
+        Expect::Value,
+    );
     sc.call(ra(worker, "start"), vec![]);
+    // The worker's first message meets this thread at the barrier: it is in its callback now.
+    sc.call(ra(meet, "run"), vec![]);
     sc.call(ra(timer, "start"), vec![]);
-    let pause = sc.call(n("threading.Event"), vec![]);
-    sc.call(ra(pause, "wait"), vec![f(1.0)]);
-    // The worker waits in its logging function now.
-    sc.call(n("len"), vec![ra(sem, "_cond._waiters")]);
     let names = sc.call(ra(c, "getColorSpaceNames"), vec![]);
     sc.call(n("list"), vec![r(names)]);
     sc.call(ra(c, "getCacheID"), vec![]);
