@@ -30,9 +30,12 @@ use common::app_helpers::{
     EXPOSURE_CONTRAST_GAMMA, Reached, Rng, apply_calls, capture, compare_processor_call, pixels,
     report, text,
 };
+use ocio::transforms::group_transform::GroupTransform;
+use ocio::transforms::lut3d_transform::Lut3DTransform;
+use ocio::transforms::matrix_transform::MatrixTransform;
 use ocio::{
-    BuiltinConfigRegistry, ColorSpaceVisibility, Config, DynamicPropertyType,
-    ExposureContrastTransform, Processor, SearchReferenceSpaceType, Transform,
+    BuiltinConfigRegistry, ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config,
+    DynamicPropertyType, ExposureContrastTransform, Processor, SearchReferenceSpaceType, Transform,
 };
 use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
 use ocio_ops::image_desc::PackedImageDesc;
@@ -54,6 +57,35 @@ const AP0_TO_709: &str = "[2.52168618674388, -1.13413098823972, -0.3875551985041
                           -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, \
                           0, 1]";
 
+/// The same matrix, for the transforms built through the API.
+const AP0_TO_709_VALUES: [f64; 16] = [
+    2.52168618674388,
+    -1.13413098823972,
+    -0.387555198504164,
+    0.0,
+    -0.276479914229922,
+    1.37271908766826,
+    -0.096239173438334,
+    0.0,
+    -0.0153780649660342,
+    -0.152975335867399,
+    1.16835340083343,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0,
+];
+
+/// The AP1 to linear Rec.709 matrix: the wrong one for an sRGB texture space of ACES2065-1.
+const AP1_TO_709: &str = "[1.70505, -0.62179, -0.08326, 0, -0.13026, 1.14080, -0.01055, 0, \
+                          -0.02400, -0.12897, 1.15297, 0, 0, 0, 0, 1]";
+
+/// The AP0 to AP1 matrix.
+const AP0_TO_AP1: &str = "[1.4514393161, -0.2365107469, -0.2149285693, 0, -0.0765537734, \
+                          1.1762296998, -0.0996759264, 0, 0.0083161484, -0.0060324498, \
+                          0.9977163014, 0, 0, 0, 0, 1]";
+
 /// A generated config: a reference space, a data space, and `spaces` (YAML list entries).
 fn generated(roles: &str, spaces: &str) -> String {
     format!(
@@ -66,11 +98,24 @@ fn generated(roles: &str, spaces: &str) -> String {
 /// An sRGB texture space named `name` (with `extra` keys) whose from-reference transform is
 /// the AP0 to Rec.709 matrix then the sRGB curve.
 fn srgb_space(name: &str, extra: &str) -> String {
+    srgb_space_of(name, extra, AP0_TO_709)
+}
+
+/// `srgb_space` with the matrix `matrix`.
+fn srgb_space_of(name: &str, extra: &str, matrix: &str) -> String {
     format!(
         "\n  - !<ColorSpace>\n    name: {name}\n{extra}    from_scene_reference: \
          !<GroupTransform>\n      children:\n        - !<MatrixTransform> {{matrix: \
-         {AP0_TO_709}}}\n        - !<ExponentWithLinearTransform> {{gamma: 2.4, offset: \
+         {matrix}}}\n        - !<ExponentWithLinearTransform> {{gamma: 2.4, offset: \
          0.055, direction: inverse}}\n"
+    )
+}
+
+/// A linear space named `name` whose from-reference transform is the matrix `matrix`.
+fn linear_space_of(name: &str, matrix: &str) -> String {
+    format!(
+        "\n  - !<ColorSpace>\n    name: {name}\n    from_scene_reference: !<MatrixTransform> \
+         {{matrix: {matrix}}}\n"
     )
 }
 
@@ -122,6 +167,45 @@ fn generated_configs() -> Vec<(&'static str, String)> {
                     "{}{}{lin709}",
                     scaled_cg("cg near", "1.003"),
                     scaled_cg("cg far", "1.01")
+                ),
+            ),
+        ),
+        // ACEScg scaled by 1.0048 and by 1.0052, on each side of IdentifyBuiltinColorSpace's
+        // 5e-3 on its test values.
+        (
+            "edge ACEScg",
+            generated(
+                "",
+                &format!(
+                    "{}{}{lin709}",
+                    scaled_cg("cg edge in", "1.0048"),
+                    scaled_cg("cg edge out", "1.0052")
+                ),
+            ),
+        ),
+        // Two sRGB texture spaces that both could match (the first one has AP1's primaries,
+        // the second AP0's), then two linear spaces in the same order: each loop of the
+        // heuristics stops at its first match, and the reference space it finds follows.
+        (
+            "two sRGB",
+            generated(
+                "",
+                &format!(
+                    "{}{}{}",
+                    srgb_space_of("srgb wrong", "", AP1_TO_709),
+                    srgb_space("srgb right", ""),
+                    linear_space_of("acescg", AP0_TO_AP1)
+                ),
+            ),
+        ),
+        (
+            "two linear",
+            generated(
+                "",
+                &format!(
+                    "{}{}",
+                    linear_space_of("lin a", AP1_TO_709),
+                    linear_space_of("lin b", AP0_TO_709)
                 ),
             ),
         ),
@@ -182,12 +266,47 @@ fn generated_configs() -> Vec<(&'static str, String)> {
     ]
 }
 
+/// The port's color space of `Edit::Lut3DSpace`.
+fn lut3d_space() -> ColorSpace {
+    let mut matrix = MatrixTransform::new();
+    matrix.set_matrix(&AP0_TO_709_VALUES);
+    let mut group = GroupTransform::new();
+    group.append_transform(Transform::from(matrix));
+    group.append_transform(Transform::from(Lut3DTransform::new()));
+    let mut cs = ColorSpace::new();
+    cs.set_name("lut lin709");
+    cs.set_transform(
+        Some(&Transform::Group(group)),
+        ColorSpaceDirection::FromReference,
+    )
+    .unwrap();
+    cs
+}
+
+/// The wheel's calls of `Edit::Lut3DSpace` on the config stored as `config`.
+fn lut3d_space_calls(config: &str) -> Vec<Value> {
+    let group = json!({"class": "GroupTransform", "children": [
+        {"class": "MatrixTransform", "calls": [["setMatrix", AP0_TO_709_VALUES]]},
+        {"class": "Lut3DTransform"},
+    ]});
+    vec![
+        json!({"new": "ColorSpace", "args": [{"enum": "REFERENCE_SPACE_SCENE"}], "as": "lut_cs"}),
+        json!({"call": "setName", "on": "lut_cs", "args": ["lut lin709"]}),
+        json!({"call": "setTransform", "on": "lut_cs",
+               "args": [{"transform": group}, {"enum": "COLORSPACE_DIR_FROM_REFERENCE"}]}),
+        json!({"call": "addColorSpace", "on": config, "args": [{"ref": "lut_cs"}]}),
+    ]
+}
+
 /// A change made to a source config after loading it, on both sides.
 #[derive(Clone, Debug)]
 enum Edit {
     Role(&'static str, &'static str),
     Inactive(&'static str),
     AddSearchPath(String),
+    /// A scene color space "lut lin709" whose from-reference transform is a group of the AP0 to
+    /// Rec.709 matrix and a default `Lut3DTransform`, built through the API.
+    Lut3DSpace,
 }
 
 /// Where a config comes from, and the changes made to it.
@@ -220,6 +339,7 @@ impl Source {
                     Edit::Role(role, cs) => config.set_role(role, Some(cs.as_bytes())).unwrap(),
                     Edit::Inactive(list) => config.set_inactive_color_spaces(list),
                     Edit::AddSearchPath(path) => config.add_search_path(path),
+                    Edit::Lut3DSpace => config.add_color_space(&lut3d_space()).unwrap(),
                 }
             }
             Arc::new(config)
@@ -234,15 +354,17 @@ impl Source {
         };
         let mut calls = vec![json!({"call": call, "on": "Config", "args": [arg], "as": name})];
         for edit in &self.edits {
-            calls.push(match edit {
-                Edit::Role(role, cs) => json!({"call": "setRole", "on": name, "args": [role, cs]}),
-                Edit::Inactive(list) => {
-                    json!({"call": "setInactiveColorSpaces", "on": name, "args": [list]})
+            match edit {
+                Edit::Role(role, cs) => {
+                    calls.push(json!({"call": "setRole", "on": name, "args": [role, cs]}));
                 }
+                Edit::Inactive(list) => calls
+                    .push(json!({"call": "setInactiveColorSpaces", "on": name, "args": [list]})),
                 Edit::AddSearchPath(path) => {
-                    json!({"call": "addSearchPath", "on": name, "args": [path]})
+                    calls.push(json!({"call": "addSearchPath", "on": name, "args": [path]}));
                 }
-            });
+                Edit::Lut3DSpace => calls.extend(lut3d_space_calls(name)),
+            }
         }
         calls
     }
@@ -318,6 +440,12 @@ fn cases(src: &Config, builtin: &Config, seed: u64, n: usize) -> Vec<Case> {
         .iter()
         .map(|b| Case::IdentifyBuiltin(b.clone()))
         .collect();
+    // The unnamed source space with ACEScg: the random names may never ask for this pair, which
+    // the configs with two candidates (two sRGB, two linear) tell apart.
+    out.push(Case::IdentifyInterchange(
+        String::new(),
+        "ACEScg".to_string(),
+    ));
     for _ in 0..n {
         out.push(Case::IdentifyInterchange(
             rng.pick(&src_names),
@@ -859,4 +987,32 @@ fn the_heuristics_put_the_caches_back() {
     // The probe tells the caches apart: shared (src, b) and off (off) differ in the wheel.
     assert_eq!(wheel[0], wheel[1]);
     assert_ne!(wheel[0], wheel[2]);
+}
+
+/// A space whose from-reference transform holds a `Lut3DTransform` (built through the API; no
+/// config file has a default one): the heuristics don't pick it as an equivalent (the wheel's
+/// `IdentifyBuiltinColorSpace` of "Linear Rec.709 (sRGB)" raises that it found none).
+#[test]
+fn an_api_built_lut3d_space_matches_the_wheel() {
+    let s = source(
+        "lut3d space",
+        Load::Yaml(
+            "ocio_profile_version: 2\n\nroles:\n  default: ref\n  aces_interchange: ref\n\n\
+             colorspaces:\n  - !<ColorSpace>\n    name: ref\n"
+                .to_string(),
+        ),
+        vec![Edit::Lut3DSpace],
+    );
+    let mut coverage = Coverage::default();
+    let mut failures = Vec::new();
+    check(&s, 0x91a0_3000, 6, &mut coverage, &mut failures);
+    report("config_utils_lut3d_space", &failures);
+    assert!(
+        coverage.messages.iter().any(|m| m.contains(
+            "Heuristics were not able to find an equivalent to the requested color space: \
+             Linear Rec.709 (sRGB)."
+        )),
+        "{:#?}",
+        coverage.messages
+    );
 }

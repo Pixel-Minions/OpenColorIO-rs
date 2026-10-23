@@ -5662,3 +5662,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   the cache off while a guard lives, and the guards restore flags in the order they end, as
   upstream's would without the race (`config_utils.rs`, `SuspendCacheGuard`, in
   `p9-config-utils` 9.1a). Nothing to refuse: no wheel behaviour is defined to compare.
+
+### U-172. The binding's config utilities crash the wheel when a config is None
+
+- **Upstream:** `PyConfig.cpp` binds `Config.IdentifyInterchangeSpace`,
+  `Config.IdentifyBuiltinColorSpace`, `Config.GetProcessorToBuiltinColorSpace`,
+  `Config.GetProcessorFromBuiltinColorSpace` and the 8 overloads of
+  `Config.GetProcessorFromConfigs` with `ConstConfigRcPtr` arguments (and
+  `GetProcessorFromConfigs`' contexts) that accept `None`. pybind11 passes a null pointer, and
+  the functions dereference it without a check: the interpreter dies with a segmentation
+  fault (exit 139). Seen with `Config.IdentifyBuiltinColorSpace(None, builtin, "ACEScg")`,
+  `Config.GetProcessorFromConfigs(None, "a", Config.CreateRaw(), "raw")` and
+  `Config.GetProcessorToBuiltinColorSpace(None, "a", "ACEScg")`.
+- **Who notices:** Python code that passes `None` for a config, typically after a failed
+  lookup.
+- **A fix:** a null check in each binding that raises an exception.
+- **Status:** the Rust API takes `&Config` and `&Context`, so `None` can't reach it. The
+  binding refuses `None` for these arguments with an exception instead of a crash, to be
+  enforced in 6.8a. Not testable through the oracle (it would end the wheel's
+  process).

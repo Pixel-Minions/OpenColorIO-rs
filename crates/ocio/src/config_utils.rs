@@ -969,19 +969,15 @@ pub(crate) fn ref_space_converter(
     // Get a conversion from one builtin interchange to another. The interchange spaces are
     // never empty (identify_interchange_space returns color spaces' names or throws), so
     // upstream's null group, which appendTransform would add, can't happen.
-    let src_builtin_to_dst_builtin =
-        if !src_builtin_interchange.is_empty() && !dst_builtin_interchange.is_empty() {
-            let mut cst = ColorSpaceTransform::new();
-            cst.set_src(src_builtin_interchange);
-            cst.set_dst(dst_builtin_interchange);
-            builtin_config
-                .processor(&Transform::from(cst))?
-                .create_group_transform()?
-        } else {
-            return Err(Exception::new(
-                "getRefSpaceConverter: an interchange space of the built-in config is empty.",
-            ));
-        };
+    (!src_builtin_interchange.is_empty() && !dst_builtin_interchange.is_empty())
+        .then_some(())
+        .expect("identify_interchange_space returns color spaces' names or throws, never empty");
+    let mut cst = ColorSpaceTransform::new();
+    cst.set_src(src_builtin_interchange);
+    cst.set_dst(dst_builtin_interchange);
+    let src_builtin_to_dst_builtin = builtin_config
+        .processor(&Transform::from(cst))?
+        .create_group_transform()?;
 
     // Append to_ref transform from the dstInterchange space.
     let dst_to_ref = transform_for_dir(
