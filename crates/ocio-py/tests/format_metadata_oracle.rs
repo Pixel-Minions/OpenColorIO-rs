@@ -21,7 +21,7 @@
 
 mod common;
 
-use common::script::{Expect, Script, by, compare, fl, i, l, n, none, r, ra, s};
+use common::script::{Expect, Script, by, compare, compare_with, fl, i, l, n, none, r, ra, s};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
@@ -274,10 +274,52 @@ fn matrix_metadata(sc: &mut Script) -> (usize, usize) {
 // The objects the child iterators return are the same while the vector keeps its buffer, new
 // ones once it reallocates, which the wheels' C++ runtimes do at different sizes (MSVC's grows a
 // full vector by half: 1, 2, 3, 4, 6, 9, 13; libstdc++ doubles it: 1, 2, 4, 8, 16). A script
-// keeps every result alive, and the wheel's allocator may put a later buffer at the address of
-// one it freed, where pybind11 then finds the stale object (U-121): so each script reallocates
-// a vector once at most while it holds an object of the old buffer, and allocates nothing
-// after.
+// keeps every result alive, and pybind11 finds an element's object by its address, so a lookup
+// into a buffer allocated after the wheel freed one that held an element with an object may
+// return that stale object, when the allocator put the new element at the freed address (U-121).
+// A reallocation allocates the new buffer before it frees the old one, so `growth_script`, which
+// reallocates once and allocates nothing after, decides every identity. `nested_growth_script`
+// reallocates twice: its later lookups' identity depends on where the allocator puts the
+// buffers ([`Reuse`]).
+
+/// Steps of a script whose object the wheel may find at the address of an element it freed
+/// before: their `same_as` may list the stale object's step (`stale`), depending on where the
+/// wheel's allocator put the buffers (U-121). The test leaves `stale` out of those steps'
+/// `same_as` in the wheel's report, and only where the wheel's own `operator.is_` step
+/// `stale_check` says (`False`) that the vector holding `stale` reallocated before they
+/// allocated their buffers; the port, which never returns a stale object, must give the rest
+/// exactly.
+struct Reuse {
+    stale_check: usize,
+    stale: usize,
+    steps: Vec<usize>,
+}
+
+/// Leaves `reuse.stale` out of the `same_as` of `reuse.steps` in the wheel's report `theirs`
+/// when its step `reuse.stale_check` is `False`; whether it did.
+fn leave_out_stale(theirs: &mut serde_json::Value, reuse: &Reuse, script: usize) -> bool {
+    let steps = theirs["steps"].as_array_mut().unwrap();
+    let check = &steps[reuse.stale_check]["value"];
+    assert_eq!(check["type"], "builtins.bool", "script {script}: {check}");
+    if check["bool"].as_bool().unwrap() {
+        return false;
+    }
+    let stale = &steps[reuse.stale]["value"];
+    assert_eq!(
+        stale["type"], "PyOpenColorIO.PyOpenColorIO.FormatMetadata",
+        "script {script}: {stale}"
+    );
+    for &j in &reuse.steps {
+        let step = &mut steps[j];
+        assert!(
+            step["same_as"].is_array(),
+            "script {script} step {j}: {step}"
+        );
+        let same_as = step["same_as"].as_array_mut().unwrap();
+        same_as.retain(|k| k.as_u64() != Some(reuse.stale as u64));
+    }
+    true
+}
 
 /// The root's vector of `count` children given one more: its first child's object before and
 /// after.
@@ -299,7 +341,12 @@ fn growth_script(count: usize) -> Script {
 /// A child's vector of `count` children given one more; then (with 4 children at the root,
 /// a size at which both runtimes reallocate) the root's growth, which copies the child and
 /// its vector.
-fn nested_growth_script(count: usize) -> Script {
+///
+/// Where the child's growth reallocated, it freed the buffer of `g0`, and the root's growth
+/// allocates the buffers of `c3c` and `g0c` after that: the wheel may find either at `g0`'s
+/// address. (`g0b` and `c3` go stale only once those are allocated, and nothing is looked up in
+/// a buffer allocated later.)
+fn nested_growth_script(count: usize) -> (Script, Reuse) {
     let mut sc = Script::new();
     let (_, md) = matrix_metadata(&mut sc);
     add_children(&mut sc, md, "C", 4);
@@ -308,7 +355,7 @@ fn nested_growth_script(count: usize) -> Script {
     let g0 = child(&mut sc, c3, 0);
     add_children(&mut sc, c3, "H", 1);
     let g0b = child(&mut sc, c3, 0);
-    sc.call(n("operator.is_"), vec![r(g0), r(g0b)]);
+    let stale_check = sc.call(n("operator.is_"), vec![r(g0), r(g0b)]);
     let c3b = child(&mut sc, md, 3);
     sc.call(n("operator.is_"), vec![r(c3), r(c3b)]);
     add_children(&mut sc, md, "D", 1);
@@ -316,9 +363,14 @@ fn nested_growth_script(count: usize) -> Script {
     sc.call(n("operator.is_"), vec![r(c3c), r(c3)]);
     let g0c = child(&mut sc, c3c, 0);
     sc.call(n("operator.is_"), vec![r(g0c), r(g0b)]);
-    sc.eval(r(g0c), &["getElementName", "__repr__"]);
+    let g0c_again = sc.eval(r(g0c), &["getElementName", "__repr__"]);
     sc.repr(r(md));
-    sc
+    let reuse = Reuse {
+        stale_check,
+        stale: g0,
+        steps: vec![c3c, g0c, g0c_again],
+    };
+    (sc, reuse)
 }
 
 /// A copy has its own metadata; a group's child is the transform given.
@@ -455,11 +507,32 @@ fn format_metadata_behaves_as_the_wheels() {
     ]);
 }
 
+/// The wheel's lookups after a second reallocation may return a stale object, depending on its
+/// allocator (U-121; on Windows, 2026-10-22, `g0c` was `g0` in 1 of 20 live runs of this test
+/// for `nested_growth_script(4)` and in 8 for `(6)`): those identities are compared up to that
+/// stale object, the rest exactly.
 #[test]
 fn child_objects_change_where_the_wheels_vectors_reallocate() {
     let mut scripts: Vec<Script> = (1..=13).map(growth_script).collect();
-    scripts.extend((1..=9).map(nested_growth_script));
-    compare(&scripts);
+    let mut reuses = Vec::new();
+    for count in 1..=9 {
+        let (sc, reuse) = nested_growth_script(count);
+        reuses.push((scripts.len(), reuse));
+        scripts.push(sc);
+    }
+    let json: Vec<_> = scripts.iter().map(Script::json).collect();
+    let mut theirs = common::wheel(&json);
+    let stale: Vec<usize> = reuses
+        .iter()
+        .filter(|(k, reuse)| leave_out_stale(&mut theirs[*k], reuse, *k))
+        .map(|(k, _)| *k)
+        .collect();
+    // The child's growth reallocates at some counts and not at others, on both runtimes.
+    assert!(
+        !stale.is_empty() && stale.len() < reuses.len(),
+        "the scripts where g0 went stale: {stale:?}"
+    );
+    compare_with(&scripts, &theirs);
 }
 
 /// Runs `code` against the port's module, in globals of its own.

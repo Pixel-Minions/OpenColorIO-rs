@@ -4873,7 +4873,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   wheel's reference dangles the port raises RuntimeError "the FormatMetadata element was freed
   (its transform freed, or the vector of child elements holding it reallocated, cleared or
   shortened), and the wheel reads its memory anyway (docs/improvements.md, U-121)"; a lookup
-  never returns a stale object. In `p6-objects` (6.3d,
+  never returns a stale object, but a new one. The wheel's answer to a lookup into a buffer
+  allocated after it freed one that held an element with a live Python object depends on where
+  its allocator puts the new buffer, and isn't deterministic: a child's vector reallocated while
+  its first child had an object, then the parent's grown (`nested_growth_script` in
+  `format_metadata_oracle.rs`), the copied first child is that stale object in some runs and a
+  new one in the others (Windows, 2026-10-22: in 1 and 8 of 20 runs of the test for 4 and 6
+  children; one failure of the test before, `same_as` [18] for 9). The test compares those
+  lookups' identities up to the stale object, the rest exactly. A lookup into a buffer
+  allocated before such a free (a reallocation allocates the new buffer before it frees the
+  old one) is deterministic. In `p6-objects` (6.3d,
   `crates/ocio-py/src/py_format_metadata.rs`, `MetadataHeap`); `format_metadata_oracle.rs`.
 
 ### U-122. A context collecting the variables it uses into itself
