@@ -11,23 +11,58 @@
 //! queries must be the wheel's, and so must the shader the extraction writes into a
 //! `GpuShaderDesc` of each language: its text, cache ID and names, its textures (ACES 2.0's
 //! tables, and the 1D LUTs' since WP 2.1h) and 3D textures (the 3D LUTs) with their values'
-//! bits, and its uniforms and dynamic properties, of which these classes have none. Or both
-//! must raise the same message at the same stage.
+//! bits, and the number of its uniforms and dynamic properties. Or both must raise the same
+//! message at the same stage. OCIO's log must be the wheel's too (the OSL writer warns of each
+//! dynamic property it replaces by a local variable).
+//!
+//! The ExposureContrast and grading transforms' uniforms are compared row by row (name, type,
+//! buffer offset, value) by [`check_uniforms`], through `dynamic_apply`, for their dynamic
+//! cases (`common::api_grading_cases`) at the same levels and in the same languages: after
+//! the extraction, and after each set of a dynamic property taken from the description (one
+//! value the setter refuses among them, which the wheel must refuse with the same message).
 
 mod common;
 
 use common::api::{Calls, LEVELS, port_transform};
 use common::api_cases::{self, Cases};
-use ocio::{Config, Exception, TransformDirection};
-use ocio_gpu::gpu_shader::{TextureDimensions, TextureType};
+use common::api_grading_cases::{self, DynCases, DynSet};
+use common::grading_specs::{self, Object};
+use ocio::{Config, DynamicPropertyType, Exception, TransformDirection};
+use ocio_gpu::gpu_shader::{TextureDimensions, TextureType, UniformData};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
+use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
+use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::Direction;
 use ocio_testkit::gpu::{
     self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings, Texture,
 };
+use ocio_testkit::oracle::BatchCall;
 use serde_json::{Value, json};
+use std::sync::{Arc, Mutex, PoisonError};
+
+/// The tests of this file swap the logging function: one at a time.
+static SERIAL: Mutex<()> = Mutex::new(());
+
+/// What `f` logs on the port's side, each message as the oracle reports the wheel's.
+fn capture<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
+    let messages = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&messages);
+    set_logging_function(Some(Arc::new(move |m: &[u8]| {
+        sink.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(String::from_utf8(m.to_vec()).expect("UTF-8"));
+    })))
+    .expect("a logging function");
+    let out = f();
+    reset_to_default_logging_function();
+    let log = messages
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    (out, log)
+}
 
 /// A version 1 config with one color space, for the classes that build other ops there.
 const V1_CONFIG: &str = "ocio_profile_version: 1
@@ -47,6 +82,9 @@ struct Class {
     cases: Cases,
     /// A version 1 config instead of the raw config.
     v1: bool,
+    /// A class with dynamic properties, whose uniforms are counted here and compared, with
+    /// their values after sets, by [`check_uniforms`].
+    dynamic: bool,
 }
 
 impl Class {
@@ -55,6 +93,14 @@ impl Class {
             name,
             cases,
             v1: false,
+            dynamic: false,
+        }
+    }
+
+    fn dynamic(name: &'static str, cases: Cases) -> Class {
+        Class {
+            dynamic: true,
+            ..Class::new(name, cases)
         }
     }
 }
@@ -277,6 +323,7 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
 
 /// Runs every job of `class` against the wheel; panics with a report if any differs.
 fn check(class: &Class) {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
     let jobs = jobs(class);
     let mut failures = Vec::new();
     let (mut compared, mut refusals) = (0, 0);
@@ -294,18 +341,27 @@ fn check(class: &Class) {
             );
             let reply =
                 GpuShaderReply::from_response(response.unwrap_or_else(|e| panic!("{what}: {e}")));
-            if !reply.log().is_empty() {
-                failures.push(format!("{what}: OCIO logged {:?}", reply.log()));
-            }
+            // The OSL writer warns of each dynamic property it replaces by a local variable.
             let wheel = wheel(&reply);
-            let port = port(class, job, case.params());
+            let (port, port_log) = capture(|| port(class, job, case.params()));
+            if reply.log() != port_log {
+                failures.push(format!(
+                    "{what}: logs
+  wheel {:?}
+  port  {port_log:?}",
+                    reply.log()
+                ));
+            }
             if wheel != port {
                 failures.push(format!("{what}\n  wheel {wheel:?}\n  port  {port:?}"));
                 continue;
             }
             match wheel {
                 Outcome::Gpu { shader: Ok(s), .. } => {
-                    assert!(s["uniforms"] == 0, "{what}: compare the uniforms too: {s}");
+                    assert!(
+                        class.dynamic || s["uniforms"] == 0,
+                        "{what}: compare the uniforms too: {s}"
+                    );
                     compared += 1;
                 }
                 _ => refusals += 1,
@@ -410,4 +466,363 @@ fn fixed_function_transform_shaders_match_the_wheel() {
         "FixedFunctionTransform",
         api_cases::fixed_function(),
     ));
+}
+
+/// A dynamic property type's name in PyOpenColorIO.
+fn property_name(ty: DynamicPropertyType) -> &'static str {
+    match ty {
+        DynamicPropertyType::Exposure => "DYNAMIC_PROPERTY_EXPOSURE",
+        DynamicPropertyType::Contrast => "DYNAMIC_PROPERTY_CONTRAST",
+        DynamicPropertyType::Gamma => "DYNAMIC_PROPERTY_GAMMA",
+        DynamicPropertyType::GradingPrimary => "DYNAMIC_PROPERTY_GRADING_PRIMARY",
+        DynamicPropertyType::GradingRgbCurve => "DYNAMIC_PROPERTY_GRADING_RGBCURVE",
+        DynamicPropertyType::GradingTone => "DYNAMIC_PROPERTY_GRADING_TONE",
+        DynamicPropertyType::GradingHueCurve => "DYNAMIC_PROPERTY_GRADING_HUECURVE",
+    }
+}
+
+/// The property types `sets` names, each once, in order.
+fn property_types(sets: &[DynSet]) -> Vec<DynamicPropertyType> {
+    let mut types = Vec::new();
+    for set in sets {
+        if !types.contains(&set.ty) {
+            types.push(set.ty);
+        }
+    }
+    types
+}
+
+/// The port's uniforms, each `[name, type, buffer offset, value]` as `gpu_shader` writes the
+/// wheel's: a double, a float or a float of a vector by its bits.
+fn port_uniform_rows(desc: &GpuShaderDesc) -> Vec<Value> {
+    let text = |b: &[u8]| String::from_utf8(b.to_vec()).expect("UTF-8");
+    let bits = |v: &[f32]| v.iter().map(|f| f.to_bits()).collect::<Vec<u32>>();
+    desc.uniforms()
+        .iter()
+        .map(|u| {
+            let (kind, value) = match u.data() {
+                UniformData::Double(get) => ("UNIFORM_DOUBLE", json!(get().to_bits())),
+                UniformData::Bool(get) => ("UNIFORM_BOOL", json!(get())),
+                UniformData::Float3(get) => ("UNIFORM_FLOAT3", json!(bits(&get()))),
+                UniformData::VectorFloat { size, values } => (
+                    "UNIFORM_VECTOR_FLOAT",
+                    json!(bits(&values()[..size() as usize])),
+                ),
+                UniformData::VectorInt { size, values } => (
+                    "UNIFORM_VECTOR_INT",
+                    json!(values()[..size() as usize].to_vec()),
+                ),
+            };
+            json!([text(u.name()), kind, u.buffer_offset(), value])
+        })
+        .collect()
+}
+
+/// The wheel's uniforms of a `dynamic_apply` step, as [`port_uniform_rows`] writes the port's.
+fn wheel_uniform_rows(step: &Value) -> Option<Vec<Value>> {
+    let rows = step["result"].as_array()?;
+    Some(
+        rows.iter()
+            .map(|u| json!([u["name"], u["type"], u["buffer_offset"], u["value"]]))
+            .collect(),
+    )
+}
+
+/// Sets the port's property to a set's value, built from its spec as the oracle builds it; or
+/// where that raised, as `dynamic_apply` names it ("value" or "set"), and the error.
+fn port_set(prop: &DynamicPropertyRcPtr, set: &DynSet) -> Result<(), (&'static str, Exception)> {
+    let on_set = |e: Exception| ("set", e);
+    if set.value.get("f64").is_some() {
+        prop.as_double()
+            .map_err(on_set)?
+            .set_value(grading_specs::f64_of(&set.value));
+        return Ok(());
+    }
+    let value = grading_specs::object(&set.value["object"]).map_err(|e| ("value", e))?;
+    let set = |r: Result<(), Exception>| r.map_err(on_set);
+    match value {
+        Object::Primary(v, _) => set(prop.as_grading_primary().and_then(|p| p.set_value(&v))),
+        Object::Tone(v) => set(prop.as_grading_tone().and_then(|p| p.set_value(&v))),
+        Object::RgbCurve(v) => set(prop.as_grading_rgb_curve().and_then(|p| p.set_value(&v))),
+        Object::HueCurve(v) => set(prop.as_grading_hue_curve().and_then(|p| p.set_value(&v))),
+        other => panic!("not a dynamic property's value: {other:?}"),
+    }
+}
+
+/// What [`check_uniforms`] compared.
+#[derive(Default, Debug)]
+struct UniformCounts {
+    reads: usize,
+    expected_reads: usize,
+    refused_sets: usize,
+    missing: usize,
+    refusals: usize,
+}
+
+/// One extraction of [`check_uniforms`] against the wheel's reply: the uniforms read after
+/// the extraction and after each set, every row (name, type, buffer offset, value).
+fn compare_uniforms(
+    class: &Class,
+    job: &Job,
+    sets: &[DynSet],
+    result: &Value,
+    counts: &mut UniformCounts,
+    failures: &mut Vec<String>,
+) {
+    let case = &class.cases.cases[job.case];
+    let what = format!(
+        "{} \"{}\" {:?} {} {:?}",
+        class.name,
+        case.label(),
+        job.dir,
+        job.level.map_or("getDefaultGPUProcessor", |l| LEVELS[l].0),
+        GpuLanguage::ALL[job.language]
+    );
+    let (port, port_log) = capture(|| {
+        let transform =
+            port_transform(&case.params().spec(job.dir)).map_err(|e| ("transform", e))?;
+        let processor = Config::create_raw()
+            .unwrap()
+            .processor_in_direction(&transform, TransformDirection::Forward)
+            .map_err(|e| ("processor", e))?;
+        let gpu = match job.level {
+            None => processor.default_gpu_processor(),
+            Some(level) => processor.optimized_gpu_processor(LEVELS[level].1),
+        }
+        .map_err(|e| ("gpu_processor", e))?;
+        let mut desc = GpuShaderDesc::new(GpuLanguage::ALL[job.language]);
+        gpu.extract_gpu_shader_info(&mut desc)
+            .map_err(|e| ("extract", e))?;
+        Ok::<_, (&str, Exception)>(desc)
+    });
+    // The OSL writer warns of each dynamic property it replaces by a local variable.
+    if result["log"] != json!(port_log) {
+        failures.push(format!(
+            "{what}: logs
+  wheel {}
+  port  {port_log:?}",
+            result["log"]
+        ));
+    }
+    let desc = match (result.get("exception"), port) {
+        (None, Ok(desc)) => desc,
+        (Some(e), Err((stage, p))) if result["stage"] == stage && e["message"] == p.message() => {
+            counts.refusals += 1;
+            return;
+        }
+        (_, port) => {
+            failures.push(format!("{what}: wheel {result}, port {:?}", port.err()));
+            return;
+        }
+    };
+    counts.expected_reads += sets.len() + 1;
+    let steps = result["steps"].as_array().expect("steps");
+    let mut k = 0;
+    let mut props = Vec::new();
+    for ty in property_types(sets) {
+        let step = &steps[k];
+        k += 1;
+        match (desc.dynamic_property_by_type(ty), step.get("exception")) {
+            (Ok(p), None) => props.push((ty, Some(p))),
+            (Err(p), Some(e)) if e["message"] == p.message() => {
+                counts.missing += 1;
+                props.push((ty, None));
+            }
+            (port, _) => failures.push(format!(
+                "{what}: get {ty:?}: wheel {step}, port {:?}",
+                port.err()
+            )),
+        }
+    }
+    let mut read = |k: usize, failures: &mut Vec<String>| {
+        let port = port_uniform_rows(&desc);
+        match wheel_uniform_rows(&steps[k]) {
+            Some(wheel) if wheel == port => counts.reads += 1,
+            wheel => failures.push(format!(
+                "{what}: step {k}\n  wheel {wheel:?}\n  port  {port:?}"
+            )),
+        }
+    };
+    read(k, failures);
+    k += 1;
+    for set in sets {
+        let step = &steps[k];
+        match props.iter().find(|(t, _)| *t == set.ty) {
+            Some((_, Some(prop))) => match (step.get("exception"), capture(|| port_set(prop, set)))
+            {
+                (_, (_, log)) if step["log"] != json!(log) => {
+                    failures.push(format!("{what}: set logs: wheel {step}, port {log:?}"));
+                }
+                (wheel, (port, _)) => match (wheel, port) {
+                    (None, Ok(())) => {}
+                    (Some(e), Err((stage, p)))
+                        if e["message"] == p.message() && step["stage"] == stage =>
+                    {
+                        counts.refused_sets += 1;
+                    }
+                    (_, port) => failures.push(format!("{what}: set: wheel {step}, port {port:?}")),
+                },
+            },
+            Some((_, None)) => {
+                if step["result"]["unbound"] != true {
+                    failures.push(format!("{what}: set of a property not taken: wheel {step}"));
+                }
+            }
+            None => return,
+        }
+        read(k + 1, failures);
+        k += 2;
+    }
+}
+
+/// The uniforms of the dynamic cases of `cases`, through `dynamic_apply`, in both directions, at
+/// every level and in every language: the properties taken from the GPU description after the
+/// extraction, the uniforms read, then each set followed by a read. Every uniform's name,
+/// type, buffer offset and value must be the wheel's after every step, and a set the port
+/// refuses must be refused by the wheel with the same message.
+fn check_uniforms(name: &'static str, cases: DynCases) {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let (kept, sets): (Vec<_>, Vec<_>) = cases
+        .cases
+        .cases
+        .into_iter()
+        .zip(cases.sets)
+        .filter(|(_, sets)| !sets.is_empty())
+        .unzip();
+    assert!(!kept.is_empty(), "{name}: no dynamic case");
+    let class = Class::new(
+        name,
+        Cases {
+            cases: kept,
+            bases: Vec::new(),
+        },
+    );
+    let jobs = jobs(&class);
+    let mut counts = UniformCounts::default();
+    let mut failures = Vec::new();
+    for batch in jobs.chunks(300) {
+        let calls: Vec<BatchCall<'_>> = batch
+            .iter()
+            .map(|job| {
+                let s = &sets[job.case];
+                let mut steps: Vec<Value> = property_types(s)
+                    .into_iter()
+                    .map(|ty| json!({"get": property_name(ty), "from": "gpu", "as": property_name(ty)}))
+                    .collect();
+                steps.push(json!({"uniforms": true}));
+                for set in s {
+                    steps.push(json!({"set": property_name(set.ty), "value": set.value}));
+                    steps.push(json!({"uniforms": true}));
+                }
+                let mut gpu = json!({"shader": {"language": oracle_gpu::GpuLanguage::ALL[job.language].oracle_name()}});
+                if let Some(level) = job.level {
+                    gpu["optimization"] = json!(LEVELS[level].0);
+                }
+                BatchCall {
+                    cmd: "dynamic_apply",
+                    args: json!({
+                        "transform": job.request.processor["transform"],
+                        "gpu": gpu,
+                        "steps": steps,
+                    }),
+                    blobs: Vec::new(),
+                }
+            })
+            .collect();
+        for (job, response) in batch.iter().zip(Oracle::get().batch(&calls, true)) {
+            let response = response.unwrap_or_else(|e| panic!("{name}: {e}"));
+            compare_uniforms(
+                &class,
+                job,
+                &sets[job.case],
+                &response.result,
+                &mut counts,
+                &mut failures,
+            );
+        }
+    }
+    println!("{name}: {} extractions: {counts:?}", jobs.len());
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures[..failures.len().min(10)].join("\n")
+    );
+    // Every extraction both made reads the uniforms once, then once after each set.
+    assert!(counts.reads > 0, "{name}: {counts:?}");
+    assert_eq!(
+        counts.reads, counts.expected_reads,
+        "{name}: every read compared"
+    );
+}
+
+#[test]
+fn exposure_contrast_transform_shaders_match_the_wheel() {
+    check(&Class::dynamic(
+        "ExposureContrastTransform",
+        api_grading_cases::exposure_contrast().cases,
+    ));
+}
+
+#[test]
+fn exposure_contrast_uniforms_follow_their_sets_as_in_the_wheel() {
+    check_uniforms(
+        "ExposureContrastTransform",
+        api_grading_cases::exposure_contrast(),
+    );
+}
+
+#[test]
+fn grading_primary_transform_shaders_match_the_wheel() {
+    check(&Class::dynamic(
+        "GradingPrimaryTransform",
+        api_grading_cases::primary().cases,
+    ));
+}
+
+#[test]
+fn grading_primary_uniforms_follow_their_sets_as_in_the_wheel() {
+    check_uniforms("GradingPrimaryTransform", api_grading_cases::primary());
+}
+
+#[test]
+fn grading_tone_transform_shaders_match_the_wheel() {
+    check(&Class::dynamic(
+        "GradingToneTransform",
+        api_grading_cases::tone().cases,
+    ));
+}
+
+#[test]
+fn grading_tone_uniforms_follow_their_sets_as_in_the_wheel() {
+    check_uniforms("GradingToneTransform", api_grading_cases::tone());
+}
+
+#[test]
+fn grading_hue_curve_transform_shaders_match_the_wheel() {
+    check(&Class::dynamic(
+        "GradingHueCurveTransform",
+        api_grading_cases::hue_curve().cases,
+    ));
+}
+
+#[test]
+fn grading_hue_curve_uniforms_follow_their_sets_as_in_the_wheel() {
+    check_uniforms("GradingHueCurveTransform", api_grading_cases::hue_curve());
+}
+
+#[test]
+fn grading_rgb_curve_transform_shaders_match_the_wheel() {
+    check(&Class::dynamic(
+        "GradingRGBCurveTransform",
+        api_cases::rgb_curve_cases(),
+    ));
+}
+
+#[test]
+fn grading_rgb_curve_uniforms_follow_their_sets_as_in_the_wheel() {
+    check_uniforms(
+        "GradingRGBCurveTransform",
+        api_grading_cases::rgb_curve_dynamic(),
+    );
 }
