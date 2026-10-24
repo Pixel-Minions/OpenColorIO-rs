@@ -1344,20 +1344,6 @@ def manager_two_threads():
     return two_threads(manager, lambda m: m.getSelectedMixingEncodingIdx(),
                        lambda m, c: m.getProcessor('raw', 'd', 'v'))
 
-def menu_logs():
-    cfg = OCIO.Config.CreateRaw()
-    count[0] += 1
-    # A role naming no color space: the config doesn't validate, which the menu logs.
-    cfg.setRole('scene_linear', 'missing_%d_%d' % (RUN, count[0]))
-    params = OCIO.ColorSpaceMenuParameters(cfg)
-    params.setAppCategories('categories from the test')
-    seen = []
-    OCIO.SetLoggingFunction(lambda message: seen.append(outcome(params.getAppCategories)))
-    try:
-        done = outcome(lambda: type(OCIO.ColorSpaceMenuHelper(params)).__name__)
-    finally:
-        OCIO.ResetToDefaultLoggingFunction()
-    return done, seen
 ";
 
 /// The globals [`HELPER_CALLBACKS`] runs in: the module and `RUN` (a number of this call's own).
@@ -1450,31 +1436,6 @@ fn a_callback_reads_the_manager_that_makes_a_processor() {
                 &got,
                 "(('ok', 'Processor'), [('ok', True)], ('ok', 1), False)",
             );
-        });
-    });
-}
-
-/// A menu of a config that doesn't validate logs a warning (ColorSpaceHelpers.cpp:385-395 @ v2.5.2),
-/// and the logging function reads the menu's parameters: the port's parameters aren't locked
-/// while the library makes the menu.
-#[test]
-fn a_logging_function_reads_the_parameters_of_a_menu_being_made() {
-    guarded(|| {
-        start();
-        Python::attach(|py| {
-            let globals = helper_globals(py);
-            let got = eval_in(&globals, c"menu_logs()");
-            let (done, seen) = (got.get_item(0).unwrap(), got.get_item(1).unwrap());
-            assert_py_eq(&globals, &done, "('ok', 'ColorSpaceMenuHelper')");
-            // Other tests of this process may log meanwhile: every message reads the same.
-            assert!(seen.len().unwrap() > 0);
-            for read in seen.try_iter().unwrap() {
-                assert_py_eq(
-                    &globals,
-                    &read.unwrap(),
-                    "('ok', 'categories from the test')",
-                );
-            }
         });
     });
 }
@@ -1872,48 +1833,116 @@ fn load_calls(sc: &mut Script, px: usize, init: Value) {
 }
 
 /// A pipeline's processor loads its linear CC's LUT through the config's proxy, whose loader
-/// sets the pipeline's looks override (to the path it loads): the wheel's call works on the
-/// pipeline the loader changes, and so does the port's (its lock isn't held while the library
-/// builds the processor). The looks override isn't enabled, so the processor is the same.
+/// changes the pipeline (its looks override, set to the path it loads) or one of its transforms
+/// in place (the source of its display view transform's copy): the wheel's call reads the
+/// pipeline again after the loader (LegacyViewingPipeline.cpp:220-330), and makes the
+/// processor; the port's raises D-12's error, and the change stands, as in the wheel.
 #[test]
-fn a_lut_loader_changes_the_pipeline_that_makes_a_processor() {
-    let mut sc = Script::new();
-    let px = proxy_of(&mut sc, &PROXY_CONFIG.replace("SRC", "lut_pipeline.spi1d"));
-    let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
-    let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
-    load_calls(&mut sc, px, ra(vp, "setLooksOverride"));
-    let dvt = sc.call_kw(
-        n("OCIO.DisplayViewTransform"),
-        vec![],
-        vec![("src", s("raw")), ("display", s("d")), ("view", s("v"))],
-        Expect::Value,
-    );
-    sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
-    let ft = sc.call(n("OCIO.FileTransform"), vec![s("lut_pipeline.spi1d")]);
-    sc.call(ra(vp, "setLinearCC"), vec![r(ft)]);
-    sc.eval(r(vp), &PIPELINE_GETTERS);
-    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
-    sc.unrepr(p);
-    sc.call(ra(p, "getCacheID"), vec![]);
-    sc.eval(r(vp), &PIPELINE_GETTERS);
-    guarded(move || run(&[sc]));
+fn a_lut_loader_that_changes_the_pipeline_is_d12() {
+    start();
+    for (k, change) in ["looks", "transform"].into_iter().enumerate() {
+        let mut sc = Script::new();
+        let lut = format!("lut_pipeline_{k}.spi1d");
+        let px = proxy_of(&mut sc, &PROXY_CONFIG.replace("SRC", &lut));
+        let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
+        let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+        let dvt = sc.call_kw(
+            n("OCIO.DisplayViewTransform"),
+            vec![],
+            vec![("src", s("raw")), ("display", s("d")), ("view", s("v"))],
+            Expect::Value,
+        );
+        sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+        let held = sc.call(ra(vp, "getDisplayViewTransform"), vec![]);
+        let init = match change {
+            "looks" => ra(vp, "setLooksOverride"),
+            _ => ra(held, "setSrc"),
+        };
+        load_calls(&mut sc, px, init);
+        let ft = sc.call(n("OCIO.FileTransform"), vec![s(&lut)]);
+        sc.call(ra(vp, "setLinearCC"), vec![r(ft)]);
+        sc.eval(r(vp), &PIPELINE_GETTERS);
+        let made = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+        sc.eval(r(vp), &PIPELINE_GETTERS);
+        sc.eval(r(held), &["getSrc"]);
+        let json = sc.json();
+        let theirs = common::wheel(std::slice::from_ref(&json)).remove(0);
+        let ours = guarded_port(json);
+        let (theirs, ours) = (
+            theirs["steps"].as_array().unwrap(),
+            ours["steps"].as_array().unwrap(),
+        );
+        assert_eq!(theirs.len(), sc.steps.len());
+        assert_eq!(ours.len(), sc.steps.len());
+        for (k, (t, o)) in theirs.iter().zip(ours).enumerate() {
+            if k == made {
+                assert!(t.get("value").is_some(), "{change}: {t}");
+                assert_eq!(
+                    o["raised"]["type"], "builtins.RuntimeError",
+                    "{change}: {o}"
+                );
+                let message =
+                    String::from_utf8(ocio_testkit::oracle_values::bytes(&o["raised"]["message"]))
+                        .unwrap();
+                assert_eq!(
+                    message,
+                    "LegacyViewingPipeline: a callback changed the pipeline while the library \
+                     made its processor, which OCIO 2.5.2 reads again after that callback and \
+                     the port can't follow (docs/deviations.md, D-12)"
+                );
+            } else {
+                assert!(t.get("value").is_some(), "{change}, step {k}: {t}");
+                assert_eq!(t, o, "{change}, step {k}");
+            }
+        }
+    }
 }
 
-/// As [`a_lut_loader_changes_the_pipeline_that_makes_a_processor`], for a mixing manager
-/// whose color picking role's color space reads the LUT, and a loader that selects a mixing
-/// space by the path it loads (which isn't one: the loader raises, and so does the call).
+/// The port's report of `script`, run on a thread of its own ([`guarded`]).
+fn guarded_port(script: Value) -> Value {
+    let (tx, rx) = std::sync::mpsc::channel();
+    guarded(move || {
+        let _ = tx.send(common::port(&script));
+    });
+    rx.recv().unwrap()
+}
+
+/// As [`a_lut_loader_that_changes_the_pipeline_is_d12`], for a mixing manager whose color
+/// picking role's color space reads the LUT: a loader that selects the mixing encoding named by
+/// the path it loads (`HSV`), whose processor the wheel makes in that encoding (it reads the
+/// encoding after the loader, MixingHelpers.cpp:338), one that changes the config's
+/// description, and one that selects a mixing space by the path (which isn't one: the loader
+/// raises, and so does the call). The port's manager is read again after the loader too.
 #[test]
-fn a_lut_loader_uses_the_manager_that_makes_a_processor() {
+fn a_lut_loader_changes_the_manager_that_makes_a_processor() {
     let mut sc = Script::new();
-    let config = PROXY_CONFIG
-        .replace("SRC", "lut_mixing.spi1d")
-        .replace("scene_linear: raw", "scene_linear: raw, color_picking: lut");
-    let px = proxy_of(&mut sc, &config);
-    let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
-    let m = sc.call(n("OCIO.MixingColorSpaceManager"), vec![r(cfg)]);
-    load_calls(&mut sc, px, ra(m, "setSelectedMixingSpace"));
-    sc.eval(r(m), &MIXING_GETTERS);
-    sc.raises(ra(m, "getProcessor"), vec![s("raw"), s("d"), s("v")]);
-    sc.eval(r(m), &MIXING_GETTERS);
+    for (src, select, expect) in [
+        ("HSV", "setSelectedMixingEncoding", Expect::Value),
+        ("lut_mixing_2.spi1d", "setDescription", Expect::Value),
+        ("lut_mixing.spi1d", "setSelectedMixingSpace", Expect::Raised),
+    ] {
+        let config = PROXY_CONFIG
+            .replace("SRC", src)
+            .replace("scene_linear: raw", "scene_linear: raw, color_picking: lut");
+        let px = proxy_of(&mut sc, &config);
+        let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
+        let m = sc.call(n("OCIO.MixingColorSpaceManager"), vec![r(cfg)]);
+        let init = match select {
+            "setDescription" => ra(cfg, select),
+            _ => ra(m, select),
+        };
+        load_calls(&mut sc, px, init);
+        sc.eval(r(m), &MIXING_GETTERS);
+        let p = sc.step(
+            serde_json::json!({ "call": ra(m, "getProcessor"), "args": [s("raw"), s("d"), s("v")] }),
+            expect,
+        );
+        if expect == Expect::Value {
+            sc.unrepr(p);
+            sc.call(ra(p, "getCacheID"), vec![]);
+        }
+        sc.eval(r(m), &MIXING_GETTERS);
+        sc.call(ra(cfg, "getDescription"), vec![]);
+    }
     guarded(move || run(&[sc]));
 }

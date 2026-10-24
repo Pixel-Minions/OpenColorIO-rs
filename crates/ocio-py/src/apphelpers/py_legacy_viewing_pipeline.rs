@@ -27,6 +27,8 @@ use crate::py_transform::{
     string_out, transform_out, validate_ocio, with,
 };
 use crate::shared::{Shared, construct};
+
+type PipelineRc = Shared<PipelineNode>;
 use crate::{method_def, q, this_shared};
 
 const PIPELINE: &str = q!("LegacyViewingPipeline");
@@ -116,6 +118,46 @@ impl PipelineNode {
         }
         Ok(Ok(()))
     }
+}
+
+/// What the pipeline `rc` is made of, as counts of the changes Python made: its own (its
+/// setters) and its transforms', at every level (a group's children, the curves a curve
+/// transform's `getValue` gave Python), each by its key. Equal states: Python changed nothing
+/// (as the config's `state`, `crate::py_config`).
+fn state(rc: &PipelineRc) -> Vec<(usize, u64)> {
+    let mut out = vec![(rc.key(), rc.version())];
+    let mut stack: Vec<TransformRc> = rc
+        .lock()
+        .transforms()
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
+    let mut seen = Vec::new();
+    while let Some(t) = stack.pop() {
+        // A group holding itself (U-111) is walked once.
+        if seen.contains(&t.key()) {
+            continue;
+        }
+        seen.push(t.key());
+        let n = t.lock();
+        out.push((t.key(), n.version));
+        if let Some(value) = &n.curve_value {
+            value.state(&mut out);
+        }
+        stack.extend(n.children.iter().flatten().cloned());
+    }
+    out
+}
+
+/// D-12: Python code the library ran while it made the pipeline's processor (the config's I/O
+/// proxy loading a LUT, a logging function) changed the pipeline.
+fn changed_during_call() -> PyErr {
+    pyo3::exceptions::PyRuntimeError::new_err(
+        "LegacyViewingPipeline: a callback changed the pipeline while the library made its \
+         processor, which OCIO 2.5.2 reads again after that callback and the port can't follow \
+         (docs/deviations.md, D-12)",
+    )
 }
 
 // .def(py::init(&LegacyViewingPipeline::Create)) (PyLegacyViewingPipeline.cpp:16-17 @ v2.5.2).
@@ -285,8 +327,11 @@ fn none_value(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
 // ConstContextRcPtr()) (PyLegacyViewingPipeline.cpp:46-55 @ v2.5.2): a null context is the
 // config's current one. The library builds the processor of a copy of the pipeline, made
 // under its lock and released before: building it can run Python code (the config's I/O
-// proxy loading a LUT, a logging function), which may read or change the pipeline, as the
-// wheel's can.
+// proxy loading a LUT, a logging function), which may read the pipeline, as the wheel's can.
+// Upstream reads the pipeline again after such code (LegacyViewingPipeline.cpp:220-330: the
+// color timing CC, the display view transform, the looks override, the channel view and the
+// display CC, and the linear CC it appends itself), which the copy can't follow: a change the
+// code made to the pipeline or its transforms is D-12's error.
 static GET_PROCESSOR: Function = method_def!(
     "getProcessor",
     [
@@ -315,7 +360,12 @@ static GET_PROCESSOR: Function = method_def!(
                 }
             };
             let pipeline = py_result(py, pipeline)?;
-            py_result(py, pipeline.processor(&n.config, context.as_ref()))
+            let before = state(&rc);
+            let p = pipeline.processor(&n.config, context.as_ref());
+            if state(&rc) != before {
+                return Err(changed_during_call());
+            }
+            py_result(py, p)
         })?;
         processor_out(py, p)
     }

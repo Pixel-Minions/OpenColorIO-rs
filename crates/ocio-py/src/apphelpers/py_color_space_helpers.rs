@@ -485,11 +485,17 @@ static MENUS: Mutex<Vec<(Weak<ColorSpaceMenuHelper>, ConfigRc, usize)>> = Mutex:
 
 /// Port of `ColorSpaceMenuHelper::Create` (ColorSpaceHelpers.cpp:378-450 @ v2.5.2) of the
 /// parameters `rc`: the library's menu of the parameters, their config as it is now, and the
-/// config it shares.
+/// config it shares. In two steps, as upstream reads the parameters: Python code the config's
+/// validation runs (a logging function) may change them, and the menu is made of them as they
+/// are then (their config's cache ID computed then, as upstream writes it into the menu's key).
 fn create_helper(py: Python<'_>, rc: &ParamsRc) -> PyResult<HelperNode> {
+    with_current(rc, false, |params, _| {
+        ColorSpaceMenuHelper::log_validation(params);
+        Ok(())
+    })?;
     let (helper, config, id_len) = with_current(rc, true, |params, config| {
         let id_len = py_result(py, params.config().cache_id())?.len();
-        let helper = py_result(py, ColorSpaceMenuHelper::new(params))?;
+        let helper = py_result(py, ColorSpaceMenuHelper::new_validated(params))?;
         Ok((helper, config.clone(), id_len))
     })?;
     let mut menus = MENUS.lock().unwrap_or_else(PoisonError::into_inner);

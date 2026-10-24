@@ -239,7 +239,10 @@ static REFRESH: Function = method_def!(
 
 // .def("getProcessor", &MixingColorSpaceManager::getProcessor, "workingSpaceName"_a.none(false),
 // "displayName"_a.none(false), "viewName"_a.none(false), "direction"_a = TRANSFORM_DIR_FORWARD)
-// (PyMixingHelpers.cpp:92-97 @ v2.5.2): a direction outside the enumerators is U-112.
+// (PyMixingHelpers.cpp:92-97 @ v2.5.2): a direction outside the enumerators is U-112. In two
+// steps, as upstream reads the manager: Python code the first one runs (the config's I/O proxy
+// loading a LUT) may change the manager, and the second one reads its encoding and its config
+// as they are then (MixingHelpers.cpp:327-347).
 static GET_PROCESSOR: Function = method_def!(
     "getProcessor",
     [
@@ -256,8 +259,11 @@ static GET_PROCESSOR: Function = method_def!(
         let NonNullCharPtr(display) = crate::arg!(a, 2, convert, NonNullCharPtr);
         let NonNullCharPtr(view) = crate::arg!(a, 3, convert, NonNullCharPtr);
         let dir = direction(enum_param!(o, a, 4))?;
+        let first = with_current(&rc, |m, _| {
+            py_result(py, m.processor_without_encoding(&working, &display, &view))
+        })?;
         let p = with_current(&rc, |m, _| {
-            py_result(py, m.processor(&working, &display, &view, dir))
+            py_result(py, m.processor_with_encoding(&first, dir))
         })?;
         processor_out(py, p)
     }

@@ -986,6 +986,58 @@ fn callbacks_as_the_wheels() {
 
     // Another thread's call on the config: it waits, and is the wheel's.
     compare(&[threads_script()]);
+
+    // A menu's logging function changes the menu's parameters (chunk 6.7c); on a thread of its
+    // own, so that a regression (the parameters' lock held while the library logs) fails.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(|| compare(&[menu_logging_script()]));
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(120)) {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(_) => panic!("the menu's logging function waits for the parameters' lock"),
+    }
+}
+
+/// A config whose view `v` shows a color space it doesn't have: it doesn't validate.
+const MENU_CONFIG: &str = "ocio_profile_version: 2\ndescription: menu logging\n\
+     roles: {default: raw, scene_linear: lin}\n\
+     displays: {d: [!<View> {name: v, colorspace: missing}]}\n\
+     colorspaces: [!<ColorSpace> {name: raw}, !<ColorSpace> {name: lin}]\n";
+
+/// A menu of a config that doesn't validate logs a warning first (`ColorSpaceMenuHelper::Create`,
+/// ColorSpaceHelpers.cpp:385-394 @ v2.5.2), whose logging function includes the roles in the
+/// menu's parameters (a class of `str` whose `__del__` is the parameters' `setIncludeRoles`,
+/// its default `True`; the step interpreter defines no functions): the wheel reads the
+/// parameters after the warning, and its menu has the roles; so has the port's, and its
+/// parameters' lock isn't held while the library logs.
+fn menu_logging_script() -> Script {
+    let mut sc = Script::new();
+    let cfg = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(MENU_CONFIG)]);
+    let p = sc.call(n("OCIO.ColorSpaceMenuParameters"), vec![r(cfg)]);
+    sc.eval(r(p), &["getIncludeRoles"]);
+    let class = sc.call(
+        n("type"),
+        vec![
+            s("Logged"),
+            t(vec![n("str")]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("__del__"), ra(p, "setIncludeRoles")),
+            ]),
+        ],
+    );
+    sc.call(n("OCIO.SetLoggingFunction"), vec![r(class)]);
+    let h = sc.call(n("OCIO.ColorSpaceMenuHelper"), vec![r(p)]);
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    sc.eval(r(p), &["getIncludeRoles"]);
+    sc.call(ra(h, "getNumColorSpaces"), vec![]);
+    for k in 0..4 {
+        sc.call(ra(h, "getName"), vec![i(k)]);
+    }
+    sc
 }
 
 /// Where the wheel's process dies (U-123, U-124) or it keeps a level outside the enumerators
