@@ -323,6 +323,10 @@ fn primary_script() -> Script {
     );
     setattr(&mut sc, r(video), "NoClampBlack", f(3.0), Expect::Raised);
     let dict = sc.eval(n("OCIO.GradingPrimary.__dict__"), &[]);
+    // The dictionary's repr holds what earlier scripts added to the class in this process
+    // (`copy.copy` makes `copyreg` add `__slotnames__`), where the wheel runs each script in a
+    // process of its own: the class's own members are py_surface's (the surface test).
+    sc.unrepr(dict);
     let prop = sc.call(ra(dict, "__getitem__"), vec![s("NoClampBlack")]);
     sc.call(ra(prop, "fget"), vec![i(5)]);
     sc.call(ra(prop, "fget"), vec![none()]);
@@ -967,6 +971,8 @@ fn rgb_curve_script() -> Script {
     accessors(&mut sc, "OCIO.GradingRGBCurve.red");
     accessors(&mut sc, "OCIO.GradingHueCurve.hue_fx");
     let dict = sc.eval(n("OCIO.GradingPrimary.__dict__"), &[]);
+    // As in primary_script: the dictionary's repr depends on earlier scripts of this process.
+    sc.unrepr(dict);
     let prop = sc.call(ra(dict, "__getitem__"), vec![s("NoClampWhite")]);
     sc.call(n("type"), vec![r(prop)]);
     sc.call(
