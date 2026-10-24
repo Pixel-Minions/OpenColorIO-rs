@@ -31,7 +31,8 @@ Runs, in order, stopping at the first failure:
   py-suite       then: cargo xtask py-suite (upstream's Python suite against the port's
                  module; every test function py-port/passing.txt lists must pass)
   test-release   the same in release, with --release (and test-release-py)
-  rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh)
+  rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh),
+                 started once ci (and deny) pass, beside the test steps above
 
   --staged       gate exactly what is staged (`git add`), leaving unstaged changes and
                  untracked files out: the index as a temporary commit on HEAD, checked out
@@ -257,12 +258,55 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
             Kind::Plain,
         )?;
     }
+    // The Rocky pass runs beside this platform's tests, once the checks above have passed
+    // (owner, 2026-10-24: the tests mostly wait on the wheel, and one platform after the other
+    // made the full gate the longest part of a land). Its summary lines arrive as they come.
+    let rocky = if opts.rocky {
+        let cmd = rocky_command(&root, &opts, &log_dir, base_file.as_deref())?;
+        let mut nested = Runner::new(log_dir.clone());
+        Some(std::thread::spawn(move || {
+            let result = nested.step("rocky", cmd, Kind::Nested);
+            (result, nested.steps)
+        }))
+    } else {
+        None
+    };
+    // This platform's tests; a failure still waits for the Rocky pass, which then reports too.
+    let here = run_tests(&root, &opts, &mut runner, tests, &python);
+    if let Some(rocky) = rocky {
+        let (result, steps) = rocky
+            .join()
+            .map_err(|_| "the Rocky pass's thread panicked".to_string())?;
+        runner.steps += steps;
+        here?;
+        result?;
+    } else {
+        here?;
+    }
+    if !nested {
+        println!(
+            "gate: pass, {} steps in {}",
+            runner.steps,
+            duration(runner.started.elapsed())
+        );
+    }
+    Ok(())
+}
+
+/// The test steps of this platform: debug, Python, the Python suite, then release.
+fn run_tests(
+    root: &Path,
+    opts: &Options,
+    runner: &mut Runner,
+    tests: bool,
+    python: &[(&str, std::ffi::OsString)],
+) -> Result<(), String> {
     let tier = if opts.full { "full" } else { "quick" };
     let test_py = tests && (opts.crates.is_empty() || opts.crates.iter().any(|c| c == "ocio-py"));
     if tests {
         runner.step(
             "test",
-            test_command(&root, &opts.crates, false, tier),
+            test_command(root, &opts.crates, false, tier),
             Kind::Tests,
         )?;
     } else {
@@ -274,62 +318,62 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     if test_py {
         runner.step(
             "test-py",
-            python_test_command(&root, &python, false, tier),
+            python_test_command(root, python, false, tier),
             Kind::Tests,
         )?;
         let mut suite = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
-        suite.arg("py-suite").current_dir(&root);
+        suite.arg("py-suite").current_dir(root);
         runner.step("py-suite", suite, Kind::Plain)?;
     }
     if opts.release && tests {
         runner.step(
             "test-release",
-            test_command(&root, &opts.crates, true, tier),
+            test_command(root, &opts.crates, true, tier),
             Kind::Tests,
         )?;
         if test_py {
             runner.step(
                 "test-release-py",
-                python_test_command(&root, &python, true, tier),
+                python_test_command(root, python, true, tier),
                 Kind::Tests,
             )?;
         }
     }
-    if opts.rocky {
-        let mut rocky = Command::new(bash()?);
-        rocky
-            .current_dir(&root)
-            .args(["scripts/rocky9.sh", "cargo", "xtask", "gate"]);
-        if opts.touched {
-            // The Rocky pass reads the same HEAD, in the same checkout.
-            rocky.arg("--touched");
-        } else if !opts.crates.is_empty() {
-            rocky.args(["--crates", &opts.crates.join(",")]);
-        }
-        if opts.release {
-            rocky.arg("--release");
-        }
-        if opts.main {
-            rocky.arg("--main");
-        }
-        rocky.arg(if opts.full { "--full" } else { "--quick" });
-        rocky
-            .arg("--log-dir")
-            .arg(crate::display_path(&log_dir.join("rocky")));
-        if let Some(file) = &base_file {
-            // Relative to the checkout, which the container mounts at /work.
-            rocky.arg("--base-file").arg(crate::display_path(file));
-        }
-        runner.step("rocky", rocky, Kind::Nested)?;
-    }
-    if !nested {
-        println!(
-            "gate: pass, {} steps in {}",
-            runner.steps,
-            duration(runner.started.elapsed())
-        );
-    }
     Ok(())
+}
+
+/// The Rocky pass: this gate, with the same options, in Rocky Linux 9 (`scripts/rocky9.sh`).
+fn rocky_command(
+    root: &Path,
+    opts: &Options,
+    log_dir: &Path,
+    base_file: Option<&Path>,
+) -> Result<Command, String> {
+    let mut rocky = Command::new(bash()?);
+    rocky
+        .current_dir(root)
+        .args(["scripts/rocky9.sh", "cargo", "xtask", "gate"]);
+    if opts.touched {
+        // The Rocky pass reads the same HEAD, in the same checkout.
+        rocky.arg("--touched");
+    } else if !opts.crates.is_empty() {
+        rocky.args(["--crates", &opts.crates.join(",")]);
+    }
+    if opts.release {
+        rocky.arg("--release");
+    }
+    if opts.main {
+        rocky.arg("--main");
+    }
+    rocky.arg(if opts.full { "--full" } else { "--quick" });
+    rocky
+        .arg("--log-dir")
+        .arg(crate::display_path(&log_dir.join("rocky")));
+    if let Some(file) = base_file {
+        // Relative to the checkout, which the container mounts at /work.
+        rocky.arg("--base-file").arg(crate::display_path(file));
+    }
+    Ok(rocky)
 }
 
 /// `--staged`: gates exactly the index. It becomes a temporary commit on HEAD (on no branch),
@@ -877,10 +921,6 @@ impl Runner {
         let mut log =
             File::create(&log_path).map_err(|e| format!("{}: {e}", log_path.display()))?;
         let _ = writeln!(log, "$ {}\n", describe(&cmd));
-        if kind != Kind::Nested {
-            print!("{}: {name:<NAME_WIDTH$} ", self.label);
-            let _ = std::io::stdout().flush();
-        }
         let start = Instant::now();
         let status = run_logged(&mut cmd, &log, kind == Kind::Nested, name, self.label);
         let elapsed = duration(start.elapsed());
@@ -901,35 +941,38 @@ impl Runner {
             Err(e) => (false, e.clone()),
         };
         let verdict = if ok { "pass" } else { "FAIL" };
-        if kind == Kind::Nested {
-            print!("{}: {name:<NAME_WIDTH$} ", self.label);
-        }
-        println!("{verdict} {elapsed:>7}  {counts}{shown}");
+        // One line, printed whole: the Rocky pass prints its own lines meanwhile.
+        println!(
+            "{}: {name:<NAME_WIDTH$} {verdict} {elapsed:>7}  {counts}{shown}",
+            self.label
+        );
         if ok {
             return Ok(());
         }
+        // The report is one block: the stdout lock keeps the Rocky pass's lines out of it.
+        let mut out = std::io::stdout().lock();
         let failed = failed_tests(&text);
         if !failed.is_empty() {
-            println!("{}: failed tests:", self.label);
+            let _ = writeln!(out, "{}: failed tests:", self.label);
             for t in failed.iter().take(30) {
-                println!("    {t}");
+                let _ = writeln!(out, "    {t}");
             }
             if failed.len() > 30 {
-                println!("    ... and {} more", failed.len() - 30);
+                let _ = writeln!(out, "    ... and {} more", failed.len() - 30);
             }
         }
         let targets = failed_targets(&text);
         if !targets.is_empty() {
             // A test binary that crashes (an abort, running out of memory) reports no test.
-            println!("{}: failed test binaries:", self.label);
+            let _ = writeln!(out, "{}: failed test binaries:", self.label);
             for t in &targets {
-                println!("    {t}");
+                let _ = writeln!(out, "    {t}");
             }
         }
-        println!("{}: last lines of {shown}:", self.label);
+        let _ = writeln!(out, "{}: last lines of {shown}:", self.label);
         let lines: Vec<&str> = text.lines().collect();
         for line in &lines[lines.len().saturating_sub(25)..] {
-            println!("    | {line}");
+            let _ = writeln!(out, "    | {line}");
         }
         Err(format!(
             "{} failed at step `{name}` ({why}); full log: {shown}",
