@@ -3848,6 +3848,52 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `ConfigMergingParameters`, whose override config is shared behind an `Arc`);
   `merge_params_oracle.rs` changes a copy and its original in turn, and reads both.
 
+### I-387. A merge that names a later merge's output fails with the C++ library's error
+
+- **Upstream:** `ConfigMerger::Impl::loadConfig` takes an earlier merge's output by the index
+  of its parameters, `m_mergedConfigs.at(i)` (`MergeConfigsHelpers.cpp:505-513` @ v2.5.2),
+  while `mergeConfigs` runs the merges in order (`681-726`). A base or input that names (ignoring
+  case) the output of its own merge or of a later one, and no file or built-in config, makes
+  `std::vector::at` throw `std::out_of_range`, which no handler of OCIO's catches: Python gets
+  an `IndexError` with the C++ library's text, "invalid vector subscript" from the Windows wheel
+  (MSVC; probed 2026-10-23), "vector::_M_range_check: __n (which is N) >= this->size() (which is
+  M)" from the Linux wheel (libstdc++; the format string is in its `libOpenColorIO.so`). The
+  message names neither the merge nor the config, and differs between the platforms.
+- **Who notices:** OCIOM files whose merges are out of order, or whose merge names its own
+  output.
+- **A fix:** an OCIO exception that names the output and says that its merge comes later.
+- **Status:** matched in `p9-merge-1` (9.2b, `apphelpers/mergeconfigs/merge_configs_helpers.rs`,
+  `ConfigMerger::load_config`, with the error kind `ExceptionKind::OutOfRange` that the binding
+  raises as `IndexError`); `merge_configs_helpers_oracle_tests.rs` compares the text with the
+  wheel's `mergeConfigs` on each platform.
+
+### I-388. The merger doesn't say why a config failed to load
+
+- **Upstream:** `ConfigMerger::Impl::loadConfig` tries `Config::CreateFromFile` at each search
+  path and then `Config::CreateFromBuiltinConfig`, each inside `catch(...)`
+  (`MergeConfigsHelpers.cpp:475-503` @ v2.5.2, with upstream's TODO saying so): a config file
+  that exists but fails to load is passed over like a missing one, and when nothing else
+  matches, `mergeConfigs` fails with "Could not load the base or the input config", which names
+  neither the config nor the reason.
+- **Who notices:** whoever merges a config with an error in it, or misspells a name.
+- **A fix:** keep the first error a file that exists gives, and report it with the config's name.
+- **Status:** matched in `p9-merge-1` (9.2b, `ConfigMerger::load_config`);
+  `merge_configs_helpers_oracle_tests.rs` (files that aren't configs before valid ones along the
+  search paths, and alone).
+
+### I-389. The merger's search path string is split at every colon, even on Windows
+
+- **Upstream:** `ConfigMerger::setSearchPath` splits its argument at each `:`
+  (`StringUtils::Split`, `MergeConfigsHelpers.cpp:583-586` @ v2.5.2), as a config's search path
+  is (I-9): on Windows, `C:/configs` becomes `C` and `/configs`; `""` gives one empty path.
+  `addSearchPath` keeps a path whole. The OCIOM reader sets a `search_path` written as a string
+  this way (9.2c).
+- **Who notices:** Windows users who give the merger, or an OCIOM file, a search path string
+  with a drive letter.
+- **A fix:** as I-9, don't split after a drive letter.
+- **Status:** matched in `p9-merge-1` (9.2b, `ConfigMerger::set_search_path`);
+  `config_merger_oracle.rs` (`C:/drive`, `a:b::c:`, `""`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -5697,3 +5743,27 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   binding refuses `None` for these arguments with an exception instead of a crash, to be
   enforced in 6.8a. Not testable through the oracle (it would end the wheel's
   process).
+
+### U-176. A config merger holding `None` parameters dereferences them
+
+- **Upstream:** the binding's `ConfigMerger.addParams` takes `None` (pybind11's holder caster)
+  and stores a null pointer, which `getParams` returns (as `None`) and
+  `getNumConfigMergingParameters` counts. `ConfigMerger::createEditableCopy` (Python's
+  `copy.deepcopy`, and `mergeConfigs`, which starts from a copy) calls
+  `param->createEditableCopy()` on it (`MergeConfigsHelpers.h:167-170` @ v2.5.2), the writer
+  (`serialize()` and `repr()`) reads its output name (`OCIOMYaml.cpp:548-549`), and
+  `loadConfig` its output name too (`MergeConfigsHelpers.cpp:506-508`): the wheel's process
+  dies with a segmentation fault (probed on Windows, 2026-10-23, each call apart).
+  `ConfigMergingHelpers.MergeColorSpace(None, base, colorspace)` does the same with its
+  parameters (`params->createEditableCopy()`, `785`) once the color space is added.
+- **Who notices:** Python code that adds `None` to a merger, or passes it as the parameters.
+- **A fix:** refuse `None` in `addParams` (`"params"_a.none(false)`), and check the
+  parameters in `MergeColorSpace`.
+- **Status:** the port keeps a `None` (`add_params(Option<ConfigMergingParameters>)`), counts
+  and returns it as the wheel does, and where the wheel dereferences it returns the error
+  "<call>: the merge parameters at index N are None, a null pointer the wheel dereferences (its
+  process dies; docs/improvements.md, U-176)" (`createEditableCopy`, `serialize`,
+  `mergeConfigs`), in `p9-merge-1` (9.2b, `apphelpers/mergeconfigs/merge_configs_helpers.rs`);
+  `config_merger_oracle.rs` (`none_parameters`) and `merge_configs_helpers_oracle_tests.rs`.
+  `MergeColorSpace` takes its parameters by reference in the Rust API (P9-2): its binding
+  refuses `None` (6.8a).

@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The parameters of a config merge (`ConfigMergingParameters`): a port of
+//! The parameters of a config merge (`ConfigMergingParameters`) and the merger that runs a
+//! series of merges (`ConfigMerger`): a port of
 //! `src/OpenColorIO/apphelpers/mergeconfigs/MergeConfigsHelpers.h` and
 //! `MergeConfigsHelpers.cpp` @ v2.5.2, whose public API is
-//! `include/OpenColorIO/OpenColorAppHelpers.h:536-709` (owner decision P9-2).
+//! `include/OpenColorIO/OpenColorAppHelpers.h:536-853` (owner decision P9-2).
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ocio_ops::exception::Result;
-use ocio_ops::utils::string_utils::c_str;
+use ocio_ops::exception::{Exception, Result};
+use ocio_ops::platform::strcasecmp;
+use ocio_ops::utils::pystring::os_path;
+use ocio_ops::utils::string_utils::{c_str, right_trim_char, split, trim};
 
-use crate::apphelpers::mergeconfigs::ociom_yaml::enum_to_strategy_string;
+use crate::apphelpers::mergeconfigs::ociom_yaml::{self, WriteError, enum_to_strategy_string};
 use crate::config::Config;
 
 /// How a section of the config is merged.
@@ -791,3 +794,333 @@ impl ConfigMergingParameters {
 fn bool_text(value: bool) -> &'static str {
     if value { "true" } else { "false" }
 }
+
+/// The error where upstream dereferences the null parameters a merger holds (`addParams` given
+/// `None`): the wheel's process dies there (docs/improvements.md, U-176).
+fn null_params(call: &str, index: usize) -> Exception {
+    Exception::new(format!(
+        "{call}: the merge parameters at index {index} are None, a null pointer the wheel \
+         dereferences (its process dies; docs/improvements.md, U-176)"
+    ))
+}
+
+/// The `std::out_of_range` that `std::vector::at(n)` throws for a vector of `size` elements, as
+/// each wheel's C++ library words it: MSVC's "invalid vector subscript", libstdc++'s
+/// `vector::_M_range_check` message (docs/improvements.md, I-387).
+fn vector_at_out_of_range(n: usize, size: usize) -> Exception {
+    if cfg!(windows) {
+        Exception::out_of_range("invalid vector subscript")
+    } else {
+        Exception::out_of_range(format!(
+            "vector::_M_range_check: __n (which is {n}) >= this->size() (which is {size})"
+        ))
+    }
+}
+
+/// The controller of a series of merges: the search paths and working directory where it finds
+/// the base and input configs, one [`ConfigMergingParameters`] per merge, and, once merged,
+/// each merge's config (a later merge's base or input may name an earlier one's output). An
+/// OCIOM file holds one.
+///
+/// A value (owner decision P9-2): [`create_editable_copy`](ConfigMerger::create_editable_copy)
+/// is upstream's deep copy. The merge parameters it holds are shared handles, as upstream's
+/// pointers; `None` stands for upstream's null pointer, which `addParams` takes (the wheel
+/// accepts `None`), and which the copy, the merge and the writer refuse where upstream
+/// dereferences it (docs/improvements.md, U-176).
+///
+/// Port of `ConfigMerger` (include/OpenColorIO/OpenColorAppHelpers.h:711-853) and
+/// `ConfigMerger::Impl` (src/OpenColorIO/apphelpers/mergeconfigs/MergeConfigsHelpers.h:129-194,
+/// MergeConfigsHelpers.cpp:449-680 @ v2.5.2).
+#[derive(Debug)]
+pub struct ConfigMerger {
+    /// `m_searchPaths`: where the base and input configs are looked for.
+    search_paths: Vec<Vec<u8>>,
+    /// `m_workingDir`: the directory relative search paths start from, and the search path
+    /// when there is none.
+    working_dir: Vec<u8>,
+    /// `m_majorVersion`: the OCIOM format's.
+    major_version: u32,
+    /// `m_minorVersion`.
+    minor_version: u32,
+    /// `m_mergeParams`: one per merge; `None` for upstream's null pointer.
+    merge_params: Vec<Option<ConfigMergingParameters>>,
+    /// `m_mergedConfigs`: each merge's output.
+    merged_configs: Vec<Arc<Config>>,
+}
+
+impl Default for ConfigMerger {
+    fn default() -> Self {
+        ConfigMerger::new()
+    }
+}
+
+impl ConfigMerger {
+    /// A merger without merges, search paths or working directory, of OCIOM version 1.0.
+    ///
+    /// Port of `ConfigMerger::Create` and `ConfigMerger::Impl::Impl`
+    /// (MergeConfigsHelpers.cpp:521-535, MergeConfigsHelpers.h:139-151 @ v2.5.2).
+    #[doc(alias = "Create")]
+    pub fn new() -> ConfigMerger {
+        ConfigMerger {
+            search_paths: Vec::new(),
+            working_dir: Vec::new(),
+            major_version: 1,
+            minor_version: 0,
+            merge_params: Vec::new(),
+            merged_configs: Vec::new(),
+        }
+    }
+
+    /// A deep copy: the search paths, working directory and version, a copy of each merge's
+    /// parameters ([`ConfigMergingParameters::create_editable_copy`], which still shares their
+    /// overrides, docs/improvements.md, I-386), and a copy of each merged config. Fails where a
+    /// copy of the parameters fails, and for parameters that are `None`, which upstream
+    /// dereferences (docs/improvements.md, U-176).
+    ///
+    /// Port of `ConfigMerger::createEditableCopy` and `ConfigMerger::Impl::operator=`
+    /// (MergeConfigsHelpers.cpp:560-565, MergeConfigsHelpers.h:156-180 @ v2.5.2).
+    #[doc(alias = "createEditableCopy")]
+    pub fn create_editable_copy(&self) -> Result<ConfigMerger> {
+        let mut merger = ConfigMerger::new();
+        merger.search_paths.clone_from(&self.search_paths);
+        merger.working_dir.clone_from(&self.working_dir);
+        merger.major_version = self.major_version;
+        merger.minor_version = self.minor_version;
+
+        merger.merge_params.reserve(self.merge_params.len());
+        for (i, param) in self.merge_params.iter().enumerate() {
+            let param = param
+                .as_ref()
+                .ok_or_else(|| null_params("createEditableCopy", i))?;
+            merger
+                .merge_params
+                .push(Some(param.create_editable_copy()?));
+        }
+
+        merger.merged_configs.reserve(self.merged_configs.len());
+        for config in &self.merged_configs {
+            merger.merged_configs.push(Arc::new(Config::clone(config)));
+        }
+        Ok(merger)
+    }
+
+    /// The config `value` names: the first file found at `value` along the search paths
+    /// (relative ones from the working directory, trimmed of spaces and trailing `/`; the
+    /// working directory alone without search paths), else the built-in config of that name,
+    /// else the output of a merge whose output name is `value`, ignoring case, else `None`. A
+    /// file or built-in config that exists but fails to load is skipped silently
+    /// (docs/improvements.md, I-388). A merge whose output doesn't exist yet (a later merge)
+    /// fails with the C++ library's `std::out_of_range` (I-387), and parameters that are `None`
+    /// are refused where upstream dereferences them (U-176).
+    ///
+    /// Port of `ConfigMerger::Impl::loadConfig` (MergeConfigsHelpers.cpp:449-516 @ v2.5.2).
+    // `mergeConfigs` (9.2j, p9-merge-3) calls it.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn load_config(&self, value: &[u8]) -> Result<Option<Arc<Config>>> {
+        // Get the absolute path.
+        let mut searchpaths: Vec<Vec<u8>> = Vec::new();
+
+        if self.search_paths.is_empty() {
+            searchpaths.push(self.working_dir.clone());
+        }
+
+        for path in &self.search_paths {
+            // Remove trailing "/", and spaces.
+            let mut dirname = right_trim_char(trim(path), b'/').to_vec();
+
+            if !os_path::isabs(&dirname) {
+                dirname = os_path::join(&self.working_dir, &dirname);
+            }
+
+            searchpaths.push(os_path::normpath(&dirname));
+        }
+
+        for searchpath in &searchpaths {
+            // Try to load the provided config using the search paths. Return as soon as a
+            // valid path is found. Normalize the path to prevent directory traversal via '../'
+            // sequences. A config that can't be loaded, for whatever reason, is skipped
+            // (upstream's `catch(...)`).
+            let resolvedfullpath = os_path::normpath(&os_path::join(searchpath, value));
+            if let Ok(config) = Config::create_from_file(&resolvedfullpath) {
+                return Ok(Some(config));
+            }
+        }
+
+        // Try to load the provided base config name as a built-in config.
+        if let Ok(config) = Config::create_from_builtin_config(value) {
+            return Ok(Some(config));
+        }
+
+        // Must be a reference to a config from a previous merge.
+        for (i, params) in self.merge_params.iter().enumerate() {
+            let params = params
+                .as_ref()
+                .ok_or_else(|| null_params("mergeConfigs", i))?;
+            if strcasecmp(params.output_name(), value).is_eq() {
+                // Use the config from the index.
+                return match self.merged_configs.get(i) {
+                    Some(config) => Ok(Some(Arc::clone(config))),
+                    None => Err(vector_at_out_of_range(i, self.merged_configs.len())),
+                };
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// The number of search paths.
+    ///
+    /// Port of `ConfigMerger::getNumSearchPaths` (MergeConfigsHelpers.cpp:572-575 @ v2.5.2).
+    #[doc(alias = "getNumSearchPaths")]
+    pub fn num_search_paths(&self) -> i32 {
+        self.search_paths.len() as i32
+    }
+
+    /// The search path at `index`; `""` outside the list.
+    ///
+    /// Port of `ConfigMerger::getSearchPath` (MergeConfigsHelpers.cpp:577-581 @ v2.5.2).
+    #[doc(alias = "getSearchPath")]
+    pub fn search_path(&self, index: i32) -> Vec<u8> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.search_paths.get(i))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Sets the search paths: `path` split on `:` (`""` gives one empty path; a Windows drive
+    /// letter is split off too, docs/improvements.md, I-389).
+    ///
+    /// Port of `ConfigMerger::setSearchPath` (MergeConfigsHelpers.cpp:583-586 @ v2.5.2).
+    #[doc(alias = "setSearchPath")]
+    pub fn set_search_path(&mut self, path: impl AsRef<[u8]>) {
+        self.search_paths = split(c_str(path.as_ref()), b':');
+    }
+
+    /// Adds a search path; an empty one is ignored.
+    ///
+    /// Port of `ConfigMerger::addSearchPath` (MergeConfigsHelpers.cpp:588-594 @ v2.5.2).
+    #[doc(alias = "addSearchPath")]
+    pub fn add_search_path(&mut self, path: impl AsRef<[u8]>) {
+        let path = c_str(path.as_ref());
+        if !path.is_empty() {
+            self.search_paths.push(path.to_vec());
+        }
+    }
+
+    /// Sets the directory that relative search paths start from, and the search path when
+    /// there is none (an OCIOM file's directory, by default).
+    ///
+    /// Port of `ConfigMerger::setWorkingDir` (MergeConfigsHelpers.cpp:596-599 @ v2.5.2).
+    #[doc(alias = "setWorkingDir")]
+    pub fn set_working_dir(&mut self, dirname: impl AsRef<[u8]>) {
+        self.working_dir = c_str(dirname.as_ref()).to_vec();
+    }
+
+    /// Port of `ConfigMerger::getWorkingDir` (MergeConfigsHelpers.cpp:601-604 @ v2.5.2).
+    #[doc(alias = "getWorkingDir")]
+    pub fn working_dir(&self) -> &[u8] {
+        &self.working_dir
+    }
+
+    /// The parameters of the merge at `index` (the same object, a shared handle); `None`
+    /// outside the list, and for parameters added as `None`.
+    ///
+    /// Port of `ConfigMerger::getParams` (MergeConfigsHelpers.cpp:606-613 @ v2.5.2).
+    #[doc(alias = "getParams")]
+    pub fn params(&self, index: i32) -> Option<ConfigMergingParameters> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.merge_params.get(i))
+            .cloned()
+            .flatten()
+    }
+
+    /// The number of merges, `None` parameters included.
+    ///
+    /// Port of `ConfigMerger::getNumConfigMergingParameters` (MergeConfigsHelpers.cpp:615-618 @
+    /// v2.5.2).
+    #[doc(alias = "getNumConfigMergingParameters")]
+    pub fn num_config_merging_parameters(&self) -> i32 {
+        self.merge_params.len() as i32
+    }
+
+    /// Adds a merge's parameters (the handle itself, shared with the caller). `None`, which
+    /// the wheel accepts, is kept as upstream's null pointer (docs/improvements.md, U-176).
+    ///
+    /// Port of `ConfigMerger::addParams` (MergeConfigsHelpers.cpp:620-623 @ v2.5.2).
+    #[doc(alias = "addParams")]
+    pub fn add_params(&mut self, params: Option<ConfigMergingParameters>) {
+        self.merge_params.push(params);
+    }
+
+    /// The merger as an OCIOM file. Fails as the writer does: "Error building YAML: " and the
+    /// message of a list of active displays, active views or inactive color spaces that opens a
+    /// quote it doesn't close; and for parameters that are `None`, which upstream dereferences
+    /// (docs/improvements.md, U-176). The Python binding's `serialize()` and `repr()`.
+    ///
+    /// Port of `ConfigMerger::serialize` and `operator<<(std::ostream&, const ConfigMerger&)`
+    /// (MergeConfigsHelpers.cpp:625-644 @ v2.5.2).
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        ociom_yaml::write(self).map_err(|e| match e {
+            WriteError::Exception(e) => {
+                let mut error = b"Error building YAML: ".to_vec();
+                error.extend_from_slice(e.what());
+                Exception::new(error)
+            }
+            WriteError::NullParams(index) => null_params("serialize", index),
+        })
+    }
+
+    /// Port of `ConfigMerger::getMajorVersion` (MergeConfigsHelpers.cpp:646-649 @ v2.5.2).
+    #[doc(alias = "getMajorVersion")]
+    pub fn major_version(&self) -> u32 {
+        self.major_version
+    }
+
+    /// Port of `ConfigMerger::getMinorVersion` (MergeConfigsHelpers.cpp:651-654 @ v2.5.2).
+    #[doc(alias = "getMinorVersion")]
+    pub fn minor_version(&self) -> u32 {
+        self.minor_version
+    }
+
+    /// Sets the version of the OCIOM format.
+    ///
+    /// Port of `ConfigMerger::setVersion` (MergeConfigsHelpers.cpp:656-660 @ v2.5.2).
+    #[doc(alias = "setVersion")]
+    pub fn set_version(&mut self, major: u32, minor: u32) {
+        self.major_version = major;
+        self.minor_version = minor;
+    }
+
+    /// The number of merged configs.
+    ///
+    /// Port of `ConfigMerger::getNumMergedConfigs` (MergeConfigsHelpers.cpp:662-665 @ v2.5.2).
+    #[doc(alias = "getNumMergedConfigs")]
+    pub fn num_merged_configs(&self) -> i32 {
+        self.merged_configs.len() as i32
+    }
+
+    /// The last merge's config; `None` before any merge.
+    ///
+    /// Port of `ConfigMerger::getMergedConfig()` (MergeConfigsHelpers.cpp:667-670 @ v2.5.2).
+    #[doc(alias = "getMergedConfig")]
+    pub fn last_merged_config(&self) -> Option<Arc<Config>> {
+        self.merged_config(self.merged_configs.len() as i32 - 1)
+    }
+
+    /// The config of the merge at `index`; `None` outside the list.
+    ///
+    /// Port of `ConfigMerger::getMergedConfig(int)` (MergeConfigsHelpers.cpp:672-679 @ v2.5.2).
+    #[doc(alias = "getMergedConfig")]
+    pub fn merged_config(&self, index: i32) -> Option<Arc<Config>> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.merged_configs.get(i))
+            .cloned()
+    }
+}
+
+#[cfg(test)]
+#[path = "merge_configs_helpers_oracle_tests.rs"]
+mod oracle_tests;

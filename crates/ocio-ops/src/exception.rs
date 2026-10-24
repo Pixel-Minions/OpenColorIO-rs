@@ -38,6 +38,10 @@ pub enum ExceptionKind {
     /// past its limits, where OCIO lets it through (matching a file rule's path). PyOpenColorIO
     /// raises it as `RuntimeError`.
     RegexError,
+    /// `std::out_of_range`, which `std::vector::at` raises for an index past the end, where OCIO
+    /// lets it through (`ConfigMerger::Impl::loadConfig`, a merge naming a later merge's output).
+    /// PyOpenColorIO raises it as `IndexError`.
+    OutOfRange,
 }
 
 /// An OpenColorIO error: upstream's exception type and its message, verbatim.
@@ -98,6 +102,16 @@ impl Exception {
     pub fn regex_error(message: impl Into<Vec<u8>>) -> Self {
         Exception {
             kind: ExceptionKind::RegexError,
+            text: String::new(),
+            message: c_message(message),
+        }
+        .with_text()
+    }
+
+    /// A `std::out_of_range` with `what()` = `msg`, up to its first NUL.
+    pub fn out_of_range(message: impl Into<Vec<u8>>) -> Self {
+        Exception {
+            kind: ExceptionKind::OutOfRange,
             text: String::new(),
             message: c_message(message),
         }
