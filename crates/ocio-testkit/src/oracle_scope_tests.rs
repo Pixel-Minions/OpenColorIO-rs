@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use super::Scopes;
+use super::{ANALYZER, Scopes};
 use crate::Oracle;
 use crate::paths;
 
@@ -239,6 +239,44 @@ fn the_roots_are_shared_and_unknown_modules_unresolved() {
     assert_eq!(scopes.key("y_cmd", &json!({})), FULL);
     assert!(Scopes::from_manifest(FULL, ENV, modules(&names[..4]), &manifest).is_err());
     assert!(Scopes::from_manifest(FULL, ENV, modules(&names), &json!({"format": 2})).is_err());
+}
+
+/// A key names the modules it covers: two modules with the same bytes aren't the same module.
+#[test]
+fn the_key_names_the_modules_it_covers() {
+    let module = |edges: &[&str], commands: &[&str]| {
+        json!({"edges": edges, "commands": commands, "dispatchers": [], "fallback": [],
+               "global": []})
+    };
+    let names = [
+        "__init__.py",
+        "__main__.py",
+        "commands.py",
+        "p.py",
+        "q.py",
+        "x.py",
+    ];
+    // `p.py` and `q.py` have the same hash.
+    let modules: Vec<(String, u128)> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.to_string(), if i == 4 { 3 } else { i as u128 }))
+        .collect();
+    let key = |edge: &str| {
+        let manifest = json!({"format": 1, "modules": {
+            "__init__.py": module(&[], &[]),
+            "__main__.py": module(&[], &[]),
+            "commands.py": module(&[], &[]),
+            "p.py": module(&[], &[]),
+            "q.py": module(&[], &[]),
+            "x.py": module(&[edge], &["x_cmd"]),
+        }});
+        Scopes::from_manifest(FULL, ENV, modules.clone(), &manifest)
+            .unwrap()
+            .key("x_cmd", &json!({}))
+    };
+    assert_ne!(key("p.py"), FULL);
+    assert_ne!(key("p.py"), key("q.py"));
 }
 
 /// Changing a shared source changes every key: the modules every process runs and what they
@@ -513,12 +551,16 @@ fn the_dispatchers_are_keyed_by_the_commands_they_run() {
     ] {
         assert_eq!(scopes.key(cmd, &args), FULL, "{cmd} {args}");
     }
-    // Commands nested past the depth limit.
-    let mut deep = call("a_cmd");
-    for _ in 0..6 {
-        deep = json!({"cmd": "batch", "args": {"calls": [deep]}});
-    }
-    assert_eq!(scopes.key("batch", &deep["args"]), FULL);
+    // Commands nested to the depth limit, 4 below the request, and past it.
+    let nest = |depth: usize| {
+        let mut request = call("a_cmd");
+        for _ in 0..depth {
+            request = json!({"cmd": "batch", "args": {"calls": [request]}});
+        }
+        request
+    };
+    assert_ne!(scopes.key("batch", &nest(4)["args"]), FULL);
+    assert_eq!(scopes.key("batch", &nest(5)["args"]), FULL);
 }
 
 /// Strings that name a module are edges: a sibling's file a module starts as a script, the
@@ -568,16 +610,20 @@ fn strings_that_name_a_module_are_edges() {
 }
 
 /// The analysis is kept in the cache directory, keyed by what it reads: the same sources read
-/// it back, and changed sources are analysed again (here, `b` no longer imports `a`). A cached
-/// analysis that doesn't parse is made again.
+/// it back; changed sources (here, `b` no longer imports `a`), another analyzer or other
+/// environment files are analysed again. A cached analysis that doesn't parse, or gives no
+/// scopes, is made again. An analysis whose sources changed while it ran is refused, and not
+/// kept.
 #[test]
 fn the_cached_analysis_follows_the_sources() {
     let dir = package("cached");
     let cache = dir.join("cache");
-    let compute = || {
-        Scopes::compute(Oracle::get().python(), &dir, FULL, ENV, Some(&cache))
+    let python = Oracle::get().python();
+    let compute_with = |analyzer: &str| {
+        Scopes::compute_with(analyzer, python, &dir, FULL, ENV, Some(&cache))
             .unwrap_or_else(|e| panic!("{e}"))
     };
+    let compute = || compute_with(ANALYZER);
     let first = keys(&compute(), &COMMANDS);
     let entries = || -> Vec<PathBuf> {
         let mut entries: Vec<PathBuf> = std::fs::read_dir(&cache)
@@ -595,8 +641,24 @@ fn the_cached_analysis_follows_the_sources() {
         "the cache changed the keys"
     );
 
-    std::fs::write(&entries()[0], b"{\"format\": 1, \"mod").unwrap();
-    assert_eq!(keys(&compute(), &COMMANDS), first);
+    // Cut short, or of another format: made again, in place.
+    for broken in [
+        &b"{\"format\": 1, \"mod"[..],
+        &b"{\"format\": 2, \"modules\": {}}"[..],
+    ] {
+        std::fs::write(&entries()[0], broken).unwrap();
+        assert_eq!(keys(&compute(), &COMMANDS), first);
+        assert_eq!(entries().len(), 1);
+        assert_ne!(std::fs::read(&entries()[0]).unwrap(), broken);
+    }
+
+    // Another analyzer, and another environment file: analysed again.
+    let changed_analyzer = format!("{ANALYZER}# changed\n");
+    assert_eq!(keys(&compute_with(&changed_analyzer), &COMMANDS).len(), 5);
+    assert_eq!(entries().len(), 2);
+    std::fs::write(dir.join("uv.lock"), "changed").unwrap();
+    compute();
+    assert_eq!(entries().len(), 3);
 
     write(
         &dir,
@@ -605,11 +667,21 @@ fn the_cached_analysis_follows_the_sources() {
          return 2, []\n",
     );
     assert!(!compute().modules_of("b_cmd").unwrap().contains(&"a.py"));
-    assert_eq!(entries().len(), 2);
+    assert_eq!(entries().len(), 4);
     let before = keys(&compute(), &COMMANDS);
     touch(&dir, "a.py");
     let after = keys(&compute(), &COMMANDS);
     assert_eq!(changed(&COMMANDS, &before, &after), ["a_cmd"]);
+
+    // An analyzer that changes a module while it runs: refused, and not kept.
+    let count = entries().len();
+    let touching = format!(
+        "import os, sys\nwith open(os.path.join(sys.argv[1], 'd.py'), 'a') as f:\n    \
+         f.write('# touched\\n')\n{ANALYZER}"
+    );
+    let result = Scopes::compute_with(&touching, python, &dir, FULL, ENV, Some(&cache));
+    assert!(result.is_err());
+    assert_eq!(entries().len(), count);
 }
 
 /// The analysis of the oracle finds every command of its registry, in the module that

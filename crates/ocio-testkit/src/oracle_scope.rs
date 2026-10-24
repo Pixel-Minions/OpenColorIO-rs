@@ -27,6 +27,10 @@
 //!   test data, the allowed variables and this machine (`environment` in `oracle.rs`), and
 //!   `oracle_scope.py` itself.
 //!
+//! The analysis is cached under the hash of what it reads. The package is read again after
+//! it ran: an analysis of sources that changed meanwhile is refused (and never kept), and a
+//! cached analysis that gives no scopes is made again.
+//!
 //! The whole oracle's key is the fallback: for a command the analysis doesn't know (or that two
 //! modules define), for a command that can reach a module with a fallback reason, for a command
 //! that runs other commands by name but isn't one of [`nested`]'s, for a `batch` or
@@ -114,6 +118,61 @@ pub(crate) struct Scopes {
     commands: HashMap<String, Scope>,
 }
 
+/// What [`fingerprint`] reads: the hash of what the analysis and every key cover besides the
+/// modules, the modules with their hashes, and the hash of both (the cached analysis's name).
+struct Fingerprint {
+    base: u128,
+    modules: Vec<(String, u128)>,
+    sources: u128,
+}
+
+/// The fingerprint of the package in `oracle_dir` and of the analyzer `analyzer`.
+fn fingerprint(oracle_dir: &Path, analyzer: &str) -> Result<Fingerprint, String> {
+    let package = oracle_dir.join("ocio_oracle");
+    let mut files = Vec::new();
+    crate::oracle::collect_files(&package, &mut files);
+    files.sort();
+
+    let mut modules = Vec::new();
+    let mut base = Xxh3::new();
+    base.update(b"oracle scope v1");
+    hash_named(&mut base, "oracle_scope.py", analyzer.as_bytes());
+    for name in ENVIRONMENT_FILES {
+        match std::fs::read(oracle_dir.join(name)) {
+            Ok(bytes) => hash_named(&mut base, name, &bytes),
+            Err(_) => hash_named(&mut base, name, b"\0missing"),
+        }
+    }
+    base.update(b"package files");
+    for file in &files {
+        let rel = file
+            .strip_prefix(&package)
+            .map_err(|e| e.to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let bytes = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
+        if rel.ends_with(".py") && !rel.contains('/') {
+            modules.push((rel, xxh3_128(&bytes)));
+        } else {
+            hash_named(&mut base, &rel, &bytes);
+        }
+    }
+    let base = base.digest128();
+
+    // The analysis reads the modules, with the environment's Python; it doesn't depend on
+    // upstream's test data or the machine, so emulated CPUs share it.
+    let mut sources = Xxh3::new();
+    sources.update(&base.to_le_bytes());
+    for (name, hash) in &modules {
+        hash_named(&mut sources, name, &hash.to_le_bytes());
+    }
+    Ok(Fingerprint {
+        base,
+        modules,
+        sources: sources.digest128(),
+    })
+}
+
 impl Scopes {
     /// The scopes of the package in `oracle_dir`, analysed by `python`. `full` is the whole
     /// oracle's key, and `environment` the hash of what isn't in `oracle_dir` (upstream's test
@@ -126,66 +185,50 @@ impl Scopes {
         environment: u128,
         cache_dir: Option<&Path>,
     ) -> Result<Scopes, String> {
-        let package = oracle_dir.join("ocio_oracle");
-        let mut files = Vec::new();
-        crate::oracle::collect_files(&package, &mut files);
-        files.sort();
+        Scopes::compute_with(ANALYZER, python, oracle_dir, full, environment, cache_dir)
+    }
 
-        // `base`: what the analysis and every scoped key cover besides the modules.
-        let mut modules = Vec::new();
-        let mut base = Xxh3::new();
-        base.update(b"oracle scope v1");
-        hash_named(&mut base, "oracle_scope.py", ANALYZER.as_bytes());
-        for name in ENVIRONMENT_FILES {
-            match std::fs::read(oracle_dir.join(name)) {
-                Ok(bytes) => hash_named(&mut base, name, &bytes),
-                Err(_) => hash_named(&mut base, name, b"\0missing"),
-            }
-        }
-        base.update(b"package files");
-        for file in &files {
-            let rel = file
-                .strip_prefix(&package)
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .replace('\\', "/");
-            let bytes = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
-            if rel.ends_with(".py") && !rel.contains('/') {
-                modules.push((rel, xxh3_128(&bytes)));
-            } else {
-                hash_named(&mut base, &rel, &bytes);
-            }
-        }
-        let base = base.digest128();
-
-        // The analysis reads the modules, with the environment's Python; it doesn't depend on
-        // upstream's test data or the machine, so emulated CPUs share it.
-        let mut sources = Xxh3::new();
-        sources.update(&base.to_le_bytes());
-        for (name, hash) in &modules {
-            sources.update(name.as_bytes());
-            sources.update(&hash.to_le_bytes());
-        }
-        let cached =
-            cache_dir.map(|dir| dir.join(format!("scope-{:032x}.json", sources.digest128())));
-        // A cached analysis that doesn't parse (a write cut short) is made again.
-        let read = cached.as_deref().and_then(|f| std::fs::read(f).ok());
-        let manifest = match read.and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()) {
-            Some(manifest) => manifest,
-            None => {
-                let bytes = analyze(python, &package)?;
-                let manifest: Value =
-                    serde_json::from_slice(&bytes).map_err(|e| format!("analysis: {e}"))?;
-                if let Some(file) = &cached {
-                    crate::oracle::write_atomically(file, &bytes);
-                }
-                manifest
-            }
+    /// [`Scopes::compute`], with the analyzer's source `analyzer`.
+    pub(crate) fn compute_with(
+        analyzer: &str,
+        python: &Path,
+        oracle_dir: &Path,
+        full: u128,
+        environment: u128,
+        cache_dir: Option<&Path>,
+    ) -> Result<Scopes, String> {
+        let keyed = |base: u128| {
+            let mut h = Xxh3::new();
+            h.update(&base.to_le_bytes());
+            h.update(&environment.to_le_bytes());
+            h.digest128()
         };
-        let mut keyed = Xxh3::new();
-        keyed.update(&base.to_le_bytes());
-        keyed.update(&environment.to_le_bytes());
-        Scopes::from_manifest(full, keyed.digest128(), modules, &manifest)
+        let read = fingerprint(oracle_dir, analyzer)?;
+        let cached = cache_dir.map(|dir| dir.join(format!("scope-{:032x}.json", read.sources)));
+        // A cached analysis that doesn't parse (a write cut short), or that gives no scopes,
+        // is made again.
+        if let Some(manifest) = cached
+            .as_deref()
+            .and_then(|f| std::fs::read(f).ok())
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            && let Ok(scopes) =
+                Scopes::from_manifest(full, keyed(read.base), read.modules.clone(), &manifest)
+        {
+            return Ok(scopes);
+        }
+        let bytes = analyze(analyzer, python, &oracle_dir.join("ocio_oracle"))?;
+        // The analysis read the files again: they must be the bytes hashed above, or the
+        // analysis would be kept under the wrong name.
+        if fingerprint(oracle_dir, analyzer)?.sources != read.sources {
+            return Err("the oracle's package changed while it was analysed".to_string());
+        }
+        let manifest: Value =
+            serde_json::from_slice(&bytes).map_err(|e| format!("analysis: {e}"))?;
+        let scopes = Scopes::from_manifest(full, keyed(read.base), read.modules, &manifest)?;
+        if let Some(file) = &cached {
+            crate::oracle::write_atomically(file, &bytes);
+        }
+        Ok(scopes)
     }
 
     /// The scopes that `manifest`, the analysis of `modules`, gives.
@@ -379,9 +422,9 @@ fn closure(edges: &[Vec<usize>], from: &[usize]) -> Vec<bool> {
     reach
 }
 
-/// Runs [`ANALYZER`] on `package` with `python`, isolated as the oracle is, and returns what it
+/// Runs `analyzer` on `package` with `python`, isolated as the oracle is, and returns what it
 /// prints.
-fn analyze(python: &Path, package: &Path) -> Result<Vec<u8>, String> {
+fn analyze(analyzer: &str, python: &Path, package: &Path) -> Result<Vec<u8>, String> {
     let mut command = Command::new(python);
     crate::oracle::isolate(&mut command);
     command
@@ -397,7 +440,7 @@ fn analyze(python: &Path, package: &Path) -> Result<Vec<u8>, String> {
         .stdin
         .take()
         .expect("piped stdin")
-        .write_all(ANALYZER.as_bytes());
+        .write_all(analyzer.as_bytes());
     let output = child.wait_with_output().map_err(|e| e.to_string())?;
     if !output.status.success() || written.is_err() {
         return Err(format!(
