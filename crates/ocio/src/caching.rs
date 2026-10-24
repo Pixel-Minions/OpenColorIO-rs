@@ -5,9 +5,11 @@
 //! upstream gives them, `std::hash<std::string>` of a text, which each wheel's C++ library
 //! computes its own way.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::{Mutex, MutexGuard};
 
+use ocio_ops::exception::{Exception, Result};
 use ocio_ops::platform::is_env_present;
 
 /// `OCIO_DISABLE_ALL_CACHES`: disables every cache, the processors' and the files'.
@@ -87,6 +89,62 @@ pub fn libstdcxx_hash_bytes(bytes: &[u8], seed: u64) -> u64 {
     }
     hash = shift_mix(hash).wrapping_mul(MUL);
     shift_mix(hash)
+}
+
+thread_local! {
+    /// The addresses of the mutexes of the library's caches that this thread holds while it
+    /// works under them ([`Held`]).
+    static HELD: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+/// This thread's hold of the mutex of a cache (a [`GenericCache`], or one file's entry in the
+/// file cache), from before it locks the mutex to after it releases it.
+///
+/// Upstream's caches lock a `std::mutex` while they make what they cache, which can call the
+/// application's code (a config's I/O proxy loading a LUT, a logging function): code that makes
+/// a processor of the same config, or loads the same file, then locks that mutex again on the
+/// same thread, which is undefined behaviour (docs/improvements.md, U-182). MSVC's mutex throws
+/// `std::system_error`, which the port matches on Windows; glibc's waits for itself, where the
+/// port refuses with an error of its own.
+#[derive(Debug)]
+pub(crate) struct Held(usize);
+
+impl Held {
+    /// The hold of the mutex at `address`, before this thread locks it: [`relock_error`] when
+    /// this thread holds it already.
+    pub(crate) fn enter(address: usize) -> Result<Held> {
+        HELD.with_borrow_mut(|held| {
+            if held.contains(&address) {
+                return Err(relock_error());
+            }
+            held.push(address);
+            Ok(Held(address))
+        })
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        HELD.with_borrow_mut(|held| {
+            if let Some(k) = held.iter().rposition(|&a| a == self.0) {
+                held.remove(k);
+            }
+        });
+    }
+}
+
+/// The error of a cache's mutex locked again on the thread that holds it (U-182): on Windows,
+/// the `std::system_error` MSVC's `std::mutex::lock` throws ("resource deadlock would occur",
+/// `what()` repeating the category's message after the error's); elsewhere, where upstream's
+/// thread waits for itself, the port's own error.
+pub(crate) fn relock_error() -> Exception {
+    if cfg!(windows) {
+        Exception::system_error("resource deadlock would occur: resource deadlock would occur")
+    } else {
+        Exception::new(
+            "A cache's mutex is locked again by the thread that holds it (code the library              calls while it makes a processor or loads a file, such as a config's I/O proxy,              makes a processor of the same config or loads the same file): OCIO 2.5.2 waits              for itself, which is undefined behaviour (docs/improvements.md, U-182).",
+        )
+    }
 }
 
 /// A cache of entries under a key, which the environment can disable when it is created, and
@@ -171,26 +229,33 @@ impl<K: Ord, V> GenericCache<K, V> {
         !self.env_disable_all_caches && state.enabled && state.entries.contains_key(key)
     }
 
-    /// The entries, locked, when the cache is enabled.
+    /// The entries, locked, when the cache is enabled. Locked again by the thread that holds
+    /// them (from code the library calls meanwhile), the error of upstream's `std::mutex`
+    /// locked again ([`relock_error`], docs/improvements.md, U-182).
     ///
     /// Port of `GenericCache::lock` and `operator[]` (Caching.h:61-77 @ v2.5.2).
-    pub fn lock(&self) -> Option<CacheGuard<'_, K, V>> {
+    pub fn lock(&self) -> Result<Option<CacheGuard<'_, K, V>>> {
+        let held = Held::enter(std::ptr::from_ref(self) as usize)?;
         let guard = self.state();
         if self.env_disable_all_caches || !guard.enabled {
-            return None;
+            return Ok(None);
         }
-        Some(CacheGuard(guard))
+        Ok(Some(CacheGuard { guard, _held: held }))
     }
 }
 
 /// The locked entries of an enabled [`GenericCache`], in key order (upstream's `std::map`).
 #[derive(Debug)]
-pub struct CacheGuard<'a, K, V>(MutexGuard<'a, CacheState<K, V>>);
+pub struct CacheGuard<'a, K, V> {
+    guard: MutexGuard<'a, CacheState<K, V>>,
+    /// This thread's hold, released after the mutex (the fields drop in order).
+    _held: Held,
+}
 
 impl<K, V> CacheGuard<'_, K, V> {
     /// The entries.
     pub fn entries(&mut self) -> &mut BTreeMap<K, V> {
-        &mut self.0.entries
+        &mut self.guard.entries
     }
 }
 

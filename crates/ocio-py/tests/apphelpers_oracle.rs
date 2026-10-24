@@ -2245,3 +2245,105 @@ fn a_lut_loader_that_changes_the_pipelines_transforms_is_d12() {
         (run, vec![ran, (n("repr"), vec![r(cc)])])
     });
 }
+
+// ---------------------------------------------------------------------------------------------
+// U-182: a cache's mutex locked again by the thread that holds it (verifier 6.7c, second round)
+
+/// Where a LUT loader makes a processor again while the library makes one that loads the LUT.
+#[derive(Clone, Copy, Debug)]
+enum Again {
+    /// The mixing manager's own processor: upstream's config locks its processors' cache, which
+    /// the outer call holds (Config.cpp:4830-4832 @ v2.5.2).
+    Manager,
+    /// A processor of another config over the same file: upstream's file cache locks the file's
+    /// entry, which the outer load holds (FileTransform.cpp:837 @ v2.5.2).
+    OtherConfig,
+}
+
+/// A mixing manager (its config's color picking role reads a LUT through the config's proxy)
+/// makes a processor, or its config does, and the proxy's loader makes the processor `again`
+/// does (the step interpreter defines no functions: the `run` of a thread never started, as
+/// the loaded object's `__del__`, [`load_then`]), whose exception reaches
+/// `sys.unraisablehook`, a list's `append` for the script. The script, and its step that
+/// reads the exception.
+fn relock_script(again: Again) -> (Script, usize) {
+    let mut sc = Script::new();
+    let lut = format!("lut_relock_{again:?}.spi1d");
+    let config = PROXY_CONFIG
+        .replace("SRC", &lut)
+        .replace("scene_linear: raw", "scene_linear: raw, color_picking: lut");
+    let px = proxy_of(&mut sc, &config);
+    let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
+    let m = sc.call(n("OCIO.MixingColorSpaceManager"), vec![r(cfg)]);
+    let (target, args) = match again {
+        Again::Manager => (ra(m, "getProcessor"), vec![s("raw"), s("d"), s("v")]),
+        Again::OtherConfig => {
+            let other = proxy_of(&mut sc, &config);
+            let other = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(other)]);
+            (ra(other, "getProcessor"), vec![s("raw"), s("lut")])
+        }
+    };
+    let (run, _) = call_once(&mut sc, target, args, vec![], false);
+    let got = sc.call(n("list"), vec![]);
+    sc.step(
+        serde_json::json!({ "setattr": n("threading._sys"), "name": "unraisablehook",
+                            "value": ra(got, "append") }),
+        Expect::Value,
+    );
+    load_then(&mut sc, px, run);
+    let made = match again {
+        Again::Manager => sc.call(ra(m, "getProcessor"), vec![s("raw"), s("d"), s("v")]),
+        Again::OtherConfig => sc.call(ra(cfg, "getProcessor"), vec![s("raw"), s("lut")]),
+    };
+    sc.call(ra(made, "getCacheID"), vec![]);
+    sc.step(
+        serde_json::json!({ "setattr": n("threading._sys"), "name": "unraisablehook",
+                            "value": n("threading._sys.__unraisablehook__") }),
+        Expect::Value,
+    );
+    sc.call(n("len"), vec![r(got)]);
+    let first = sc.call(n("operator.getitem"), vec![r(got), i(0)]);
+    // It names the object whose `__del__` raised, at its address.
+    sc.uncompare(first);
+    let raised = sc.eval(ra(first, "exc_value"), &[]);
+    (sc, raised)
+}
+
+/// U-182: the Windows wheel's C++ runtime throws `std::system_error` ("resource deadlock would
+/// occur") where upstream locks a cache's `std::mutex` again on the thread that holds it, as
+/// RuntimeError in the loader, and the outer call makes its processor: the port's is the same
+/// (each step compared with the wheel). glibc's mutex waits for itself, and the Linux wheel's
+/// process hangs (probed in Rocky Linux 9): there, without the wheel, the port's error, and the
+/// outer processor. Each on a thread of its own with a time limit ([`guarded`]): a regression
+/// waits for itself.
+#[test]
+fn a_lut_loader_that_makes_the_same_processor_again_is_u182() {
+    for again in [Again::Manager, Again::OtherConfig] {
+        let (sc, raised) = relock_script(again);
+        if cfg!(windows) {
+            let theirs = common::wheel(&[sc.json()]).remove(0);
+            assert_eq!(
+                theirs["steps"][raised]["value"]["type"], "builtins.RuntimeError",
+                "{again:?}: {theirs}"
+            );
+            guarded(move || run(&[sc]));
+            continue;
+        }
+        let ours = guarded_port(sc.json());
+        let steps = ours["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), sc.steps.len(), "{again:?}");
+        for (k, step) in steps.iter().enumerate() {
+            assert!(step.get("value").is_some(), "{again:?}, step {k}: {step}");
+        }
+        let value = &steps[raised]["value"];
+        assert_eq!(
+            value["type"], "PyOpenColorIO.PyOpenColorIO.Exception",
+            "{again:?}: {value}"
+        );
+        let text = String::from_utf8(ocio_testkit::oracle_values::bytes(&value["repr"])).unwrap();
+        assert!(
+            text.contains("(docs/improvements.md, U-182)."),
+            "{again:?}: {text}"
+        );
+    }
+}

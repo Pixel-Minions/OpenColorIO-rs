@@ -6454,7 +6454,7 @@ impl Config {
             Ok(Arc::new(processor))
         };
 
-        if let Some(mut cache) = self.processor_cache.lock() {
+        if let Some(mut cache) = self.processor_cache.lock()? {
             // Note that the key includes a string description of the transform which does not
             // include all the LUT entries (just the arguments of the FileTransforms for LUTs).
             // `oss << usedContext->getCacheID() << *transform << direction` on one stream (the

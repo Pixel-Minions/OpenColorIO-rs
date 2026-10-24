@@ -453,7 +453,7 @@ impl Processor {
 
         let o_flags = environment_override(o_flags)?;
 
-        if let Some(mut cache) = self.opt_processor_cache.lock() {
+        if let Some(mut cache) = self.opt_processor_cache.lock()? {
             let key = depths_and_flags_key(in_bit_depth, out_bit_depth, o_flags);
             if let Some(processor) = cache.entries().get(&key) {
                 return Ok(processor.clone());
@@ -501,7 +501,7 @@ impl Processor {
 
         let o_flags = environment_override(o_flags)?;
 
-        if let Some(mut cache) = self.gpu_processor_cache.lock() {
+        if let Some(mut cache) = self.gpu_processor_cache.lock()? {
             let key = flags_key(o_flags);
             if let Some(processor) = cache.entries().get(&key) {
                 return Ok(processor.clone());
@@ -564,7 +564,7 @@ impl Processor {
             true
         };
 
-        if use_cache && let Some(mut cache) = self.cpu_processor_cache.lock() {
+        if use_cache && let Some(mut cache) = self.cpu_processor_cache.lock()? {
             let key = depths_and_flags_key(in_bit_depth, out_bit_depth, o_flags);
             if let Some(processor) = cache.entries().get(&key) {
                 return Ok(processor.clone());

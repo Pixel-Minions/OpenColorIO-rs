@@ -33,12 +33,12 @@ fn generic_cache() {
 
         let entry1 = Arc::new(Data::default());
         {
-            let mut m = cache.lock().expect("an enabled cache");
+            let mut m = cache.lock().unwrap().expect("an enabled cache");
             m.entries().insert(key("entry1"), entry1.clone());
         }
         assert!(cache.exists(&key("entry1")));
         {
-            let mut m = cache.lock().expect("an enabled cache");
+            let mut m = cache.lock().unwrap().expect("an enabled cache");
             assert!(Arc::ptr_eq(&m.entries()[&key("entry1")], &entry1));
         }
 
@@ -59,7 +59,7 @@ fn generic_cache() {
         assert!(!cache.is_enabled());
 
         // Upstream writes the entry to its dummy entry; the port's lock gives no entries.
-        assert!(cache.lock().is_none());
+        assert!(cache.lock().unwrap().is_none());
 
         assert!(!cache.exists(&key("entry1")));
         env.set(&[]);
@@ -75,6 +75,7 @@ fn generic_cache() {
         let entry1 = Arc::new(Data::default());
         cache
             .lock()
+            .unwrap()
             .expect("an enabled cache")
             .entries()
             .insert(key("entry1"), entry1);
@@ -103,6 +104,7 @@ fn processor_cache() {
         let entry1 = Arc::new(Data::default());
         cache
             .lock()
+            .unwrap()
             .expect("an enabled cache")
             .entries()
             .insert(key("entry1"), entry1);
@@ -247,7 +249,7 @@ fn caches_read_the_environment_once() {
     assert!(!disabled.is_enabled());
     disabled.enable(true);
     assert!(!disabled.is_enabled());
-    assert!(disabled.lock().is_none());
+    assert!(disabled.lock().unwrap().is_none());
 }
 
 /// Texts of every length up to 40 bytes, every byte value, and two keys of the caches' form,

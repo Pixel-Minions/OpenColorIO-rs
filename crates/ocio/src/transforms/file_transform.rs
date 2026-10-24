@@ -28,7 +28,7 @@ use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::pystring::{self, os_path};
 use ocio_ops::utils::string_utils::c_str;
 
-use crate::caching::GenericCache;
+use crate::caching::{GenericCache, Held};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::input_stream::{InputStream, OpenMode};
@@ -540,7 +540,8 @@ static FILE_CACHE: LazyLock<GenericCache<Vec<u8>, Arc<Mutex<FileCacheResult>>>> 
 
 /// The format and contents of the file at `filepath`, loaded once per path while the file
 /// cache is enabled (a failed load fails again with the same text), and at every call
-/// otherwise.
+/// otherwise. Asked for again while this thread loads it (by code the load calls), the error
+/// of upstream's `std::mutex` locked again (docs/improvements.md, U-182).
 ///
 /// Port of `GetCachedFileAndFormat` (FileTransform.cpp:801-888 @ v2.5.2). Its `catch (...)`,
 /// for an exception that isn't a `std::exception`, has nothing to catch here.
@@ -550,7 +551,7 @@ pub(crate) fn get_cached_file_and_format(
     config: &Config,
 ) -> Result<(&'static dyn FileFormat, CachedFileRcPtr)> {
     // Load the file cache ptr from the global map
-    let result = match FILE_CACHE.lock() {
+    let result = match FILE_CACHE.lock()? {
         Some(mut entries) => entries
             .entries()
             .entry(filepath.to_vec())
@@ -560,6 +561,9 @@ pub(crate) fn get_cached_file_and_format(
     };
 
     // If this file has already been loaded, return the result immediately.
+    // The entry's mutex locked again by this thread (code the load calls, such as a config's
+    // I/O proxy, loads the same file) is upstream's undefined behaviour (U-182).
+    let _held = Held::enter(Arc::as_ptr(&result) as usize)?;
     let mut result = result.lock().unwrap_or_else(|e| e.into_inner());
     if !result.ready {
         result.ready = true;

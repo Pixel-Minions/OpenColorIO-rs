@@ -5983,3 +5983,42 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `crates/ocio-py/tests/callbacks_oracle.rs`, `a_menu_made_while_a_menu_is_made` (the logging
   function a class of `str` whose `__del__` makes the inner menu: compared with the wheel on
   Windows, the port's error on Linux; a 120 s limit).
+
+### U-182. A processor made again by a callback while the library makes it
+
+- **Upstream:** the library's caches lock a `std::mutex` while they make what they cache: a
+  config's processors' cache while `Config::getProcessor` makes a processor
+  (Config.cpp:4830-4832 @ v2.5.2), a file's entry in the file cache while
+  `GetCachedFileAndFormat` loads it (FileTransform.cpp:837), and a processor's caches of its
+  optimized, CPU and GPU processors. Making them can call the application's code: a config's
+  I/O proxy loading a LUT (`PyConfigIOProxy.getLutData`), a logging function. Code there that
+  makes a processor of the same config (a mixing manager's `getProcessor` from the LUT loader
+  of its config) or loads the same file (another config over the same file) locks the mutex
+  again on the same thread: undefined behaviour. The Windows wheel's C++ runtime throws
+  `std::system_error`, which reaches Python as RuntimeError "resource deadlock would occur:
+  resource deadlock would occur" in the callback, and the outer call goes on (probed on
+  Windows, 2026-10-24); libstdc++'s mutex on Linux is a pthread mutex, which waits for itself:
+  the Linux wheel's process hangs (probed in Rocky Linux 9, 2026-10-24: a manager's own
+  processor, another config's and another manager's over the same file).
+- **Who notices:** an application whose config I/O proxy or logging function makes
+  processors over the same config or files.
+- **A fix:** release the caches' mutexes while the library calls the application, or detect
+  the re-entry.
+- **Status:** on Windows the port matches the wheel: the cache locked again by the thread that
+  holds it returns `std::system_error`'s text ("resource deadlock would occur: resource
+  deadlock would occur", `ExceptionKind::SystemError`, RuntimeError in Python), as U-181. On
+  Linux, where the wheel hangs, it returns the error "A cache's mutex is locked again by the
+  thread that holds it (code the library calls while it makes a processor or loads a file,
+  such as a config's I/O proxy, makes a processor of the same config or loads the same file):
+  OCIO 2.5.2 waits for itself, which is undefined behaviour (docs/improvements.md, U-182)."
+  Both detect the case by a thread-local list of the caches' mutexes the thread holds, checked
+  before each lock (`GenericCache::lock`, the file cache's entries); other threads wait for
+  the lock, as upstream's. `GenericCache::clear` and `enable`, which upstream's
+  `noexcept` functions lock too (a relock there ends upstream's process), aren't covered: the
+  binding can't reach them on a cache the thread holds (a config's setters need the config
+  the library is working on, D-9). In `p6-after-p5` (6.7c, `crates/ocio/src/caching.rs`,
+  `Held`, `relock_error`; `crates/ocio/src/transforms/file_transform.rs`);
+  `crates/ocio-py/tests/apphelpers_oracle.rs`,
+  `a_lut_loader_that_makes_the_same_processor_again_is_u182` (a mixing manager's LUT loader
+  making the manager's processor, and another config's over the same file: compared with the
+  wheel on Windows, the port's error and the outer processor on Linux; a 120 s limit).
