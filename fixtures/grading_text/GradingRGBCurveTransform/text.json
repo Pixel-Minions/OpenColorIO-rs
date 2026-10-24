@@ -290,10 +290,56 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('red', 0, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-0, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"72aaf2312c576512fa1ec4a0a005a19d\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -0 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('red', 0, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=-0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e78c0cab37a7bac2862d664e328ef4c3\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('red', 0, 0) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 1 has a x coordinate '0.5' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('red', 0, 0) = inf",
   "exception": {
    "type": "Exception",
    "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 1 has a x coordinate '0' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic True ('red', 0, 0) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 1 has a x coordinate '0.5' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('red', 0, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=nan><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ff2dabf528b8f036b509b5dca9d667f7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('red', 0, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=nan><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"06de23d4dcaed37995a4ed13407886fe\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 nan\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -313,6 +359,29 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic True ('red', 0, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-0><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -0\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('red', 0, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=-0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e2a61e8f9f9fc4d3a81ba9d086ac5c75\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('red', 0, 1) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 1 has a y coordinate '0.5' that is less than previous control point y coordinate 'inf'."
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('red', 0, 1) = inf",
   "exception": {
    "type": "Exception",
@@ -320,11 +389,34 @@
   }
  },
  {
-  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic True ('red', 1, 0) = -0",
-  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('red', 0, 1) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 1 has a y coordinate '0.5' that is less than previous control point y coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic True ('red', 1, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfd981dd6e2d6c58a90b073cf2312163\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('red', 1, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=-0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3433d5141a90dc962b7399ab10a36cc4\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('red', 1, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9dd46a836fb53f49f06a1ccba29c1085\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -335,11 +427,57 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('red', 1, 0) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 2 has a x coordinate '7' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic True ('red', 1, 0) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('red', 1, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=nan><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"01180df1fdd683f4d107f0242cd97c73\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('red', 1, 1) = nan",
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=nan><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
    "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"859602b588a78b451beca7c1426010e3\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 nan\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('red', 1, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=nan><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"6c1565cea333229f2d4dc3258d2d9a72\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('red', 1, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=-0><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"2911140edf4e506d7e4507b4c5fc3ae6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic True ('red', 1, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=-0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -358,19 +496,63 @@
   }
  },
  {
-  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic True ('red', 2, 0) = -0",
-  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=-0, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
-  "validate": null,
-  "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                         -0 7\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('red', 1, 1) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 2 has a y coordinate '7' that is less than previous control point y coordinate 'inf'."
   }
  },
  {
-  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('red', 2, 0) = inf",
-  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('red', 1, 1) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 2 has a y coordinate '1' that is less than previous control point y coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic True ('red', 2, 0) = -0",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 2 has a x coordinate '-0' that is less than previous control point x coordinate '0.5'."
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('red', 2, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=-0, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"8fe3bcd13e15a062835e48358f81d08a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"39cc70b13dc520a2267a662bd077da15\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                         -0 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('red', 2, 0) = -0",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 2 has a x coordinate '-0' that is less than previous control point x coordinate '0.5'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('red', 2, 0) = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5e546bb772691ebe15f31b6080211f56\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('red', 2, 0) = inf",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=inf, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"55620e57bde4a3878feea75fb211b3d4\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                        inf 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic True ('red', 2, 0) = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -382,11 +564,57 @@
   }
  },
  {
-  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('red', 2, 1) = -0",
-  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=-0>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('red', 2, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=nan>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"c0d233d8bc1ee321ac7d59d623aceb8e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"35795c8ec2e3de6663cd036eaac1f868\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 nan\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('red', 2, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=nan>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfe4660799a714e512562bd0ad845ecd\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('red', 2, 1) = -0",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 2 has a y coordinate '-0' that is less than previous control point y coordinate '0.5'."
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic True ('red', 2, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=-0>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('red', 2, 1) = -0",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'red' curve with: Control point at index 2 has a y coordinate '-0' that is less than previous control point y coordinate '0.5'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('red', 2, 1) = inf",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=inf>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"f1666f050eb7cb53cf1f2861029c9624\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('red', 2, 1) = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=inf>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"4222df9cc50b1ff33c32c1d8e7d880d7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -406,10 +634,56 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('master', 0, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-0, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9f890f8fa58d7d847053c522203d17b1\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -0 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('master', 0, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=-0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"c8ac7dcd4ae338d5fde72b4e3ff2a467\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('master', 0, 0) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 1 has a x coordinate '0.5' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('master', 0, 0) = inf",
   "exception": {
    "type": "Exception",
    "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 1 has a x coordinate '0' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic True ('master', 0, 0) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 1 has a x coordinate '0.5' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('master', 0, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=nan><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9396c8c8f61504dfab4a7bc106cde3de\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('master', 0, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=nan><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"595c85ccedb971d7b5dc1c039986e093\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 nan\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -429,6 +703,29 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic True ('master', 0, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-0><x=0, y=0><x=7, y=7>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -0\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('master', 0, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=-0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b5656c787b7af72a842bd5543e6381e1\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('master', 0, 1) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 1 has a y coordinate '0.5' that is less than previous control point y coordinate 'inf'."
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('master', 0, 1) = inf",
   "exception": {
    "type": "Exception",
@@ -436,11 +733,34 @@
   }
  },
  {
-  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic True ('master', 1, 0) = -0",
-  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>>, dynamic>",
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('master', 0, 1) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 1 has a y coordinate '0.5' that is less than previous control point y coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic True ('master', 1, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffbdbf025487dcb9b54a83ede9d0f404\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3648def9cf693c8c3067451efce35313\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('master', 1, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=-0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9d4106e67215092c0a7b5e03e7c29903\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('master', 1, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cc3a4ee2af8e6ac21e9d0ed24d8d9ef5\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -451,11 +771,57 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('master', 1, 0) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 2 has a x coordinate '7' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic True ('master', 1, 0) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('master', 1, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=nan><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3ae8e9af6dbfead3251f5f0e531dfe15\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('master', 1, 1) = nan",
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=nan><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
    "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"65a33ac05fc3b06166f46b7c72d70573\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 nan\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('master', 1, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=nan><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"0276dec572c6770089fa5e60be515f1f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('master', 1, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=-0><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"fd085fcc45ca7a61bccafcf2f7a17930\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic True ('master', 1, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=-0><x=7, y=7>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -474,19 +840,63 @@
   }
  },
  {
-  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic True ('master', 2, 0) = -0",
-  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=-0, y=7>]>>, dynamic>",
-  "validate": null,
-  "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                         -0 7\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('master', 1, 1) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 2 has a y coordinate '7' that is less than previous control point y coordinate 'inf'."
   }
  },
  {
-  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('master', 2, 0) = inf",
-  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>>>",
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('master', 1, 1) = inf",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 2 has a y coordinate '1' that is less than previous control point y coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic True ('master', 2, 0) = -0",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 2 has a x coordinate '-0' that is less than previous control point x coordinate '0.5'."
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('master', 2, 0) = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=-0, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"430b8f9f50cde83c395c95084fe76064\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b99bea200b7cb8629085f78b240aba6f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                         -0 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('master', 2, 0) = -0",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 2 has a x coordinate '-0' that is less than previous control point x coordinate '0.5'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('master', 2, 0) = inf",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a03627c8d874cdb2de878efa22933d2d\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('master', 2, 0) = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=inf, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"7762d272ea42b9fa42daa9b5e5a1af4d\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                        inf 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic True ('master', 2, 0) = inf",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffbdbf025487dcb9b54a83ede9d0f404\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -498,11 +908,57 @@
   }
  },
  {
-  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('master', 2, 1) = -0",
-  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=-0>]>>>",
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('master', 2, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=nan>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3a918bd385b389e2be046599fbbfe6c4\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"70cf1f328124ab92d6f284b0c320fe94\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('master', 2, 1) = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=nan>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"fc37e4abab465b9b314f837722965cd2\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('master', 2, 1) = -0",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 2 has a y coordinate '-0' that is less than previous control point y coordinate '0.5'."
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic True ('master', 2, 1) = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=-0>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('master', 2, 1) = -0",
+  "exception": {
+   "type": "Exception",
+   "message": "GradingRGBCurve validation failed for 'master' curve with: Control point at index 2 has a y coordinate '-0' that is less than previous control point y coordinate '0.5'."
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('master', 2, 1) = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=inf>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"fbc28c059a5eaab129fbb4e5156a2f3e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('master', 2, 1) = inf",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=inf>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"44d621e1950fd2d4f4becddf69169134\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 inf\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -522,11 +978,59 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('green', 0, 'slope') = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=nan><x=0, y=0, slp=0><x=7, y=7, slp=0>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"96b06557d3cdf147e7d131cb2770cb0e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                        nan 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('green', 0, 'slope') = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=nan><x=0.5, y=0.5, slp=0><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"da2a67a3f900ec6a144e01f43cf97249\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        nan 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('green', 0, 'slope') = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"34ebe713b4dff759cf291baadc9637c9\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('green', 0, 'slope') = -0",
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
    "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5fe2958b58c48668b079e5a171b8d493\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic True ('green', 0, 'slope') = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('green', 0, 'slope') = inf",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=inf><x=0.5, y=0.5, slp=0><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"51b431ae2f2e26329afe49a55e362483\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        inf 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('green', 0, 'slope') = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=inf><x=0, y=0, slp=0><x=7, y=7, slp=0>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cfef1d27489f245bf6d02d5c047ce621\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                        inf 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -546,6 +1050,30 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic True ('green', 1, 'slope') = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=nan><x=7, y=7, slp=0>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 nan 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('green', 1, 'slope') = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=nan><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"41ee681a620c67b3f15a37247d2e5901\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 nan 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('green', 1, 'slope') = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a624d3d571257d094f09fef9761a4790\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('green', 1, 'slope') = -0",
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
@@ -554,11 +1082,35 @@
   }
  },
  {
-  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic True ('green', 1, 'slope') = inf",
-  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=inf><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic False ('green', 1, 'slope') = -0",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"6fcb576ad06347b9374c9b37fea975c6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic True ('green', 1, 'slope') = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=inf><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfd981dd6e2d6c58a90b073cf2312163\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('green', 1, 'slope') = inf",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=inf><x=7, y=7, slp=0>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ae7277f7e4d3a70bf7846db8d61758b0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('green', 1, 'slope') = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=inf><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cbe5e8834a82d169d2a97b15e25ceb8a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -570,11 +1122,59 @@
   }
  },
  {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic False ('green', 2, 'slope') = nan",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=0><x=7, y=7, slp=nan>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d632e1c86b7dce6cea5a8c017142585c\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0 nan \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_FORWARD dynamic True ('green', 2, 'slope') = nan",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0><x=1, y=1, slp=nan>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffbdbf025487dcb9b54a83ede9d0f404\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 nan \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_INVERSE dynamic False ('green', 2, 'slope') = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"34ebe713b4dff759cf291baadc9637c9\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
   "label": "GRADING_LIN TRANSFORM_DIR_FORWARD dynamic False ('green', 2, 'slope') = -0",
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
    "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5fe2958b58c48668b079e5a171b8d493\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_VIDEO TRANSFORM_DIR_INVERSE dynamic False ('green', 2, 'slope') = -0",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"8182ca53ca4d6a24fefca7d3ca875e1e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LOG TRANSFORM_DIR_FORWARD dynamic False ('green', 2, 'slope') = inf",
+  "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0><x=1, y=1, slp=inf>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"f42598fc09a4d6c5a7fbafb9cb76b11f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 inf \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "GRADING_LIN TRANSFORM_DIR_INVERSE dynamic True ('green', 2, 'slope') = inf",
+  "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=0><x=7, y=7, slp=inf>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0 inf \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {

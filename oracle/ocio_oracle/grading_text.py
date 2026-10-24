@@ -414,8 +414,8 @@ def _rgb_curve_value(style, changes):
 
 
 def _curve_cases(cls, slots, value_of, typical_of, extra, excluded=lambda slot, v: False):
-    """As _slot_cases, for curves: LOGIC in each slot with the style cycling, FLOATS and
-    SPELLED_FLOATS each in two slots. A value `excluded` leaves out of a slot is left out of
+    """As _slot_cases, for curves: LOGIC in each slot in every style (their default curves
+    differ), FLOATS and SPELLED_FLOATS each in two slots. A value `excluded` leaves out of a slot is left out of
     it (LOGIC), or goes to the next slot that takes it (FLOATS)."""
     cases = []
     for style in GRADING_STYLES:
@@ -433,13 +433,14 @@ def _curve_cases(cls, slots, value_of, typical_of, extra, excluded=lambda slot, 
         for name, v in LOGIC:
             if excluded(slot, v):
                 continue
-            style = GRADING_STYLES[k % 3]
-            direction = DIRECTIONS[k // 3 % 2]
-            dynamic = k % 5 == 0
-            k += 1
-            cases.append(_case(f"{style} {direction} dynamic {dynamic} {slot} = {name}",
-                               "transform",
-                               _grading(cls, style, direction, dynamic, value_of(style, {slot: v}))))
+            for style in GRADING_STYLES:
+                direction = DIRECTIONS[k % 2]
+                dynamic = k % 5 == 0
+                k += 1
+                cases.append(_case(f"{style} {direction} dynamic {dynamic} {slot} = {name}",
+                                   "transform",
+                                   _grading(cls, style, direction, dynamic,
+                                            value_of(style, {slot: v}))))
     for spelled, values in ((False, FLOATS), (True, SPELLED_FLOATS)):
         for i, (name, v) in enumerate(values):
             for j in range(2):

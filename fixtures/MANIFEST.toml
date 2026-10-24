@@ -208,21 +208,21 @@ machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD 
 
 [[file]]
 path = "grading_text/GradingHueCurveTransform/serialize.ocio"
-sha256 = "b574e3d3b745757c333bce5333b318a92175af55ae3f136fe7cea45f7bb16e85"
+sha256 = "a9563a589c41b00822a39058600c9cf2a5da323374328455df4168ad1caa9e58"
 generator = "ocio_oracle regen grading_text"
 ocio_version = "2.5.2"
 machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD cpuid=AuthenticAMD:00b40f40 features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
 
 [[file]]
 path = "grading_text/GradingHueCurveTransform/spec.json"
-sha256 = "b4000c1e7ecd16cd8e430982bb65e6bc5d9637732e9ff6a0046d189bf0da7291"
+sha256 = "9ebee61cc8e89c2f22e387b202373aa3c58afc684a2418c8b8e16b694b7f4f2b"
 generator = "ocio_oracle regen grading_text"
 ocio_version = "2.5.2"
 machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD cpuid=AuthenticAMD:00b40f40 features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
 
 [[file]]
 path = "grading_text/GradingHueCurveTransform/text.json"
-sha256 = "4a64baa8603b9619132509949594c1a951b6f0534fe7e4d5c2f780244e269f5f"
+sha256 = "31abbffd1a3f321097f7eb506685b88a18f2433c3035de1daea9a3763dbe399e"
 generator = "ocio_oracle regen grading_text"
 ocio_version = "2.5.2"
 machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD cpuid=AuthenticAMD:00b40f40 features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
@@ -264,21 +264,21 @@ machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD 
 
 [[file]]
 path = "grading_text/GradingRGBCurveTransform/serialize.ocio"
-sha256 = "b2ccb5ddd98d79a20dbfb8d955e040dc7050eeb31e89cb122552584400106d41"
+sha256 = "5817ee4c50af948dd3f9de4d9df6a2c8f59d4a552a34a0b6cdb96e7e694c0a88"
 generator = "ocio_oracle regen grading_text"
 ocio_version = "2.5.2"
 machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD cpuid=AuthenticAMD:00b40f40 features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
 
 [[file]]
 path = "grading_text/GradingRGBCurveTransform/spec.json"
-sha256 = "0751b8fb880fbbf39368b214983611ac12f875af2d87c3932b6785c40c5b1c02"
+sha256 = "cbd05761776968e3d8b2a0bdc3b72dcc7832e29aa410732ce1cd07d0d2a2ac5f"
 generator = "ocio_oracle regen grading_text"
 ocio_version = "2.5.2"
 machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD cpuid=AuthenticAMD:00b40f40 features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
 
 [[file]]
 path = "grading_text/GradingRGBCurveTransform/text.json"
-sha256 = "c54d1e55d1670440de4aab5b1b19f961a923574e0b4cf897075b2be512d33d7f"
+sha256 = "716decf7fdcc9590518538db1d36fdf115c4e88bb6ec402ca657e833f640757f"
 generator = "ocio_oracle regen grading_text"
 ocio_version = "2.5.2"
 machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD cpuid=AuthenticAMD:00b40f40 features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
