@@ -7,3 +7,5 @@
 //! 6.8's.
 
 pub(crate) mod py_color_space_helpers;
+pub(crate) mod py_display_view_helpers;
+pub(crate) mod py_legacy_viewing_pipeline;

@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
 /// for entry (transforms_oracle.rs checks them in detail).
-const COMPLETE: [&str; 51] = [
+const COMPLETE: [&str; 52] = [
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -78,6 +78,7 @@ const COMPLETE: [&str; 51] = [
     "DynamicProperty",
     "ColorSpaceMenuParameters",
     "ColorSpaceMenuHelper",
+    "LegacyViewingPipeline",
 ];
 
 /// The classes a binding makes itself rather than bindPyTypes' declarations (bindPyConfigIOProxy's

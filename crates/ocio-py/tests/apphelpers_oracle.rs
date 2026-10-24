@@ -17,8 +17,11 @@
 
 mod common;
 
-use common::script::{Expect, Script, b, compare, i, n, none, r, ra, s};
+use std::sync::Once;
+
+use common::script::{Expect, Script, b, compare, f, i, l, n, none, r, ra, s};
 use pyo3::prelude::*;
+use pyo3::types::PyCFunction;
 use serde_json::Value;
 
 /// upstream's tests/python/UnitTestUtils.py `SAMPLE_CONFIG`, the config of their tests.
@@ -42,8 +45,31 @@ fn config(sc: &mut Script, tag: &str) -> usize {
     c
 }
 
+static STAND_IN: Once = Once::new();
+
+/// Starts the interpreter, with `Processor.getCacheID` a stand-in while the module lacks it.
 fn start() {
     common::start_python();
+    STAND_IN.call_once(|| {
+        Python::attach(|py| {
+            let ocio = py.import("PyOpenColorIO").unwrap();
+            let processor = ocio.getattr("Processor").unwrap();
+            if !processor.hasattr("getCacheID").unwrap() {
+                let f = PyCFunction::new_closure(py, Some(c"getCacheID"), None, |args, _| {
+                    let p = ocio_py::embed::processor_from_python(&args.get_item(0)?)?;
+                    p.cache_id()
+                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+                })
+                .unwrap();
+                let method = py
+                    .eval(c"lambda f: lambda self: f(self)", None, None)
+                    .unwrap()
+                    .call1((f,))
+                    .unwrap();
+                processor.setattr("getCacheID", method).unwrap();
+            }
+        });
+    });
 }
 
 fn run(scripts: &[Script]) {
@@ -68,8 +94,10 @@ fn the_app_helpers_have_the_wheels_surface() {
     assert!(!embedded_file);
     for c in [
         "ColorSpaceHelpers",
+        "DisplayViewHelpers",
         "ColorSpaceMenuParameters",
         "ColorSpaceMenuHelper",
+        "LegacyViewingPipeline",
     ] {
         let mut theirs = common::wheel_member(&report, c);
         let ours = common::port_member(c);
@@ -473,6 +501,328 @@ fn add_color_space_behaves_as_the_wheels() {
     run(&[sc]);
 }
 
+/// `DisplayViewHelpers`: the processors (their cache IDs, the same object asked twice), the
+/// views added and removed, and their errors.
+#[test]
+fn display_view_helpers_behave_as_the_wheels() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "display view helpers");
+    let get = "OCIO.DisplayViewHelpers.GetProcessor";
+    let mut processors = Vec::new();
+    for (args, kwargs) in [
+        (
+            vec![r(cfg)],
+            vec![
+                ("workingSpaceName", s("lin_1")),
+                ("displayName", s("DISP_1")),
+                ("viewName", s("VIEW_1")),
+            ],
+        ),
+        (
+            vec![r(cfg), none(), s("lin_1"), s("DISP_2"), s("VIEW_2")],
+            vec![],
+        ),
+        (
+            vec![r(cfg)],
+            vec![
+                ("workingSpaceName", s("lin_1")),
+                ("displayName", s("DISP_1")),
+                ("viewName", s("VIEW_1")),
+                ("direction", n("OCIO.TRANSFORM_DIR_INVERSE")),
+            ],
+        ),
+    ] {
+        let p = sc.call_kw(n(get), args, kwargs, Expect::Value);
+        sc.unrepr(p);
+        processors.push(p);
+        sc.call(ra(p, "getCacheID"), vec![]);
+    }
+    let ctx = sc.call(ra(cfg, "getCurrentContext"), vec![]);
+    sc.unrepr(ctx);
+    let mat = sc.call(
+        n("OCIO.MatrixTransform.Scale"),
+        vec![l(vec![f(1.5), f(1.25), f(1.0), f(1.0)])],
+    );
+    let p = sc.call_kw(
+        n(get),
+        vec![r(cfg), r(ctx), s("lin_1"), s("DISP_1"), s("VIEW_1")],
+        vec![("channelView", r(mat))],
+        Expect::Value,
+    );
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    let again = sc.call_kw(
+        n(get),
+        vec![r(cfg)],
+        vec![
+            ("workingSpaceName", s("lin_1")),
+            ("displayName", s("DISP_1")),
+            ("viewName", s("VIEW_1")),
+        ],
+        Expect::Value,
+    );
+    sc.unrepr(again);
+    sc.call(n("operator.is_"), vec![r(again), r(processors[0])]);
+    for args in [
+        vec![r(cfg), none(), s("nope"), s("DISP_1"), s("VIEW_1")],
+        vec![r(cfg), none(), s("lin_1"), s("DISP_9"), s("VIEW_1")],
+        vec![r(cfg), none(), s("lin_1"), none(), s("VIEW_1")],
+        vec![none(), none(), s("lin_1"), s("DISP_1"), s("VIEW_1")],
+        vec![r(cfg), none(), s("lin_1"), s("DISP_1"), s("VIEW_1"), r(cfg)],
+        vec![r(cfg), s("lin_1"), s("DISP_1"), s("VIEW_1")],
+    ] {
+        sc.raises(n(get), args);
+    }
+    let identity = sc.call(
+        n("OCIO.DisplayViewHelpers.GetIdentityProcessor"),
+        vec![r(cfg)],
+    );
+    sc.unrepr(identity);
+    sc.call(ra(identity, "getCacheID"), vec![]);
+    sc.raises(
+        n("OCIO.DisplayViewHelpers.GetIdentityProcessor"),
+        vec![none()],
+    );
+    // Views added and removed.
+    let add = "OCIO.DisplayViewHelpers.AddDisplayView";
+    sc.call_kw(
+        n(add),
+        vec![],
+        vec![
+            ("config", r(cfg)),
+            ("displayName", s("DISP_1")),
+            ("viewName", s("VIEW_5")),
+            ("lookName", s("look_3")),
+            ("colorSpaceName", s("view_5")),
+            ("colorSpaceFamily", s("Display/family")),
+            ("colorSpaceDescription", s("a description")),
+            ("colorSpaceCategories", s("file-io")),
+            ("transformFilePath", s("lut1d_green.ctf")),
+            ("connectionColorSpaceName", s("lin_1")),
+        ],
+        Expect::Value,
+    );
+    sc.call(
+        n(add),
+        vec![
+            r(cfg),
+            s("DISP_NEW"),
+            s("VIEW_NEW"),
+            s(""),
+            s("view_new\u{0}cut"),
+            s(""),
+            s(""),
+            s(""),
+            s("lut.clf"),
+            s("lin_2"),
+        ],
+    );
+    sc.call(ra(cfg, "serialize"), vec![]);
+    // A color space that exists, an empty path, a connection color space that doesn't.
+    for (cs, path, connection) in [
+        ("view_5", "lut.clf", "lin_1"),
+        ("view_51", "", "lin_1"),
+        ("view_51", "lut.clf", "nope"),
+    ] {
+        sc.call_kw(
+            n(add),
+            vec![],
+            vec![
+                ("config", r(cfg)),
+                ("displayName", s("DISP_1")),
+                ("viewName", s("VIEW_6")),
+                ("colorSpaceName", s(cs)),
+                ("transformFilePath", s(path)),
+                ("connectionColorSpaceName", s(connection)),
+            ],
+            Expect::Raised,
+        );
+    }
+    sc.raises(
+        n(add),
+        vec![
+            r(cfg),
+            none(),
+            s("v"),
+            s(""),
+            s(""),
+            s(""),
+            s(""),
+            s(""),
+            s("f"),
+            s("lin_1"),
+        ],
+    );
+    let remove = "OCIO.DisplayViewHelpers.RemoveDisplayView";
+    sc.call(n(remove), vec![r(cfg), s("DISP_1"), s("VIEW_5")]);
+    sc.call_kw(
+        n(remove),
+        vec![],
+        vec![
+            ("config", r(cfg)),
+            ("displayName", s("DISP_NEW")),
+            ("viewName", s("VIEW_NEW")),
+        ],
+        Expect::Value,
+    );
+    sc.raises(n(remove), vec![r(cfg), s("DISP_1"), s("VIEW_5")]);
+    sc.raises(n(remove), vec![r(cfg), none(), s("VIEW_1")]);
+    sc.call(ra(cfg, "serialize"), vec![]);
+    run(&[sc]);
+}
+
+const PIPELINE_GETTERS: [&str; 3] = ["getLooksOverrideEnabled", "getLooksOverride", "__repr__"];
+
+/// The pipeline: its transforms (its own copies, the same objects while they live, changed in
+/// place through its getters), the looks override, `repr` and the processors, with their
+/// errors (a transform whose direction is outside the enumerators among them, I-261).
+#[test]
+fn legacy_viewing_pipeline_behaves_as_the_wheels() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "pipeline");
+    let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    sc.raises(n("OCIO.LegacyViewingPipeline"), vec![i(1)]);
+    let none_proc = sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    let _ = none_proc;
+    let dvt = sc.call_kw(
+        n("OCIO.DisplayViewTransform"),
+        vec![],
+        vec![
+            ("src", s("in_1")),
+            ("display", s("DISP_2")),
+            ("view", s("VIEW_2")),
+        ],
+        Expect::Value,
+    );
+    sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+    let held = sc.call(ra(vp, "getDisplayViewTransform"), vec![]);
+    sc.call(n("operator.is_"), vec![r(held), r(dvt)]);
+    let held2 = sc.call(ra(vp, "getDisplayViewTransform"), vec![]);
+    sc.call(n("operator.is_"), vec![r(held), r(held2)]);
+    sc.eval(r(dvt), &["getLooksBypass"]);
+    sc.eval(r(held), &["getLooksBypass", "getSrc"]);
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    // The copy changed in place: the pipeline's.
+    sc.call(ra(held, "setLooksBypass"), vec![b(false)]);
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    // The other transforms.
+    let mat = sc.call(
+        n("OCIO.MatrixTransform.Scale"),
+        vec![l(vec![f(1.1), f(1.2), f(1.1), f(1.0)])],
+    );
+    let ff = sc.call(
+        n("OCIO.FixedFunctionTransform"),
+        vec![n("OCIO.FIXED_FUNCTION_ACES_RED_MOD_03")],
+    );
+    let expo = sc.call(
+        n("OCIO.ExponentTransform"),
+        vec![l(vec![f(1.25), f(1.25), f(1.25), f(1.0)])],
+    );
+    let grp = sc.call(n("OCIO.GroupTransform"), vec![]);
+    sc.call(ra(grp, "appendTransform"), vec![r(expo)]);
+    let timing = sc.call(n("OCIO.MatrixTransform"), vec![]);
+    for (set, get, t) in [
+        ("setChannelView", "getChannelView", mat),
+        ("setLinearCC", "getLinearCC", ff),
+        ("setDisplayCC", "getDisplayCC", grp),
+        ("setColorTimingCC", "getColorTimingCC", timing),
+    ] {
+        sc.eval(r(vp), &[get]);
+        sc.call(ra(vp, set), vec![r(t)]);
+        let got = sc.call(ra(vp, get), vec![]);
+        sc.call(n("operator.is_"), vec![r(got), r(t)]);
+        let again = sc.call(ra(vp, get), vec![]);
+        sc.call(n("operator.is_"), vec![r(got), r(again)]);
+        sc.call(n("type"), vec![r(got)]);
+        sc.raises(ra(vp, set), vec![]);
+        sc.raises(ra(vp, set), vec![b(false)]);
+        sc.raises(ra(vp, set), vec![n("OCIO.TRANSFORM_DIR_FORWARD")]);
+    }
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    sc.call(ra(vp, "setColorTimingCC"), vec![none()]);
+    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    // Changed in place through the getters; the group's copy shares its children.
+    let cv = sc.call(ra(vp, "getChannelView"), vec![]);
+    sc.call(
+        ra(cv, "setOffset"),
+        vec![l(vec![f(0.125), f(0.25), f(0.5), f(0.0)])],
+    );
+    sc.call(
+        ra(expo, "setValue"),
+        vec![l(vec![f(2.0), f(2.0), f(2.0), f(1.0)])],
+    );
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    let ctx = sc.call(ra(cfg, "getCurrentContext"), vec![]);
+    sc.unrepr(ctx);
+    let p = sc.call_kw(
+        ra(vp, "getProcessor"),
+        vec![],
+        vec![("config", r(cfg)), ("context", r(ctx))],
+        Expect::Value,
+    );
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    sc.raises(ra(vp, "getProcessor"), vec![none()]);
+    sc.raises(ra(vp, "getProcessor"), vec![]);
+    // Looks override.
+    sc.call(ra(vp, "setLooksOverrideEnabled"), vec![b(true)]);
+    sc.call(ra(vp, "setLooksOverride"), vec![s("look_3")]);
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    sc.call(ra(vp, "setLooksOverride"), vec![s("nope")]);
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.call(ra(vp, "setLooksOverrideEnabled"), vec![none()]);
+    for bad in [vec![], vec![n("OCIO.TRANSFORM_DIR_FORWARD")], vec![s("no")]] {
+        sc.raises(ra(vp, "setLooksOverrideEnabled"), bad);
+    }
+    for bad in [vec![none()], vec![], vec![b(false)]] {
+        sc.raises(ra(vp, "setLooksOverride"), bad);
+    }
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    // An invalid transform, and a direction outside the enumerators.
+    sc.call(ra(vp, "setLooksOverride"), vec![s("")]);
+    let bad_dir = sc.call(n("OCIO.TransformDirection"), vec![i(5)]);
+    sc.call(ra(cv, "setDirection"), vec![r(bad_dir)]);
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.call(
+        ra(cv, "setDirection"),
+        vec![n("OCIO.TRANSFORM_DIR_FORWARD")],
+    );
+    let held_dvt = sc.call(ra(vp, "getDisplayViewTransform"), vec![]);
+    sc.call(ra(held_dvt, "setSrc"), vec![s("")]);
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.call(ra(held_dvt, "setSrc"), vec![s("in_1")]);
+    for set in [
+        "setChannelView",
+        "setLinearCC",
+        "setColorTimingCC",
+        "setDisplayCC",
+        "setDisplayViewTransform",
+    ] {
+        sc.call(ra(vp, set), vec![none()]);
+    }
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    run(&[sc]);
+}
+
 /// Runs `sc` on both sides: each step of `stored` succeeds in the wheel, each of `refused`
 /// raises there, and each raises the port's ValueError naming U-112 (an enum value outside the
 /// enumerators, which the port's library can't hold).
@@ -523,4 +873,25 @@ fn a_search_reference_type_outside_the_enumerators_is_the_ports_error() {
         ),
     ];
     outside_enumerators(&sc, &stored, &[]);
+}
+
+/// A direction outside the enumerators, which the wheel's display view helper hands to its
+/// display view transform, whose validation refuses it: the port's error (U-112).
+#[test]
+fn a_display_view_direction_outside_the_enumerators_is_the_ports_error() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "display view direction outside");
+    let dir = sc.call(n("OCIO.TransformDirection"), vec![i(5)]);
+    let refused = sc.call_kw(
+        n("OCIO.DisplayViewHelpers.GetProcessor"),
+        vec![r(cfg)],
+        vec![
+            ("workingSpaceName", s("lin_1")),
+            ("displayName", s("DISP_1")),
+            ("viewName", s("VIEW_1")),
+            ("direction", r(dir)),
+        ],
+        Expect::Raised,
+    );
+    outside_enumerators(&sc, &[], &[refused]);
 }

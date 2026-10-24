@@ -129,8 +129,8 @@ fn wheel_unnamed() -> Vec<Unnamed> {
 
 /// The table is the wheel's unnamed overloads, exactly; the parameters of the pointers and
 /// holders of the classes the port binds are of the types the dispatcher loads (`str`,
-/// classes and `GradingBSplineCurve.setSlopes`' sequence; a later card binding a class adds its
-/// types to `dispatch.rs`'s `rest_loads`).
+/// classes, `GradingBSplineCurve.setSlopes`' sequence, and the legacy viewing pipeline's `bool`;
+/// a later card binding a class adds its types to `dispatch.rs`'s `rest_loads`).
 #[test]
 fn the_table_is_the_wheels_unnamed_overloads() {
     let wheel = wheel_unnamed();
@@ -167,7 +167,8 @@ fn the_table_is_the_wheels_unnamed_overloads() {
                 assert!(
                     t == "str"
                         || t.starts_with("PyOpenColorIO.PyOpenColorIO.")
-                        || t == "collections.abc.Sequence[typing.SupportsFloat]",
+                        || t == "collections.abc.Sequence[typing.SupportsFloat]"
+                        || t == "bool",
                     "{c}.{n}: {t}"
                 );
             }
@@ -331,6 +332,9 @@ fn argument(ty: &str) -> Option<&'static str> {
             Some("OCIO.GradingHueCurve(OCIO.GRADING_LOG)")
         }
         "collections.abc.Sequence[typing.SupportsFloat]" => Some("[0.5, 0.25]"),
+        "bool" => Some("True"),
+        "PyOpenColorIO.PyOpenColorIO.Transform" => Some("OCIO.MatrixTransform()"),
+        "PyOpenColorIO.PyOpenColorIO.DisplayViewTransform" => Some("OCIO.DisplayViewTransform()"),
         _ => None,
     }
 }

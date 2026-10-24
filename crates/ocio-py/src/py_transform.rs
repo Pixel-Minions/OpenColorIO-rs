@@ -926,6 +926,12 @@ static VALIDATE: Function = method_def!("validate", [SELF], "None", |py, o, a, _
 /// null child or a group that holds itself is reached only once every node before it passed:
 /// the port's errors, as in [`TransformRc::materialize`].
 pub(crate) fn validate(py: Python<'_>, rc: &TransformRc) -> PyResult<()> {
+    py_result(py, validate_ocio(rc)?)
+}
+
+/// [`validate`], its OCIO error as the library's (the inner result), the port's errors (U-110,
+/// U-111) as Python's (the outer one).
+pub(crate) fn validate_ocio(rc: &TransformRc) -> PyResult<ocio::Result<()>> {
     // Each level: a group's node and its children, the next child.
     let mut stack: Vec<(TransformRc, Vec<Option<TransformRc>>, usize)> = Vec::new();
     let mut current = Some(rc.clone());
@@ -942,18 +948,19 @@ pub(crate) fn validate(py: Python<'_>, rc: &TransformRc) -> PyResult<()> {
             };
             let t = rc.transform_type();
             if direction != 0 && direction != 1 {
-                return Err(crate::py_open_color_io::to_py_err(
-                    py,
-                    &ocio::Exception::new(invalid_direction(t)),
-                ));
+                return Ok(Err(ocio::Exception::new(invalid_direction(t))));
             }
             match transform {
-                Some(transform) => py_result(py, transform.validate())?,
+                Some(transform) => {
+                    if let Err(e) = transform.validate() {
+                        return Ok(Err(e));
+                    }
+                }
                 None => stack.push((rc, children, 0)),
             }
         }
         let Some((_, children, next)) = stack.last_mut() else {
-            return Ok(());
+            return Ok(Ok(()));
         };
         let Some(child) = children.get(*next).cloned() else {
             stack.pop();

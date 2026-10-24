@@ -99,6 +99,7 @@ macro_rules! config_param {
         }
     };
 }
+pub(crate) use config_param;
 
 // .def(py::init(&ColorSpaceMenuParameters::Create), "config"_a.none(false)), .def(py::init([](
 // config, role, includeColorSpaces, searchReferenceSpaceType, includeNamedTransforms,

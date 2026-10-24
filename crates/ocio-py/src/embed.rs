@@ -63,6 +63,26 @@ pub fn cpu_processor_from_python(
     })
 }
 
+/// The processor the Python `PyOpenColorIO.Processor` `obj` holds, shared.
+///
+/// # Errors
+///
+/// TypeError when `obj` isn't a `Processor`.
+pub fn processor_from_python(
+    obj: &pyo3::Bound<'_, pyo3::PyAny>,
+) -> pyo3::PyResult<std::sync::Arc<ocio::Processor>> {
+    crate::shared::holder_of::<crate::py_processor::ProcessorRc>(
+        obj,
+        crate::py_processor::PROCESSOR,
+    )?
+    .map(|p| p.0)
+    .ok_or_else(|| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "processor_from_python: not a PyOpenColorIO.Processor",
+        )
+    })
+}
+
 /// A copy of the transform the Python `PyOpenColorIO.Transform` (of any class) `obj` holds, as
 /// the library holds one (a group with copies of its children): a later change Python makes
 /// isn't the copy's.

@@ -256,7 +256,7 @@ fn bind<'py>(
 /// with conversions, for the parameter types of the overloads [`crate::self_kind`] lists with a
 /// null `self` (a `const char *`: a `str`, `bytes` or `None`; a class's holder: an instance or
 /// `None`; a `std::vector<float>`: a sequence of numbers, whose caster may raise instead of
-/// refusing, as when loading the call's arguments).
+/// refusing, as when loading the call's arguments; a `bool`).
 fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> PyResult<bool> {
     for (p, v) in o.params.iter().zip(values).skip(1) {
         let loads = if p.ty == "str" {
@@ -266,6 +266,10 @@ fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> PyResult<bool> {
         } else if p.ty == "collections.abc.Sequence[typing.SupportsFloat]" {
             // `GradingBSplineCurve.setSlopes` (PyGradingData.cpp:353 @ v2.5.2).
             <Vec<f32> as Cast>::try_load(v, true)?.is_some()
+        } else if p.ty == "bool" {
+            // `LegacyViewingPipeline.setLooksOverrideEnabled` (PyLegacyViewingPipeline.cpp:38 @
+            // v2.5.2).
+            <bool as Cast>::load(v, true).is_some()
         } else {
             false
         };

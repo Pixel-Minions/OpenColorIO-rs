@@ -3996,19 +3996,19 @@ status = "done"
 path = "src/bindings/python/apphelpers/PyDisplayViewHelpers.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_display_view_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyLegacyViewingPipeline.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_legacy_viewing_pipeline.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyMergeConfigs.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_merge_configs.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyMixingHelpers.cpp"
