@@ -209,6 +209,18 @@ fn rust_reads_the_current_config_python_holds() {
                 "sub.appendTransform(OCIO.ExponentTransform([1.5, 1.5, 1.5, 1]))",
                 "1.5",
             ),
+            (
+                "g.addColorSpace(OCIO.ColorSpace(name='gradecs', \
+                 fromReference=OCIO.GradingRGBCurveTransform()))",
+                "gradecs",
+            ),
+            // A curve of a curve transform's value, changed in place: the transform's node
+            // doesn't change, its value's curve does.
+            (
+                "gcv = g.getColorSpace('gradecs').getTransform(FROM).getValue()\n\
+                 gcv.red.getControlPoints()[1] = OCIO.GradingControlPoint(0.40625, 0.40625)",
+                "0.40625",
+            ),
         ];
         let mut text = serialization_of(py, &g, &last);
         for (edit, needle) in edits {

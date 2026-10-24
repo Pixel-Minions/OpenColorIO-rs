@@ -921,6 +921,22 @@ pub(crate) enum CurveValue {
 }
 
 impl CurveValue {
+    /// The keys and change counts of the value and of its curves, for the current config's
+    /// state (`crate::py_config`, D-11): a curve Python changes in place is the config's
+    /// change.
+    pub(crate) fn state(&self, out: &mut Vec<(usize, u64)>) {
+        match self {
+            CurveValue::Rgb(rc) => {
+                out.push((rc.key(), rc.version()));
+                out.extend(rc.lock().curves.iter().map(|c| (c.key(), c.version())));
+            }
+            CurveValue::Hue(rc) => {
+                out.push((rc.key(), rc.version()));
+                out.extend(rc.lock().curves.iter().map(|c| (c.key(), c.version())));
+            }
+        }
+    }
+
     /// The curves now into the transform `t`, as they are (not validated:
     /// `set_value_as_is`), as upstream's transform holds what Python changed.
     pub(crate) fn write_back(&self, t: &mut ocio::Transform) {

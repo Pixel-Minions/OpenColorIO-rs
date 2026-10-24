@@ -284,6 +284,9 @@ ProcessorCacheTest.py::ProcessorCacheTest.test_processor_cache
 RangeTransformTest.py::RangeTransformTest.test_range_transform_equality
 RangeTransformTest.py::RangeTransformTest.test_range_transform_interface
 RangeTransformTest.py::RangeTransformTest.test_range_transform_validation
+TransformsBaseTest.py::TransformsBaseTest.test_direction
+TransformsTest.py::TransformsTest.test_binding_group_polymorphism
+TransformsTest.py::TransformsTest.test_copy
 ViewTransformTest.py::ViewTransformTest.test_categories
 ViewTransformTest.py::ViewTransformTest.test_copy
 ViewTransformTest.py::ViewTransformTest.test_default_contructor

@@ -3497,7 +3497,8 @@ fn current_lock() -> std::sync::MutexGuard<'static, Option<Current>> {
 
 /// What the library's copy of the config `rc` (its node `node`) is made of, as counts of the
 /// changes Python made: the node's own (its config's methods), the objects of it Python holds
-/// and the transforms they hold, at every level, each by its key, and the changes made
+/// and the transforms they hold, at every level (and the curves of a curve transform's value),
+/// each by its key, and the changes made
 /// through any config's context and rules ([`crate::shared::cell_changes`]). Equal states:
 /// nothing changed (each change raises a count of an object the state lists then, and an
 /// object only joins it unchanged, or by a change of its holder).
@@ -3517,6 +3518,10 @@ fn state(rc: &ConfigRc, node: &ConfigNode) -> Vec<(usize, u64)> {
             seen.push(t.key());
             let n = t.lock();
             out.push((t.key(), n.version));
+            // The curves a curve transform's `getValue` gave Python, which it changes in place.
+            if let Some(value) = &n.curve_value {
+                value.state(out);
+            }
             stack.extend(n.children.iter().flatten().cloned());
         }
     }
