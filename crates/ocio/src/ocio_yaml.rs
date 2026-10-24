@@ -2564,7 +2564,7 @@ pub(crate) fn load_view(node: &Node, v: &mut View) -> LoadResult<()> {
 /// `std::stoi(str)`: `strtol` in base 10 (white space skipped, a sign, digits), or `None`
 /// where `stoi` throws: no digits (`std::invalid_argument`) or a value outside `int`
 /// (`std::out_of_range`). Both wheels' C++ libraries agree.
-fn stoi(s: &[u8]) -> Option<i32> {
+pub(crate) fn stoi(s: &[u8]) -> Option<i32> {
     let s = c_str(s);
     let mut i = 0;
     // isspace in the C locale: space, \t, \n, \v, \f, \r.

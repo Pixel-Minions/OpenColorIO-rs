@@ -3894,6 +3894,61 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p9-merge-1` (9.2b, `ConfigMerger::set_search_path`);
   `config_merger_oracle.rs` (`C:/drive`, `a:b::c:`, `""`).
 
+### I-390. An empty value in an OCIOM file reads as the text "null"
+
+- **Upstream:** the OCIOM reader reads most values with yaml-cpp's `as<std::string>()`, which
+  gives `"null"` for a null node (`OCIOMYaml.cpp:389-403, 144-148, 173, 235-236` @ v2.5.2): a
+  merge's `base:` or `input:` left empty names the config `null`, an empty family prefix is the
+  prefix `null`, an environment variable with no value gets the value `null`, a merge named `~`
+  is the output `null`, and an empty `default_strategy` or `strategy` is refused as "The value
+  'null' is not recognized. ". The overrides (`name`, `description`, ...) and the top-level
+  keys skip a null value instead (`197`, `316`). Probed on the Windows wheel (2026-10-23).
+- **Who notices:** whoever leaves a value empty in an OCIOM file, meaning "none" or "default".
+- **A fix:** skip null values everywhere, as the overrides do.
+- **Status:** matched in `p9-merge-1` (9.2c, `apphelpers/mergeconfigs/ociom_yaml.rs`, through
+  the port of yaml-cpp's conversion); `ociom_yaml_oracle_tests.rs`.
+
+### I-391. The OCIOM reader ignores unknown and repeated keys silently
+
+- **Upstream:** the reader ignores, without a warning, the keys it doesn't know at the top
+  level, in a merge, in its `options` and in its `overrides`, and the keys other than `strategy`
+  in a section's strategy (`OCIOMYaml.cpp:139-184, 193-261, 312-429, 113-122` @ v2.5.2): a
+  misspelled `input_frist: false` or `bsae: x` leaves the default, while an unknown section
+  under `params` is a warning ("Unsupported property in merge params: key", `302`). Repeated
+  keys are refused in the document, in `merge`, `options`, `overrides` and `params`
+  (`CheckDuplicates`), but not in a merge itself, in a section's strategy or in the
+  environment, where the last one wins.
+- **Who notices:** whoever misspells a key in an OCIOM file.
+- **A fix:** warn about unknown keys and refuse repeated ones at every level, as the config
+  reader does.
+- **Status:** matched in `p9-merge-1` (9.2c, `ociom_yaml.rs`); `ociom_yaml_oracle_tests.rs`.
+
+### I-392. The OCIOM version is read leniently
+
+- **Upstream:** `ociom_version` is split at `.` and each part read with `std::stoi`
+  (`OCIOMYaml.cpp:318-358` @ v2.5.2), which skips leading white space, takes a sign, and stops
+  at the first character that isn't a digit: `1.0abc`, ` 1`, `+1`, `1.-0`, `1e0` and `01.0` all
+  read as 1.0, and `0` or `0.0` are accepted as versions below 1.0. A negative major version
+  wraps to a large unsigned one and is refused as higher than 1.0; one part or two are
+  accepted, three refused. Probed on the Windows wheel (2026-10-23).
+- **Who notices:** OCIOM files with a malformed version, which upstream accepts.
+- **A fix:** accept only `1` and `1.0` (or the digits alone in each part).
+- **Status:** matched in `p9-merge-1` (9.2c, `ociom_yaml.rs`, with `ocio_yaml.rs`'s `stoi`);
+  `ociom_yaml_oracle_tests.rs`.
+
+### I-393. An OCIOM file without a value at the top level sets no working directory
+
+- **Upstream:** the reader sets the merger's working directory to the OCIOM file's directory
+  inside its loop over the top-level keys, after each key whose value isn't null
+  (`OCIOMYaml.cpp:422-428` @ v2.5.2). An empty file, one with only comments, or one whose keys
+  are all empty (`merge:`) leaves the working directory empty, so the merges' configs are looked
+  for relative to the process's current directory rather than the file's. Probed on the Windows
+  wheel (2026-10-23).
+- **Who notices:** whoever reads such an OCIOM file and adds merges to it through the API.
+- **A fix:** set the working directory once, whatever the file holds.
+- **Status:** matched in `p9-merge-1` (9.2c, `ociom_yaml.rs`, `load`);
+  `ociom_yaml_oracle_tests.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -5767,3 +5822,17 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `config_merger_oracle.rs` (`none_parameters`) and `merge_configs_helpers_oracle_tests.rs`.
   `MergeColorSpace` takes its parameters by reference in the Rust API (P9-2): its binding
   refuses `None` (6.8a).
+
+### U-177. OCIOM readers and writers on several threads race to fill the strategy names
+
+- **Upstream:** `OCIOMYaml` keeps the names of the merge strategies in a static
+  `std::unordered_map`, which its constructor fills when it finds it empty, without a lock
+  (`OCIOMYaml.cpp:22-34` @ v2.5.2); `ConfigMerger::CreateFromFile` and `ConfigMerger::serialize`
+  each construct one. The first two of them that run at the same time on different threads
+  both write the map, or one reads it (`StrategyStringToEnum`) while the other writes it: a data
+  race, undefined behaviour.
+- **Who notices:** applications that read or write OCIOM files on several threads.
+- **A fix:** a constant table, or a function-local static.
+- **Status:** the port matches the names in a `match` (`ociom_yaml.rs`,
+  `strategy_string_to_enum`), with no shared state, in `p9-merge-1` (9.2c). Nothing to refuse:
+  no wheel behaviour is defined to compare.

@@ -10,12 +10,13 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ocio_ops::exception::{Exception, Result};
-use ocio_ops::platform::strcasecmp;
+use ocio_ops::platform::{create_input_file_stream, strcasecmp};
 use ocio_ops::utils::pystring::os_path;
 use ocio_ops::utils::string_utils::{c_str, right_trim_char, split, trim};
 
 use crate::apphelpers::mergeconfigs::ociom_yaml::{self, WriteError, enum_to_strategy_string};
 use crate::config::Config;
+use crate::yaml_cpp::stream::IStream;
 
 /// How a section of the config is merged.
 ///
@@ -1121,6 +1122,65 @@ impl ConfigMerger {
     }
 }
 
+/// The C library's `strerror` of an I/O error: its text without Rust's " (os error N)".
+fn strerror(e: &std::io::Error) -> String {
+    let text = e.to_string();
+    match (e.raw_os_error(), text.rfind(" (os error ")) {
+        (Some(_), Some(at)) => text[..at].to_string(),
+        _ => text,
+    }
+}
+
+impl ConfigMerger {
+    /// The merger an OCIOM file describes (`filepath` up to its first NUL). The errors: "The
+    /// merge options filepath is missing." (a missing-file exception) for an empty path, "Error
+    /// could not read '<filepath>' merge options." for a file that can't be opened, and the
+    /// reader's, "Error: Loading the OCIOM Merge parameters '<filepath>' failed. ..."
+    /// (`ociom_yaml::read`). The file's bytes are read as the `std::ifstream` gives them to
+    /// yaml-cpp ([`IStream::file`]), as [`Config::create_from_file`] reads a config.
+    ///
+    /// Port of `ConfigMerger::CreateFromFile` (MergeConfigsHelpers.cpp:537-558 @ v2.5.2).
+    #[doc(alias = "CreateFromFile")]
+    pub fn from_file(filepath: impl AsRef<[u8]>) -> Result<Arc<ConfigMerger>> {
+        let filepath = c_str(filepath.as_ref());
+        if filepath.is_empty() {
+            return Err(Exception::missing_file(
+                "The merge options filepath is missing.",
+            ));
+        }
+
+        let mut ifstream = create_input_file_stream(filepath).map_err(|_| {
+            let mut os = b"Error could not read '".to_vec();
+            os.extend_from_slice(filepath);
+            os.extend_from_slice(b"' merge options.");
+            Exception::new(os)
+        })?;
+
+        // The stream's bytes, up to a read that fails (a directory, which Linux opens).
+        let mut data = Vec::new();
+        let read = std::io::Read::read_to_end(&mut ifstream, &mut data);
+        drop(ifstream);
+
+        // A read that fails ends MSVC's file stream, as the end of the file does. libstdc++'s
+        // throws `std::ios_base::failure` from `basic_filebuf::underflow` as yaml-cpp reads the
+        // stream buffer, inside `Impl::Read`'s handler, which wraps its `what()` (as
+        // `Config::create_from_file`, which Rocky Linux 9 checked for a directory).
+        if let Err(e) = read
+            && !cfg!(windows)
+        {
+            let mut what = b"basic_filebuf::underflow error reading the file: ".to_vec();
+            what.extend_from_slice(strerror(&e).as_bytes());
+            return Err(ociom_yaml::failed(filepath, &what));
+        }
+
+        Ok(Arc::new(ociom_yaml::read(IStream::file(&data), filepath)?))
+    }
+}
+
 #[cfg(test)]
 #[path = "merge_configs_helpers_oracle_tests.rs"]
 mod oracle_tests;
+
+#[cfg(test)]
+#[path = "merge_configs_helpers_tests.rs"]
+mod tests;
