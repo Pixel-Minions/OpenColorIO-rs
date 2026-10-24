@@ -8,9 +8,8 @@
 //! bit depths).
 //!
 //! The tests of that file that read files (`BuildOpsTest`: the readers and `FileTransform` of
-//! the `ocio` crate) are in `crates/ocio/src/file_tests/op_optimizers_tests.rs` (WP 4.10a).
-//! The one that isn't here isn't ported yet: `opt_prefix_test1`, whose file holds an
-//! ExposureContrast op.
+//! the `ocio` crate) are in `crates/ocio/src/file_tests/op_optimizers_tests.rs` (WP 4.10a, and
+//! WP 5.6b for `opt_prefix_test1`, whose file holds an ExposureContrast op).
 
 use ocio_testkit::upstream::check_close;
 

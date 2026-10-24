@@ -2,7 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of the double-property tests of `tests/cpu/DynamicProperty_tests.cpp` @ v2.5.2. The
-//! others need the grading properties (Phase 5) or a processor that reads CTF files.
+//! others are with the grading transforms (Phase 5), and `get_dynamic_via_cpu_processor`, which
+//! reads a CTF file, in `crates/ocio/src/file_tests/dynamic_property_tests.rs`.
 //!
 //! Upstream's `OCIO_REQUIRE_ASSERT(dp)` checks that `std::make_shared` gave a pointer; an
 //! `Arc` always holds one.

@@ -5,8 +5,9 @@
 //! (`BuildOpsTest`). The others are `crates/ocio-ops/src/op_optimizers_tests.rs`.
 
 use ocio_ops::op::OpVec;
-use ocio_ops::op_data::OpData;
-use ocio_ops::open_color_types::{NegativeStyle, OptimizationFlags, TransformDirection};
+use ocio_ops::op_data::{OpData, OpDataType};
+use ocio_ops::op_optimizers::remove_no_op_types;
+use ocio_ops::open_color_types::{BitDepth, NegativeStyle, OptimizationFlags, TransformDirection};
 use ocio_ops::ops::exponent::exponent_op::create_exponent_op_from_values;
 use ocio_testkit::upstream::check_close;
 
@@ -549,4 +550,49 @@ fn range_lut() {
 
     // Now check that the optimized transform renders the same as the original.
     compare_render(&ops, &opt_ops, 1e-6, false);
+}
+
+/// Port of `OCIO_ADD_TEST(OpOptimizers, opt_prefix_test1)` @ v2.5.2.
+#[test]
+fn opt_prefix_test1() {
+    let file_name = "opt_prefix_test1.ctf";
+    let mut ops = OpVec::new();
+    let context = Context::new();
+    build_ops_test(&mut ops, file_name, &context, TransformDirection::Forward).unwrap();
+
+    // First one is the file no op.
+    assert_eq!(ops.len(), 12);
+
+    remove_no_op_types(&mut ops);
+
+    assert_eq!(ops.len(), 11);
+
+    let mut opt_ops = ops.clone_ops().unwrap();
+    assert_eq!(opt_ops.len(), 11);
+    // Ignore dynamic properties.
+    opt_ops.finalize().unwrap();
+    opt_ops.optimize(OptimizationFlags::ALL).unwrap();
+    opt_ops
+        .optimize_for_bitdepth(
+            BitDepth::F16,
+            BitDepth::F32,
+            OptimizationFlags::COMP_SEPARABLE_PREFIX,
+        )
+        .unwrap();
+
+    assert_eq!(opt_ops.len(), 3);
+
+    let o0 = &opt_ops[0];
+    let o1 = &opt_ops[1];
+    let o2 = &opt_ops[2];
+
+    assert_eq!(o0.data().get_type(), OpDataType::Lut1D);
+    assert_eq!(o1.data().get_type(), OpDataType::Matrix);
+    assert_eq!(o2.data().get_type(), OpDataType::Gamma);
+
+    let OpData::Lut1D(lut0) = &**o0.data() else {
+        panic!("a Lut1D op")
+    };
+    assert!(!lut0.is_identity());
+    assert_eq!(lut0.get_array().get_length(), 65536);
 }

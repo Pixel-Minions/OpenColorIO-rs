@@ -8,6 +8,7 @@
 use ocio_testkit::upstream::check_throw_what;
 
 use super::*;
+use crate::caching::OCIO_DISABLE_CACHE_FALLBACK;
 use crate::test_env::EnvGuard;
 use crate::transforms::exponent_transform::ExponentTransform;
 use crate::transforms::file_transform::FileTransform;
@@ -6257,6 +6258,212 @@ fn create_raw_config() {
     );
 }
 
+/// Port of `OCIO_ADD_TEST(Config, optimization_with_bitdepths)` @ v2.5.2.
+#[test]
+fn optimization_with_bitdepths() {
+    use crate::apphelpers::legacy_viewing_pipeline::LegacyViewingPipeline;
+    use crate::transforms::exposure_contrast_transform::ExposureContrastTransform;
+    use ocio_ops::image_desc::PackedImageDesc;
+    use ocio_ops::open_color_types::{BitDepth, ExposureContrastStyle};
+    use ocio_testkit::upstream::check_equal;
+
+    let _env = EnvGuard::new();
+    // The unit test validates that the bit-depth conversion is correctly done for an empty list of
+    // ops i.e. the color transformation does nothing.
+
+    const S_FROM_SPACE: &str = "ACEScg";
+    const S_DIPLAY: &str = "AdobeRGB";
+    const S_VIEW: &str = "raw";
+
+    const CONFIG: &str = r#"ocio_profile_version: 2
+environment: {}
+search_path: "./"
+roles:
+  data: Raw
+  default: Raw
+  scene_linear: ACEScg
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  AdobeRGB:
+    - !<View> {name: Raw, colorspace: Raw}
+
+colorspaces:
+  - !<ColorSpace>
+    name: ACEScg
+    to_reference: !<MatrixTransform> {matrix: [ 0.695452241357, 0.140678696470, 0.163869062172, 0, 0.044794563372, 0.859671118456, 0.095534318172, 0, -0.005525882558, 0.004025210306, 1.001500672252, 0, 0, 0, 0, 1 ]}
+  - !<ColorSpace>
+    name: Raw
+    isdata: true"#;
+
+    {
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Create the two processors.
+
+        let mut transform = DisplayViewTransform::new();
+        transform.set_src(S_FROM_SPACE);
+        transform.set_display(S_DIPLAY);
+        transform.set_view(S_VIEW);
+
+        let proc = config.processor(&Transform::from(transform)).unwrap();
+
+        let cpu1 = proc.default_cpu_processor().unwrap();
+        let cpu2 = proc
+            .optimized_cpu_processor_with_bit_depths(
+                BitDepth::F32,
+                BitDepth::Uint8,
+                OptimizationFlags::DEFAULT,
+            )
+            .unwrap();
+
+        // Declare all the buffers.
+
+        let in_col: [f32; 4] = [0.5, 0.5, 0.5, 1.0];
+        let mut out_col1 = [0.0f32; 4];
+        let mut out_col2 = [0u8; 4];
+
+        // Wrap source and destination colors.
+
+        let desc_src =
+            PackedImageDesc::with_channel_order(&in_col[..], 1, 1, ChannelOrdering::Rgba).unwrap();
+
+        {
+            let mut desc_dst1 =
+                PackedImageDesc::with_channel_order(&mut out_col1[..], 1, 1, ChannelOrdering::Rgba)
+                    .unwrap();
+            let mut desc_dst2 = PackedImageDesc::with_channel_order_and_strides(
+                &mut out_col2[..],
+                1,
+                1,
+                ChannelOrdering::Rgba,
+                BitDepth::Uint8,
+                1,
+                4,
+                4,
+            )
+            .unwrap();
+
+            cpu1.apply_src_dst(&desc_src, &mut desc_dst1).unwrap();
+            cpu2.apply_src_dst(&desc_src, &mut desc_dst2).unwrap();
+        }
+
+        // Check results.
+
+        check_equal(out_col1[0], 0.5f32);
+        check_equal(out_col1[1], 0.5f32);
+        check_equal(out_col1[2], 0.5f32);
+        check_equal(out_col1[3], 1.0f32);
+
+        check_equal(out_col2[0] as u32, 128);
+        check_equal(out_col2[1] as u32, 128);
+        check_equal(out_col2[2] as u32, 128);
+        check_equal(out_col2[3] as u32, 255);
+    }
+
+    {
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Setup viewing pipeline for proc1.
+
+        let mut transform = DisplayViewTransform::new();
+        transform.set_src(S_FROM_SPACE);
+        transform.set_display(S_DIPLAY);
+        transform.set_view(S_VIEW);
+        let mut vp = LegacyViewingPipeline::new();
+        vp.set_display_view_transform(Some(&transform));
+
+        // Add Exposure / Contrast.
+        {
+            let mut ex = ExposureContrastTransform::new();
+            ex.set_style(ExposureContrastStyle::Linear);
+            ex.set_pivot(0.18);
+            ex.make_exposure_dynamic();
+            ex.make_contrast_dynamic();
+            ex.make_gamma_dynamic();
+            vp.set_linear_cc(Some(&Transform::from(ex))).unwrap();
+        }
+
+        // Create two processors 1: using viewing pipeline, 2: using just Display/View pair.
+
+        let processor1 = vp
+            .processor(&config, Some(&config.current_context().get()))
+            .unwrap();
+        let processor2 = config
+            .processor_for_display_view(S_FROM_SPACE, S_DIPLAY, S_VIEW, TransformDirection::Forward)
+            .unwrap();
+
+        // Get optimized processors.
+
+        let cpu1 = processor1
+            .optimized_cpu_processor_with_bit_depths(
+                BitDepth::F32,
+                BitDepth::Uint8,
+                OptimizationFlags::DEFAULT,
+            )
+            .unwrap();
+        let cpu2 = processor2
+            .optimized_cpu_processor_with_bit_depths(
+                BitDepth::F32,
+                BitDepth::Uint8,
+                OptimizationFlags::DEFAULT,
+            )
+            .unwrap();
+
+        // Declare all the buffers.
+
+        let in_col: [f32; 4] = [0.5, 0.5, 0.5, 1.0];
+        let mut out_col1 = [0u8; 3];
+        let mut out_col2 = [0u8; 3];
+
+        // Wrap source and destination colors.
+
+        let desc_src =
+            PackedImageDesc::with_channel_order(&in_col[..], 1, 1, ChannelOrdering::Rgba).unwrap();
+        {
+            let mut desc_dst1 = PackedImageDesc::with_channel_order_and_strides(
+                &mut out_col1[..],
+                1,
+                1,
+                ChannelOrdering::Rgb,
+                BitDepth::Uint8,
+                1,
+                3,
+                3,
+            )
+            .unwrap();
+            let mut desc_dst2 = PackedImageDesc::with_channel_order_and_strides(
+                &mut out_col2[..],
+                1,
+                1,
+                ChannelOrdering::Rgb,
+                BitDepth::Uint8,
+                1,
+                3,
+                3,
+            )
+            .unwrap();
+
+            cpu1.apply_src_dst(&desc_src, &mut desc_dst1).unwrap();
+            cpu2.apply_src_dst(&desc_src, &mut desc_dst2).unwrap();
+        }
+
+        // Check results.
+
+        check_equal(out_col1[0] as u32, 128);
+        check_equal(out_col1[1] as u32, 128);
+        check_equal(out_col1[2] as u32, 128);
+
+        check_equal(out_col2[0] as u32, 128);
+        check_equal(out_col2[1] as u32, 128);
+        check_equal(out_col2[2] as u32, 128);
+    }
+}
+
 /// Port of `OCIO_ADD_TEST(Config, look_is_noop)` @ v2.5.2.
 #[test]
 fn look_is_noop() {
@@ -7233,6 +7440,183 @@ colorspaces:
     config.processor(&display.into()).unwrap();
 }
 
+/// Holds `OCIO_DISABLE_CACHE_FALLBACK` set in the environment OCIO reads on this thread, until
+/// it is dropped.
+///
+/// Port of `DisableFallback` (tests/cpu/Config_tests.cpp:8312-8320 @ v2.5.2).
+struct DisableFallback<'a>(&'a EnvGuard);
+
+impl<'a> DisableFallback<'a> {
+    fn new(env: &'a EnvGuard) -> Self {
+        env.set(&[(OCIO_DISABLE_CACHE_FALLBACK, "1")]);
+        DisableFallback(env)
+    }
+}
+
+impl Drop for DisableFallback<'_> {
+    fn drop(&mut self) {
+        self.0.set(&[]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, config_context_cacheids)` @ v2.5.2.
+#[test]
+fn config_context_cacheids() {
+    use crate::fileformats::test_utils::get_test_files_dir;
+
+    let _env = EnvGuard::new();
+    // Validate the cacheID computation from Config & Context classes when OCIO Context
+    // variables are present. In the config below, there is one in a color space i.e. $CS3
+    // and one undeclared in a look i.e. $LOOK1.
+
+    const CONFIG: &str = r#"ocio_profile_version: 2
+
+search_path: luts
+
+environment: {CS3: lut1d_green.ctf}
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs3}
+    - !<View> {name: view2, colorspace: cs3, looks: look1}
+
+looks:
+  - !<Look>
+    name: look1
+    process_space: cs2
+    transform: !<FileTransform> {src: $LOOK1}
+
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}
+
+  - !<ColorSpace>
+    name: cs3
+    from_scene_reference: !<FileTransform> {src: $CS3}
+"#;
+
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+
+    // Set the right search_path.
+    let mut cfg = (*config).clone();
+    cfg.clear_search_paths();
+    cfg.add_search_path(get_test_files_dir());
+
+    // Lets say there is a need for several processors built from the same config
+    // with same or different contexts.
+
+    let context_cache_id = cfg.current_context().get().cache_id();
+    let config_cache_id = cfg.cache_id().unwrap();
+
+    // Using the default context variables.
+    {
+        cfg.processor_for_display_view("cs2", "disp1", "view1", TransformDirection::Forward)
+            .unwrap();
+    }
+
+    // Set the context variable to its default value on a new context instance.
+    {
+        let mut ctx = (*cfg.current_context().get()).clone();
+        ctx.set_string_var("CS3", Some(b"lut1d_green.ctf"));
+
+        cfg.processor_for_display_view_with_context(
+            &ctx,
+            "cs2",
+            "disp1",
+            "view1",
+            TransformDirection::Forward,
+        )
+        .unwrap();
+
+        assert_eq!(context_cache_id, ctx.cache_id());
+        assert_eq!(
+            config_cache_id,
+            cfg.cache_id_with_context(Some(&ctx)).unwrap()
+        );
+    }
+
+    // Set the context variable to its default value.
+    {
+        cfg.add_environment_var("CS3", Some(b"lut1d_green.ctf"));
+        cfg.processor_for_display_view("cs2", "disp1", "view1", TransformDirection::Forward)
+            .unwrap();
+
+        assert_eq!(context_cache_id, cfg.current_context().get().cache_id());
+        assert_eq!(config_cache_id, cfg.cache_id().unwrap());
+    }
+
+    // Set the context variable to a different file using the context.
+    {
+        let mut ctx = (*cfg.current_context().get()).clone();
+        ctx.set_string_var("CS3", Some(b"exposure_contrast_log.ctf"));
+
+        cfg.processor_for_display_view_with_context(
+            &ctx,
+            "cs2",
+            "disp1",
+            "view1",
+            TransformDirection::Forward,
+        )
+        .unwrap();
+
+        assert_ne!(context_cache_id, ctx.cache_id());
+        assert_ne!(
+            config_cache_id,
+            cfg.cache_id_with_context(Some(&ctx)).unwrap()
+        );
+
+        // As expected the 'current' context is unchanged.
+        assert_eq!(config_cache_id, cfg.cache_id().unwrap());
+    }
+
+    // Set the context variable to a different file using the config i.e. add a new value.
+    {
+        cfg.add_environment_var("CS3", Some(b"exposure_contrast_log.ctf"));
+        cfg.processor_for_display_view("cs2", "disp1", "view1", TransformDirection::Forward)
+            .unwrap();
+
+        assert_ne!(context_cache_id, cfg.current_context().get().cache_id());
+        assert_ne!(config_cache_id, cfg.cache_id().unwrap());
+    }
+
+    // $LOOK1 was missing so set to something.
+    {
+        cfg.add_environment_var("LOOK1", Some(b"lut1d_green.ctf"));
+        cfg.processor_for_display_view("cs2", "disp1", "view2", TransformDirection::Forward)
+            .unwrap();
+
+        assert_ne!(context_cache_id, cfg.current_context().get().cache_id());
+        assert_ne!(config_cache_id, cfg.cache_id().unwrap());
+    }
+
+    // Set $CS3 to its default value.
+    {
+        cfg.add_environment_var("CS3", Some(b"lut1d_green.ctf"));
+        cfg.processor_for_display_view("cs2", "disp1", "view2", TransformDirection::Forward)
+            .unwrap();
+
+        assert_ne!(context_cache_id, cfg.current_context().get().cache_id());
+        assert_ne!(config_cache_id, cfg.cache_id().unwrap());
+    }
+
+    // Remove $LOOK1 from context.
+    {
+        cfg.add_environment_var("CS3", Some(b"lut1d_green.ctf"));
+        cfg.add_environment_var("LOOK1", None);
+
+        assert_eq!(context_cache_id, cfg.current_context().get().cache_id());
+        assert_eq!(config_cache_id, cfg.cache_id().unwrap());
+    }
+}
+
 /// Port of `OCIO_ADD_TEST(Config, processor_cache_with_context_variables)` @ v2.5.2.
 #[test]
 fn processor_cache_with_context_variables() {
@@ -7330,6 +7714,598 @@ colorspaces:
             &proc(&cfg, "ref", "cs2"),
             &proc(&cfg, "ref", "cs3")
         ));
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variables_typical_use_cases)` @ v2.5.2.
+#[test]
+fn context_variables_typical_use_cases() {
+    use crate::fileformats::test_utils::get_test_files_dir;
+
+    let env = EnvGuard::new();
+
+    // The config of `text` (with the directory of the test files for `@DIR@`), as an editable
+    // copy, validated.
+    let load = |text: &str| -> Config {
+        let text = text.replace("@DIR@", &get_test_files_dir());
+        let cfg = (*Config::create_from_stream(text.as_bytes()).unwrap()).clone();
+        cfg.validate().unwrap();
+        cfg
+    };
+
+    // If consecutive calls to getProcessor return the same pointer, it means that the cache
+    // is working.
+    fn colors(cfg: &Config, src: &str, dst: &str) -> Arc<Processor> {
+        cfg.processor_between(src, dst).unwrap()
+    }
+    fn colors_in(cfg: &Config, ctx: &Context, src: &str, dst: &str) -> Arc<Processor> {
+        cfg.processor_between_with_context(ctx, src, dst).unwrap()
+    }
+    fn view(cfg: &Config, src: &str, display: &str, view: &str) -> Arc<Processor> {
+        cfg.processor_for_display_view(src, display, view, TransformDirection::Forward)
+            .unwrap()
+    }
+    fn view_in(
+        cfg: &Config,
+        ctx: &Context,
+        src: &str,
+        display: &str,
+        view: &str,
+    ) -> Arc<Processor> {
+        cfg.processor_for_display_view_with_context(
+            ctx,
+            src,
+            display,
+            view,
+            TransformDirection::Forward,
+        )
+        .unwrap()
+    }
+    #[track_caller]
+    fn same(a: Arc<Processor>, b: Arc<Processor>) {
+        assert!(Arc::ptr_eq(&a, &b));
+    }
+    #[track_caller]
+    fn differ(a: Arc<Processor>, b: Arc<Processor>) {
+        assert!(!Arc::ptr_eq(&a, &b));
+    }
+
+    // Case 1 - No context variables used in the config.
+
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+
+search_path: @DIR@
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs2}
+    - !<View> {name: view2, colorspace: cs3}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<FileTransform> {src: exposure_contrast_linear.ctf}
+
+  - !<ColorSpace>
+    name: cs3
+    from_scene_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}
+"#;
+
+        let cfg = load(CONFIG);
+
+        same(colors(&cfg, "cs1", "cs2"), colors(&cfg, "cs1", "cs2"));
+
+        same(colors(&cfg, "cs1", "cs3"), colors(&cfg, "cs1", "cs3"));
+
+        same(
+            view(&cfg, "cs1", "disp1", "view1"),
+            view(&cfg, "cs1", "disp1", "view1"),
+        );
+
+        same(
+            view(&cfg, "cs1", "disp1", "view2"),
+            view(&cfg, "cs1", "disp1", "view2"),
+        );
+
+        // Create a different context instance but still identical to the current one.
+        let mut ctx = (*cfg.current_context().get()).clone();
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+        );
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs3"),
+            colors_in(&cfg, &ctx, "cs1", "cs3"),
+        );
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+            colors(&cfg, "cs1", "cs2"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view2"),
+            view_in(&cfg, &ctx, "cs1", "disp1", "view2"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+            view(&cfg, "cs1", "disp1", "view1"),
+        );
+
+        // Add an unused context variable in the context. The cache is still used.
+        ctx.set_string_var("ENV", Some(b"xxx"));
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+        );
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs3"),
+            colors_in(&cfg, &ctx, "cs1", "cs3"),
+        );
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+            colors(&cfg, "cs1", "cs2"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view2"),
+            view_in(&cfg, &ctx, "cs1", "disp1", "view2"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+            view(&cfg, "cs1", "disp1", "view1"),
+        );
+    }
+
+    // Case 2 - Context variables used anywhere but in the search_path.
+
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+
+environment: {FILE: exposure_contrast_linear.ctf }
+
+search_path: @DIR@
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs2}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<FileTransform> {src: $FILE}
+"#;
+
+        let cfg = load(CONFIG);
+
+        same(colors(&cfg, "cs1", "cs2"), colors(&cfg, "cs1", "cs2"));
+
+        same(
+            view(&cfg, "cs1", "disp1", "view1"),
+            view(&cfg, "cs1", "disp1", "view1"),
+        );
+
+        // Add an unused context variable in the context. The cache is still used.
+        let mut ctx = (*cfg.current_context().get()).clone();
+        ctx.set_string_var("ENV", Some(b"xxx"));
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+        );
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+            colors(&cfg, "cs1", "cs2"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+            view(&cfg, "cs1", "disp1", "view1"),
+        );
+
+        // Change the value of the used context variable. The original cached value is *not* used.
+        ctx.set_string_var("FILE", Some(b"exposure_contrast_log.ctf"));
+
+        same(
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+        );
+
+        same(colors(&cfg, "cs1", "cs2"), colors(&cfg, "cs1", "cs2"));
+
+        differ(
+            colors_in(&cfg, &ctx, "cs1", "cs2"),
+            colors(&cfg, "cs1", "cs2"),
+        );
+
+        same(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+        );
+
+        same(
+            view(&cfg, "cs1", "disp1", "view1"),
+            view(&cfg, "cs1", "disp1", "view1"),
+        );
+
+        differ(
+            view_in(&cfg, &ctx, "cs1", "disp1", "view1"),
+            view(&cfg, "cs1", "disp1", "view1"),
+        );
+    }
+
+    // Case 3 - Context variables used on the search_path, but that variable is unchanged.
+
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+
+environment:
+  SHOW: @DIR@
+  SHOT: exposure_contrast_linear.ctf
+
+search_path: $SHOW
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs2}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<FileTransform> {src: exposure_contrast_linear.ctf}
+
+  - !<ColorSpace>
+    name: cs3
+    from_scene_reference: !<FileTransform> {src: $SHOT}
+"#;
+
+        {
+            let cfg = load(CONFIG);
+
+            // Change $SHOT to lut1d_green.ctf but $SHOT is not used.
+            let mut ctx = (*cfg.current_context().get()).clone();
+            ctx.set_string_var("SHOT", Some(b"lut1d_green.ctf"));
+
+            // Here is the important validation: same processor because $SHOT is not used.
+            same(
+                colors(&cfg, "cs1", "cs2"),
+                colors_in(&cfg, &ctx, "cs1", "cs2"),
+            );
+
+            // The cache mechanism is also looking for identical processors (i.e. diff. contexts
+            // or color spaces but producing the same color transformation). The following check is
+            // validating the behavior.
+
+            // Note that using this fall-back mechanism in the cache is much slower than if the
+            // cache is able to find a hit based on the arguments alone since it much calculate a
+            // cacheID of the two processors.  The ocioperf tool may be used to measure cache speed
+            // in various situations.
+
+            // Same processor because $SHOT is equal to 'exposure_contrast_linear.ctf'.
+            same(colors(&cfg, "cs1", "cs2"), colors(&cfg, "cs1", "cs3"));
+        }
+
+        {
+            // If the fallback is disabled (using the env. variable OCIO_DISABLE_CACHE_FALLBACK)
+            // then the processor cache returns different instances as the cache keys are different.
+
+            let _guard = DisableFallback::new(&env);
+
+            let cfg = load(CONFIG);
+
+            // Fail to find the identical processor because the fallback is now disabled i.e. but
+            // it succeeds when fallback is enabled as demonstrated above.
+            differ(colors(&cfg, "cs1", "cs2"), colors(&cfg, "cs1", "cs3"));
+
+            // Change $SHOT to lut1d_green.ctf but $SHOT is not used.
+            let mut ctx = (*cfg.current_context().get()).clone();
+            ctx.set_string_var("SHOT", Some(b"lut1d_green.ctf"));
+
+            // Here is the important validation: As the fallback is not used for the computation
+            // of the cs1 to cs2 color transformation the same processor is still found.
+            same(
+                colors(&cfg, "cs1", "cs2"),
+                colors_in(&cfg, &ctx, "cs1", "cs2"),
+            );
+        }
+    }
+
+    // Case 4 - Context vars used in the search_path and they are changing per shot, but no
+    // FileTransforms are used.
+
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+
+environment:
+  SHOW: @DIR@
+
+search_path: $SHOW
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs2}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}
+"#;
+
+        {
+            let cfg = load(CONFIG);
+
+            let mut ctx = (*cfg.current_context().get()).clone();
+            ctx.set_string_var("SHOW", Some(b"/some/arbitrary/path"));
+
+            // As the context does not impact the color transformation computation use two different
+            // context instances i.e. context keys are then different.
+            assert_ne!(cfg.current_context().get().cache_id(), ctx.cache_id());
+
+            // Here is the important validation: same processor because $SHOW is not used.
+            same(
+                colors(&cfg, "cs1", "cs2"),
+                colors_in(&cfg, &ctx, "cs1", "cs2"),
+            );
+        }
+
+        {
+            // Demonstrate that the fallback is not used here i.e. context variables are not
+            // impacting the cache.
+
+            let _guard = DisableFallback::new(&env);
+
+            let cfg = load(CONFIG);
+
+            let mut ctx = (*cfg.current_context().get()).clone();
+            ctx.set_string_var("SHOW", Some(b"/some/arbitrary/path"));
+
+            // Here is the demonstration that the fallback is not used i.e. disabled but the right
+            // processor is still found.
+            same(
+                colors(&cfg, "cs1", "cs2"),
+                colors_in(&cfg, &ctx, "cs1", "cs2"),
+            );
+        }
+    }
+
+    // Case 5 - Context vars in the search_path and they are changing but the changed vars are not
+    // used to resolve the file transform.
+
+    // TODO: The collect of context variables currently lacks the heuristic to find which search_path
+    // is effectively used so, as soon as one path (from the search_paths) is used all the paths are
+    // then collected changing the cache key computation (even if the extra search_paths are useless).
+    // To mitigate that limitation the fallback is then used to find if an existing identical
+    // processor instance already exists.
+
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+
+environment:
+  TRANSFORM_DIR: @DIR@
+
+search_path:
+  - /bogus/unknown/path
+  - $TRANSFORM_DIR
+  - $SHOT
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs2}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<FileTransform> {src: exposure_contrast_linear.ctf}
+"#;
+
+        let cfg = load(CONFIG);
+
+        let mut ctx1 = (*cfg.current_context().get()).clone();
+        ctx1.set_string_var("SHOT", Some(b"/unknow/path/for_path_1"));
+
+        let mut ctx2 = (*cfg.current_context().get()).clone();
+        ctx2.set_string_var("SHOT", Some(b"/unknow/path/for_path_2"));
+
+        // Even if the two context instances are different the changed context variable is useless
+        // so the same processor instance is returned.
+        same(
+            colors_in(&cfg, &ctx1, "cs1", "cs2"),
+            colors_in(&cfg, &ctx2, "cs1", "cs2"),
+        );
+
+        {
+            // If the fallback is disabled (using the env. variable OCIO_DISABLE_CACHE_FALLBACK)
+            // then the processor cache returns different instances because of the search_path
+            // heuristic limitation. It demonstrates the fallback is needed to mitigate the heuristic
+            // limitation. As soon as the heuristic is enhanced, the following test must return
+            // the same processor instance.
+
+            let _guard = DisableFallback::new(&env);
+
+            let cfg = load(CONFIG);
+
+            differ(
+                colors_in(&cfg, &ctx1, "cs1", "cs2"),
+                colors_in(&cfg, &ctx2, "cs1", "cs2"),
+            );
+        }
+    }
+
+    // Case 6 - Context vars in the search_path, the vars on the path to the file do change, but the
+    // resulting file is the same.
+
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+
+environment:
+  PATH_1: @DIR@
+  PATH_2: @DIR@
+
+search_path:
+  - $PATH_1
+  - $PATH_2
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs2}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<FileTransform> {src: exposure_contrast_linear.ctf}
+"#;
+
+        let cfg = load(CONFIG);
+
+        let mut ctx1 = (*cfg.current_context().get()).clone();
+        ctx1.set_string_var("PATH_1", Some(b"/unknow/path/for_path_1"));
+
+        let mut ctx2 = (*cfg.current_context().get()).clone();
+        ctx2.set_string_var("PATH_2", Some(b"/unknow/path/for_path_2"));
+
+        // It demonstrates that the cache keys will be different.
+        assert_ne!(ctx1.cache_id(), ctx2.cache_id());
+
+        // Even if a different context variable is used the color transform remains identical so
+        // the processor cache returns the same processor instance because of the fallback.
+        same(
+            colors_in(&cfg, &ctx1, "cs1", "cs2"), // FileTransform uses PATH_2
+            colors_in(&cfg, &ctx2, "cs1", "cs2"), // FileTransform uses PATH_1
+        );
+
+        {
+            // If the fallback is disabled (using the env. variable OCIO_DISABLE_CACHE_FALLBACK)
+            // then the processor cache returns different instances as the cache keys are different
+            // i.e. cs1 needs PATH_2 while cs2 needs PATH_1. It demonstrates that only the fallback
+            // can find the processor instance.
+
+            let _guard = DisableFallback::new(&env);
+
+            let cfg = load(CONFIG);
+
+            // The processor cache without the fallback fails to find the identical processor.
+            differ(
+                colors_in(&cfg, &ctx1, "cs1", "cs2"),
+                colors_in(&cfg, &ctx2, "cs1", "cs2"),
+            );
+        }
+    }
+
+    // Case 7 - Context variables in the FileTransform's CCCID.
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+
+environment:
+  CCPREFIX: cc
+
+search_path: @DIR@
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs2}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<FileTransform> {src: cdl_test1.ccc, cccid: $CCPREFIX00$CCNUM}
+"#;
+
+        let cfg = load(CONFIG);
+
+        let ctf = cfg
+            .color_space("cs2")
+            .unwrap()
+            .transform(ColorSpaceDirection::FromReference)
+            .unwrap()
+            .clone();
+
+        let mut ctx = (*cfg.current_context().get()).clone();
+
+        ctx.set_string_var("CCNUM", Some(b"01"));
+        let p1 = cfg
+            .processor_with_context(&ctx, &ctf, TransformDirection::Forward)
+            .unwrap();
+
+        ctx.set_string_var("CCNUM", Some(b"02"));
+        let p2 = cfg
+            .processor_with_context(&ctx, &ctf, TransformDirection::Forward)
+            .unwrap();
+
+        ctx.set_string_var("CCNUM", Some(b"03"));
+        let p3 = cfg
+            .processor_with_context(&ctx, &ctf, TransformDirection::Forward)
+            .unwrap();
+
+        // All three processors should be different.
+        differ(p1.clone(), p2.clone());
+        differ(p1, p3.clone());
+        differ(p2, p3);
     }
 }
 

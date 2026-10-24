@@ -75,10 +75,12 @@ fn is_combine_enabled(op_type: OpDataType, flags: OptimizationFlags) -> bool {
 /// Port of `MAX_OPTIMIZATION_PASSES` (src/OpenColorIO/OpOptimizers.cpp:72 @ v2.5.2).
 const MAX_OPTIMIZATION_PASSES: i32 = 80;
 
-/// Removes the no-op types (allocation, file and look no-ops), and returns how many.
+/// Removes the no-op types (allocation, file and look no-ops), and returns how many. Public for
+/// the file tests of the `ocio` crate (`opt_prefix_test1` calls it, as upstream's test file
+/// includes the optimizer's source).
 ///
 /// Port of `RemoveNoOpTypes` (src/OpenColorIO/OpOptimizers.cpp:74-94 @ v2.5.2).
-fn remove_no_op_types(op_vec: &mut OpVec) -> i32 {
+pub fn remove_no_op_types(op_vec: &mut OpVec) -> i32 {
     let mut count = 0;
     let mut iter = 0;
     while iter != op_vec.len() {
