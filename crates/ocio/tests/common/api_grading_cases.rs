@@ -90,13 +90,15 @@ fn ec_calls(style: &str, values: [f64; 6], dynamic: [bool; 3]) -> Calls {
     calls
 }
 
-/// `ExposureContrastTransform`: per style, the defaults, typical values, and typical values
-/// with every property dynamic, set in turn (an infinite exposure and a zero contrast among
-/// them), or with the exposure alone dynamic.
+/// `ExposureContrastTransform`: per style, the defaults, typical and extreme values, and
+/// typical values with every property dynamic, set in turn (an infinite exposure and a zero
+/// contrast among them), with the exposure, the contrast or the gamma alone dynamic, or the
+/// contrast and the gamma, set to extreme values.
 pub(crate) fn exposure_contrast() -> DynCases {
     use DynamicPropertyType::{Contrast, Exposure, Gamma};
     let defaults = [0.0, 1.0, 1.0, 0.18, 0.088, 0.435];
     let typical = [0.5, 1.2, 0.9, 0.18, 0.1, 0.4];
+    let extremes = [1e30, 1e-30, 1e30, 1e-30, 1e30, -1e30];
     let mut out = DynCases::new();
     for style in [
         "EXPOSURE_CONTRAST_LINEAR",
@@ -129,6 +131,39 @@ pub(crate) fn exposure_contrast() -> DynCases {
             format!("{style} exposure dynamic"),
             ec_calls(style, typical, [true, false, false]),
             vec![double(Exposure, -0.75), double(Exposure, 2.5)],
+        );
+        out.push(
+            format!("{style} extremes"),
+            ec_calls(style, extremes, [false; 3]),
+            Vec::new(),
+        );
+        out.push(
+            format!("{style} contrast dynamic"),
+            ec_calls(style, typical, [false, true, false]),
+            vec![
+                double(Contrast, 1e30),
+                double(Contrast, -2.5),
+                double(Contrast, 1e-30),
+            ],
+        );
+        out.push(
+            format!("{style} gamma dynamic"),
+            ec_calls(style, typical, [false, false, true]),
+            vec![
+                double(Gamma, 1e-30),
+                double(Gamma, 1e30),
+                double(Gamma, -0.5),
+            ],
+        );
+        out.push(
+            format!("{style} contrast and gamma dynamic"),
+            ec_calls(style, extremes, [false, true, true]),
+            vec![
+                double(Gamma, 1e30),
+                double(Contrast, -1e30),
+                double(Gamma, f64::INFINITY),
+                double(Contrast, f64::NEG_INFINITY),
+            ],
         );
     }
     out

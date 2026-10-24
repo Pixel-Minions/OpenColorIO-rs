@@ -622,6 +622,10 @@ fn compare_uniforms(
     for ty in property_types(sets) {
         let step = &steps[k];
         k += 1;
+        // hasDynamicProperty, whichever way the get goes.
+        if step["has"] != desc.has_dynamic_property(ty) {
+            failures.push(format!("{what}: has {ty:?}: wheel {step}"));
+        }
         match (desc.dynamic_property_by_type(ty), step.get("exception")) {
             (Ok(p), None) => props.push((ty, Some(p))),
             (Err(p), Some(e)) if e["message"] == p.message() => {

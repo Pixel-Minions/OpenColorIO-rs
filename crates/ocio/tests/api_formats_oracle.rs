@@ -1325,6 +1325,10 @@ fn compare_dynamic_job(
     for ty in property_types(sets) {
         let step = &steps[k];
         k += 1;
+        // hasDynamicProperty, whichever way the get goes.
+        if step["has"] != cpu.has_dynamic_property(ty) {
+            failures.push(format!("{what}: has {ty:?}: wheel {step}"));
+        }
         // A CPU processor whose optimizer folded the dynamic op into a LUT (integer inputs at
         // the draft level) has no property: both must refuse, with the same message.
         match (cpu.get_dynamic_property(ty), step.get("exception")) {
@@ -1450,7 +1454,7 @@ fn check_dynamic(name: &'static str, cases: DynCases) {
         }
     }
     println!(
-        "{name}: {} jobs ({} tier): {} applies compared, {} properties no CPU processor has,          {} refused sets, {} refusals",
+        "{name}: {} jobs ({} tier): {} applies compared, {} properties no CPU processor has, {} refused sets, {} refusals",
         jobs.len(),
         tier.name(),
         counts.applies,
