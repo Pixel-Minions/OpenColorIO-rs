@@ -303,7 +303,7 @@ p6-skeleton (6.1a-c) ── p6-core (6.2a-b, 6.4a) ─┬─ p6-transforms (6.3a
                                                  └─ p6-buffers (6.5a-b) ─ p6-processors (6.3h) ┤
 Phase 4 (4.6e, 4.8, 4.9) ── p6-baker (6.3i) and the archive and write tests ─────────────────────┤
 Phase 5 ── p6-after-p5 (6.7a-c) ─────────────────────────────────────────────────────────────────┤
-p9-config-utils, p9-merge (P6-11) ── p6-after-p9 (6.8a) ─────────────────────────────────────────┤
+p9-config-utils, p9-merge-3, p9-monitors (P6-11) ── p6-after-p9 (6.8a) ──────────────────────────┤
 all of the above ── p6-m4-parity: the suite through OpenColorIOTestSuite.py, the full O6.1 and O6.2 sweeps ── M4
 ```
 
@@ -331,8 +331,8 @@ are made, without waiting for other Phase 6 cards.
 | `p6-processors` | 6.3h | 1, ~600 | B or second | `p6-buffers` | — |
 | `p6-baker` | 6.3i | 1, ~150 | B | `p6-config`, 4.8 | — |
 | `p6-after-p5` | 6.7a–6.7c | 3, ~1,600 | B | Phase 5's library cards | — |
-| `p9-config-utils`, `p9-merge` | Phase 9's `ConfigUtils` and config merging, pulled forward (P6-11, decided; their chunks in a Phase 9 card file) | ~9 | second | Phase 3 | — |
-| `p6-after-p9` | 6.8a | 1, ~300 | B | `p9-config-utils`, `p9-merge`, `p6-config` | — |
+| `p9-config-utils`, `p9-merge-1` to `p9-merge-3`, `p9-monitors` | Phase 9's `ConfigUtils`, config merging and system monitors, pulled forward (P6-11, decided; their chunks in `docs/cards/phase9.md`) | ~15 | second | Phase 3 | — |
+| `p6-after-p9` | 6.8a | 1, ~300 | B | `p9-config-utils`, `p9-merge-3`, `p9-monitors`, `p6-config` | — |
 | `p6-m4-parity` | The suite through `OpenColorIOTestSuite.py` on both platforms; every class's O6.1 and O6.2 sweeps complete | 1–2 | any | every card above | — |
 
 12 Phase 6 cards, about 27 chunks. When a card grows past about 6 chunks, it splits at a

@@ -651,6 +651,7 @@ All 10 shading languages already come with each op family (Phases 1–5). This p
 - **ConfigUtils:** identifying interchange spaces, and processors that span two configs.
 - **Config merging:** `ConfigMerger` and the OCIOM format.
 - **Everything still open on the parity dashboard.**
+- **Cards:** `docs/cards/phase9.md` (ConfigUtils and config merging pulled forward by P6-11).
 
 ### Phase 10 — Release (~5 pw)
 
