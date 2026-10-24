@@ -1,0 +1,859 @@
+[
+ {
+  "label": "GradingRGBM()",
+  "repr": "<r=0, g=0, b=0, m=0>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW()",
+  "repr": "<red=1 green=1 blue=1 master=1 start=0 width=1>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW(start, width)",
+  "repr": "<red=1 green=1 blue=1 master=1 start=0.2 width=0.7>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingControlPoint()",
+  "repr": "<x=0, y=0>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM nan",
+  "repr": "<r=nan, g=0, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW nan",
+  "repr": "<red=0.5 green=nan blue=1 master=1 start=0.1 width=nan>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM nan payload",
+  "repr": "<r=nan, g=0.25, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW nan payload",
+  "repr": "<red=0.5 green=nan blue=1 master=1 start=0.1 width=nan>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM inf",
+  "repr": "<r=inf, g=0.5, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW inf",
+  "repr": "<red=0.5 green=inf blue=1 master=1 start=0.1 width=inf>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -inf",
+  "repr": "<r=-inf, g=0.75, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -inf",
+  "repr": "<red=0.5 green=-inf blue=1 master=1 start=0.1 width=-inf>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 0",
+  "repr": "<r=0, g=1, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 0",
+  "repr": "<red=0.5 green=0 blue=1 master=1 start=0.1 width=0>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -0",
+  "repr": "<r=-0, g=0, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -0",
+  "repr": "<red=0.5 green=-0 blue=1 master=1 start=0.1 width=-0>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM min subnormal",
+  "repr": "<r=4.94066e-324, g=0.25, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW min subnormal",
+  "repr": "<red=0.5 green=4.94066e-324 blue=1 master=1 start=0.1 width=4.94066e-324>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -min subnormal",
+  "repr": "<r=-4.94066e-324, g=0.5, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -min subnormal",
+  "repr": "<red=0.5 green=-4.94066e-324 blue=1 master=1 start=0.1 width=-4.94066e-324>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM min normal",
+  "repr": "<r=2.22507e-308, g=0.75, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW min normal",
+  "repr": "<red=0.5 green=2.22507e-308 blue=1 master=1 start=0.1 width=2.22507e-308>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM max",
+  "repr": "<r=1.79769e+308, g=1, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW max",
+  "repr": "<red=0.5 green=1.79769e+308 blue=1 master=1 start=0.1 width=1.79769e+308>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM lowest",
+  "repr": "<r=-1.79769e+308, g=0, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW lowest",
+  "repr": "<red=0.5 green=-1.79769e+308 blue=1 master=1 start=0.1 width=-1.79769e+308>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1e300",
+  "repr": "<r=1e+300, g=0.25, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1e300",
+  "repr": "<red=0.5 green=1e+300 blue=1 master=1 start=0.1 width=1e+300>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -1e-300",
+  "repr": "<r=-1e-300, g=0.5, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -1e-300",
+  "repr": "<red=0.5 green=-1e-300 blue=1 master=1 start=0.1 width=-1e-300>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM float max",
+  "repr": "<r=3.40282e+38, g=0.75, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW float max",
+  "repr": "<red=0.5 green=3.40282e+38 blue=1 master=1 start=0.1 width=3.40282e+38>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM float min normal",
+  "repr": "<r=1.17549e-38, g=1, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW float min normal",
+  "repr": "<red=0.5 green=1.17549e-38 blue=1 master=1 start=0.1 width=1.17549e-38>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 0.1",
+  "repr": "<r=0.1, g=0, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 0.1",
+  "repr": "<red=0.5 green=0.1 blue=1 master=1 start=0.1 width=0.1>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1/3",
+  "repr": "<r=0.333333, g=0.25, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1/3",
+  "repr": "<red=0.5 green=0.333333 blue=1 master=1 start=0.1 width=0.333333>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -2/3",
+  "repr": "<r=-0.666667, g=0.5, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -2/3",
+  "repr": "<red=0.5 green=-0.666667 blue=1 master=1 start=0.1 width=-0.666667>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1e-7",
+  "repr": "<r=1e-07, g=0.75, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1e-7",
+  "repr": "<red=0.5 green=1e-07 blue=1 master=1 start=0.1 width=1e-07>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1e-5",
+  "repr": "<r=1e-05, g=1, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1e-5",
+  "repr": "<red=0.5 green=1e-05 blue=1 master=1 start=0.1 width=1e-05>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 0.0001",
+  "repr": "<r=0.0001, g=0, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 0.0001",
+  "repr": "<red=0.5 green=0.0001 blue=1 master=1 start=0.1 width=0.0001>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 0.01",
+  "repr": "<r=0.01, g=0.25, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 0.01",
+  "repr": "<red=0.5 green=0.01 blue=1 master=1 start=0.1 width=0.01>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM below 0.01",
+  "repr": "<r=0.01, g=0.5, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW below 0.01",
+  "repr": "<red=0.5 green=0.01 blue=1 master=1 start=0.1 width=0.01>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 123456.5",
+  "repr": "<r=123456, g=0.75, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 123456.5",
+  "repr": "<red=0.5 green=123456 blue=1 master=1 start=0.1 width=123456>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 999999.4",
+  "repr": "<r=999999, g=1, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 999999.4",
+  "repr": "<red=0.5 green=999999 blue=1 master=1 start=0.1 width=999999>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 999999.5",
+  "repr": "<r=1e+06, g=0, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 999999.5",
+  "repr": "<red=0.5 green=1e+06 blue=1 master=1 start=0.1 width=1e+06>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1e6",
+  "repr": "<r=1e+06, g=0.25, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1e6",
+  "repr": "<red=0.5 green=1e+06 blue=1 master=1 start=0.1 width=1e+06>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1234567",
+  "repr": "<r=1.23457e+06, g=0.5, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1234567",
+  "repr": "<red=0.5 green=1.23457e+06 blue=1 master=1 start=0.1 width=1.23457e+06>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 9999999.5",
+  "repr": "<r=1e+07, g=0.75, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 9999999.5",
+  "repr": "<red=0.5 green=1e+07 blue=1 master=1 start=0.1 width=1e+07>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 9999999999999998",
+  "repr": "<r=1e+16, g=1, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 9999999999999998",
+  "repr": "<red=0.5 green=1e+16 blue=1 master=1 start=0.1 width=1e+16>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1e15+0.3",
+  "repr": "<r=1e+15, g=0, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1e15+0.3",
+  "repr": "<red=0.5 green=1e+15 blue=1 master=1 start=0.1 width=1e+15>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1e16",
+  "repr": "<r=1e+16, g=0.25, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1e16",
+  "repr": "<red=0.5 green=1e+16 blue=1 master=1 start=0.1 width=1e+16>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1.2345678901234568e17",
+  "repr": "<r=1.23457e+17, g=0.5, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1.2345678901234568e17",
+  "repr": "<red=0.5 green=1.23457e+17 blue=1 master=1 start=0.1 width=1.23457e+17>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1e21",
+  "repr": "<r=1e+21, g=0.75, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1e21",
+  "repr": "<red=0.5 green=1e+21 blue=1 master=1 start=0.1 width=1e+21>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 0.12345678901234568",
+  "repr": "<r=0.123457, g=1, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 0.12345678901234568",
+  "repr": "<red=0.5 green=0.123457 blue=1 master=1 start=0.1 width=0.123457>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1+ulp",
+  "repr": "<r=1, g=0, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1+ulp",
+  "repr": "<red=0.5 green=1 blue=1 master=1 start=0.1 width=1>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 1-ulp",
+  "repr": "<r=1, g=0.25, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 1-ulp",
+  "repr": "<red=0.5 green=1 blue=1 master=1 start=0.1 width=1>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 0.5",
+  "repr": "<r=0.5, g=0.5, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 0.5",
+  "repr": "<red=0.5 green=0.5 blue=1 master=1 start=0.1 width=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -1",
+  "repr": "<r=-1, g=0.75, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -1",
+  "repr": "<red=0.5 green=-1 blue=1 master=1 start=0.1 width=-1>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM 2",
+  "repr": "<r=2, g=1, b=-1.5, m=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW 2",
+  "repr": "<red=0.5 green=2 blue=1 master=1 start=0.1 width=2>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -nan",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -nan",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -nan payload",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -nan payload",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM snan",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW snan",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBM -snan",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingRGBMSW -snan",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingControlPoint nan",
+  "repr": "<x=nan, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve nan",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=nan, y=0.5, slp=nan><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint inf",
+  "repr": "<x=inf, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve inf",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=inf, y=0.5, slp=inf><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate 'inf'."
+  }
+ },
+ {
+  "label": "GradingControlPoint -inf",
+  "repr": "<x=-inf, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve -inf",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=-inf, y=0.5, slp=-inf><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 1 has a x coordinate '-inf' that is less than previous control point x coordinate '0'."
+  }
+ },
+ {
+  "label": "GradingControlPoint 0",
+  "repr": "<x=0, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 0",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=0, y=0.5, slp=0><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint -0",
+  "repr": "<x=-0, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve -0",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=-0, y=0.5, slp=-0><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint min subnormal",
+  "repr": "<x=1.4013e-45, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve min subnormal",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=1.4013e-45, y=0.5, slp=1.4013e-45><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint max",
+  "repr": "<x=3.40282e+38, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve max",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=3.40282e+38, y=0.5, slp=3.40282e+38><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate '3.40282e+38'."
+  }
+ },
+ {
+  "label": "GradingControlPoint lowest",
+  "repr": "<x=-3.40282e+38, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve lowest",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=-3.40282e+38, y=0.5, slp=-3.40282e+38><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 1 has a x coordinate '-3.40282e+38' that is less than previous control point x coordinate '0'."
+  }
+ },
+ {
+  "label": "GradingControlPoint min normal",
+  "repr": "<x=1.17549e-38, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve min normal",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=1.17549e-38, y=0.5, slp=1.17549e-38><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint 0.1",
+  "repr": "<x=0.1, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 0.1",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=0.1, y=0.5, slp=0.1><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint 1/3",
+  "repr": "<x=0.333333, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 1/3",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=0.333333, y=0.5, slp=0.333333><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint 1e-7",
+  "repr": "<x=1e-07, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 1e-7",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=1e-07, y=0.5, slp=1e-07><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint 123456.5",
+  "repr": "<x=123456, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 123456.5",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=123456, y=0.5, slp=123456><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate '123456'."
+  }
+ },
+ {
+  "label": "GradingControlPoint 999999.4",
+  "repr": "<x=999999, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 999999.4",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=999999, y=0.5, slp=999999><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate '999999'."
+  }
+ },
+ {
+  "label": "GradingControlPoint 1234567",
+  "repr": "<x=1.23457e+06, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 1234567",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=1.23457e+06, y=0.5, slp=1.23457e+06><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate '1.23457e+06'."
+  }
+ },
+ {
+  "label": "GradingControlPoint 16777217",
+  "repr": "<x=1.67772e+07, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 16777217",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=1.67772e+07, y=0.5, slp=1.67772e+07><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate '1.67772e+07'."
+  }
+ },
+ {
+  "label": "GradingControlPoint 0.12345679",
+  "repr": "<x=0.123457, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 0.12345679",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=0.123457, y=0.5, slp=0.123457><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint 1+ulp",
+  "repr": "<x=1, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 1+ulp",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=1, y=0.5, slp=1><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate '1'."
+  }
+ },
+ {
+  "label": "GradingControlPoint 1-ulp",
+  "repr": "<x=1, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 1-ulp",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=1, y=0.5, slp=1><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint 0.5",
+  "repr": "<x=0.5, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 0.5",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0.5><x=1, y=1, slp=1>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingControlPoint -1",
+  "repr": "<x=-1, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve -1",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=-1, y=0.5, slp=-1><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 1 has a x coordinate '-1' that is less than previous control point x coordinate '0'."
+  }
+ },
+ {
+  "label": "GradingControlPoint 2",
+  "repr": "<x=2, y=0.5>",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve 2",
+  "repr": "<control_points=[<x=0, y=0, slp=0><x=2, y=0.5, slp=2><x=1, y=1, slp=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '1' that is less than previous control point x coordinate '2'."
+  }
+ },
+ {
+  "label": "GradingControlPoint -nan",
+  "validate": "no validate"
+ },
+ {
+  "label": "GradingBSplineCurve -nan",
+  "validate": null
+ },
+ {
+  "label": "GradingPrimary(GRADING_LOG)",
+  "repr": "<brightness=<r=0, g=0, b=0, m=0>, contrast=<r=1, g=1, b=1, m=1>, gamma=<r=1, g=1, b=1, m=1>, offset=<r=0, g=0, b=0, m=0>, exposure=<r=0, g=0, b=0, m=0>, lift=<r=0, g=0, b=0, m=0>, gain=<r=1, g=1, b=1, m=1>, saturation=1, pivot=<contrast=-0.2, black=0, white=1>>",
+  "validate": null
+ },
+ {
+  "label": "GradingTone(GRADING_LOG)",
+  "repr": "<blacks=<red=1 green=1 blue=1 master=1 start=0.4 width=0.4> shadows=<red=1 green=1 blue=1 master=1 start=0.5 width=0> midtones=<red=1 green=1 blue=1 master=1 start=0.4 width=0.6> highlights=<red=1 green=1 blue=1 master=1 start=0.3 width=1> whites=<red=1 green=1 blue=1 master=1 start=0.4 width=0.5> s_contrast=1>",
+  "validate": null
+ },
+ {
+  "label": "GradingHueCurve(GRADING_LOG)",
+  "repr": "<hue_hue=<control_points=[<x=0, y=0><x=0.166667, y=0.166667><x=0.333333, y=0.333333><x=0.5, y=0.5><x=0.666667, y=0.666667><x=0.833333, y=0.833333>]>, hue_sat=<control_points=[<x=0, y=1><x=0.166667, y=1><x=0.333333, y=1><x=0.5, y=1><x=0.666667, y=1><x=0.833333, y=1>]>, hue_lum=<control_points=[<x=0, y=1><x=0.166667, y=1><x=0.333333, y=1><x=0.5, y=1><x=0.666667, y=1><x=0.833333, y=1>]>, lum_sat=<control_points=[<x=0, y=1><x=0.5, y=1><x=1, y=1>]>, sat_sat=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, lum_lum=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, sat_lum=<control_points=[<x=0, y=1><x=0.5, y=1><x=1, y=1>]>, hue_fx=<control_points=[<x=0, y=0><x=0.166667, y=0><x=0.333333, y=0><x=0.5, y=0><x=0.666667, y=0><x=0.833333, y=0>]>>",
+  "validate": null
+ },
+ {
+  "label": "GradingPrimary(GRADING_LIN)",
+  "repr": "<brightness=<r=0, g=0, b=0, m=0>, contrast=<r=1, g=1, b=1, m=1>, gamma=<r=1, g=1, b=1, m=1>, offset=<r=0, g=0, b=0, m=0>, exposure=<r=0, g=0, b=0, m=0>, lift=<r=0, g=0, b=0, m=0>, gain=<r=1, g=1, b=1, m=1>, saturation=1, pivot=<contrast=0.18, black=0, white=1>>",
+  "validate": null
+ },
+ {
+  "label": "GradingTone(GRADING_LIN)",
+  "repr": "<blacks=<red=1 green=1 blue=1 master=1 start=0 width=4> shadows=<red=1 green=1 blue=1 master=1 start=2 width=-7> midtones=<red=1 green=1 blue=1 master=1 start=0 width=8> highlights=<red=1 green=1 blue=1 master=1 start=-2 width=9> whites=<red=1 green=1 blue=1 master=1 start=0 width=8> s_contrast=1>",
+  "validate": null
+ },
+ {
+  "label": "GradingHueCurve(GRADING_LIN)",
+  "repr": "<hue_hue=<control_points=[<x=0, y=0><x=0.166667, y=0.166667><x=0.333333, y=0.333333><x=0.5, y=0.5><x=0.666667, y=0.666667><x=0.833333, y=0.833333>]>, hue_sat=<control_points=[<x=0, y=1><x=0.166667, y=1><x=0.333333, y=1><x=0.5, y=1><x=0.666667, y=1><x=0.833333, y=1>]>, hue_lum=<control_points=[<x=0, y=1><x=0.166667, y=1><x=0.333333, y=1><x=0.5, y=1><x=0.666667, y=1><x=0.833333, y=1>]>, lum_sat=<control_points=[<x=-7, y=1><x=0, y=1><x=7, y=1>]>, sat_sat=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, lum_lum=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, sat_lum=<control_points=[<x=0, y=1><x=0.5, y=1><x=1, y=1>]>, hue_fx=<control_points=[<x=0, y=0><x=0.166667, y=0><x=0.333333, y=0><x=0.5, y=0><x=0.666667, y=0><x=0.833333, y=0>]>>",
+  "validate": null
+ },
+ {
+  "label": "GradingPrimary(GRADING_VIDEO)",
+  "repr": "<brightness=<r=0, g=0, b=0, m=0>, contrast=<r=1, g=1, b=1, m=1>, gamma=<r=1, g=1, b=1, m=1>, offset=<r=0, g=0, b=0, m=0>, exposure=<r=0, g=0, b=0, m=0>, lift=<r=0, g=0, b=0, m=0>, gain=<r=1, g=1, b=1, m=1>, saturation=1, pivot=<contrast=0.18, black=0, white=1>>",
+  "validate": null
+ },
+ {
+  "label": "GradingTone(GRADING_VIDEO)",
+  "repr": "<blacks=<red=1 green=1 blue=1 master=1 start=0.4 width=0.4> shadows=<red=1 green=1 blue=1 master=1 start=0.6 width=0> midtones=<red=1 green=1 blue=1 master=1 start=0.4 width=0.7> highlights=<red=1 green=1 blue=1 master=1 start=0.2 width=1> whites=<red=1 green=1 blue=1 master=1 start=0.5 width=0.5> s_contrast=1>",
+  "validate": null
+ },
+ {
+  "label": "GradingHueCurve(GRADING_VIDEO)",
+  "repr": "<hue_hue=<control_points=[<x=0, y=0><x=0.166667, y=0.166667><x=0.333333, y=0.333333><x=0.5, y=0.5><x=0.666667, y=0.666667><x=0.833333, y=0.833333>]>, hue_sat=<control_points=[<x=0, y=1><x=0.166667, y=1><x=0.333333, y=1><x=0.5, y=1><x=0.666667, y=1><x=0.833333, y=1>]>, hue_lum=<control_points=[<x=0, y=1><x=0.166667, y=1><x=0.333333, y=1><x=0.5, y=1><x=0.666667, y=1><x=0.833333, y=1>]>, lum_sat=<control_points=[<x=0, y=1><x=0.5, y=1><x=1, y=1>]>, sat_sat=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, lum_lum=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, sat_lum=<control_points=[<x=0, y=1><x=0.5, y=1><x=1, y=1>]>, hue_fx=<control_points=[<x=0, y=0><x=0.166667, y=0><x=0.333333, y=0><x=0.5, y=0><x=0.666667, y=0><x=0.833333, y=0>]>>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(0)",
+  "repr": "<control_points=[]>",
+  "validate": {
+   "type": "Exception",
+   "message": "There must be at least 2 control points."
+  }
+ },
+ {
+  "label": "GradingBSplineCurve(1)",
+  "repr": "<control_points=[<x=0, y=0>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "There must be at least 2 control points."
+  }
+ },
+ {
+  "label": "GradingBSplineCurve(4)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(3, HUE_HUE)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(3, HUE_SAT)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(3, HUE_LUM)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(3, LUM_SAT)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(3, SAT_SAT)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(3, LUM_LUM)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(3, SAT_LUM)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(3, HUE_FX)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(2, B_SPLINE)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(2, DIAGONAL_B_SPLINE)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(2, HUE_HUE_B_SPLINE)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(2, PERIODIC_1_B_SPLINE)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(2, PERIODIC_0_B_SPLINE)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve(2, HORIZONTAL1_B_SPLINE)",
+  "repr": "<control_points=[<x=0, y=0><x=0, y=0>]>",
+  "validate": null
+ },
+ {
+  "label": "GradingBSplineCurve out of order",
+  "repr": "<control_points=[<x=0, y=0><x=0.7, y=0.5><x=0.5, y=1>]>",
+  "validate": {
+   "type": "Exception",
+   "message": "Control point at index 2 has a x coordinate '0.5' that is less than previous control point x coordinate '0.7'."
+  }
+ }
+]

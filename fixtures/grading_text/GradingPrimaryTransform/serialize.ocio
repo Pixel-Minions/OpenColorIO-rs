@@ -1,0 +1,4449 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: t0000
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0001
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0.1, 0.9, 1.2], master: 1.05}
+      contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
+      gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
+      saturation: 1.3
+      pivot: {contrast: 0.123456789, black: 0.05, white: 0.95}
+      clamp: {black: -0.1, white: 1.2}
+
+  - !<ColorSpace>
+    name: t0002
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0003
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0.1, 0.9, 1.2], master: 1.05}
+      contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
+      gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
+      saturation: 1.3
+      pivot: {contrast: 0.123456789, black: 0.05, white: 0.95}
+      clamp: {black: -0.1, white: 1.2}
+
+  - !<ColorSpace>
+    name: t0004
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0005
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0.1, 0.9, 1.2], master: 1.05}
+      contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
+      gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
+      saturation: 1.3
+      pivot: {contrast: 0.123456789, black: 0.05, white: 0.95}
+      clamp: {black: -0.1, white: 1.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0006
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0007
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0.1, 0.9, 1.2], master: 1.05}
+      contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
+      gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
+      saturation: 1.3
+      pivot: {contrast: 0.123456789, black: 0.05, white: 0.95}
+      clamp: {black: -0.1, white: 1.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0008
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0009
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      exposure: {rgb: [1.14, 0.94, -0.25], master: 1.09}
+      contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
+      saturation: 1.3
+      pivot: {contrast: 0.123456789}
+      clamp: {black: -0.1, white: 1.2}
+
+  - !<ColorSpace>
+    name: t0010
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0011
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      exposure: {rgb: [1.14, 0.94, -0.25], master: 1.09}
+      contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
+      saturation: 1.3
+      pivot: {contrast: 0.123456789}
+      clamp: {black: -0.1, white: 1.2}
+
+  - !<ColorSpace>
+    name: t0012
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0013
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      exposure: {rgb: [1.14, 0.94, -0.25], master: 1.09}
+      contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
+      saturation: 1.3
+      pivot: {contrast: 0.123456789}
+      clamp: {black: -0.1, white: 1.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0014
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0015
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      exposure: {rgb: [1.14, 0.94, -0.25], master: 1.09}
+      contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
+      saturation: 1.3
+      pivot: {contrast: 0.123456789}
+      clamp: {black: -0.1, white: 1.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0016
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0017
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [1.15, 0.95, 1.25], master: 0.02}
+      gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
+      gain: {rgb: [1.16, 0.96, 1.26], master: 1.11}
+      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      saturation: 1.3
+      pivot: {black: 0.05, white: 0.95}
+      clamp: {black: -0.1, white: 1.2}
+
+  - !<ColorSpace>
+    name: t0018
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0019
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [1.15, 0.95, 1.25], master: 0.02}
+      gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
+      gain: {rgb: [1.16, 0.96, 1.26], master: 1.11}
+      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      saturation: 1.3
+      pivot: {black: 0.05, white: 0.95}
+      clamp: {black: -0.1, white: 1.2}
+
+  - !<ColorSpace>
+    name: t0020
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0021
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [1.15, 0.95, 1.25], master: 0.02}
+      gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
+      gain: {rgb: [1.16, 0.96, 1.26], master: 1.11}
+      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      saturation: 1.3
+      pivot: {black: 0.05, white: 0.95}
+      clamp: {black: -0.1, white: 1.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0022
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0023
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [1.15, 0.95, 1.25], master: 0.02}
+      gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
+      gain: {rgb: [1.16, 0.96, 1.26], master: 1.11}
+      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      saturation: 1.3
+      pivot: {black: 0.05, white: 0.95}
+      clamp: {black: -0.1, white: 1.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0024
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [.nan, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0025
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0026
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0027
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0028
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0029
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0030
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [.inf, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0031
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0032
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0033
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, .nan, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0034
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0035
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0036
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0037
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0038
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0039
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, .inf, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0040
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0041
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0042
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, 0, .nan], master: 0}
+
+  - !<ColorSpace>
+    name: t0043
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0044
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0045
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0046
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0047
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0048
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, 0, .inf], master: 0}
+
+  - !<ColorSpace>
+    name: t0049
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0050
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0051
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, 0, 0], master: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0052
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0053
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0054
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0055
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0056
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0057
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, 0, 0], master: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0058
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0059
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0060
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [.nan, 1, 1], master: 1}
+      pivot: {contrast: -0.2}
+
+  - !<ColorSpace>
+    name: t0061
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [.nan, 1, 1], master: 1}
+      pivot: {contrast: 0.18}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0062
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0063
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [-0, 1, 1], master: 1}
+      pivot: {contrast: -0.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0064
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0065
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [.inf, 1, 1], master: 1}
+      pivot: {contrast: -0.2}
+
+  - !<ColorSpace>
+    name: t0066
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [.inf, 1, 1], master: 1}
+      pivot: {contrast: 0.18}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0067
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0068
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, .nan, 1], master: 1}
+      pivot: {contrast: -0.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0069
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, .nan, 1], master: 1}
+      pivot: {contrast: 0.18}
+
+  - !<ColorSpace>
+    name: t0070
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0071
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, -0, 1], master: 1}
+      pivot: {contrast: -0.2}
+
+  - !<ColorSpace>
+    name: t0072
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0073
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, .inf, 1], master: 1}
+      pivot: {contrast: -0.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0074
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, .inf, 1], master: 1}
+      pivot: {contrast: 0.18}
+
+  - !<ColorSpace>
+    name: t0075
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0076
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, 1, .nan], master: 1}
+      pivot: {contrast: -0.2}
+
+  - !<ColorSpace>
+    name: t0077
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, 1, .nan], master: 1}
+      pivot: {contrast: 0.18}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0078
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0079
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, 1, -0], master: 1}
+      pivot: {contrast: -0.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0080
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0081
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, 1, .inf], master: 1}
+      pivot: {contrast: -0.2}
+
+  - !<ColorSpace>
+    name: t0082
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, 1, .inf], master: 1}
+      pivot: {contrast: 0.18}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0083
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0084
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, 1, 1], master: .nan}
+      pivot: {contrast: -0.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0085
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, 1, 1], master: .nan}
+      pivot: {contrast: 0.18}
+
+  - !<ColorSpace>
+    name: t0086
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0087
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, 1, 1], master: -0}
+      pivot: {contrast: -0.2}
+
+  - !<ColorSpace>
+    name: t0088
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0089
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, 1, 1], master: .inf}
+      pivot: {contrast: -0.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0090
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, 1, 1], master: .inf}
+      pivot: {contrast: 0.18}
+
+  - !<ColorSpace>
+    name: t0091
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0092
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [.nan, 1, 1], master: 1}
+
+  - !<ColorSpace>
+    name: t0093
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0094
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [.nan, 1, 1], master: 1}
+
+  - !<ColorSpace>
+    name: t0095
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0096
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [.inf, 1, 1], master: 1}
+
+  - !<ColorSpace>
+    name: t0097
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0098
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [.inf, 1, 1], master: 1}
+
+  - !<ColorSpace>
+    name: t0099
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [1, .nan, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0100
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0101
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [1, .nan, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0102
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0103
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [1, .inf, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0104
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0105
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [1, .inf, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0106
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [1, 1, .nan], master: 1}
+
+  - !<ColorSpace>
+    name: t0107
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0108
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [1, 1, .nan], master: 1}
+
+  - !<ColorSpace>
+    name: t0109
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0110
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [1, 1, .inf], master: 1}
+
+  - !<ColorSpace>
+    name: t0111
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0112
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [1, 1, .inf], master: 1}
+
+  - !<ColorSpace>
+    name: t0113
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [1, 1, 1], master: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0114
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0115
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [1, 1, 1], master: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0116
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0117
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [1, 1, 1], master: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0118
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0119
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [1, 1, 1], master: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0120
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0121
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [.nan, 0, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0122
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [.nan, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0123
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0124
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0125
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0126
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0127
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [.inf, 0, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0128
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [.inf, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0129
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0130
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, .nan, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0131
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, .nan, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0132
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0133
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0134
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0135
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0136
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, .inf, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0137
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, .inf, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0138
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0139
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, 0, .nan], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0140
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, 0, .nan], master: 0}
+
+  - !<ColorSpace>
+    name: t0141
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0142
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0143
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0144
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0145
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, 0, .inf], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0146
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, 0, .inf], master: 0}
+
+  - !<ColorSpace>
+    name: t0147
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0148
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, 0, 0], master: .nan}
+
+  - !<ColorSpace>
+    name: t0149
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, 0, 0], master: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0150
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0151
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0152
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0153
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0154
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, 0, 0], master: .inf}
+
+  - !<ColorSpace>
+    name: t0155
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, 0, 0], master: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0156
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0157
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [.nan, 0, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0158
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0159
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0160
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0161
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0162
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0163
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [.inf, 0, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0164
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0165
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0166
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0, .nan, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0167
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0168
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0169
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0170
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0171
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0172
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0, .inf, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0173
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0174
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0175
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0, 0, .nan], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0176
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0177
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0178
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0179
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0180
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0181
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0, 0, .inf], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0182
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0183
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0184
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0, 0, 0], master: .nan}
+
+  - !<ColorSpace>
+    name: t0185
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0186
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0187
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0188
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0189
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0190
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0, 0, 0], master: .inf}
+
+  - !<ColorSpace>
+    name: t0191
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0192
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0193
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0194
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [.nan, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0195
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0196
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0197
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0198
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0199
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0200
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [.inf, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0201
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0202
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0203
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [0, .nan, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0204
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0205
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0206
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0207
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0208
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0209
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [0, .inf, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0210
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0211
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0212
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [0, 0, .nan], master: 0}
+
+  - !<ColorSpace>
+    name: t0213
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0214
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0215
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0216
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0217
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0218
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [0, 0, .inf], master: 0}
+
+  - !<ColorSpace>
+    name: t0219
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0220
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0221
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [0, 0, 0], master: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0222
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0223
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0224
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0225
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0226
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0227
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [0, 0, 0], master: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0228
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0229
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0230
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [.nan, 1, 1], master: 1}
+
+  - !<ColorSpace>
+    name: t0231
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0232
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0233
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [-0, 1, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0234
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0235
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0236
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [.inf, 1, 1], master: 1}
+
+  - !<ColorSpace>
+    name: t0237
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0238
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0239
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, .nan, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0240
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0241
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0242
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, -0, 1], master: 1}
+
+  - !<ColorSpace>
+    name: t0243
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0244
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0245
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, .inf, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0246
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0247
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0248
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, 1, .nan], master: 1}
+
+  - !<ColorSpace>
+    name: t0249
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0250
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0251
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, 1, -0], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0252
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0253
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0254
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, 1, .inf], master: 1}
+
+  - !<ColorSpace>
+    name: t0255
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0256
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0257
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, 1, 1], master: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0258
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0259
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0260
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, 1, 1], master: -0}
+
+  - !<ColorSpace>
+    name: t0261
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0262
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0263
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, 1, 1], master: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0264
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      saturation: .nan
+
+  - !<ColorSpace>
+    name: t0265
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      saturation: .nan
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0266
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      saturation: .nan
+
+  - !<ColorSpace>
+    name: t0267
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      saturation: -0
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0268
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      saturation: -0
+
+  - !<ColorSpace>
+    name: t0269
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      saturation: -0
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0270
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      saturation: .inf
+
+  - !<ColorSpace>
+    name: t0271
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      saturation: .inf
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0272
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      saturation: .inf
+
+  - !<ColorSpace>
+    name: t0273
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      pivot: {contrast: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0274
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      pivot: {contrast: .nan}
+
+  - !<ColorSpace>
+    name: t0275
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0276
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      pivot: {contrast: -0}
+
+  - !<ColorSpace>
+    name: t0277
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      pivot: {contrast: -0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0278
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0279
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      pivot: {contrast: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0280
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      pivot: {contrast: .inf}
+
+  - !<ColorSpace>
+    name: t0281
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0282
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      pivot: {black: .nan}
+
+  - !<ColorSpace>
+    name: t0283
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0284
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      pivot: {black: .nan}
+
+  - !<ColorSpace>
+    name: t0285
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0286
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0287
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0288
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      pivot: {white: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0289
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0290
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      pivot: {white: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0291
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      pivot: {white: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0292
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0293
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      pivot: {white: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0294
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {black: .nan}
+
+  - !<ColorSpace>
+    name: t0295
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {black: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0296
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {black: .nan}
+
+  - !<ColorSpace>
+    name: t0297
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {black: -0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0298
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {black: -0}
+
+  - !<ColorSpace>
+    name: t0299
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {black: -0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0300
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {white: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0301
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {white: .nan}
+
+  - !<ColorSpace>
+    name: t0302
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {white: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0303
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {white: -0}
+
+  - !<ColorSpace>
+    name: t0304
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {white: -0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0305
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {white: -0}
+
+  - !<ColorSpace>
+    name: t0306
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {white: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0307
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {white: .inf}
+
+  - !<ColorSpace>
+    name: t0308
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {white: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0309
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [.nan, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0310
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, .nan, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0311
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, 1, 1], master: .nan}
+      pivot: {contrast: 0.18}
+
+  - !<ColorSpace>
+    name: t0312
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [.nan, 0, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0313
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, 0, .inf], master: 0}
+
+  - !<ColorSpace>
+    name: t0314
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0315
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0316
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0317
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      saturation: 0
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0318
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0319
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0320
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0321
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0322
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, 0, 0], master: -4.94065645841247e-324}
+
+  - !<ColorSpace>
+    name: t0323
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      saturation: -4.94065645841247e-324
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0324
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [0, 0, 2.2250738585072e-308], master: 0}
+
+  - !<ColorSpace>
+    name: t0325
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, 2.2250738585072e-308, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0326
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      pivot: {contrast: 1.79769313486232e+308}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0327
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0328
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0329
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, 0, 0], master: -1.79769313486232e+308}
+
+  - !<ColorSpace>
+    name: t0330
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gamma: {rgb: [1, 1e+300, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0331
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0332
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0333
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      pivot: {contrast: -1e-300}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0334
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0335
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0336
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      pivot: {black: 1.17549435082229e-38}
+
+  - !<ColorSpace>
+    name: t0337
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, 0, 0], master: 0.1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0338
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0.1, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0339
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0340
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [0, 0, 0], master: 0.333333333333333}
+
+  - !<ColorSpace>
+    name: t0341
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0342
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      pivot: {black: -0.666666666666667}
+
+  - !<ColorSpace>
+    name: t0343
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0344
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0345
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0346
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0347
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      gamma: {rgb: [1, 1, 1], master: 0.01}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0348
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0349
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0, 0, 0.01], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0350
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      pivot: {white: 0.01}
+
+  - !<ColorSpace>
+    name: t0351
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, 123456.5, 1], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0352
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [123456.5, 1, 1], master: 1}
+      pivot: {contrast: -0.2}
+
+  - !<ColorSpace>
+    name: t0353
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {black: 999999.4}
+
+  - !<ColorSpace>
+    name: t0354
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0355
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, 999999.5, 1], master: 1}
+      pivot: {contrast: 0.18}
+
+  - !<ColorSpace>
+    name: t0356
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0357
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [1000000, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0358
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0359
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0360
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {black: 1234567}
+
+  - !<ColorSpace>
+    name: t0361
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0362
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+
+  - !<ColorSpace>
+    name: t0363
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {white: 1e+16}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0364
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0365
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, 1, 1e+15], master: 1}
+      pivot: {contrast: -0.2}
+
+  - !<ColorSpace>
+    name: t0366
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      exposure: {rgb: [0, 0, 0], master: 1e+15}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0367
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, 1e+16, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0368
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      gain: {rgb: [1, 1, 1e+16], master: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0369
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [1.23456789012346e+17, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0370
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {white: 1.23456789012346e+17}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0371
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0372
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, 1, 1e+21], master: 1}
+      pivot: {contrast: 0.18}
+
+  - !<ColorSpace>
+    name: t0373
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0374
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, 0.123456789012346, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0375
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0376
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0377
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+
+  - !<ColorSpace>
+    name: t0378
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0379
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0380
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0381
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      saturation: -1
+
+  - !<ColorSpace>
+    name: t0382
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      contrast: {rgb: [1, 1, 1], master: -1}
+      pivot: {contrast: -0.2}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0383
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [0, 2, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0384
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, 0, 2], master: 0}
+
+  - !<ColorSpace>
+    name: t0385
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      brightness: {rgb: [.nan, 0, 0], master: 0}
+
+  - !<ColorSpace>
+    name: t0386
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      offset: {rgb: [0, .nan, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0387
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      contrast: {rgb: [1, 1, 1], master: .nan}
+      pivot: {contrast: 0.18}
+
+  - !<ColorSpace>
+    name: t0388
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      lift: {rgb: [.nan, 0, 0], master: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0389
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      offset: {rgb: [0, 0, .nan], master: 0}
+
+  - !<ColorSpace>
+    name: t0390
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0391
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0392
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+
+  - !<ColorSpace>
+    name: t0393
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0394
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {black: -1e+300}
+
+  - !<ColorSpace>
+    name: t0395
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {white: 1e+300}
+
+  - !<ColorSpace>
+    name: t0396
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: log
+      clamp: {black: 0, white: 1}
+
+  - !<ColorSpace>
+    name: t0397
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0398
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {black: -1e+300}
+
+  - !<ColorSpace>
+    name: t0399
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {white: 1e+300}
+
+  - !<ColorSpace>
+    name: t0400
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: linear
+      clamp: {black: 0, white: 1}
+
+  - !<ColorSpace>
+    name: t0401
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0402
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {black: -1e+300}
+
+  - !<ColorSpace>
+    name: t0403
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {white: 1e+300}
+
+  - !<ColorSpace>
+    name: t0404
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingPrimaryTransform>
+      style: video
+      clamp: {black: 0, white: 1}

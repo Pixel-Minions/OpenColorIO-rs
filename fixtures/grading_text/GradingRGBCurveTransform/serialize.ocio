@@ -1,0 +1,1053 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: t0000
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0001
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+
+  - !<ColorSpace>
+    name: t0002
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0003
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+
+  - !<ColorSpace>
+    name: t0004
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0005
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0006
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0007
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0008
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0009
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0010
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0011
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0012
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0013
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+
+  - !<ColorSpace>
+    name: t0014
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0015
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+
+  - !<ColorSpace>
+    name: t0016
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0017
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0018
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0019
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0020
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      lintolog_bypass: true
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+
+  - !<ColorSpace>
+    name: t0021
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      blue: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, 0.75, 0]}
+
+  - !<ColorSpace>
+    name: t0022
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      lintolog_bypass: true
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0023
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      blue: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, 0.75, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0024
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      blue: {control_points: [-7, -7, 0, 0, 7, 7], slopes: [0, 0.75, 0]}
+
+  - !<ColorSpace>
+    name: t0025
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      blue: {control_points: [-7, -7, 0, 0, 7, 7], slopes: [0, 0.75, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0026
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      lintolog_bypass: true
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+
+  - !<ColorSpace>
+    name: t0027
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      blue: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, 0.75, 0]}
+
+  - !<ColorSpace>
+    name: t0028
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      lintolog_bypass: true
+      red: {control_points: [0, 0, 0.5, 0.6, 1, 1]}
+      green: {control_points: [0, 0, 0.4, 0.5, 1, 1]}
+      blue: {control_points: [0, 0.05, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 0.95], slopes: [0, 1.25, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0029
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      blue: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, 0.75, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0030
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0031
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0032
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0033
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0, -0, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0034
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, .nan, 7, 7]}
+
+  - !<ColorSpace>
+    name: t0035
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0, 0.5, -0, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0036
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, 0, -0, 7]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0037
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0, 0.5, 0.5, .inf, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0038
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      red: {control_points: [0, 0, 0.5, 0.5, 1, .nan]}
+
+  - !<ColorSpace>
+    name: t0039
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, 0, 7, -0]}
+
+  - !<ColorSpace>
+    name: t0040
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0, 0.5, 0.5, 1, .inf]}
+
+  - !<ColorSpace>
+    name: t0041
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0042
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      master: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0043
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0044
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      master: {control_points: [0, 0, -0, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0045
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, .nan, 7, 7]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0046
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      master: {control_points: [0, 0, 0.5, -0, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0047
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, -0, 7]}
+
+  - !<ColorSpace>
+    name: t0048
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      master: {control_points: [0, 0, 0.5, 0.5, .inf, 1]}
+
+  - !<ColorSpace>
+    name: t0049
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      master: {control_points: [0, 0, 0.5, 0.5, 1, .nan]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0050
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, -0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0051
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      master: {control_points: [0, 0, 0.5, 0.5, 1, .inf]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0052
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      green: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [.nan, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0053
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0054
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      green: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [.inf, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0055
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      green: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .nan, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0056
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0057
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      green: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .inf, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0058
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      green: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, 0, .nan]}
+
+  - !<ColorSpace>
+    name: t0059
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0060
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      green: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, 0, .inf]}
+
+  - !<ColorSpace>
+    name: t0061
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      red: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0062
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, .nan]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0063
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, 0, 7, .inf]}
+
+  - !<ColorSpace>
+    name: t0064
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0065
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, 0]}
+
+  - !<ColorSpace>
+    name: t0066
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, 0, 7, -0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0067
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0068
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      master: {control_points: [1.401298e-45, 0, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0069
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, 3.402823e+38]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0070
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, -3.402823e+38, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0071
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      master: {control_points: [1.175494e-38, 0, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0072
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      red: {control_points: [0.1, 0, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0073
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, 0.1]}
+
+  - !<ColorSpace>
+    name: t0074
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, 0, 7, 0.3333333]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0075
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0.3333333, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0076
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      master: {control_points: [1e-07, 0, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0077
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, 123456.5]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0078
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, 0, 7, 999999.4]}
+
+  - !<ColorSpace>
+    name: t0079
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      master: {control_points: [0, 0, 0.5, 0.5, 1234567, 1]}
+
+  - !<ColorSpace>
+    name: t0080
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, 1.677722e+07]}
+
+  - !<ColorSpace>
+    name: t0081
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, 0, 7, 0.1234568]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0082
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0.1234568, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0083
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      master: {control_points: [0, 0, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0084
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, 0.9999999]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0085
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      red: {control_points: [-7, -7, 0, 0, 7, 0.5]}
+
+  - !<ColorSpace>
+    name: t0086
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: video
+      red: {control_points: [0, 0.5, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0087
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      master: {control_points: [-1, 0, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0088
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, 2]}
+
+  - !<ColorSpace>
+    name: t0089
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: log
+      red: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0090
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingRGBCurveTransform>
+      style: linear
+      master: {control_points: [-7, -7, 0, 0, 7, .nan]}
+      direction: inverse
