@@ -58,6 +58,8 @@ fn files() -> Vec<(&'static str, String)> {
         ),
         ("broken/b.ocio", "not: a config\n".to_string()),
         ("dir.ocio/inside.ocio", small_config("inside")),
+        // A file named like a built-in config: found along the search paths before it.
+        ("cg-config-latest", small_config("file cg")),
     ]
 }
 
@@ -97,6 +99,8 @@ fn load_cases() -> Vec<LoadCase> {
         "b.ocio",
         "c.ocio",
         "sub/b.ocio",
+        // A lexical `..` through a directory that doesn't exist (the normalized path on Linux).
+        "nodir/../a.ocio",
         "dir.ocio",
         "missing.ocio",
         "",

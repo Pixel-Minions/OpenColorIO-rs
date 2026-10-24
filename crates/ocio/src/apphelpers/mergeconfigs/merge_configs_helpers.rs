@@ -875,7 +875,8 @@ impl ConfigMerger {
     /// A deep copy: the search paths, working directory and version, a copy of each merge's
     /// parameters ([`ConfigMergingParameters::create_editable_copy`], which still shares their
     /// overrides, docs/improvements.md, I-386), and a copy of each merged config. Fails where a
-    /// copy of the parameters fails, and for parameters that are `None`, which upstream
+    /// copy of the parameters fails, and for parameters that are `None` (after making the new
+    /// parameters, as upstream does, so the environment's error comes first), which upstream
     /// dereferences (docs/improvements.md, U-176).
     ///
     /// Port of `ConfigMerger::createEditableCopy` and `ConfigMerger::Impl::operator=`
@@ -890,12 +891,15 @@ impl ConfigMerger {
 
         merger.merge_params.reserve(self.merge_params.len());
         for (i, param) in self.merge_params.iter().enumerate() {
+            // `param->createEditableCopy()` makes the new parameters (`Create`, so a
+            // `Config::Create`, which can fail on the environment) before it reads `*this`: for
+            // a null pointer too, so a failing environment is reported before the null.
+            let copy = ConfigMergingParameters::new()?;
             let param = param
                 .as_ref()
                 .ok_or_else(|| null_params("createEditableCopy", i))?;
-            merger
-                .merge_params
-                .push(Some(param.create_editable_copy()?));
+            copy.lock().assign(&param.lock());
+            merger.merge_params.push(Some(copy));
         }
 
         merger.merged_configs.reserve(self.merged_configs.len());

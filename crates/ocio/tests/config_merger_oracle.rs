@@ -224,6 +224,9 @@ fn strings() -> Vec<Vec<u8>> {
         "true",
         "a, b, \"c, d\"",
         "x\ny",
+        // NUL: the setters take a `const char *`, which ends there.
+        "a\0b",
+        "\0x",
     ]
     .iter()
     .map(|s| s.as_bytes().to_vec())
@@ -298,6 +301,13 @@ fn coverage_sequence() -> Vec<Step> {
         op(Op::AddSearchPath(s("/usr/local/configs"))),
         op(Op::SetSearchPath(s("a:b::c:"))),
         op(Op::AddSearchPath(s("."))),
+        op(Op::SetWorkingDir(s("/work dir"))),
+        // NUL ends each string (`const char *`), whatever follows it.
+        op(Op::SetSearchPath(s("p\0:q"))),
+        op(Op::AddSearchPath(s("r\0s"))),
+        op(Op::AddSearchPath(s("\0t"))),
+        op(Op::SetWorkingDir(s("w\0d"))),
+        op(Op::SetSearchPath(s("a:b::c:"))),
         op(Op::SetWorkingDir(s("/work dir"))),
         op(Op::SetVersion(1, 0)),
         op(Op::SetVersion(2, 13)),
@@ -790,4 +800,98 @@ fn none_parameters() {
         m.create_editable_copy().unwrap_err().to_string(),
         u176("createEditableCopy")
     );
+}
+
+/// A py_eval string.
+fn s(v: &str) -> Value {
+    json!({"str": hex(v.as_bytes())})
+}
+
+/// A py_eval script that sets the process's `OCIO_ACTIVE_DISPLAYS` (through `os.environ`,
+/// which the script's names don't list: `__import__`, from the builtins the `copy` module
+/// holds), then copies (`copy.deepcopy`) a merger holding `params` `None` parameters. Its last
+/// step is the copy.
+fn copy_script(value: &str, params: usize) -> Value {
+    let mut steps = vec![
+        json!({"call": {"name": "operator.getitem"},
+               "args": [{"name": "copy.__builtins__"}, s("__import__")]}),
+        json!({"call": {"ref": 0}, "args": [s("os")]}),
+        json!({"eval": {"ref": 1, "attr": "environ"}}),
+        json!({"setitem": {"ref": 2}, "index": s("OCIO_ACTIVE_DISPLAYS"), "value": s(value)}),
+        json!({"call": {"name": "OCIO.ConfigMerger.Create"}}),
+    ];
+    for _ in 0..params {
+        steps.push(json!({"call": {"ref": 4, "attr": "addParams"},
+                          "args": [{"none": null}]}));
+    }
+    steps.push(json!({"call": {"name": "copy.deepcopy"}, "args": [{"ref": 4}]}));
+    json!({"steps": steps})
+}
+
+/// A copy of a merger holding `None` parameters, under an environment `Config::Create` refuses
+/// (an unclosed quote in `OCIO_ACTIVE_DISPLAYS`): upstream's `param->createEditableCopy()`
+/// makes the new parameters (`ConfigMergingParameters::Create`) before it reads the null
+/// pointer, so the wheel raises the environment's error, and the port must too (the error of
+/// docs/improvements.md, U-176, comes after it). A merger without parameters copies under the
+/// same environment. The environment is set inside the wheel's script, because the oracle's
+/// config (`object_calls`) is made from it first and would be refused.
+#[test]
+fn a_copy_makes_its_parameters_before_it_reads_the_null() {
+    const BAD: &str = "\"open, c";
+    let report = Oracle::get()
+        .call(
+            "py_eval",
+            json!({"scripts": [copy_script(BAD, 1), copy_script(BAD, 0)]}),
+            &[],
+        )
+        .result;
+    let reports = report["scripts"].as_array().expect("scripts");
+    assert_eq!(reports.len(), 2, "{report}");
+    // Every step before the copy succeeded: the environment was set, the merger made.
+    for r in reports {
+        let steps = r["steps"].as_array().expect("steps");
+        let (_, before) = steps.split_last().expect("steps");
+        assert!(before.iter().all(|st| st.get("raised").is_none()), "{r}");
+    }
+
+    set_thread_env_provider(Some(Arc::new(MapEnv::from_entries::<&str, &str>(&[(
+        "OCIO_ACTIVE_DISPLAYS",
+        BAD,
+    )]))));
+
+    // With a null: the environment's error, as the wheel's.
+    let wheel = reports[0]["steps"]
+        .as_array()
+        .expect("steps")
+        .last()
+        .expect("a step");
+    let raised = &wheel["raised"];
+    assert_eq!(
+        raised["mro"][0],
+        json!("PyOpenColorIO.PyOpenColorIO.Exception"),
+        "{wheel}"
+    );
+    assert_eq!(
+        raised["message"],
+        bytes_arg(
+            b"The string '\"open, c' is not correctly formatted. It is missing a closing quote."
+        ),
+        "{wheel}"
+    );
+    let mut m = ConfigMerger::new();
+    m.add_params(None);
+    let e = m.create_editable_copy().expect_err("the null parameters");
+    assert_eq!(e.kind(), ExceptionKind::Exception);
+    assert_eq!(raised["message"], bytes_arg(e.what()));
+
+    // Without parameters: nothing is made, and the copy succeeds on both sides.
+    let wheel = reports[1]["steps"]
+        .as_array()
+        .expect("steps")
+        .last()
+        .expect("a step");
+    assert!(wheel.get("raised").is_none(), "{wheel}");
+    assert!(ConfigMerger::new().create_editable_copy().is_ok());
+
+    set_thread_env_provider(None);
 }

@@ -5821,7 +5821,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `mergeConfigs`), in `p9-merge-1` (9.2b, `apphelpers/mergeconfigs/merge_configs_helpers.rs`);
   `config_merger_oracle.rs` (`none_parameters`) and `merge_configs_helpers_oracle_tests.rs`.
   `MergeColorSpace` takes its parameters by reference in the Rust API (P9-2): its binding
-  refuses `None` (6.8a).
+  refuses `None` (6.8a). The copy makes the new parameters (`ConfigMergingParameters::Create`,
+  so a `Config::Create`) before it reads the null pointer, so under an environment that
+  `Config::Create` refuses (an unclosed quote in `OCIO_ACTIVE_DISPLAYS`) the wheel raises that
+  error, not a crash (probed on Windows, 2026-10-23), and so does the port, first.
 
 ### U-177. OCIOM readers and writers on several threads race to fill the strategy names
 

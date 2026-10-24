@@ -498,10 +498,64 @@ fn generated() -> Vec<Vec<u8>> {
     docs.push(merge_doc(
         "    params:\n      unknown: 1\n      roles: {strategy: Nope}\n",
     ));
+    // A strategy name that holds a NUL ends there, as the `const char *` of upstream's lookup
+    // (YAML's escape; the raw byte is below).
+    for entry in [
+        "looks: {strategy: \"Remove\0x\"}",
+        "looks: {strategy: \"\0x\"}",
+        "looks: {strategy: \"Nope\0Remove\"}",
+        "colorspaces: {strategy: \"PreferBase\0\"}",
+    ] {
+        docs.push(params(entry));
+    }
+    docs.push(options("default_strategy: \"Remove\0x\""));
+    docs.push(options("default_strategy: \"\0Remove\""));
+    // Tags: the messages of upstream's `throw_value_error` carry the tag of the node.
+    for entry in [
+        "looks: !q {strategy: Nope}",
+        "looks: !q {strategy: Remove}",
+        "looks: !q scalar",
+        "looks: !q [Remove]",
+        "looks: !q {strategy: Remove, strategy: Nope}",
+        "!k looks: {strategy: Nope}",
+        "!k looks: scalar",
+        "looks: !q {other: x}",
+        "roles: !r {strategy: Nope}\n      looks: !q {strategy: Nope}",
+    ] {
+        docs.push(params(entry));
+    }
+    docs.push(merge_doc("    params: !x {a: 1, a: 2}\n"));
+    docs.push(merge_doc(
+        "    params: !x {looks: {strategy: Remove}, looks: {strategy: Remove}}\n",
+    ));
+    docs.push(merge_doc("    overrides: !x {name: a, name: b}\n"));
+    docs.push(merge_doc("    overrides: !x {environment: scalar}\n"));
+    docs.push(merge_doc("    overrides: !x {a: 1, a: 2}\n"));
+    docs.push(merge_doc("    options: !x {a: 1, a: 2}\n"));
+    docs.push(merge_doc("    options: !x {default_strategy: Nope}\n"));
+    docs.push(merge_doc("    options: !x {input_first: maybe}\n"));
+    docs.push(merge_doc("    !x base: b\n    !y base: c\n"));
+    docs.push("ociom_version: 1.0\nmerge: !x {M: {base: b}, M: {base: c}}\n".into());
+    docs.push("ociom_version: 1.0\nmerge: !x {M: {base: b}, m: {base: c}}\n".into());
+    docs.push("ociom_version: 1.0\nmerge: !x [M]\n".into());
+    docs.push("!x {merge: {}, merge: {}}\n".into());
+    docs.push("!x {ociom_version: 1.0, ociom_version: 1.0}\n".into());
+    docs.push("ociom_version: !v 2.0\nmerge:\n  M: {base: b}\n".into());
+    docs.push("ociom_version: !v abc\nmerge:\n  M: {base: b}\n".into());
+    docs.push("ociom_version: !v [1]\nmerge:\n  M: {base: b}\n".into());
+    docs.push("ociom_version: 1.0\nmerge:\n  M: !x scalar\n".into());
+    docs.push("ociom_version: 1.0\nmerge:\n  M: !x [base]\n".into());
+    docs.push("ociom_version: 1.0\nmerge:\n  !a M: {base: b}\n  !b M: {base: c}\n".into());
+    docs.push("ociom_version: 1.0\nsearch_path: !s {a: b}\nmerge: {}\n".into());
     let mut texts: Vec<Vec<u8>> = docs.into_iter().map(String::into_bytes).collect();
     // Bytes that aren't UTF-8, and a NUL.
     texts.push(b"merge:\n  \xff\xfe: {base: \xfe}\n".to_vec());
     texts.push(b"merge:\n  M: {base: a\0b}\n".to_vec());
+    // The raw NUL byte of a strategy name, in a plain scalar.
+    texts.push(
+        b"ociom_version: 1.0\nmerge:\n  M:\n    params:\n      looks: {strategy: Remove\0x}\n"
+            .to_vec(),
+    );
     texts.push(b"merge:\n  M: {overrides: {environment: {\xc3\xa9: v\xff}}}\n".to_vec());
     texts.push(b"\xef\xbb\xbfmerge:\n  M: {base: bom}\n".to_vec());
     texts.push(b"merge:\r\n  M: {base: crlf}\r\n".to_vec());
