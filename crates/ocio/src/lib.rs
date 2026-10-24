@@ -48,6 +48,9 @@ mod test_env;
 pub use apphelpers::color_space_helpers::{self, ColorSpaceMenuHelper, ColorSpaceMenuParameters};
 pub use apphelpers::display_view_helpers;
 pub use apphelpers::legacy_viewing_pipeline::LegacyViewingPipeline;
+pub use apphelpers::mergeconfigs::merge_configs_helpers::{
+    ConfigMergingParameters, MergeStrategies,
+};
 pub use apphelpers::mixing_helpers::{MixingColorSpaceManager, MixingSlider};
 pub use baker::Baker;
 pub use builtinconfigs::builtin_config_registry::{

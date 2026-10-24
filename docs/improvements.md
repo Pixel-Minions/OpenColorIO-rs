@@ -3832,6 +3832,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `MixingColorSpaceManager`); `mixing_helpers_oracle.rs` (`managers_match_the_wheel`,
   `builtin_config_managers_match_the_wheel`).
 
+### I-386. A copy of merge parameters shares their overrides with the original
+
+- **Upstream:** `ConfigMergingParameters` keeps the overrides of the search path, the
+  environment, the active displays and views and the inactive color spaces in a config,
+  `m_overrideCfg`, and `Impl::operator=` copies that pointer (`MergeConfigsHelpers.h:106` @
+  v2.5.2), so `createEditableCopy` (Python's `copy.deepcopy`) gives an object that shares them
+  with the original: a search path, an environment variable or an active view set on either
+  shows on both, while the names, options and strategies are the copy's own. Probed on the
+  Windows wheel (2026-10-23). The copies `ConfigMerger::createEditableCopy` makes of its
+  parameters, and `MergeColorSpace` of the parameters given, share them too.
+- **Who notices:** code that copies a merge's parameters to change the copy's overrides.
+- **A fix:** copy the override config (`createEditableCopy`) in `Impl::operator=`.
+- **Status:** matched in `p9-merge-1` (9.2a, `apphelpers/mergeconfigs/merge_configs_helpers.rs`,
+  `ConfigMergingParameters`, whose override config is shared behind an `Arc`);
+  `merge_params_oracle.rs` changes a copy and its original in turn, and reads both.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

@@ -8,6 +8,7 @@ pub(crate) mod category_helpers;
 pub mod color_space_helpers;
 pub mod display_view_helpers;
 pub mod legacy_viewing_pipeline;
+pub mod mergeconfigs;
 pub mod mixing_helpers;
 
 #[cfg(test)]
