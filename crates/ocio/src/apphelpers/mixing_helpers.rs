@@ -597,9 +597,18 @@ impl MixingColorSpaceManager {
     /// role's color space, else to the view `view_name` of the display `display_name` (the
     /// display space) or an identity (the rendering space).
     ///
+    /// [`MixingColorSpaceManager::processor`]'s first step, public for the Python binding
+    /// only (`ocio-py`), with [`MixingColorSpaceManager::processor_with_encoding`]: the library
+    /// can run Python code here (a config's I/O proxy loading a LUT), which can change the
+    /// manager, and upstream reads the encoding and the config after it (MixingHelpers.cpp:
+    /// 336-346), so the binding hands the second step the manager as it is then.
+    /// Behaviour-neutral for the Rust API (owner decision 2026-10-24, relayed by the
+    /// coordinator).
+    ///
     /// Port of `MixingColorSpaceManagerImpl::getProcessorWithoutEncoding` (MixingHelpers.cpp:
     /// 296-325 @ v2.5.2).
-    fn processor_without_encoding(
+    #[doc(hidden)]
+    pub fn processor_without_encoding(
         &self,
         working_name: &[u8],
         display_name: &[u8],
@@ -638,13 +647,28 @@ impl MixingColorSpaceManager {
         view_name: impl AsRef<[u8]>,
         direction: TransformDirection,
     ) -> Result<Arc<Processor>> {
-        let mut group = GroupTransform::new();
-
         let processor = self.processor_without_encoding(
             working_name.as_ref(),
             display_name.as_ref(),
             view_name.as_ref(),
         )?;
+        self.processor_with_encoding(&processor, direction)
+    }
+
+    /// [`MixingColorSpaceManager::processor`]'s second step, of the first one's `processor`
+    /// (see [`MixingColorSpaceManager::processor_without_encoding`]): the processor in the
+    /// selected encoding, in `direction`. For the Python binding only.
+    ///
+    /// Port of `MixingColorSpaceManagerImpl::getProcessor` (MixingHelpers.cpp:327-347 @
+    /// v2.5.2), after its call of `getProcessorWithoutEncoding`. Upstream makes the group
+    /// before that call, which reads nothing of the manager.
+    #[doc(hidden)]
+    pub fn processor_with_encoding(
+        &self,
+        processor: &Processor,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let mut group = GroupTransform::new();
 
         group.append_transform(Transform::from(processor.create_group_transform()?));
 

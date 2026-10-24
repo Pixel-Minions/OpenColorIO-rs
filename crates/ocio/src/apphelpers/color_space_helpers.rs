@@ -657,6 +657,20 @@ impl ColorSpaceMenuHelper {
     /// Port of `ColorSpaceMenuHelper::Create` (ColorSpaceHelpers.cpp:378-450 @ v2.5.2).
     #[doc(alias = "Create")]
     pub fn new(p: &ColorSpaceMenuParameters) -> Result<Arc<ColorSpaceMenuHelper>> {
+        ColorSpaceMenuHelper::log_validation(p);
+        ColorSpaceMenuHelper::new_validated(p)
+    }
+
+    /// [`ColorSpaceMenuHelper::new`]'s first step, public for the Python binding only
+    /// (`ocio-py`), with [`ColorSpaceMenuHelper::new_validated`]: the config's validation,
+    /// whose error is logged. The library can run Python code here (a logging function), which
+    /// can change the parameters, and upstream reads them after it, so the binding hands the
+    /// second step the parameters as they are then. Behaviour-neutral for the Rust API (owner
+    /// decision 2026-10-24, relayed by the coordinator, for the mixing manager's processor).
+    ///
+    /// Port of `ColorSpaceMenuHelper::Create` (ColorSpaceHelpers.cpp:378-394 @ v2.5.2).
+    #[doc(hidden)]
+    pub fn log_validation(p: &ColorSpaceMenuParameters) {
         // Upstream refuses parameters without a config ("ColorSpaceMenuHelper needs parameters
         // with a config."): the port's always have one.
 
@@ -666,7 +680,14 @@ impl ColorSpaceMenuHelper {
             oss.extend_from_slice(e.what());
             log_warning(&oss);
         }
+    }
 
+    /// [`ColorSpaceMenuHelper::new`]'s second step (see
+    /// [`ColorSpaceMenuHelper::log_validation`]). For the Python binding only.
+    ///
+    /// Port of `ColorSpaceMenuHelper::Create` (ColorSpaceHelpers.cpp:396-450 @ v2.5.2).
+    #[doc(hidden)]
+    pub fn new_validated(p: &ColorSpaceMenuParameters) -> Result<Arc<ColorSpaceMenuHelper>> {
         if !p.include_color_spaces() && p.include_roles() {
             return Err(Exception::new(
                 "ColorSpaceMenuHelper needs to include color spaces if roles are included.",
