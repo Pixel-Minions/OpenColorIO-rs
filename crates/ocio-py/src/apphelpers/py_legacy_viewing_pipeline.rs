@@ -123,7 +123,10 @@ impl PipelineNode {
 /// What the pipeline `rc` is made of, as counts of the changes Python made: its own (its
 /// setters) and its transforms', at every level (a group's children, the curves a curve
 /// transform's `getValue` gave Python), each by its key. Equal states: Python changed nothing
-/// (as the config's `state`, `crate::py_config`).
+/// (as the config's `state`, `crate::py_config`). An object never changed counts for nothing,
+/// as the config's: Python reading what the pipeline holds can make an object of it (a curve
+/// transform's `getValue` makes the value object of its curves, which joins the state then),
+/// and an object joins the state unchanged, or by a change of its holder.
 fn state(rc: &PipelineRc) -> Vec<(usize, u64)> {
     let mut out = vec![(rc.key(), rc.version())];
     let mut stack: Vec<TransformRc> = rc
@@ -147,6 +150,7 @@ fn state(rc: &PipelineRc) -> Vec<(usize, u64)> {
         }
         stack.extend(n.children.iter().flatten().cloned());
     }
+    out.retain(|(_, version)| *version > 0);
     out
 }
 

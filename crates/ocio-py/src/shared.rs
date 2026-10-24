@@ -131,9 +131,12 @@ impl Drop for Reading {
 /// Whether the bound function `name` only reads the objects it is given: upstream's getters
 /// (`get`, `is`, `has`, and the module's `Get`, `Is`, `Has`, each followed by a capital) and
 /// the protocols and methods that read (`__len__`, `__iter__`, `__next__`, `__getitem__`,
-/// `__contains__`, `__repr__`, `__str__`, `__eq__`, `__ne__`, `serialize`, `validate`). Every
-/// other call counts its changes; a name guessed wrong costs a needless copy of the current
-/// config for an embedding host, never a stale one, but for a getter that changes what it
+/// `__contains__`, `__repr__`, `__str__`, `__eq__`, `__ne__`, `serialize`, `validate`, and
+/// `slopesAreDefault`, `const` in upstream, which takes the transform or curve mutably to read
+/// it, as the getters do). Every other call counts its changes; a name guessed wrong costs a
+/// needless copy of the current config for an embedding host, never a stale one, and D-12's
+/// error for a pipeline's processor whose callback calls it
+/// (`crate::apphelpers::py_legacy_viewing_pipeline`), but for a getter that changes what it
 /// reads, which upstream has none of.
 pub(crate) fn reads_only(name: &str) -> bool {
     let getter = ["get", "is", "has", "Get", "Is", "Has"].iter().any(|p| {
@@ -154,6 +157,7 @@ pub(crate) fn reads_only(name: &str) -> bool {
                 | "__ne__"
                 | "serialize"
                 | "validate"
+                | "slopesAreDefault"
         )
 }
 

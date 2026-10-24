@@ -1963,3 +1963,285 @@ fn a_lut_loader_changes_the_manager_that_makes_a_processor() {
     }
     guarded(move || run(&[sc]));
 }
+
+// ---------------------------------------------------------------------------------------------
+// D-12: what a LUT loader does to the pipeline whose processor loads the LUT (verifier 6.7c,
+// second round)
+
+/// D-12's error (docs/deviations.md).
+const D12: &str = "LegacyViewingPipeline: a callback changed the pipeline while the library made \
+                   its processor, which OCIO 2.5.2 reads again after that callback and the port \
+                   can't follow (docs/deviations.md, D-12)";
+
+/// What a LUT loader's call does to the pipeline whose processor loads the LUT.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Effect {
+    /// It reads the pipeline's transforms: the port makes the wheel's processor.
+    Read,
+    /// It changes one in place: the wheel makes its processor, the port raises D-12's error.
+    Change,
+}
+
+/// A call of a step: its callable and arguments.
+type Call = (Value, Vec<Value>);
+
+/// Gives the proxy `px` a LUT loader that returns [`LUT_TEXT`] in an object (a list) whose
+/// `__del__` is `on_del`, which runs once the library has read the LUT, during its call: as
+/// [`load_calls`], with a callable of no arguments.
+fn load_then(sc: &mut Script, px: usize, on_del: Value) {
+    let data = sc.call(n("list"), vec![by(LUT_TEXT)]);
+    let class = sc.call(
+        n("type"),
+        vec![
+            s("LutData"),
+            t(vec![n("list")]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("__del__"), on_del),
+                (s("__len__"), ra(data, "__len__")),
+                (s("__getitem__"), ra(data, "__getitem__")),
+                (s("__iter__"), ra(data, "__iter__")),
+            ]),
+        ],
+    );
+    sc.step(
+        serde_json::json!({ "setattr": r(px), "name": "getLutData", "value": r(class) }),
+        Expect::Value,
+    );
+}
+
+/// A callable of no arguments that calls `target(*args, **kwargs)` once (the step interpreter
+/// defines no functions): the `run` of a `threading.Thread` never started. With `check`, the
+/// same call is made first, as a step of its own (its arguments are right). The second
+/// element is a call to make after the processor: after `run`, the thread has no `_target`
+/// (`Thread.run` deletes it).
+fn call_once(
+    sc: &mut Script,
+    target: Value,
+    args: Vec<Value>,
+    kwargs: Vec<(&str, Value)>,
+    check: bool,
+) -> (Value, Call) {
+    if check {
+        sc.call_kw(target.clone(), args.clone(), kwargs.clone(), Expect::Value);
+    }
+    let kwargs = kwargs.into_iter().map(|(k, v)| (s(k), v)).collect();
+    let th = sc.call_kw(
+        n("threading.Thread"),
+        vec![],
+        vec![("target", target), ("args", t(args)), ("kwargs", d(kwargs))],
+        Expect::Value,
+    );
+    // A thread's repr holds its number and whether it is a daemon (the port's tests run
+    // these scripts in threads of their own).
+    sc.unrepr(th);
+    (ra(th, "run"), (n("hasattr"), vec![r(th), s("_target")]))
+}
+
+/// A pipeline (a display view transform and a linear CC whose LUT the config's proxy loads,
+/// the config's role `color_timing` defined) whose other transforms `setup` sets; `setup` returns the callable the loader calls once the
+/// library has the LUT ([`load_then`]) and the calls to make after the processor. The wheel's
+/// processor is made in every case; the port's too, the same (each step's report equal, the
+/// cache ID included), when the loader only reads, and D-12's error when it changes the
+/// pipeline or its transforms (the other steps equal to the wheel's).
+fn loader_on_pipeline(
+    label: &str,
+    effect: Effect,
+    setup: impl FnOnce(&mut Script, usize) -> (Value, Vec<Call>),
+) {
+    let mut sc = Script::new();
+    let lut = format!("lut_pipeline_{label}.spi1d");
+    // A color timing CC that isn't an identity needs the role.
+    let config = PROXY_CONFIG
+        .replace("SRC", &lut)
+        .replace("scene_linear: raw", "scene_linear: raw, color_timing: raw");
+    let px = proxy_of(&mut sc, &config);
+    let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
+    let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+    let dvt = sc.call_kw(
+        n("OCIO.DisplayViewTransform"),
+        vec![],
+        vec![("src", s("raw")), ("display", s("d")), ("view", s("v"))],
+        Expect::Value,
+    );
+    sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+    let (on_del, after) = setup(&mut sc, vp);
+    load_then(&mut sc, px, on_del);
+    let ft = sc.call(n("OCIO.FileTransform"), vec![s(&lut)]);
+    sc.call(ra(vp, "setLinearCC"), vec![r(ft)]);
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    let made = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    let id = (effect == Effect::Read).then(|| sc.call(ra(made, "getCacheID"), vec![]));
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    for (target, args) in after {
+        sc.call(target, args);
+    }
+    let json = sc.json();
+    let theirs = common::wheel(std::slice::from_ref(&json)).remove(0);
+    let ours = guarded_port(json);
+    let (theirs, ours) = (
+        theirs["steps"].as_array().unwrap(),
+        ours["steps"].as_array().unwrap(),
+    );
+    assert_eq!(theirs.len(), sc.steps.len(), "{label}");
+    assert_eq!(ours.len(), sc.steps.len(), "{label}");
+    if let Some(id) = id {
+        assert!(
+            theirs[id]["value"]["str"].is_object(),
+            "{label}: {}",
+            theirs[id]
+        );
+    }
+    for (k, (t, o)) in theirs.iter().zip(ours).enumerate() {
+        // Every step of these scripts succeeds in the wheel.
+        assert!(t.get("value").is_some(), "{label}, step {k}: {t}");
+        if k == made && effect == Effect::Change {
+            assert_eq!(o["raised"]["type"], "builtins.RuntimeError", "{label}: {o}");
+            let message =
+                String::from_utf8(ocio_testkit::oracle_values::bytes(&o["raised"]["message"]))
+                    .unwrap();
+            assert_eq!(message, D12, "{label}");
+        } else {
+            let (mut t, mut o) = (t.clone(), o.clone());
+            if sc.unrepr.contains(&k) {
+                for v in [&mut t, &mut o] {
+                    if let Some(value) = v.get_mut("value").and_then(Value::as_object_mut) {
+                        value.remove("repr");
+                    }
+                }
+            }
+            assert_eq!(t, o, "{label}, step {k}");
+        }
+    }
+}
+
+/// Sets the pipeline's display CC to a new transform of the class `class` (style log), and
+/// returns the transform as the pipeline holds it.
+fn display_cc(sc: &mut Script, vp: usize, class: &str) -> usize {
+    let cc = sc.call(n(class), vec![n("OCIO.GradingStyle.GRADING_LOG")]);
+    sc.call(ra(vp, "setDisplayCC"), vec![r(cc)]);
+    sc.call(ra(vp, "getDisplayCC"), vec![])
+}
+
+/// Sets the pipeline's color timing CC to a group of a matrix, and returns the group and the
+/// matrix as the pipeline holds them.
+fn color_timing_group(sc: &mut Script, vp: usize) -> (usize, usize) {
+    let m = sc.call(n("OCIO.MatrixTransform"), vec![]);
+    let g = sc.call(n("OCIO.GroupTransform"), vec![l(vec![r(m)])]);
+    sc.call(ra(vp, "setColorTimingCC"), vec![r(g)]);
+    let g = sc.call(ra(vp, "getColorTimingCC"), vec![]);
+    let child = sc.call(ra(g, "__getitem__"), vec![i(0)]);
+    (g, child)
+}
+
+/// The null device, which `GroupTransform.write` writes to.
+const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+/// A LUT loader that only reads the pipeline's transforms: a curve transform's `getValue`
+/// (which makes the value object of its curves; the port raised D-12, verifier 6.7c F1), and
+/// the `const` methods whose names aren't a getter's (`slopesAreDefault` of a transform and of
+/// a curve, which the binding counted as a change, `__deepcopy__`, `equals`,
+/// `GroupTransform.write`). The wheel and the port make the same processor.
+#[test]
+fn a_lut_loader_that_reads_the_pipeline_makes_its_processor() {
+    start();
+    for (label, class) in [
+        ("rgb_value", "OCIO.GradingRGBCurveTransform"),
+        ("hue_value", "OCIO.GradingHueCurveTransform"),
+    ] {
+        loader_on_pipeline(label, Effect::Read, |sc, vp| {
+            let cc = display_cc(sc, vp, class);
+            (ra(cc, "getValue"), vec![(n("repr"), vec![r(cc)])])
+        });
+    }
+    for (label, class, curve) in [
+        (
+            "rgb_slopes",
+            "OCIO.GradingRGBCurveTransform",
+            "OCIO.RGBCurveType.RGB_RED",
+        ),
+        (
+            "hue_slopes",
+            "OCIO.GradingHueCurveTransform",
+            "OCIO.HueCurveType.HUE_SAT",
+        ),
+    ] {
+        loader_on_pipeline(label, Effect::Read, |sc, vp| {
+            let cc = display_cc(sc, vp, class);
+            let target = ra(cc, "slopesAreDefault");
+            let (run, ran) = call_once(sc, target, vec![n(curve)], vec![], true);
+            (run, vec![ran])
+        });
+    }
+    loader_on_pipeline("curve_slopes", Effect::Read, |sc, vp| {
+        let cc = display_cc(sc, vp, "OCIO.GradingRGBCurveTransform");
+        let value = sc.call(ra(cc, "getValue"), vec![]);
+        let target = ra(value, "red.slopesAreDefault");
+        let (run, ran) = call_once(sc, target, vec![], vec![], true);
+        (run, vec![ran])
+    });
+    loader_on_pipeline("deepcopy", Effect::Read, |sc, vp| {
+        let cc = display_cc(sc, vp, "OCIO.GradingRGBCurveTransform");
+        let target = ra(cc, "__deepcopy__");
+        let (run, ran) = call_once(sc, target, vec![d(vec![])], vec![], true);
+        (run, vec![ran])
+    });
+    loader_on_pipeline("equals", Effect::Read, |sc, vp| {
+        let (_, child) = color_timing_group(sc, vp);
+        let other = sc.call(n("OCIO.MatrixTransform"), vec![]);
+        let (run, ran) = call_once(sc, ra(child, "equals"), vec![r(other)], vec![], true);
+        (run, vec![ran])
+    });
+    loader_on_pipeline("write", Effect::Read, |sc, vp| {
+        let (g, _) = color_timing_group(sc, vp);
+        let raw = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+        let kwargs = vec![
+            ("config", r(raw)),
+            ("formatName", s("Color Transform Format")),
+            ("fileName", s(NULL_DEVICE)),
+        ];
+        let (run, ran) = call_once(sc, ra(g, "write"), vec![], kwargs, true);
+        (run, vec![ran])
+    });
+}
+
+/// A LUT loader that changes the pipeline's transforms in place, as Python holds them: a
+/// child appended to the group of its color timing CC, that group's child changed, a curve of
+/// a curve transform's value changed (a control point, through the curve's iterator), and the
+/// hue curve value's "draw curve only". The wheel reads them again after the loader and makes
+/// its processor; the port raises D-12's error (verifier 6.7c F2), and the change stands.
+#[test]
+fn a_lut_loader_that_changes_the_pipelines_transforms_is_d12() {
+    start();
+    loader_on_pipeline("group_append", Effect::Change, |sc, vp| {
+        let (g, _) = color_timing_group(sc, vp);
+        let m = sc.call(n("OCIO.MatrixTransform"), vec![]);
+        let (run, ran) = call_once(sc, ra(g, "appendTransform"), vec![r(m)], vec![], false);
+        (
+            run,
+            vec![ran, (n("len"), vec![r(g)]), (n("repr"), vec![r(g)])],
+        )
+    });
+    loader_on_pipeline("group_child", Effect::Change, |sc, vp| {
+        let (g, child) = color_timing_group(sc, vp);
+        let offset = l(vec![f(0.125), f(0.0), f(0.0), f(0.0)]);
+        let (run, ran) = call_once(sc, ra(child, "setOffset"), vec![offset], vec![], false);
+        (run, vec![ran, (n("repr"), vec![r(g)])])
+    });
+    loader_on_pipeline("curve_point", Effect::Change, |sc, vp| {
+        let cc = display_cc(sc, vp, "OCIO.GradingRGBCurveTransform");
+        let value = sc.call(ra(cc, "getValue"), vec![]);
+        let points = sc.call(ra(value, "red.getControlPoints"), vec![]);
+        let point = sc.call(n("OCIO.GradingControlPoint"), vec![f(0.5), f(0.25)]);
+        let target = ra(points, "__setitem__");
+        let (run, ran) = call_once(sc, target, vec![i(1), r(point)], vec![], false);
+        (run, vec![ran, (n("repr"), vec![r(cc)])])
+    });
+    loader_on_pipeline("hue_draw", Effect::Change, |sc, vp| {
+        let cc = display_cc(sc, vp, "OCIO.GradingHueCurveTransform");
+        let value = sc.call(ra(cc, "getValue"), vec![]);
+        let target = ra(value, "setDrawCurveOnly");
+        let (run, ran) = call_once(sc, target, vec![b(true)], vec![], false);
+        (run, vec![ran, (n("repr"), vec![r(cc)])])
+    });
+}
