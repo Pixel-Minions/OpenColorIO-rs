@@ -4008,7 +4008,7 @@ status = "done"
 path = "src/bindings/python/apphelpers/PyMergeConfigs.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_merge_configs.rs"]
-status = "done"
+status = "todo"
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyMixingHelpers.cpp"

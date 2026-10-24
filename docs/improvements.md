@@ -5325,11 +5325,6 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   the direction of `DisplayViewHelpers.GetProcessor`, which the wheel's display view transform
   keeps and its validation refuses ("DisplayViewTransform validation failed: ...: invalid
   direction."; `a_display_view_direction_outside_the_enumerators_is_the_ports_error`).
-  Also the app helpers' (6.7c, `crates/ocio-py/src/apphelpers/`, `apphelpers_oracle.rs`):
-  `ColorSpaceMenuParameters.setSearchReferenceSpaceType` and the constructor's
-  `searchReferenceSpaceType`, which the wheel stores (its getter gives the value back, its
-  `repr` writes no `colorSpaceType`, and a menu of them has no color space;
-  `a_search_reference_type_outside_the_enumerators_is_the_ports_error`).
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
