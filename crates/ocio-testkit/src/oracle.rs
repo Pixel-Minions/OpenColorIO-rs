@@ -17,8 +17,11 @@
 //! its `result`, not a protocol error.
 //!
 //! Responses are cached under `<target>/oracle-cache`, keyed by the request, the oracle's
-//! sources and lock file, upstream's test files (which requests name by path), and this
-//! machine's OS and CPU ([`machine_description`]). Set
+//! sources that the command can reach, its lock file, upstream's test files (which requests
+//! name by path), and this machine's OS and CPU ([`machine_description`]). Which sources a
+//! command reaches is resolved statically (`oracle_scope.rs`): its own module, every module
+//! it imports, transitively, and the modules every process runs; a command whose reach can't
+//! be resolved is keyed by every source of the oracle, as every command was before. Set
 //! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Only what can't be transient is cached:
 //! never a failed call (the oracle's error, or its process dying), a batch in which a call
 //! raised, or a response that reports a process the oracle started dying ([`cacheable`]).
@@ -51,6 +54,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use xxhash_rust::xxh3::Xxh3;
 
+use crate::oracle_scope::Scopes;
 use crate::paths;
 
 /// A response from the oracle.
@@ -89,7 +93,11 @@ pub struct BatchCall<'a> {
 #[derive(Debug)]
 pub struct Oracle {
     python: PathBuf,
+    /// The key of every command when the cache keys can't be scoped ([`identity_from`]).
     identity: u128,
+    /// The cache keys scoped to the sources each command reaches; `None` without a cache, or
+    /// when the analysis failed.
+    scopes: Option<Scopes>,
     cache_dir: Option<PathBuf>,
 }
 
@@ -147,9 +155,23 @@ impl Oracle {
         } else {
             Some(paths::target_dir().join("oracle-cache"))
         };
+        let environment = environment(&upstream_tests_dir(), &ALLOWED_VARIABLES);
+        let identity = identity_from(&oracle_dir, environment)?;
+        let scopes = cache_dir.as_ref().and_then(|dir| {
+            Scopes::compute(&python, &oracle_dir, identity, environment, Some(dir))
+                .map_err(|e| {
+                    // Straight to the process's stderr, past the test harness's capture.
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "ocio-testkit: the oracle's cache keys cover the whole oracle: {e}"
+                    );
+                })
+                .ok()
+        });
         Ok(Oracle {
             python,
-            identity: identity(&oracle_dir)?,
+            identity,
+            scopes,
             cache_dir,
         })
     }
@@ -290,8 +312,9 @@ impl Oracle {
         blobs: &[&[u8]],
         cache: bool,
     ) -> Result<Response, String> {
+        let key = self.key(cmd, &args);
         let request = request(cmd, args, blobs);
-        let cache_file = self.cache_file(&request).filter(|_| cache);
+        let cache_file = self.cache_file(key, &request).filter(|_| cache);
         if let Some(file) = &cache_file
             && let Ok(bytes) = std::fs::read(file)
             && let Ok(response) = parse_response(&bytes)
@@ -310,11 +333,20 @@ impl Oracle {
         Ok(response)
     }
 
-    /// Where the response to `request` is cached, unless the cache is off.
-    fn cache_file(&self, request: &[u8]) -> Option<PathBuf> {
+    /// The cache key of the oracle's sources and environment for a request of `cmd` with
+    /// `args` (`oracle_scope.rs`).
+    fn key(&self, cmd: &str, args: &Value) -> u128 {
+        self.scopes
+            .as_ref()
+            .map_or(self.identity, |scopes| scopes.key(cmd, args))
+    }
+
+    /// Where the response to `request`, whose sources have the cache key `key`
+    /// ([`Oracle::key`]), is cached, unless the cache is off.
+    fn cache_file(&self, key: u128, request: &[u8]) -> Option<PathBuf> {
         self.cache_dir.as_ref().map(|dir| {
             let mut h = Xxh3::new();
-            h.update(&self.identity.to_le_bytes());
+            h.update(&key.to_le_bytes());
             h.update(request);
             dir.join(format!("{:032x}.bin", h.digest128()))
         })
@@ -678,7 +710,8 @@ fn uv_program() -> PathBuf {
     std::env::var_os("OCIO_RS_UV").map_or_else(|| PathBuf::from("uv"), PathBuf::from)
 }
 
-/// Hash of everything that determines the oracle's answers on this machine.
+/// [`identity_from`] of this checkout's upstream tests and [`ALLOWED_VARIABLES`].
+#[cfg(test)]
 fn identity(oracle_dir: &Path) -> Result<u128, String> {
     identity_with(oracle_dir, &upstream_tests_dir(), &ALLOWED_VARIABLES)
 }
@@ -689,14 +722,23 @@ fn upstream_tests_dir() -> PathBuf {
     paths::upstream_dir().join("tests")
 }
 
-/// [`identity`], with upstream's tests in `upstream_tests` (its `data` and `python`
+/// [`identity_from`], with upstream's tests in `upstream_tests` (its `data` and `python`
 /// directories) and the variables `allowed` that the oracle's processes get ([`isolate`]):
 /// another allowlist can change what the oracle answers.
+#[cfg(test)]
 fn identity_with(
     oracle_dir: &Path,
     upstream_tests: &Path,
     allowed: &[&str],
 ) -> Result<u128, String> {
+    identity_from(oracle_dir, environment(upstream_tests, allowed))
+}
+
+/// Hash of everything that determines the oracle's answers on this machine: every file of the
+/// oracle in `oracle_dir` (its environment's files and its package), and the hash of what
+/// isn't in it, [`environment`]. The cache key of every command whose reach can't be scoped
+/// (`oracle_scope.rs`).
+fn identity_from(oracle_dir: &Path, environment: u128) -> Result<u128, String> {
     let mut files = Vec::new();
     for name in ["pyproject.toml", "uv.lock", ".python-version"] {
         files.push(oracle_dir.join(name));
@@ -712,6 +754,15 @@ fn identity_with(
         h.update(&(bytes.len() as u64).to_le_bytes());
         h.update(&bytes);
     }
+    h.update(&environment.to_le_bytes());
+    Ok(h.digest128())
+}
+
+/// Hash of what determines the oracle's answers besides its own directory: upstream's tests in
+/// `upstream_tests` (its `data` and `python` directories), the variables `allowed` that the
+/// oracle's processes get ([`isolate`]), and this machine ([`machine_description`]).
+fn environment(upstream_tests: &Path, allowed: &[&str]) -> u128 {
+    let mut h = Xxh3::new();
     hash_test_data(&mut h, &upstream_tests.join("data"));
     hash_test_data(&mut h, &upstream_tests.join("python"));
     h.update(b"allowed variables");
@@ -720,7 +771,7 @@ fn identity_with(
         h.update(name.as_bytes());
     }
     h.update(machine_description().as_bytes());
-    Ok(h.digest128())
+    h.digest128()
 }
 
 /// Hashes a directory of upstream's tests into the cache key: `tests/data`, the files requests
@@ -750,7 +801,7 @@ fn hash_test_data(h: &mut Xxh3, data: &Path) {
 
 /// Every file under `dir`, at any depth, except Python's bytecode caches (`__pycache__`),
 /// which the interpreter may write and which don't change what the oracle does.
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
+pub(crate) fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -1020,7 +1071,7 @@ fn parse_frame(bytes: &[u8]) -> Result<(Value, Vec<Vec<u8>>), String> {
 /// is this write's alone: when it named only the process, two test threads writing the same
 /// entry at once shared it, and one could empty it while the other renamed it into place, so
 /// a reader found the entry part written.
-fn write_atomically(file: &Path, bytes: &[u8]) {
+pub(crate) fn write_atomically(file: &Path, bytes: &[u8]) {
     static WRITES: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -1498,7 +1549,7 @@ mod tests {
         };
         let cache_file = |calls: &[BatchCall<'_>]| {
             let (args, blobs) = batch_request(calls);
-            oracle.cache_file(&request("batch", args, &blobs))
+            oracle.cache_file(oracle.key("batch", &args), &request("batch", args, &blobs))
         };
 
         // A call that raises: the batch isn't written to the cache.
@@ -1627,8 +1678,10 @@ mod tests {
                            "args": ["OCIO_RS_CACHE_PROBE", value]}],
             })
         };
-        let file =
-            |args: &Value| oracle.cache_file(&request("context_env_calls", args.clone(), &[]));
+        let file = |args: &Value| {
+            let key = oracle.key("context_env_calls", args);
+            oracle.cache_file(key, &request("context_env_calls", args.clone(), &[]))
+        };
 
         // A child that succeeds: cached.
         let short = set("x".to_string());
