@@ -13,6 +13,7 @@
 //! Upstream keeps every menu it makes, for the life of the process, keyed by the hash of the
 //! text of its parameters; the port does the same ([`ColorSpaceMenuHelper::new`]).
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -608,6 +609,29 @@ type Entries = BTreeMap<u64, Option<Arc<ColorSpaceMenuHelper>>>;
 /// Port of `g_mutex` and `g_entries` (ColorSpaceHelpers.cpp:425-426 @ v2.5.2).
 static ENTRIES: Mutex<Entries> = Mutex::new(BTreeMap::new());
 
+thread_local! {
+    /// Whether this thread holds [`ENTRIES`]' lock, making a menu: a menu made meanwhile on
+    /// this thread (by a logging function the menu's refresh calls) would lock it again
+    /// (docs/improvements.md, U-181).
+    static MAKING_A_MENU: Cell<bool> = const { Cell::new(false) };
+}
+
+/// [`MAKING_A_MENU`] set while it lives.
+struct MakingAMenu;
+
+impl MakingAMenu {
+    fn enter() -> MakingAMenu {
+        MAKING_A_MENU.with(|m| m.set(true));
+        MakingAMenu
+    }
+}
+
+impl Drop for MakingAMenu {
+    fn drop(&mut self) {
+        MAKING_A_MENU.with(|m| m.set(false));
+    }
+}
+
 /// Whether menus are kept: `OCIO_DISABLE_ALL_CACHES` isn't set, as the environment is when the
 /// first menu is asked for (past the checks of its parameters), and never read again.
 ///
@@ -652,7 +676,10 @@ impl ColorSpaceMenuHelper {
     /// names a missing color space fails, where upstream's process dies (docs/improvements.md,
     /// U-141), and so does a role set to the empty name with the roles included, where
     /// upstream makes a menu with a null item and its process dies when that item is read
-    /// (U-142).
+    /// (U-142). A menu asked for on a thread that is making one (by a logging function its
+    /// making calls) fails, where upstream locks its menus' mutex again (U-181): on Windows
+    /// with MSVC's `std::system_error` ("resource deadlock would occur: resource deadlock would
+    /// occur"), elsewhere with the port's error, where upstream's process hangs.
     ///
     /// Port of `ColorSpaceMenuHelper::Create` (ColorSpaceHelpers.cpp:378-450 @ v2.5.2).
     #[doc(alias = "Create")]
@@ -713,7 +740,25 @@ impl ColorSpaceMenuHelper {
         // Note: Add a cache to not recreate a new menu helper for the same parameters.
 
         if *IS_CACHE_ENABLED {
+            // Upstream locks its `std::mutex` again on this thread, which is undefined
+            // behaviour (docs/improvements.md, U-181): MSVC's throws `std::system_error`, which
+            // the port matches on Windows; glibc's waits for itself, where the port refuses.
+            if MAKING_A_MENU.with(Cell::get) {
+                return Err(if cfg!(windows) {
+                    Exception::system_error(
+                        "resource deadlock would occur: resource deadlock would occur",
+                    )
+                } else {
+                    Exception::new(
+                        "ColorSpaceMenuHelper: a menu is made while this thread makes another \
+                         one (from a logging function its making calls): OCIO 2.5.2 locks its \
+                         menus' mutex again on the same thread, which is undefined behaviour \
+                         (docs/improvements.md, U-181).",
+                    )
+                });
+            }
             let mut entries = ENTRIES.lock().unwrap_or_else(|e| e.into_inner());
+            let _making = MakingAMenu::enter();
 
             let oss = parameters.to_bytes()?;
 

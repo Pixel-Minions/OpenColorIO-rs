@@ -42,6 +42,10 @@ pub enum ExceptionKind {
     /// lets it through (`ConfigMerger::Impl::loadConfig`, a merge naming a later merge's output).
     /// PyOpenColorIO raises it as `IndexError`.
     OutOfRange,
+    /// `std::system_error`, which MSVC's `std::mutex::lock` raises for a mutex its own thread
+    /// holds ("resource deadlock would occur", docs/improvements.md, U-181). PyOpenColorIO
+    /// raises it as `RuntimeError`.
+    SystemError,
 }
 
 /// An OpenColorIO error: upstream's exception type and its message, verbatim.
@@ -112,6 +116,16 @@ impl Exception {
     pub fn out_of_range(message: impl Into<Vec<u8>>) -> Self {
         Exception {
             kind: ExceptionKind::OutOfRange,
+            text: String::new(),
+            message: c_message(message),
+        }
+        .with_text()
+    }
+
+    /// A `std::system_error` with `what()` = `msg`, up to its first NUL.
+    pub fn system_error(message: impl Into<Vec<u8>>) -> Self {
+        Exception {
+            kind: ExceptionKind::SystemError,
             text: String::new(),
             message: c_message(message),
         }

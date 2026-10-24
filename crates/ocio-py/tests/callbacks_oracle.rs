@@ -999,6 +999,112 @@ fn callbacks_as_the_wheels() {
         Ok(Err(panic)) => std::panic::resume_unwind(panic),
         Err(_) => panic!("the menu's logging function waits for the parameters' lock"),
     }
+
+    // A logging function that makes a menu while the library makes one (U-181), on a thread of
+    // its own: a regression waits for the menus' lock forever.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(a_menu_made_while_a_menu_is_made);
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(120)) {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(_) => panic!("a menu made by a logging function waits for the menus' lock"),
+    }
+}
+
+/// U-181: a menu whose app categories match no color space logs that, at the info level, while
+/// the library makes it (`FindColorSpaceInfos`, CategoryHelpers.cpp:297-360 @ v2.5.2), under
+/// the lock of the menus it keeps (`g_mutex`, ColorSpaceHelpers.cpp:425-443); a logging
+/// function that makes another menu then locks that `std::mutex` again on the same thread. The
+/// step interpreter defines no functions: the logging function is a class of `str` whose
+/// `__del__` is the `run` of a thread (never started) whose target makes the inner menu, and
+/// whose exception reaches `sys.unraisablehook`, a list's `append` for the script.
+fn menu_in_menu_script() -> (Script, usize) {
+    let mut sc = Script::new();
+    let y = MENU_CONFIG
+        .replace("menu logging", "u181")
+        .replace("colorspace: missing", "colorspace: raw");
+    let cfg = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(&y)]);
+    let mut params = Vec::new();
+    for categories in ["u181 inner", "u181 outer"] {
+        let p = sc.call(n("OCIO.ColorSpaceMenuParameters"), vec![r(cfg)]);
+        sc.call(ra(p, "setAppCategories"), vec![s(categories)]);
+        sc.call(ra(p, "setTreatNoCategoryAsAny"), vec![b(false)]);
+        params.push(p);
+    }
+    let thread = sc.call_kw(
+        n("threading.Thread"),
+        vec![],
+        vec![
+            ("target", n("OCIO.ColorSpaceMenuHelper")),
+            ("args", t(vec![r(params[0])])),
+        ],
+        Expect::Value,
+    );
+    sc.unrepr(thread);
+    let got = sc.call(n("list"), vec![]);
+    sc.step(
+        json!({ "setattr": n("threading._sys"), "name": "unraisablehook", "value": ra(got, "append") }),
+        Expect::Value,
+    );
+    let class = sc.call(
+        n("type"),
+        vec![
+            s("Logged"),
+            t(vec![n("str")]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("__del__"), ra(thread, "run")),
+            ]),
+        ],
+    );
+    let level = sc.call(n("OCIO.GetLoggingLevel"), vec![]);
+    sc.call(
+        n("OCIO.SetLoggingLevel"),
+        vec![n("OCIO.LOGGING_LEVEL_INFO")],
+    );
+    sc.call(n("OCIO.SetLoggingFunction"), vec![r(class)]);
+    sc.call(n("OCIO.ColorSpaceMenuHelper"), vec![r(params[1])]);
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    sc.call(n("OCIO.SetLoggingLevel"), vec![r(level)]);
+    sc.step(
+        json!({ "setattr": n("threading._sys"), "name": "unraisablehook",
+                "value": n("threading._sys.__unraisablehook__") }),
+        Expect::Value,
+    );
+    sc.call(n("len"), vec![r(got)]);
+    let first = sc.call(n("operator.getitem"), vec![r(got), i(0)]);
+    // It names the thread, whose number and daemon flag are each process's.
+    sc.uncompare(first);
+    let raised = sc.eval(ra(first, "exc_value"), &[]);
+    (sc, raised)
+}
+
+/// The Windows wheel's C++ runtime throws `std::system_error` ("resource deadlock would occur")
+/// there, RuntimeError in the logging function: the port's is the same. glibc's mutex waits
+/// for itself, and the Linux wheel's process hangs (probed in Rocky Linux 9): there, without
+/// the wheel, the port's error (U-181).
+fn a_menu_made_while_a_menu_is_made() {
+    let (sc, raised) = menu_in_menu_script();
+    if cfg!(windows) {
+        compare(std::slice::from_ref(&sc));
+        let theirs = common::wheel(&[sc.json()]).remove(0);
+        assert_eq!(
+            theirs["steps"][raised]["value"]["type"], "builtins.RuntimeError",
+            "{theirs}"
+        );
+        return;
+    }
+    let ours = common::port(&sc.json());
+    let value = &ours["steps"][raised]["value"];
+    assert_eq!(
+        value["type"], "PyOpenColorIO.PyOpenColorIO.Exception",
+        "{value}"
+    );
+    let text = String::from_utf8(ocio_testkit::oracle_values::bytes(&value["repr"])).unwrap();
+    assert!(text.contains("(docs/improvements.md, U-181)."), "{text}");
 }
 
 /// A config whose view `v` shows a color space it doesn't have: it doesn't validate.

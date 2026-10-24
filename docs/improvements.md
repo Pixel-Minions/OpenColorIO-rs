@@ -5953,3 +5953,33 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** the port matches the names in a `match` (`ociom_yaml.rs`,
   `strategy_string_to_enum`), with no shared state, in `p9-merge-1` (9.2c). Nothing to refuse:
   no wheel behaviour is defined to compare.
+
+### U-181. A menu made by a logging function while a menu is made
+
+- **Upstream:** `ColorSpaceMenuHelper::Create` keeps its menus under a static `std::mutex`
+  (`g_mutex`), held while it makes a new menu (ColorSpaceHelpers.cpp:425-443 @ v2.5.2), whose
+  refresh logs at the info level when its parameters select nothing as given
+  (`FindColorSpaceInfos`' `LogMessageHelper`, CategoryHelpers.cpp:297-360: app categories that
+  match no color space, encodings ignored, ...). A logging function that makes a menu then
+  locks that mutex again on the same thread: undefined behaviour. The Windows wheel's C++
+  runtime throws `std::system_error` ("resource deadlock would occur"), which reaches Python as
+  RuntimeError "resource deadlock would occur: resource deadlock would occur" in the logging
+  function (probed on Windows, 2026-10-24); libstdc++'s mutex on Linux is a pthread mutex, which
+  waits for itself: the Linux wheel's process hangs (probed in Rocky Linux 9, 2026-10-24).
+- **Who notices:** an application whose logging function makes color space menus (with the
+  logging level at info).
+- **A fix:** log after the mutex is released, or make the menus outside it.
+- **Status:** on Windows the port matches the wheel: `ColorSpaceMenuHelper::new` returns
+  `std::system_error`'s text ("resource deadlock would occur: resource deadlock would occur",
+  `ExceptionKind::SystemError`, which the binding raises as RuntimeError, as pybind11 does)
+  where upstream locks the mutex again (owner decision 2026-10-24, relayed by the coordinator:
+  the Windows outcome is defined, matched per platform). On Linux, where the wheel hangs, it
+  returns the error "ColorSpaceMenuHelper: a menu is made while this thread makes another one
+  (from a logging function its making calls): OCIO 2.5.2 locks its menus' mutex again on the
+  same thread, which is undefined behaviour (docs/improvements.md, U-181)." Both detect the
+  case by a thread-local flag set while the menus' lock is held; other threads wait for the
+  lock, as upstream's. In `p6-after-p5` (6.7c, `crates/ocio/src/apphelpers/color_space_helpers.rs`,
+  `MAKING_A_MENU`; `crates/ocio-ops/src/exception.rs`, `system_error`);
+  `crates/ocio-py/tests/callbacks_oracle.rs`, `a_menu_made_while_a_menu_is_made` (the logging
+  function a class of `str` whose `__del__` makes the inner menu: compared with the wheel on
+  Windows, the port's error on Linux; a 120 s limit).
