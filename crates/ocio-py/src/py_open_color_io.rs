@@ -492,5 +492,6 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::apphelpers::py_color_space_helpers::bind_py_color_space_menu_helpers(m)?;
     crate::apphelpers::py_display_view_helpers::bind_py_display_view_helpers(m)?;
     crate::apphelpers::py_legacy_viewing_pipeline::bind_py_legacy_viewing_pipeline(m)?;
+    crate::apphelpers::py_mixing_helpers::bind_py_mixing_helpers(m)?;
     Ok(())
 }

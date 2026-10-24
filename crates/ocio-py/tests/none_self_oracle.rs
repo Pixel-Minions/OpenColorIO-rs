@@ -129,8 +129,9 @@ fn wheel_unnamed() -> Vec<Unnamed> {
 
 /// The table is the wheel's unnamed overloads, exactly; the parameters of the pointers and
 /// holders of the classes the port binds are of the types the dispatcher loads (`str`,
-/// classes, `GradingBSplineCurve.setSlopes`' sequence, and the legacy viewing pipeline's `bool`;
-/// a later card binding a class adds its types to `dispatch.rs`'s `rest_loads`).
+/// classes, `GradingBSplineCurve.setSlopes`' sequence, and the numbers and `bool` of the mixing
+/// helpers and the legacy viewing pipeline; a later card binding a class adds its types to
+/// `dispatch.rs`'s `rest_loads`).
 #[test]
 fn the_table_is_the_wheels_unnamed_overloads() {
     let wheel = wheel_unnamed();
@@ -168,6 +169,8 @@ fn the_table_is_the_wheels_unnamed_overloads() {
                     t == "str"
                         || t.starts_with("PyOpenColorIO.PyOpenColorIO.")
                         || t == "collections.abc.Sequence[typing.SupportsFloat]"
+                        || t == "typing.SupportsFloat"
+                        || t == "typing.SupportsInt"
                         || t == "bool",
                     "{c}.{n}: {t}"
                 );
@@ -332,6 +335,7 @@ fn argument(ty: &str) -> Option<&'static str> {
             Some("OCIO.GradingHueCurve(OCIO.GRADING_LOG)")
         }
         "collections.abc.Sequence[typing.SupportsFloat]" => Some("[0.5, 0.25]"),
+        "typing.SupportsFloat" => Some("0.5"),
         "bool" => Some("True"),
         "PyOpenColorIO.PyOpenColorIO.Transform" => Some("OCIO.MatrixTransform()"),
         "PyOpenColorIO.PyOpenColorIO.DisplayViewTransform" => Some("OCIO.DisplayViewTransform()"),
@@ -431,6 +435,19 @@ fn every_bound_overload_with_none_as_self() {
                     for op in ["len(r)", "next(r)", "r[0]", "list(r)"] {
                         let src = std::ffi::CString::new(op).unwrap();
                         let err = py.run(&src, Some(&globals), None).expect_err(op);
+                        // The encoding iterator's `__next__` takes a space iterator (I-396):
+                        // pybind11 refuses `self` before anything reads the null pointer.
+                        if *c == "MixingColorSpaceManager"
+                            && *name == "getMixingEncodings"
+                            && op == "next(r)"
+                        {
+                            assert!(
+                                err.to_string()
+                                    .starts_with("TypeError: __next__(): incompatible function"),
+                                "{code}: {op}: {err}"
+                            );
+                            continue;
+                        }
                         assert_eq!(err.to_string(), expected, "{code}: {op}");
                     }
                     iterators += 1;

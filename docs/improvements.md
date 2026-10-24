@@ -2175,6 +2175,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `grading_data_oracle.rs`, `bspline_script` (`2**59`, `2**60`, `2**61`, `2**63`), against the
   Windows and the Linux wheels. The machine-dependent sizes are not tested.
 
+### I-396. `MixingEncodingIterator.__next__` takes a mixing space iterator
+
+- **Upstream:** the binding defines the `__next__` of `MixingColorSpaceManager`'s
+  `MixingEncodingIterator` with a lambda taking a `MixingSpaceIterator &`
+  (src/bindings/python/apphelpers/PyMixingHelpers.cpp:148-152 @ v2.5.2), the space iterator's
+  type: `next()` of an encoding iterator, and so a `for` loop or `list()` over
+  `getMixingEncodings()`, raises pybind11's TypeError ("__next__(): incompatible function
+  arguments. The following argument types are supported: 1. (self:
+  PyOpenColorIO.PyOpenColorIO.MixingColorSpaceManager.MixingSpaceIterator) -> str"), and the
+  method, given a space iterator (`MixingEncodingIterator.__next__(mix.getMixingSpaces())`),
+  walks the encodings with that iterator's index. `len()` and indexing work.
+- **Who notices:** Python code that iterates over the mixing encodings.
+- **A fix:** take a `MixingEncodingIterator &`.
+- **Status:** matched in `p6-after-p5` (6.7c, `crates/ocio-py/src/apphelpers/py_mixing_helpers.rs`,
+  `ENCODING_NEXT`); `apphelpers_oracle.rs`, `mixing_helpers_behave_as_the_wheels`.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."
@@ -5324,7 +5340,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `a_search_reference_type_outside_the_enumerators_is_the_ports_error`);
   the direction of `DisplayViewHelpers.GetProcessor`, which the wheel's display view transform
   keeps and its validation refuses ("DisplayViewTransform validation failed: ...: invalid
-  direction."; `a_display_view_direction_outside_the_enumerators_is_the_ports_error`).
+  direction."; `a_display_view_direction_outside_the_enumerators_is_the_ports_error`);
+  and the direction of `MixingColorSpaceManager.getProcessor`, with which the wheel makes a
+  processor (`a_mixing_direction_outside_the_enumerators_is_the_ports_error`).
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -5777,7 +5795,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (owner decision 2026-10-22, P5-3 d: `new` and `refresh` return `Result`). In `p5-helpers-2`
   (5.7e, `apphelpers/mixing_helpers.rs`, `color_picker_of`); `mixing_helpers_oracle.rs`
   (`a_color_picking_role_naming_no_color_space_is_refused`, against the wheel's crash in
-  `py_eval`).
+  `py_eval`). The Python binding raises it from `MixingColorSpaceManager(config)` and
+  `refresh(config)`, the manager left as it was (`p6-after-p5`, 6.7c,
+  `crates/ocio-py/src/apphelpers/py_mixing_helpers.rs`).
 
 ### U-156. Read-only buffers are written
 

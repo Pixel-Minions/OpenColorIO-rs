@@ -4014,7 +4014,7 @@ status = "todo"
 path = "src/bindings/python/apphelpers/PyMixingHelpers.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_mixing_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/package/__init__.py"

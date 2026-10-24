@@ -256,7 +256,8 @@ fn bind<'py>(
 /// with conversions, for the parameter types of the overloads [`crate::self_kind`] lists with a
 /// null `self` (a `const char *`: a `str`, `bytes` or `None`; a class's holder: an instance or
 /// `None`; a `std::vector<float>`: a sequence of numbers, whose caster may raise instead of
-/// refusing, as when loading the call's arguments; a `bool`).
+/// refusing, as when loading the call's arguments; a `float`, a `size_t` and a `bool`, the only
+/// C++ types of those signatures' `typing.SupportsFloat`, `typing.SupportsInt` and `bool`).
 fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> PyResult<bool> {
     for (p, v) in o.params.iter().zip(values).skip(1) {
         let loads = if p.ty == "str" {
@@ -266,6 +267,14 @@ fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> PyResult<bool> {
         } else if p.ty == "collections.abc.Sequence[typing.SupportsFloat]" {
             // `GradingBSplineCurve.setSlopes` (PyGradingData.cpp:353 @ v2.5.2).
             <Vec<f32> as Cast>::try_load(v, true)?.is_some()
+        } else if p.ty == "typing.SupportsFloat" {
+            // A `float`: `MixingSlider.setSliderMinEdge`, `setSliderMaxEdge`
+            // (PyMixingHelpers.cpp:45-50 @ v2.5.2).
+            <f32 as Cast>::load(v, true).is_some()
+        } else if p.ty == "typing.SupportsInt" {
+            // A `size_t`: `MixingColorSpaceManager.setSelectedMixingSpaceIdx`,
+            // `setSelectedMixingEncodingIdx` (PyMixingHelpers.cpp:70-84 @ v2.5.2).
+            <u64 as Cast>::load(v, true).is_some()
         } else if p.ty == "bool" {
             // `LegacyViewingPipeline.setLooksOverrideEnabled` (PyLegacyViewingPipeline.cpp:38 @
             // v2.5.2).

@@ -9,3 +9,4 @@
 pub(crate) mod py_color_space_helpers;
 pub(crate) mod py_display_view_helpers;
 pub(crate) mod py_legacy_viewing_pipeline;
+pub(crate) mod py_mixing_helpers;

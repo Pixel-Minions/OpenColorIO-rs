@@ -280,6 +280,9 @@ Lut3DTransformTest.py::Lut3DTransformTest.test_grid_size
 Lut3DTransformTest.py::Lut3DTransformTest.test_interpolation
 MatrixTransformTest.py::MatrixTransformTest.test_direction
 MatrixTransformTest.py::MatrixTransformTest.test_interface
+MixingHelpersTest.py::MixingHelpersTest.test_encoding
+MixingHelpersTest.py::MixingHelpersTest.test_mixing_slider
+MixingHelpersTest.py::MixingHelpersTest.test_mixing_space
 NamedTransformTest.py::NamedTransformTest.test_aliases
 NamedTransformTest.py::NamedTransformTest.test_constructor_with_keywords
 NamedTransformTest.py::NamedTransformTest.test_constructor_with_positional

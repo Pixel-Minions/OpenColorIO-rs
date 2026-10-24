@@ -98,6 +98,8 @@ fn the_app_helpers_have_the_wheels_surface() {
         "ColorSpaceMenuParameters",
         "ColorSpaceMenuHelper",
         "LegacyViewingPipeline",
+        "MixingSlider",
+        "MixingColorSpaceManager",
     ] {
         let mut theirs = common::wheel_member(&report, c);
         let ours = common::port_member(c);
@@ -823,6 +825,233 @@ fn legacy_viewing_pipeline_behaves_as_the_wheels() {
     run(&[sc]);
 }
 
+const MIXING_GETTERS: [&str; 4] = [
+    "getSelectedMixingSpaceIdx",
+    "getSelectedMixingEncodingIdx",
+    "isPerceptuallyUniform",
+    "__repr__",
+];
+
+/// The manager: its mixing spaces and encodings (I-396's `__next__`), their selection, the
+/// processors, the slider (the same object), the config (its later changes seen, `refresh`),
+/// and the color picking role.
+#[test]
+fn mixing_helpers_behave_as_the_wheels() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "mixing");
+    let m = sc.call(n("OCIO.MixingColorSpaceManager"), vec![r(cfg)]);
+    sc.eval(r(m), &MIXING_GETTERS);
+    for args in [vec![], vec![none()], vec![i(1)]] {
+        sc.raises(n("OCIO.MixingColorSpaceManager"), args);
+    }
+    let kw = sc.call_kw(
+        n("OCIO.MixingColorSpaceManager"),
+        vec![],
+        vec![("config", r(cfg))],
+        Expect::Value,
+    );
+    sc.repr(r(kw));
+    // The mixing spaces.
+    let spaces = sc.call(ra(m, "getMixingSpaces"), vec![]);
+    sc.unrepr(spaces);
+    iterator(&mut sc, spaces, 2, Expect::Raised);
+    let spaces2 = sc.call(ra(m, "getMixingSpaces"), vec![]);
+    sc.unrepr(spaces2);
+    sc.call(n("list"), vec![r(spaces2)]);
+    // The encodings: `next` of their iterator is refused, the method walks a space iterator.
+    let encodings = sc.call(ra(m, "getMixingEncodings"), vec![]);
+    sc.unrepr(encodings);
+    sc.call(n("len"), vec![r(encodings)]);
+    for k in [0, 1] {
+        sc.call(ra(encodings, "__getitem__"), vec![i(k)]);
+    }
+    sc.raises(ra(encodings, "__getitem__"), vec![i(-1)]);
+    sc.raises(ra(encodings, "__getitem__"), vec![i(2)]);
+    let same = sc.call(n("iter"), vec![r(encodings)]);
+    sc.call(n("operator.is_"), vec![r(same), r(encodings)]);
+    sc.raises(n("next"), vec![r(encodings)]);
+    sc.raises(n("list"), vec![r(encodings)]);
+    let walked = sc.call(ra(m, "getMixingSpaces"), vec![]);
+    sc.unrepr(walked);
+    let next = "OCIO.MixingColorSpaceManager.MixingEncodingIterator.__next__";
+    sc.call(n(next), vec![r(walked)]);
+    sc.call(n(next), vec![r(walked)]);
+    sc.raises(n(next), vec![r(walked)]);
+    sc.raises(n(next), vec![r(encodings)]);
+    // The selections.
+    sc.call(ra(m, "setSelectedMixingSpaceIdx"), vec![i(1)]);
+    sc.eval(r(m), &MIXING_GETTERS);
+    sc.raises(ra(m, "setSelectedMixingSpaceIdx"), vec![i(2)]);
+    sc.raises(ra(m, "setSelectedMixingSpaceIdx"), vec![i(-1)]);
+    sc.raises(ra(m, "setSelectedMixingSpaceIdx"), vec![none()]);
+    sc.call(ra(m, "setSelectedMixingSpace"), vec![s("Rendering Space")]);
+    sc.raises(ra(m, "setSelectedMixingSpace"), vec![s("nope")]);
+    sc.raises(ra(m, "setSelectedMixingSpace"), vec![none()]);
+    sc.call(ra(m, "setSelectedMixingEncoding"), vec![s("HSV")]);
+    sc.eval(r(m), &MIXING_GETTERS);
+    sc.raises(ra(m, "setSelectedMixingEncoding"), vec![s("HS")]);
+    for bad in [none(), i(1), n("OCIO.TRANSFORM_DIR_FORWARD")] {
+        sc.raises(ra(m, "setSelectedMixingEncoding"), vec![bad]);
+    }
+    sc.call(ra(m, "setSelectedMixingEncodingIdx"), vec![i(0)]);
+    sc.raises(ra(m, "setSelectedMixingEncodingIdx"), vec![i(2)]);
+    for bad in [none(), s("test")] {
+        sc.raises(ra(m, "setSelectedMixingEncodingIdx"), vec![bad]);
+    }
+    // The processors.
+    let mut first = None;
+    for (space, encoding, dir) in [
+        (0, 0, "OCIO.TRANSFORM_DIR_FORWARD"),
+        (1, 0, "OCIO.TRANSFORM_DIR_FORWARD"),
+        (1, 1, "OCIO.TRANSFORM_DIR_INVERSE"),
+        (0, 1, "OCIO.TRANSFORM_DIR_FORWARD"),
+    ] {
+        sc.call(ra(m, "setSelectedMixingSpaceIdx"), vec![i(space)]);
+        sc.call(ra(m, "setSelectedMixingEncodingIdx"), vec![i(encoding)]);
+        let p = sc.call_kw(
+            ra(m, "getProcessor"),
+            vec![],
+            vec![
+                ("workingSpaceName", s("lin_1")),
+                ("displayName", s("DISP_1")),
+                ("viewName", s("VIEW_1")),
+                ("direction", n(dir)),
+            ],
+            Expect::Value,
+        );
+        sc.unrepr(p);
+        sc.call(ra(p, "getCacheID"), vec![]);
+        first.get_or_insert(p);
+    }
+    let again = sc.call(
+        ra(m, "getProcessor"),
+        vec![s("lin_1"), s("DISP_1"), s("VIEW_1")],
+    );
+    sc.unrepr(again);
+    sc.call(ra(again, "getCacheID"), vec![]);
+    let again2 = sc.call(
+        ra(m, "getProcessor"),
+        vec![s("lin_1"), s("DISP_1"), s("VIEW_1")],
+    );
+    sc.unrepr(again2);
+    sc.call(n("operator.is_"), vec![r(again), r(again2)]);
+    sc.call(ra(m, "setSelectedMixingSpaceIdx"), vec![i(1)]);
+    for args in [
+        vec![s("lin_1"), none(), s("VIEW_1")],
+        vec![s("lin_1"), i(666), s("VIEW_1")],
+        vec![s("lin_1"), s("DISP_1")],
+        vec![s("lin_1"), s(""), s("VIEW_1")],
+        vec![s(""), s("DISP_1"), s("VIEW_1")],
+        vec![s("not found"), s("DISP_1"), s("VIEW_1")],
+    ] {
+        sc.raises(ra(m, "getProcessor"), args);
+    }
+    // The slider: the manager's own, the same object.
+    let slider = sc.call(ra(m, "getSlider"), vec![]);
+    let slider2 = sc.call_kw(
+        ra(m, "getSlider"),
+        vec![],
+        vec![
+            ("sliderMixingMinEdge", f(0.0)),
+            ("sliderMixingMaxEdge", f(1.0)),
+        ],
+        Expect::Value,
+    );
+    sc.call(n("operator.is_"), vec![r(slider), r(slider2)]);
+    let getters = ["getSliderMinEdge", "getSliderMaxEdge", "__repr__"];
+    sc.eval(r(slider), &getters);
+    for space in [0, 1] {
+        sc.call(ra(m, "setSelectedMixingSpaceIdx"), vec![i(space)]);
+        for (min, max) in [(0.0, 1.0), (-0.25, 0.75), (0.5, 0.5), (0.125, 8.0)] {
+            sc.call(ra(slider, "setSliderMinEdge"), vec![f(min)]);
+            sc.call(ra(slider, "setSliderMaxEdge"), vec![f(max)]);
+            sc.eval(r(slider), &getters);
+            for v in [0.0, 0.1, 0.5, 0.9, 1.0, -0.5, 2.0] {
+                sc.call_kw(
+                    ra(slider, "sliderToMixing"),
+                    vec![],
+                    vec![("sliderUnits", f(v))],
+                    Expect::Value,
+                );
+                sc.call_kw(
+                    ra(slider, "mixingToSlider"),
+                    vec![],
+                    vec![("mixingUnits", f(v))],
+                    Expect::Value,
+                );
+            }
+        }
+        sc.call(ra(m, "getSlider"), vec![f(0.25), f(4.0)]);
+        sc.eval(r(slider), &getters);
+    }
+    sc.raises(n("OCIO.MixingSlider"), vec![]);
+    sc.raises(ra(slider, "setSliderMinEdge"), vec![none()]);
+    sc.raises(ra(m, "getSlider"), vec![f(0.0)]);
+    sc.raises(ra(m, "getSlider"), vec![none(), f(1.0)]);
+    sc.repr(r(m));
+    // A description doesn't reset the cache ID the config computed (the manager's first repr).
+    sc.call(
+        ra(cfg, "setDescription"),
+        vec![s("mixing, described again")],
+    );
+    sc.repr(r(m));
+    // The config: its changes are the manager's (processors, repr); `refresh` takes the color
+    // picking role.
+    sc.call(ra(m, "setSelectedMixingSpaceIdx"), vec![i(1)]);
+    sc.call_kw(
+        ra(cfg, "addDisplayView"),
+        vec![],
+        vec![
+            ("display", s("DISP_1")),
+            ("view", s("VIEW_1")),
+            ("colorSpaceName", s("log_1")),
+        ],
+        Expect::Value,
+    );
+    let p = sc.call(
+        ra(m, "getProcessor"),
+        vec![s("lin_1"), s("DISP_1"), s("VIEW_1")],
+    );
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    sc.call(ra(m, "setSelectedMixingSpaceIdx"), vec![i(0)]);
+    sc.call(
+        ra(cfg, "setRole"),
+        vec![n("OCIO.ROLE_COLOR_PICKING"), s("log_1")],
+    );
+    sc.eval(r(m), &MIXING_GETTERS);
+    let p = sc.call(
+        ra(m, "getProcessor"),
+        vec![s("lin_1"), s("DISP_1"), s("VIEW_1")],
+    );
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    sc.call(ra(m, "refresh"), vec![r(cfg)]);
+    sc.eval(r(m), &MIXING_GETTERS);
+    let spaces3 = sc.call(ra(m, "getMixingSpaces"), vec![]);
+    sc.unrepr(spaces3);
+    sc.call(n("list"), vec![r(spaces3)]);
+    sc.call(ra(m, "setSelectedMixingEncodingIdx"), vec![i(1)]);
+    let p = sc.call(
+        ra(m, "getProcessor"),
+        vec![s("lin_1"), s("DISP_1"), s("VIEW_1")],
+    );
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    sc.eval(r(slider), &getters);
+    sc.raises(ra(m, "refresh"), vec![none()]);
+    let other = config(&mut sc, "mixing, other");
+    sc.call_kw(
+        ra(m, "refresh"),
+        vec![],
+        vec![("config", r(other))],
+        Expect::Value,
+    );
+    sc.eval(r(m), &MIXING_GETTERS);
+    let _ = first;
+    run(&[sc]);
+}
+
 /// Runs `sc` on both sides: each step of `stored` succeeds in the wheel, each of `refused`
 /// raises there, and each raises the port's ValueError naming U-112 (an enum value outside the
 /// enumerators, which the port's library can't hold).
@@ -894,4 +1123,19 @@ fn a_display_view_direction_outside_the_enumerators_is_the_ports_error() {
         Expect::Raised,
     );
     outside_enumerators(&sc, &[], &[refused]);
+}
+
+/// A direction outside the enumerators, with which the wheel's manager makes a processor: the
+/// port's error (U-112).
+#[test]
+fn a_mixing_direction_outside_the_enumerators_is_the_ports_error() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "mixing direction outside");
+    let dir = sc.call(n("OCIO.TransformDirection"), vec![i(5)]);
+    let m = sc.call(n("OCIO.MixingColorSpaceManager"), vec![r(cfg)]);
+    let stored = sc.call(
+        ra(m, "getProcessor"),
+        vec![s("lin_1"), s("DISP_1"), s("VIEW_1"), r(dir)],
+    );
+    outside_enumerators(&sc, &[stored], &[]);
 }
