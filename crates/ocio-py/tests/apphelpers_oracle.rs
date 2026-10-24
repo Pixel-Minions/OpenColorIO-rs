@@ -1562,17 +1562,34 @@ fn a_pipeline_bypasses_the_missing_looks_of_its_view() {
     run(&[sc]);
 }
 
-/// A menu made before anything else computed its config's cache ID; then a color space the
+/// A menu made as the first computation of its config's cache ID; then a color space the
 /// config hands out is changed in place (its description), which doesn't reset the config's
-/// cache ID: the menu's and the parameters' text keep it.
+/// cache ID: the menu's text and the config keep it (the verifier's M33, M18). The step
+/// interpreter writes each step's `repr`, and the parameters' and the menu's compute the cache
+/// ID: a role resets it after the parameters are made, and another thread makes the menu,
+/// which the library keeps (by its parameters' text) and gives again to the step that asks
+/// for it after the change.
 #[test]
 fn a_menu_made_first_keeps_its_configs_cache_id() {
     let mut sc = Script::new();
     let cfg = config(&mut sc, "menu first");
     let p = sc.call(n("OCIO.ColorSpaceMenuParameters"), vec![r(cfg)]);
-    let h = sc.call(n("OCIO.ColorSpaceMenuHelper"), vec![r(p)]);
+    sc.call(ra(cfg, "setRole"), vec![s("menu_first_role"), s("raw")]);
+    let thread = sc.call_kw(
+        n("threading.Thread"),
+        vec![],
+        vec![
+            ("target", n("OCIO.ColorSpaceMenuHelper")),
+            ("args", t(vec![r(p)])),
+        ],
+        Expect::Value,
+    );
+    sc.unrepr(thread);
+    sc.call(ra(thread, "start"), vec![]);
+    sc.call(ra(thread, "join"), vec![]);
     let cs = sc.call(ra(cfg, "getColorSpace"), vec![s("lin_1")]);
     sc.call(ra(cs, "setDescription"), vec![s("changed in place")]);
+    let h = sc.call(n("OCIO.ColorSpaceMenuHelper"), vec![r(p)]);
     sc.repr(r(h));
     sc.repr(r(p));
     sc.call(ra(cfg, "getCacheID"), vec![]);
