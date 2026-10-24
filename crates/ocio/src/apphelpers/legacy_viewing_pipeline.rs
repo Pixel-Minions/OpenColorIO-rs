@@ -194,6 +194,30 @@ impl LegacyViewingPipeline {
         Ok(())
     }
 
+    /// Holds these transforms as they are, without copying them (the display view transform's
+    /// looks bypass as it is, and the bypass remembered by the last
+    /// [`LegacyViewingPipeline::set_display_view_transform`] kept). For the Python binding only
+    /// (`ocio-py`): upstream's getters return the pipeline's own copies, which Python changes in
+    /// place; the binding keeps those copies and hands them to the pipeline as they are now
+    /// before the pipeline reads them (`getProcessor`, `repr`). Behaviour-neutral for the Rust
+    /// API, whose getters give references (coordinator's decision 2026-10-24, as
+    /// `set_value_as_is` of the curve transforms).
+    #[doc(hidden)]
+    pub fn set_transforms_as_is(
+        &mut self,
+        display_view_transform: Option<DisplayViewTransform>,
+        linear_cc: Option<Transform>,
+        color_timing_cc: Option<Transform>,
+        channel_view: Option<Transform>,
+        display_cc: Option<Transform>,
+    ) {
+        self.display_view_transform = display_view_transform;
+        self.linear_cc = linear_cc;
+        self.color_timing_cc = color_timing_cc;
+        self.channel_view = channel_view;
+        self.display_cc = display_cc;
+    }
+
     /// Whether the looks override replaces the view's looks (an empty override then means no
     /// looks).
     ///

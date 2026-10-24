@@ -389,6 +389,19 @@ impl MixingColorSpaceManager {
         Ok(())
     }
 
+    /// Takes `config` as the manager's config, as it is: nothing else changes (the mixing
+    /// spaces, the selections and the color picking role's color space stay those of the last
+    /// [`MixingColorSpaceManager::refresh`]), as when the config upstream's manager points to
+    /// is changed in place. For the Python binding only (`ocio-py`), whose configs are nodes
+    /// the library's `Arc<Config>` can't follow: it hands the manager the config as Python
+    /// holds it now before the manager reads it (`getProcessor`, `repr`). Behaviour-neutral for
+    /// the Rust API, whose configs don't change in place (coordinator's decision 2026-10-24, as
+    /// `set_value_as_is` of the curve transforms).
+    #[doc(hidden)]
+    pub fn set_config_as_is(&mut self, config: Arc<Config>) {
+        self.config = config;
+    }
+
     /// Updates the slider's copy of whether the mixing space is perceptually uniform.
     fn sync_slider(&mut self) {
         self.slider.perceptually_uniform = self.is_perceptually_uniform();
