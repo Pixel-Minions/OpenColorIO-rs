@@ -98,7 +98,13 @@ pub(crate) struct ConfigNode {
     looks: Vec<(Arc<Look>, Shared<LookNode>)>,
     view_transforms: Vec<(Arc<ViewTransform>, ViewTransformRc)>,
     named_transforms: Vec<(Arc<NamedTransform>, NamedTransformRc)>,
+    /// The library's copy of the config last made for an app helper ([`config_arc`]), and the
+    /// config's [`state`] then.
+    snapshot: Option<Snapshot>,
 }
+
+/// A copy of a config ([`config_arc`]) and the config's [`state`] when it was made.
+type Snapshot = (Vec<(usize, u64)>, Arc<Config>);
 
 /// A config shared by the Python objects that hold it.
 pub(crate) type ConfigRc = Shared<ConfigNode>;
@@ -147,6 +153,7 @@ impl ConfigNode {
             looks: Vec::new(),
             view_transforms: Vec::new(),
             named_transforms: Vec::new(),
+            snapshot: None,
         }
     }
 
@@ -458,6 +465,55 @@ fn with_two<R>(
     }
 }
 
+/// The library's config of `rc` as it is now, as an `Arc`, for the objects of the app helpers
+/// that hold a config (chunk 6.7c: upstream's hold the `ConstConfigRcPtr` Python gave them,
+/// whose changes they see): the copy made last while Python changed nothing since ([`state`]),
+/// with its caches (a processor asked twice is the same one, as upstream's config caches it),
+/// else a new copy, the config's objects written back first.
+pub(crate) fn config_arc(rc: &ConfigRc) -> PyResult<Arc<Config>> {
+    // Copying the config changes nothing Python holds (as `publish_current_config`).
+    let _reading = crate::shared::Reading::enter(true);
+    with_config(rc, |node| {
+        let now = state(rc, node);
+        if let Some((seen, config)) = &node.snapshot
+            && *seen == now
+        {
+            return Ok(Arc::clone(config));
+        }
+        let config = Arc::new(node.config.clone_as_is());
+        node.snapshot = Some((now, Arc::clone(&config)));
+        Ok(config)
+    })
+}
+
+/// [`config_arc`], for a call that reads the config's cache ID through the copy: the config's
+/// own cache ID first (upstream computes it in the config, which keeps it until a change that
+/// resets it), then a new copy, which holds it (the copies [`config_arc`] keeps may have
+/// computed theirs, from a later state of the config).
+pub(crate) fn config_arc_with_cache_id(rc: &ConfigRc) -> PyResult<Arc<Config>> {
+    let _reading = crate::shared::Reading::enter(true);
+    with_config(rc, |node| {
+        // An error comes again from the copy, where the library reads it.
+        let _ = node.config.cache_id();
+        Ok(Arc::new(node.config.clone_as_is()))
+    })
+}
+
+/// The cache ID of the config `rc` (`getCacheID()`), computed in it as upstream's: the
+/// library's result.
+pub(crate) fn cache_id(rc: &ConfigRc) -> PyResult<ocio::Result<String>> {
+    let _reading = crate::shared::Reading::enter(true);
+    with_config(rc, |node| Ok(node.config.cache_id()))
+}
+
+/// `text`, which starts with `config: ` and a cache ID of `old_len` bytes (the text of the app
+/// helpers' objects, from the library's copy of their config), with the cache ID `id` of the
+/// config itself in its place.
+pub(crate) fn with_cache_id(text: &[u8], old_len: usize, id: &str) -> Vec<u8> {
+    let rest = text.get(b"config: ".len() + old_len..).unwrap_or_default();
+    [b"config: ".as_slice(), id.as_bytes(), rest].concat()
+}
+
 /// A returned config of its own.
 pub(crate) fn config_out(py: Python<'_>, config: Config) -> Out {
     out(py, CONFIG, &Shared::new(ConfigNode::new(config)))
@@ -504,7 +560,7 @@ fn enumerator<E: Copy>(qualified: &str, v: i64, values: &[(E, i64)]) -> PyResult
         .ok_or_else(|| outside_enumerators(qualified, v))
 }
 
-fn search_reference(v: i64) -> PyResult<SearchReferenceSpaceType> {
+pub(crate) fn search_reference(v: i64) -> PyResult<SearchReferenceSpaceType> {
     use SearchReferenceSpaceType::*;
     enumerator(
         SEARCH_REFERENCE_SPACE_TYPE,
@@ -539,7 +595,7 @@ fn view_type(v: i64) -> PyResult<ViewType> {
     )
 }
 
-fn direction(v: i64) -> PyResult<TransformDirection> {
+pub(crate) fn direction(v: i64) -> PyResult<TransformDirection> {
     enumerator(
         TRANSFORM_DIRECTION,
         v,
@@ -2460,7 +2516,7 @@ static FILEPATH_ONLY_MATCHES_DEFAULT_RULE: Function = config_method!(
 // Processors (PyConfig.cpp:723-809, 964-967 @ v2.5.2)
 
 /// The context of a `ConstContextRcPtr` argument, read as it is now.
-fn context_value(ctx: &ContextRc) -> Context {
+pub(crate) fn context_value(ctx: &ContextRc) -> Context {
     ctx.read(|c| {
         let mut copy = c.clone();
         copy.set_environment_mode(c.environment_mode());

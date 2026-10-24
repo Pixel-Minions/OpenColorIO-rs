@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
 /// for entry (transforms_oracle.rs checks them in detail).
-const COMPLETE: [&str; 49] = [
+const COMPLETE: [&str; 51] = [
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -76,6 +76,8 @@ const COMPLETE: [&str; 49] = [
     "GradingRGBCurveTransform",
     "GradingHueCurveTransform",
     "DynamicProperty",
+    "ColorSpaceMenuParameters",
+    "ColorSpaceMenuHelper",
 ];
 
 /// The classes a binding makes itself rather than bindPyTypes' declarations (bindPyConfigIOProxy's
@@ -153,6 +155,18 @@ fn the_module_members_report_as_the_wheels() {
         if OWN_CLASSES.contains(&n.as_str()) {
             assert_eq!(our, their, "{n}");
             own += 1;
+            continue;
+        }
+        if their["kind"] == "module" {
+            // A submodule gets the module's `__file__` (pybind11's `def_submodule`), which the
+            // port's module embedded in the test binary has none of (apphelpers_oracle.rs).
+            let mut their = their.clone();
+            let names = their["runtime_names"].as_array_mut().unwrap();
+            let before = names.len();
+            names.retain(|n| n != "__file__");
+            assert_eq!(names.len(), before - 1, "{n}");
+            assert_eq!(*our, their, "{n}");
+            others += 1;
             continue;
         }
         if their["kind"] != "class" || !declared {

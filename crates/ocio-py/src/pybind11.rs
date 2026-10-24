@@ -1020,6 +1020,40 @@ pub fn def_function(m: &Bound<'_, PyModule>, f: &'static Function) -> PyResult<(
     )
 }
 
+/// Port of pybind11's `module_::def_submodule(name)` (the wheel's pybind11 3): the module
+/// `<m's name>.<name>` of `sys.modules` (the name the wheel's module has, [`MODULE`], also where
+/// an embedding application registers the port's as `PyOpenColorIO`), made and added there when missing
+/// (`PyImport_AddModuleRef`: its `__doc__`, `__package__`, `__loader__` and `__spec__` None), given
+/// `m`'s `__file__` when `m` has one, and set as `m.<name>`.
+pub fn def_submodule<'py>(m: &Bound<'py, PyModule>, name: &str) -> PyResult<Bound<'py, PyModule>> {
+    let py = m.py();
+    let full = format!("{MODULE}.{name}");
+    let modules = py.import("sys")?.getattr("modules")?;
+    let sub = match modules.get_item(&full) {
+        Ok(existing) => existing.cast_into::<PyModule>()?,
+        Err(_) => {
+            let sub = PyModule::new(py, &full)?;
+            modules.set_item(&full, &sub)?;
+            sub
+        }
+    };
+    if let Ok(file) = m.getattr("__file__") {
+        sub.setattr("__file__", file)?;
+    }
+    m.setattr(name, &sub)?;
+    Ok(sub)
+}
+
+/// `m.def(name, ...)` of a submodule ([`def_submodule`]): as [`def_function`], with the
+/// submodule's name as the function's `__module__`.
+pub fn def_submodule_function(m: &Bound<'_, PyModule>, f: &'static Function) -> PyResult<()> {
+    let name = m.name()?.to_string();
+    m.setattr(
+        f.name,
+        function(m.py(), f, Doc::Signatures, Some(&name), Some(m))?,
+    )
+}
+
 /// A method: [`instance_method`] of [`builtin`].
 pub fn method<'py>(py: Python<'py>, f: &'static Function) -> PyResult<Bound<'py, PyAny>> {
     instance_method(py, builtin(py, f, true)?)

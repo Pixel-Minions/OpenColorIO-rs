@@ -37,6 +37,11 @@ CDLTransformTest.py::CDLTransformTest.test_validate_direction
 CDLTransformTest.py::CDLTransformTest.test_validate_power
 CDLTransformTest.py::CDLTransformTest.test_validate_saturation
 CDLTransformTest.py::CDLTransformTest.test_validate_slope
+ColorSpaceHelpersTest.py::ColorSpaceHelpersTest.test_menu_creation_catgeories
+ColorSpaceHelpersTest.py::ColorSpaceHelpersTest.test_menu_creation_colorspaces
+ColorSpaceHelpersTest.py::ColorSpaceHelpersTest.test_menu_creation_include_roles
+ColorSpaceHelpersTest.py::ColorSpaceHelpersTest.test_menu_creation_single_role
+ColorSpaceHelpersTest.py::ColorSpaceHelpersTest.test_menu_parameters
 ColorSpaceTest.py::ColorSpaceTest.test_aliases
 ColorSpaceTest.py::ColorSpaceTest.test_allocation
 ColorSpaceTest.py::ColorSpaceTest.test_allocation_vars

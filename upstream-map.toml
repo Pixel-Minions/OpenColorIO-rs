@@ -3990,7 +3990,7 @@ note = "p6-objects 6.3d"
 path = "src/bindings/python/apphelpers/PyColorSpaceHelpers.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_color_space_helpers.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyDisplayViewHelpers.cpp"

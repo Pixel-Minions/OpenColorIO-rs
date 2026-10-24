@@ -487,5 +487,8 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::py_format_metadata::bind_py_format_metadata(m)?;
     crate::py_grading_data::bind_py_grading_data(m)?;
     crate::py_transform::bind_py_transform(m)?;
+
+    // The app helpers (PyOpenColorIO.cpp:98-103), but bindPyConfigMergingHelpers (chunk 6.8).
+    crate::apphelpers::py_color_space_helpers::bind_py_color_space_menu_helpers(m)?;
     Ok(())
 }
