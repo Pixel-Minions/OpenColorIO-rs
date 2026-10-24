@@ -418,3 +418,39 @@ pub(crate) fn report(test: &str, failures: &[String]) {
             .join("\n\n")
     );
 }
+
+/// Upstream's test config files (tests/data/files/configs @ v2.5.2, the `.ocio` files): each
+/// one's path relative to that directory and its absolute path, in order.
+pub(crate) fn upstream_test_configs() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).expect("a directory") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "ocio") {
+                out.push(path);
+            }
+        }
+    }
+    let root = ocio_testkit::paths::upstream_dir().join("tests/data/files/configs");
+    let mut paths = Vec::new();
+    walk(&root, &mut paths);
+    paths.sort();
+    let configs: Vec<(String, String)> = paths
+        .iter()
+        .map(|p| {
+            let name = p
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            (
+                name,
+                p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"),
+            )
+        })
+        .collect();
+    // context_test1 and the seven of mergeconfigs.
+    assert_eq!(configs.len(), 8, "{configs:?}");
+    configs
+}

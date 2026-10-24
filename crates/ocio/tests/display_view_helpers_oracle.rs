@@ -950,3 +950,49 @@ fn the_connection_color_space_gives_its_from_reference_transform_first() {
     );
     assert_eq!(reached.pixels, 6);
 }
+
+/// Generated `GetProcessor` cases of upstream's test config files
+/// (`common::app_helpers::upstream_test_configs`), each read from its text.
+#[test]
+fn upstream_test_config_processors_match_the_wheel() {
+    let mut failures = Vec::new();
+    let mut all = Reached::default();
+    let mut swept = 0;
+    for (k, (name, path)) in common::app_helpers::upstream_test_configs()
+        .into_iter()
+        .enumerate()
+    {
+        let text: &'static str = std::fs::read_to_string(&path).expect("the config").leak();
+        let source = Source::Yaml(text);
+        let config = source.port();
+        // The cases are (display, view) pairs: a config without displays has none.
+        if config.num_displays() == 0 {
+            continue;
+        }
+        swept += 1;
+        let r = check_processors(
+            &name,
+            &source,
+            &processor_cases(&config, 0xd15b_0200 + k as u64, 30),
+            30,
+            &mut failures,
+        );
+        assert!(
+            r.made + r.refused >= 30,
+            "{name}: {} made, {} refused",
+            r.made,
+            r.refused
+        );
+        all.add(r);
+    }
+    report("display_view_helpers_upstream_configs", &failures);
+    assert_eq!(swept, 5, "the configs with displays");
+    // Most cases of these configs are refused (views of view transforms or files they lack).
+    assert!(
+        all.made >= 20 && all.refused >= 60,
+        "{} made, {} refused",
+        all.made,
+        all.refused
+    );
+    assert_eq!(all.pixels, 2 * all.made, "pixels compared");
+}

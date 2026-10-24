@@ -4950,7 +4950,8 @@ note = "p5-huecurve 5.4a: create; create_transform and build_ops with 5.5e; p5-t
 path = "tests/cpu/ops/gradinghuecurve/GradingHueCurve_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradinghuecurve/grading_hue_curve_tests.rs"]
-status = "todo"
+status = "done"
+note = "p5-values 5.0c: basic, curves, max_ctrl_pnts (the status was left at todo; p5-m3-parity)"
 
 [[file]]
 path = "tests/cpu/ops/gradingprimary/GradingPrimaryOpCPU_tests.cpp"
@@ -4975,7 +4976,8 @@ note = "p5-primary 5.2a: create; create_transform and build_ops with 5.5b; p5-tr
 path = "tests/cpu/ops/gradingprimary/GradingPrimary_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_tests.rs"]
-status = "todo"
+status = "done"
+note = "p5-values 5.0a: basic, validate, precompute (the status was left at todo; p5-m3-parity)"
 
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingBSplineCurve_tests.cpp"
@@ -5014,6 +5016,7 @@ path = "tests/cpu/ops/gradingtone/GradingToneOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_cpu_tests.rs"]
 status = "done"
+note = "p5-tone 5.3b-c: every test; p5-m3-parity: seven of their markers carried the test's values after the version, so the parity count missed them, fixed"
 
 [[file]]
 path = "tests/cpu/ops/gradingtone/GradingToneOpData_tests.cpp"
@@ -5032,7 +5035,8 @@ note = "p5-tone 5.3a: create; create_transform and build_ops with 5.5d; p5-trans
 path = "tests/cpu/ops/gradingtone/GradingTone_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_tests.rs"]
-status = "todo"
+status = "done"
+note = "p5-values 5.0b: basic, rgbmsw_channel, validate (the status was left at todo; p5-m3-parity)"
 
 [[file]]
 path = "tests/cpu/ops/log/LogOpCPU_tests.cpp"
@@ -5352,6 +5356,7 @@ path = "tests/gpu/ECOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/ec_op_test.rs"]
 status = "todo"
+note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
 
 [[file]]
 path = "tests/gpu/FixedFunctionOp_test.cpp"
@@ -5383,24 +5388,28 @@ path = "tests/gpu/GradingHueCurveOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/grading_hue_curve_op_test.rs"]
 status = "todo"
+note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
 
 [[file]]
 path = "tests/gpu/GradingPrimaryOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/grading_primary_op_test.rs"]
 status = "todo"
+note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
 
 [[file]]
 path = "tests/gpu/GradingRGBCurveOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/grading_rgb_curve_op_test.rs"]
 status = "todo"
+note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
 
 [[file]]
 path = "tests/gpu/GradingToneOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/grading_tone_op_test.rs"]
 status = "todo"
+note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
 
 [[file]]
 path = "tests/gpu/LogOp_test.cpp"
@@ -5662,6 +5671,7 @@ path = "tests/python/ColorSpaceHelpersTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/ColorSpaceTest.py"
@@ -5698,6 +5708,7 @@ path = "tests/python/DisplayViewHelpersTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/DisplayViewTransformTest.py"
@@ -5722,6 +5733,7 @@ path = "tests/python/ExposureContrastTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/FileRulesTest.py"
@@ -5758,30 +5770,35 @@ path = "tests/python/GradingDataTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/GradingHueCurveTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/GradingPrimaryTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/GradingRGBCurveTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/GradingToneTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/GroupTransformTest.py"
@@ -5794,6 +5811,7 @@ path = "tests/python/LegacyViewingPipelineTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/LogCameraTransformTest.py"
@@ -5848,6 +5866,7 @@ path = "tests/python/MixingHelpersTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
 status = "todo"
+note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
 
 [[file]]
 path = "tests/python/NamedTransformTest.py"

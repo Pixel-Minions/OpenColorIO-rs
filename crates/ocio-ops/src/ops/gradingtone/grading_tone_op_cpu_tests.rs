@@ -103,7 +103,8 @@ fn identity() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_midtones)` @ v2.5.2 (`TS1`, 150-164).
+/// Its values are `TS1` (GradingToneOpCPU_tests.cpp:150-164 @ v2.5.2).
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_midtones)` @ v2.5.2.
 #[test]
 fn log_midtones() {
     const STYLE: GradingStyle = GradingStyle::Log;
@@ -129,7 +130,8 @@ fn log_midtones() {
     check_both_ways(STYLE, &gtd, &input_32f, &expected_32f);
 }
 
-/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_highlights)` @ v2.5.2 (`TS2`, 196-210).
+/// Its values are `TS2` (GradingToneOpCPU_tests.cpp:196-210 @ v2.5.2).
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_highlights)` @ v2.5.2.
 #[test]
 fn log_highlights() {
     const STYLE: GradingStyle = GradingStyle::Log;
@@ -157,7 +159,8 @@ fn log_highlights() {
     check_both_ways(STYLE, &gtd, &input_32f, &expected_32f);
 }
 
-/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, video_shadows)` @ v2.5.2 (`TS3`, 243-257).
+/// Its values are `TS3` (GradingToneOpCPU_tests.cpp:243-257 @ v2.5.2).
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, video_shadows)` @ v2.5.2.
 #[test]
 fn video_shadows() {
     const STYLE: GradingStyle = GradingStyle::Video;
@@ -185,7 +188,8 @@ fn video_shadows() {
     check_both_ways(STYLE, &gtd, &input_32f, &expected_32f);
 }
 
-/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, video_white_details)` @ v2.5.2 (`TS4`, 290-304).
+/// Its values are `TS4` (GradingToneOpCPU_tests.cpp:290-304 @ v2.5.2).
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, video_white_details)` @ v2.5.2.
 #[test]
 fn video_white_details() {
     const STYLE: GradingStyle = GradingStyle::Video;
@@ -211,7 +215,8 @@ fn video_white_details() {
     check_both_ways(STYLE, &gtd, &input_32f, &expected_32f);
 }
 
-/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_black_details)` @ v2.5.2 (`TS5`, 337-351).
+/// Its values are `TS5` (GradingToneOpCPU_tests.cpp:337-351 @ v2.5.2).
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_black_details)` @ v2.5.2.
 #[test]
 fn log_black_details() {
     const STYLE: GradingStyle = GradingStyle::Log;
@@ -239,7 +244,8 @@ fn log_black_details() {
     check_both_ways(STYLE, &gtd, &input_32f, &expected_32f);
 }
 
-/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_scontrast)` @ v2.5.2 (`TS6`, 384-409).
+/// Its values are `TS6` (GradingToneOpCPU_tests.cpp:384-409 @ v2.5.2).
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, log_scontrast)` @ v2.5.2.
 #[test]
 fn log_scontrast() {
     const STYLE: GradingStyle = GradingStyle::Log;
@@ -309,7 +315,8 @@ fn log_scontrast() {
     validate_image(&input_32f, &apply(&op, &expected_32f));
 }
 
-/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, lin_midtones)` @ v2.5.2 (`TS7`, 459-474).
+/// Its values are `TS7` (GradingToneOpCPU_tests.cpp:459-474 @ v2.5.2).
+/// Port of `OCIO_ADD_TEST(GradingToneOpCPU, lin_midtones)` @ v2.5.2.
 #[test]
 fn lin_midtones() {
     const STYLE: GradingStyle = GradingStyle::Lin;
