@@ -120,7 +120,7 @@ fn perceptual_to_linear(percept: f32) -> f32 {
 /// Port of `MixingSlider` (include/OpenColorIO/OpenColorAppHelpers.h:454-483) and
 /// `MixingSliderImpl` (src/OpenColorIO/apphelpers/MixingHelpers.h:15-40, MixingHelpers.cpp:
 /// 52-114 @ v2.5.2), its only implementation (owner decision 2026-10-22, P5-3 d).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MixingSlider {
     /// `m_mixing.isPerceptuallyUniform()`, kept by the manager.
     perceptually_uniform: bool,
@@ -269,12 +269,15 @@ impl fmt::Display for MixingSlider {
 ///   (the working space) and `Display Space` (a (display, view)'s).
 /// - The mixing encodings: `RGB` and `HSV`.
 ///
-/// Upstream deletes the copy constructor, and has no `createEditableCopy`.
+/// Upstream deletes the copy constructor, and has no `createEditableCopy`. The port's `Clone` is
+/// the Python binding's: it calls the library on a copy, so that no lock of its own is held
+/// while the library runs Python code (a config's I/O proxy, a logging function).
 ///
 /// Port of `MixingColorSpaceManager` (include/OpenColorIO/OpenColorAppHelpers.h:490-532) and
 /// `MixingColorSpaceManagerImpl` (src/OpenColorIO/apphelpers/MixingHelpers.h:42-97,
 /// MixingHelpers.cpp:116-395 @ v2.5.2), its only implementation (owner decision 2026-10-22,
 /// P5-3 d).
+#[derive(Clone)]
 pub struct MixingColorSpaceManager {
     /// `m_config`.
     config: Arc<Config>,

@@ -48,8 +48,10 @@ use crate::transforms::look_transform::LookTransform;
 /// Port of `LegacyViewingPipeline` (include/OpenColorIO/OpenColorAppHelpers.h:350-432) and
 /// `LegacyViewingPipelineImpl` (src/OpenColorIO/apphelpers/LegacyViewingPipeline.h:16-67 @
 /// v2.5.2), its only implementation. Upstream deletes its copy constructor, and has no
-/// `createEditableCopy`.
-#[derive(Debug, Default)]
+/// `createEditableCopy`. The port's `Clone` is the Python binding's: it calls the library on a
+/// copy, so that no lock of its own is held while the library runs Python code (a config's I/O
+/// proxy, a logging function).
+#[derive(Debug, Clone, Default)]
 pub struct LegacyViewingPipeline {
     /// `m_linearCC`.
     linear_cc: Option<Transform>,

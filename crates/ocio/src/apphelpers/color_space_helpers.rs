@@ -271,8 +271,10 @@ fn role_color_space<'a>(config: &'a Config, role: &[u8]) -> Result<&'a ColorSpac
 ///
 /// Port of `ColorSpaceMenuParameters` (include/OpenColorIO/OpenColorAppHelpers.h:104-199) and
 /// `ColorSpaceMenuParametersImpl` (src/OpenColorIO/apphelpers/ColorSpaceHelpers.h:82-137,
-/// ColorSpaceHelpers.cpp:165-322 @ v2.5.2), its only implementation.
-#[derive(Debug)]
+/// ColorSpaceHelpers.cpp:165-322 @ v2.5.2), its only implementation. The port's `Clone` is the
+/// Python binding's: it calls the library on a copy, so that no lock of its own is held while
+/// the library runs Python code (a config's I/O proxy, a logging function).
+#[derive(Debug, Clone)]
 pub struct ColorSpaceMenuParameters {
     /// `m_config`.
     config: Arc<Config>,
