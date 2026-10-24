@@ -305,3 +305,36 @@ fn libstdcxx_hash_matches_the_library() {
         );
     }
 }
+
+/// A cache counts the runs of `clear` and `enable`, the two `noexcept` functions upstream locks
+/// its mutex in, and tells whether this thread holds its lock (U-184).
+#[test]
+fn a_cache_counts_the_locks_of_its_changes_and_knows_its_holder() {
+    let cache: GenericCache<String, DataRcPtr> = GenericCache::new();
+    assert_eq!(cache.locks_by_changes(), 0);
+    cache.clear();
+    assert_eq!(cache.locks_by_changes(), 1);
+    cache.enable(false);
+    cache.enable(true);
+    assert_eq!(cache.locks_by_changes(), 3);
+    // Taking the lock, or reading the cache, is not a change.
+    assert!(!cache.is_held_by_this_thread());
+    {
+        let guard = cache.lock().unwrap().expect("an enabled cache");
+        assert!(cache.is_held_by_this_thread());
+        // Another cache of this thread is not held.
+        let other: GenericCache<String, DataRcPtr> = GenericCache::new();
+        assert!(!other.is_held_by_this_thread());
+        // Another thread doesn't hold it.
+        std::thread::scope(|s| {
+            s.spawn(|| assert!(!cache.is_held_by_this_thread()));
+        });
+        drop(guard);
+    }
+    assert!(!cache.is_held_by_this_thread());
+    assert_eq!(cache.locks_by_changes(), 3);
+    // A disabled cache's lock is not held (upstream doesn't lock it then).
+    cache.enable(false);
+    assert!(cache.lock().unwrap().is_none());
+    assert!(!cache.is_held_by_this_thread());
+}

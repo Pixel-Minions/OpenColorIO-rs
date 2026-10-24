@@ -10043,3 +10043,34 @@ fn grading_huecurve_serialization() {
         );
     }
 }
+
+/// What counts as a lock of the processor cache by a change (U-184): the changes upstream's
+/// `resetCacheIDs` follows (`setRole`, and `clearProcessorCache` and `setProcessorCacheFlags`,
+/// which lock it themselves), not those it doesn't (`setName`, `setDescription`, a refused
+/// `setRole`, `setMajorVersion` of an unsupported version, `upgradeToLatestVersion` of a
+/// config already at the latest version).
+#[test]
+fn the_changes_that_lock_the_processor_cache() {
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    let seen = |c: &Config| c.processor_cache_locks_by_changes();
+
+    let before = seen(&config);
+    config.set_name("n");
+    config.set_description("d");
+    assert!(config.set_role("", None).is_err());
+    assert!(config.set_major_version(9).is_err());
+    config.upgrade_to_latest_version().unwrap();
+    assert_eq!(seen(&config), before);
+
+    config.set_role("foo", None).unwrap();
+    let after_role = seen(&config);
+    assert!(after_role > before);
+    config.clear_processor_cache();
+    let after_clear = seen(&config);
+    assert!(after_clear > after_role);
+    config.set_processor_cache_flags(ProcessorCacheFlags::OFF);
+    assert!(seen(&config) > after_clear);
+
+    assert!(!config.processor_cache_is_held_by_this_thread());
+}

@@ -6181,6 +6181,26 @@ impl Config {
         self.processor_cache.clear();
     }
 
+    /// How many times upstream's `m_processorCache.clear()` and `.enable()` would have run on
+    /// the config: every change of its state (`resetCacheIDs`), `clearProcessorCache`
+    /// and `setProcessorCacheFlags`. Both lock the cache's `std::mutex`, which `getProcessor`
+    /// holds while it makes a processor (docs/improvements.md, U-184).
+    ///
+    /// For the Python module, which tells a change of a config made while a copy of it makes a
+    /// processor.
+    #[doc(hidden)]
+    pub fn processor_cache_locks_by_changes(&self) -> u64 {
+        self.processor_cache.locks_by_changes()
+    }
+
+    /// Whether this thread holds the lock of the config's cache of processors: the library is
+    /// making a processor of it, on this thread, and may call the application's code
+    /// meanwhile.
+    #[doc(hidden)]
+    pub fn processor_cache_is_held_by_this_thread(&self) -> bool {
+        self.processor_cache.is_held_by_this_thread()
+    }
+
     /// The processor from the color space `src` to the color space `dst` (a color space
     /// transform's between their names), forward, in the current context.
     ///

@@ -6017,9 +6017,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   Both detect the case by a thread-local list of the caches' mutexes the thread holds, checked
   before each lock (`GenericCache::lock`, the file cache's entries); other threads wait for
   the lock, as upstream's. `GenericCache::clear` and `enable`, which upstream's
-  `noexcept` functions lock too (a relock there ends upstream's process), aren't covered: the
-  binding can't reach them on a cache the thread holds (a config's setters need the config
-  the library is working on, D-9). In `p6-after-p5` (6.7c, `crates/ocio/src/caching.rs`,
+  `noexcept` functions lock too (a relock there ends upstream's process, U-184), aren't
+  covered by that list: the binding refuses the changes of a config that call them while the
+  library makes a processor of it (U-184). In `p6-after-p5` (6.7c, `crates/ocio/src/caching.rs`,
   `Held`, `relock_error`; `crates/ocio/src/transforms/file_transform.rs`);
   `crates/ocio-py/tests/apphelpers_oracle.rs`,
   `a_lut_loader_that_makes_the_same_processor_again_is_u182` (a mixing manager's LUT loader
@@ -6049,3 +6049,51 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   wheel's crash report from py_eval, the steps before the menu succeeding in the wheel; the
   port's menu raises `int`'s ValueError on the message the wheel logs, and the inner menu's
   error, the wheel's on Windows and U-181's on Linux; a time limit).
+
+### U-184. A config changed by the code that runs while the library makes a processor of it
+
+- **Upstream:** `Config::getProcessor` locks the config's cache of processors (`std::mutex`)
+  and keeps it locked while it makes the processor (Config.cpp:4830-4832 @ v2.5.2). Making it
+  can call the application's code: a config I/O proxy loading a LUT
+  (`PyConfigIOProxy.getLutData`), a logging function. Every change of the config that calls
+  `resetCacheIDs` (`setRole`, `addColorSpace`, `removeColorSpace`, `setSearchPath`,
+  `addEnvironmentVar`, `setMajorVersion`, `setActiveDisplays`, ...; Config.cpp:5464-5474),
+  `clearProcessorCache` and `setProcessorCacheFlags` flushes or enables that cache through
+  `GenericCache::clear` and `enable`, which are `noexcept` and lock the same mutex
+  (Caching.h:45-57) on the same thread. MSVC's mutex throws `std::system_error` there, which
+  `noexcept` turns into `std::terminate`: the Windows wheel's process dies (exit status 127 of
+  the probe; py_eval's crash report). libstdc++'s mutex waits for itself: the Linux wheel's
+  process hangs (probed in Rocky Linux 9, 2026-10-24: killed after 45 s). It happens through
+  `Config.getProcessor`, `MixingColorSpaceManager.getProcessor`,
+  `LegacyViewingPipeline.getProcessor` and `DisplayViewHelpers.GetProcessor`, with the cache
+  on. A change that doesn't call them (`setName`, `setDescription`, `setFamilySeparator`,
+  `setMinorVersion`, a refused `setRole`, `setMajorVersion` of an unsupported version,
+  `upgradeToLatestVersion` of a config at the latest version), a read, a copy of the config
+  or another config is safe, and so is any change when the config's cache is off (upstream
+  doesn't lock it then).
+- **Who notices:** an application whose config I/O proxy or logging function changes the
+  config it is making a processor of (a LUT loader that registers a role, say).
+- **A fix:** release the cache's mutex while the library calls the application, or make the
+  flush skip a cache its thread holds.
+- **Status:** the port doesn't end the process. The config's own calls hold the config
+  (D-9): `Config.getProcessor`, the pipeline's and `DisplayViewHelpers`' calls give D-9's
+  RuntimeError for any call on the config from the loader (checked with the Windows wheel's
+  crash report, `a_lut_loader_that_changes_the_config_of_the_processor_is_u184`). The mixing
+  manager makes its processors from a copy of the config (the library's `Arc<Config>`), so
+  the loader's call reaches the config itself: the binding counts the times the config's
+  cache would be locked by a change (`Config::processor_cache_locks_by_changes`, counted by
+  `GenericCache::clear` and `enable`) around each call on the config, and when that count
+  rose while this thread holds the lock of the cache of one of the config's copies
+  (`Config::processor_cache_is_held_by_this_thread`, the thread-local list of U-182), the call
+  raises RuntimeError "Config: a callback of the making of a processor of this config changed
+  the config, which locks the cache of processors that call holds: OCIO 2.5.2 ends the
+  process, which the port can't match (docs/improvements.md, U-184)". The change was made, as
+  in upstream's call before it dies. The exact set of calls is the library's own (upstream's
+  `resetCacheIDs` sites are ported), so the changes that don't lock the cache, and the cache
+  off, behave as the wheel (compared step by step). In `p6-after-p5` (6.7c,
+  `crates/ocio-py/src/py_config.rs`, `with_config`; `crates/ocio/src/caching.rs`,
+  `crates/ocio/src/config.rs`);
+  `crates/ocio-py/tests/apphelpers_oracle.rs`,
+  `a_lut_loader_that_changes_the_config_of_the_processor_is_u184` (the four changes that
+  lock, through the four ways to make a processor: the wheel's crash report on Windows, the
+  port's errors) and `a_lut_loader_that_changes_the_config_without_the_cache_lock_is_as_the_wheels`.

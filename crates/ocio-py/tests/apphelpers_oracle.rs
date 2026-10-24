@@ -2347,3 +2347,258 @@ fn a_lut_loader_that_makes_the_same_processor_again_is_u182() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// U-184: a change of a config by the LUT loader of the processor being made of it (verifier
+// 6.7c, third round)
+
+/// What makes a processor whose LUT a loader reads through the config's proxy.
+#[derive(Clone, Copy, Debug)]
+enum Maker {
+    /// `MixingColorSpaceManager.getProcessor`: the port works on a copy of the config.
+    Manager,
+    /// `Config.getProcessor`: the call holds the config, D-9's error for a callback's call.
+    Config,
+    /// `LegacyViewingPipeline.getProcessor`: as `Config`.
+    Pipeline,
+    /// `DisplayViewHelpers.GetProcessor`: as `Config`.
+    DisplayView,
+}
+
+/// A change of the config `cfg` a loader makes: a call and the arguments it is given.
+struct Change {
+    name: &'static str,
+    /// Whether upstream's call locks the config's cache of processors (`resetCacheIDs`,
+    /// `clearProcessorCache`, `setProcessorCacheFlags`): the wheel's process ends.
+    kills: bool,
+    args: fn(&mut Script) -> Vec<Value>,
+}
+
+/// The changes of the config the tests try: four that lock the cache of processors, three that
+/// do not (`setName` and `setDescription` store a string; `upgradeToLatestVersion` of a config
+/// at the latest version does nothing).
+fn changes() -> Vec<Change> {
+    vec![
+        Change {
+            name: "setRole",
+            kills: true,
+            args: |_| vec![s("foo"), s("raw")],
+        },
+        Change {
+            name: "clearProcessorCache",
+            kills: true,
+            args: |_| vec![],
+        },
+        Change {
+            name: "setProcessorCacheFlags",
+            kills: true,
+            args: |_| vec![n("OCIO.PROCESSOR_CACHE_ENABLED")],
+        },
+        Change {
+            name: "addColorSpace",
+            kills: true,
+            args: |sc| {
+                let cs = sc.call_kw(
+                    n("OCIO.ColorSpace"),
+                    vec![],
+                    vec![("name", s("zz"))],
+                    Expect::Value,
+                );
+                vec![r(cs)]
+            },
+        },
+        Change {
+            name: "setName",
+            kills: false,
+            args: |_| vec![s("renamed")],
+        },
+        Change {
+            name: "setDescription",
+            kills: false,
+            args: |_| vec![s("described")],
+        },
+        Change {
+            name: "upgradeToLatestVersion",
+            kills: false,
+            args: |_| vec![],
+        },
+    ]
+}
+
+/// A script in which a processor is made by `maker` of a config whose proxy's loader (the
+/// `__del__` of the object it returns, [`load_then`]) calls `change` on the config, with the
+/// processors' cache of the config on or off. The loader is a `Thread.run` of a thread never
+/// started ([`call_once`]), so an exception reaches `sys.unraisablehook`, whose reports go to
+/// a list. The script, the step of the processor, the step that reads the list's length,
+/// the config's name and description, and, when the change locks the cache that is on, the
+/// list's first exception.
+fn change_script(
+    maker: Maker,
+    change: &Change,
+    cache_off: bool,
+    tag: &str,
+) -> (Script, usize, usize, Option<usize>) {
+    let mut sc = Script::new();
+    let lut = format!("lut_u184_{tag}.spi1d");
+    let config = PROXY_CONFIG
+        .replace("SRC", &lut)
+        .replace("colorspace: raw}]}", "colorspace: lut}]}")
+        .replace("scene_linear: raw", "scene_linear: raw, color_picking: lut");
+    let px = proxy_of(&mut sc, &config);
+    let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
+    if cache_off {
+        sc.call(
+            ra(cfg, "setProcessorCacheFlags"),
+            vec![n("OCIO.PROCESSOR_CACHE_OFF")],
+        );
+    }
+    let (made_by, made_args) = match maker {
+        Maker::Manager => {
+            let m = sc.call(n("OCIO.MixingColorSpaceManager"), vec![r(cfg)]);
+            (ra(m, "getProcessor"), vec![s("raw"), s("d"), s("v")])
+        }
+        Maker::Config => (ra(cfg, "getProcessor"), vec![s("raw"), s("lut")]),
+        Maker::Pipeline => {
+            let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+            let dvt = sc.call_kw(
+                n("OCIO.DisplayViewTransform"),
+                vec![],
+                vec![("src", s("raw")), ("display", s("d")), ("view", s("v"))],
+                Expect::Value,
+            );
+            sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+            (ra(vp, "getProcessor"), vec![r(cfg)])
+        }
+        Maker::DisplayView => {
+            let ctx = sc.call(ra(cfg, "getCurrentContext"), vec![]);
+            (
+                n("OCIO.DisplayViewHelpers.GetProcessor"),
+                vec![r(cfg), r(ctx), s("raw"), s("d"), s("v")],
+            )
+        }
+    };
+    let args = (change.args)(&mut sc);
+    let (run, _) = call_once(&mut sc, ra(cfg, change.name), args, vec![], false);
+    let got = sc.call(n("list"), vec![]);
+    sc.step(
+        serde_json::json!({ "setattr": n("threading._sys"), "name": "unraisablehook",
+                            "value": ra(got, "append") }),
+        Expect::Value,
+    );
+    load_then(&mut sc, px, run);
+    let made = sc.call(made_by, made_args);
+    sc.call(ra(made, "getCacheID"), vec![]);
+    sc.step(
+        serde_json::json!({ "setattr": n("threading._sys"), "name": "unraisablehook",
+                            "value": n("threading._sys.__unraisablehook__") }),
+        Expect::Value,
+    );
+    let len = sc.call(n("len"), vec![r(got)]);
+    sc.eval(r(cfg), &["getName", "getDescription"]);
+    // The exception the loader's call ended with, when the change locks the cache.
+    let raised = (change.kills && !cache_off).then(|| {
+        let first = sc.call(n("operator.getitem"), vec![r(got), i(0)]);
+        // It names the object whose `__del__` raised, at its address.
+        sc.uncompare(first);
+        sc.eval(ra(first, "exc_value"), &[])
+    });
+    (sc, made, len, raised)
+}
+
+const MAKERS: [Maker; 4] = [
+    Maker::Manager,
+    Maker::Config,
+    Maker::Pipeline,
+    Maker::DisplayView,
+];
+
+/// U-184: `Config::getProcessor` holds the config's cache of processors locked while it makes
+/// a processor, and every change of the config that flushes the cache locks it again, from a
+/// `noexcept` function: a LUT loader that changes the config (`setRole`, `addColorSpace`,
+/// `clearProcessorCache`, `setProcessorCacheFlags`) ends the wheel's process, for each of the
+/// four ways to make a processor of a config, as the Windows wheel's crash report from py_eval
+/// shows (the Linux wheel's thread waits for itself: probed in Rocky Linux 9). The port's
+/// manager makes its processors from a copy of the config, and the change raises U-184's error
+/// in the loader; the config's, the pipeline's and `DisplayViewHelpers`' calls hold the
+/// config, and the change raises D-9's error. The processor is made in every case.
+#[test]
+fn a_lut_loader_that_changes_the_config_of_the_processor_is_u184() {
+    start();
+    let mut cases = Vec::new();
+    for maker in MAKERS {
+        for change in changes().iter().filter(|c| c.kills) {
+            let tag = format!("{maker:?}_{}", change.name);
+            let (sc, made, _, raised) = change_script(maker, change, false, &tag);
+            cases.push((maker, change.name, sc, made, raised.unwrap()));
+        }
+    }
+    assert_eq!(cases.len(), 16);
+    if cfg!(windows) {
+        let json: Vec<Value> = cases.iter().map(|c| c.2.json()).collect();
+        let result = ocio_testkit::Oracle::get()
+            .call("py_eval", serde_json::json!({ "scripts": json }), &[])
+            .result;
+        let reports = result["scripts"].as_array().unwrap();
+        assert_eq!(reports.len(), cases.len());
+        for (report, (maker, change, ..)) in reports.iter().zip(&cases) {
+            let code = report["crashed"]["returncode"].as_i64();
+            assert!(code.is_some_and(|c| c != 0), "{maker:?} {change}: {report}");
+        }
+    }
+    for (maker, change, sc, made, raised) in cases {
+        let ours = guarded_port(sc.json());
+        let steps = ours["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), sc.steps.len(), "{maker:?} {change}");
+        for (k, step) in steps.iter().enumerate() {
+            assert!(
+                step.get("value").is_some(),
+                "{maker:?} {change}, step {k}: {step}"
+            );
+        }
+        assert!(steps[made].get("value").is_some());
+        let value = &steps[raised]["value"];
+        assert_eq!(value["type"], "builtins.RuntimeError", "{maker:?} {change}");
+        let text = String::from_utf8(ocio_testkit::oracle_values::bytes(&value["repr"])).unwrap();
+        let marker = match maker {
+            Maker::Manager => "(docs/improvements.md, U-184)",
+            _ => "(docs/deviations.md, D-9)",
+        };
+        assert!(text.contains(marker), "{maker:?} {change}: {text}");
+    }
+}
+
+/// What the manager's loader leaves alone, the port leaves alone too: changes that don't lock
+/// the cache of processors (`setName`, `setDescription`, `upgradeToLatestVersion` of a config
+/// at the latest version), and every change when the config's cache is off (upstream's call
+/// doesn't lock it then): the wheel makes the processor, and so does the port, each step equal.
+#[test]
+fn a_lut_loader_that_changes_the_config_without_the_cache_lock_is_as_the_wheels() {
+    start();
+    let mut scripts = Vec::new();
+    for change in changes() {
+        for cache_off in [false, true] {
+            if change.kills && !cache_off {
+                continue;
+            }
+            let tag = format!("quiet_{}_{cache_off}", change.name);
+            let (sc, _, _, raised) = change_script(Maker::Manager, &change, cache_off, &tag);
+            assert!(raised.is_none());
+            scripts.push(sc);
+        }
+    }
+    assert_eq!(scripts.len(), 10);
+    // The loaders ran in the wheel: the config has the name or the description they gave it.
+    let json: Vec<Value> = scripts.iter().map(Script::json).collect();
+    let theirs = common::wheel(&json);
+    let hex = |text: &str| text.bytes().map(|c| format!("{c:02x}")).collect::<String>();
+    for (k, text) in [
+        (4, "renamed"),
+        (5, "renamed"),
+        (6, "described"),
+        (7, "described"),
+    ] {
+        let report = theirs[k].to_string();
+        assert!(report.contains(&hex(text)), "script {k}: {report}");
+    }
+    guarded(move || run(&scripts));
+}

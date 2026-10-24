@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use ocio_ops::exception::{Exception, Result};
@@ -162,6 +163,9 @@ pub struct GenericCache<K, V> {
     env_disable_all_caches: bool,
     /// `m_enabled` and `m_entries`, under `m_mutex`.
     state: Mutex<CacheState<K, V>>,
+    /// How many times [`GenericCache::clear`] and [`GenericCache::enable`] ran: upstream's
+    /// two `noexcept` functions that lock `m_mutex` ([`GenericCache::locks_by_changes`]).
+    locks_by_changes: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -194,6 +198,7 @@ impl<K: Ord, V> GenericCache<K, V> {
                 enabled: true,
                 entries: BTreeMap::new(),
             }),
+            locks_by_changes: AtomicU64::new(0),
         }
     }
 
@@ -203,12 +208,31 @@ impl<K: Ord, V> GenericCache<K, V> {
 
     /// Port of `GenericCache::clear` (Caching.h:45-50 @ v2.5.2).
     pub fn clear(&self) {
+        self.locks_by_changes.fetch_add(1, Ordering::SeqCst);
         self.state().entries.clear();
     }
 
     /// Port of `GenericCache::enable` (Caching.h:52-57 @ v2.5.2).
     pub fn enable(&self, enable: bool) {
+        self.locks_by_changes.fetch_add(1, Ordering::SeqCst);
         self.state().enabled = enable;
+    }
+
+    /// How many times [`GenericCache::clear`] and [`GenericCache::enable`] ran on this cache.
+    /// Upstream's two `noexcept` functions lock `m_mutex`: run by the thread that holds it
+    /// ([`GenericCache::is_held_by_this_thread`]), the C++ runtime ends the process
+    /// (docs/improvements.md, U-184). For the Python module, which tells a change of a config
+    /// during the making of its processor.
+    #[doc(hidden)]
+    pub fn locks_by_changes(&self) -> u64 {
+        self.locks_by_changes.load(Ordering::SeqCst)
+    }
+
+    /// Whether this thread holds the cache's lock now ([`GenericCache::lock`]).
+    #[doc(hidden)]
+    pub fn is_held_by_this_thread(&self) -> bool {
+        let address = std::ptr::from_ref(self) as usize;
+        HELD.with_borrow(|held| held.contains(&address))
     }
 
     /// Port of `GenericCache::isEnabled` (Caching.h:59 @ v2.5.2).

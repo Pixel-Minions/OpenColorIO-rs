@@ -32,7 +32,7 @@
 //! `IdentifyInterchangeSpace`, `GetProcessorToBuiltinColorSpace`,
 //! `GetProcessorFromBuiltinColorSpace`, `GetProcessorFromConfigs`) come with chunk 6.8a.
 
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::ThreadId;
 
 use ocio::builtinconfigs::builtin_config_registry::resolve_config_path;
@@ -101,6 +101,9 @@ pub(crate) struct ConfigNode {
     /// The library's copy of the config last made for an app helper ([`config_arc`]), and the
     /// config's [`state`] then.
     snapshot: Option<Snapshot>,
+    /// Every copy [`config_arc`] made that is alive: the library works on them where
+    /// upstream works on the config itself ([`changed_while_making_a_processor`]).
+    copies: Vec<Weak<Config>>,
 }
 
 /// A copy of a config ([`config_arc`]) and the config's [`state`] when it was made.
@@ -145,6 +148,17 @@ fn write_back<T, N>(
 }
 
 impl ConfigNode {
+    /// Whether this thread is making a processor of a copy of the config ([`config_arc`]),
+    /// which holds the lock of the copy's cache of processors, as upstream's holds the
+    /// config's.
+    fn holds_a_processor_cache(&mut self) -> bool {
+        self.copies.retain(|c| c.strong_count() > 0);
+        self.copies
+            .iter()
+            .filter_map(Weak::upgrade)
+            .any(|c| c.processor_cache_is_held_by_this_thread())
+    }
+
     /// The node of a config of its own.
     pub(crate) fn new(config: Config) -> ConfigNode {
         ConfigNode {
@@ -154,6 +168,7 @@ impl ConfigNode {
             view_transforms: Vec::new(),
             named_transforms: Vec::new(),
             snapshot: None,
+            copies: Vec::new(),
         }
     }
 
@@ -282,6 +297,20 @@ fn busy() -> PyErr {
         "Config: a callback of a call on this config uses it while the library works on it, \
          which the port can't share (docs/deviations.md, D-9)",
     )
+}
+
+/// The port's error for a change of a config made by a callback (a config I/O proxy loading a
+/// LUT, say) of the library's making of a processor of that config on this thread: upstream's
+/// `Config::getProcessor` holds the config's cache of processors locked then, and every change
+/// of the config locks it again to flush it (`resetCacheIDs`, `clearProcessorCache`,
+/// `setProcessorCacheFlags`: `noexcept`), which ends the process
+/// (docs/improvements.md, U-184).
+fn changed_while_making_a_processor() -> PyErr {
+    pyo3::exceptions::PyRuntimeError::new_err(concat!(
+        "Config: a callback of the making of a processor of this config changed the config, ",
+        "which locks the cache of processors that call holds: OCIO 2.5.2 ends the process, ",
+        "which the port can't match (docs/improvements.md, U-184)",
+    ))
 }
 
 /// The port's error for a call that would wait for a config whose call waits, through the
@@ -445,7 +474,15 @@ pub(crate) fn with_config<R>(
 ) -> PyResult<R> {
     let mut guard = lock_config(rc)?;
     guard.node().sync()?;
-    f(guard.node())
+    let before = guard.node().config.processor_cache_locks_by_changes();
+    let result = f(guard.node());
+    // The change was made, as upstream's runs it before it dies.
+    if guard.node().config.processor_cache_locks_by_changes() != before
+        && guard.node().holds_a_processor_cache()
+    {
+        return Err(changed_while_making_a_processor());
+    }
+    result
 }
 
 /// `f` of two configs (the same one twice, once locked; two in the order of their keys, so
@@ -482,6 +519,8 @@ pub(crate) fn config_arc(rc: &ConfigRc) -> PyResult<Arc<Config>> {
         }
         let config = Arc::new(node.config.clone_as_is());
         node.snapshot = Some((now, Arc::clone(&config)));
+        node.copies.retain(|c| c.strong_count() > 0);
+        node.copies.push(Arc::downgrade(&config));
         Ok(config)
     })
 }
