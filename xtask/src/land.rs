@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! `cargo xtask land <branch> [--no-rocky]`: lands a card branch on `phase0`.
+//! `cargo xtask land <branch> [--no-rocky] [--per-commit]`: lands a card branch on `phase0`.
 //!
 //! From the main checkout, on `phase0`, with a clean tree:
 //! 1. replays the branch's commits onto `phase0` in a temporary worktree (`target/land/wt`),
 //!    first without gates: a commit whose replay comes out empty, or that the replay drops,
 //!    although the original changed something, stops the land (a merge lost its changes); for
-//!    a branch with merge commits, the replay must also drop nothing they carry. Then with
+//!    a branch with merge commits, the replay must also drop nothing they carry. That replay
+//!    is what lands (owner decision, 2026-10-24: each chunk already passed its own gate, and
+//!    step 4 gates the result). With `--per-commit` it replays again with
 //!    `git rebase --exec "cargo xtask gate --touched"`, which gates every commit in debug on
 //!    this platform: fmt, clippy (the whole workspace, all targets) and `xtask ci`, and the
 //!    tests of only the packages the commit changes (the whole workspace for changes to the
@@ -44,14 +46,15 @@ pub(crate) const LAND_LOCK_ENV: &str = "OCIO_RS_LAND_LOCK";
 pub(crate) const LAND_ID_ENV: &str = "OCIO_RS_LAND_ID";
 
 pub(crate) const USAGE: &str = "\
-cargo xtask land <branch> [--no-rocky]
+cargo xtask land <branch> [--no-rocky] [--per-commit]
 
 Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
   1. replays its commits onto phase0 in target/land/wt, first without gates: it stops if a
      commit that changes something replays as an empty one or is dropped (a merge lost its
      changes). The replays merge docs/improvements.md entry by entry (`xtask
-     merge-register`). Then it replays them with
-     `git rebase --exec \"cargo xtask gate --touched\"`: every commit is gated in debug on
+     merge-register`). That replay is what lands: each chunk already passed its own gate,
+     and step 4 gates the result (owner, 2026-10-24). With --per-commit it replays them again
+     with `git rebase --exec \"cargo xtask gate --touched\"`: every commit is gated in debug on
      this platform, with fmt, clippy and ci over the whole workspace and the tests of the
      packages it changes only (`cargo xtask gate --help`; each chunk already passed its own
      gate; release, Rocky Linux 9 and every test run on the merge commit, step 4); commits
@@ -66,30 +69,34 @@ Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
      `xtask oracle check-all` on the merge commit
   5. fast-forwards phase0 to it, and prints the push steps. It never pushes.
 
-  --no-rocky   skip Rocky Linux 9 everywhere (Docker unavailable); CI still runs it
+  --no-rocky     skip Rocky Linux 9 everywhere (Docker unavailable); CI still runs it
+  --per-commit   also gate every replayed commit (`gate --touched`), as lands did before
+                 2026-10-24
 
 One land runs at a time (an OS lock on target/land/lock). If a land is killed, the rebase and
 gate it started carry on until the gate's next step, which sees that land has exited and
 stops; a new land waits for no one, but refuses to start while such a gate still runs.
 ";
 
-pub(crate) fn parse(args: &[&str]) -> Result<(String, bool), String> {
+pub(crate) fn parse(args: &[&str]) -> Result<(String, bool, bool), String> {
     let mut branch = None;
     let mut rocky = true;
+    let mut per_commit = false;
     for &arg in args {
         match arg {
             "--rocky" => rocky = true,
             "--no-rocky" => rocky = false,
+            "--per-commit" => per_commit = true,
             _ if arg.starts_with('-') => return Err(format!("unknown land option `{arg}`")),
             _ if branch.is_none() => branch = Some(arg.to_string()),
             _ => return Err(format!("land takes one branch\n\n{USAGE}")),
         }
     }
     let branch = branch.ok_or_else(|| format!("land needs a branch\n\n{USAGE}"))?;
-    Ok((branch, rocky))
+    Ok((branch, rocky, per_commit))
 }
 
-pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
+pub(crate) fn run(branch: &str, rocky: bool, per_commit: bool) -> Result<(), String> {
     let root = crate::root();
     let git = |args: &[&str]| crate::git(&root, args).map(|s| s.trim().to_string());
 
@@ -207,33 +214,41 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
         check_replay(&root, &base, &tip, plain_tip.trim()).map_err(stopped)?;
         println!("land: replaying drops nothing the branch's merge commits carry");
     }
-    crate::git(&wt, &["checkout", "--quiet", "--detach", &tip])?;
+    // 1. The plain replay lands: each chunk already passed its own `gate --staged` (with
+    // --release --rocky when numeric), and step 4 runs the full gate, every test, release and
+    // Rocky Linux 9 included, on the merged result (owner decision, 2026-10-24: gating every
+    // replayed commit took most of a land). `--per-commit` replays again, gating each commit.
+    if per_commit {
+        crate::git(&wt, &["checkout", "--quiet", "--detach", &tip])?;
 
-    // 1. Replay, gating every commit lightly: fmt, clippy, ci and the debug tests of the
-    // packages it changes (`gate --touched`), on this platform. Each chunk already passed its
-    // own `gate --staged` (with --release --rocky when numeric), and step 4 runs the full gate,
-    // every test, release and Rocky Linux 9 included, on the merged result (owner decision,
-    // 2026-10-01: the per-commit Rocky and release passes made lands the slowest step; and
-    // 2026-10-21: the per-commit tests of the whole workspace, about 20 minutes each).
-    let exec = "cargo xtask gate --touched";
-    println!("land: git rebase --exec \"{exec}\" {}", short(&base));
-    let mut rebase = Command::new("git");
-    rebase
-        .current_dir(&wt)
-        .args(&driver)
-        .args([
-            "rebase",
-            "--no-autosquash",
-            "--no-update-refs",
-            "--exec",
-            exec,
-        ])
-        .arg(&base);
-    let replayed = land_env(&mut rebase, &build, &lock)
-        .status()
-        .map_err(|e| format!("could not run git rebase: {e}"))?;
-    if !replayed.success() {
-        return Err(replay_failure(&wt));
+        // Replay, gating every commit lightly: fmt, clippy, ci and the debug tests of the
+        // packages it changes (`gate --touched`), on this platform. Each chunk already passed its
+        // own `gate --staged` (with --release --rocky when numeric), and step 4 runs the full gate,
+        // every test, release and Rocky Linux 9 included, on the merged result (owner decision,
+        // 2026-10-01: the per-commit Rocky and release passes made lands the slowest step; and
+        // 2026-10-21: the per-commit tests of the whole workspace, about 20 minutes each).
+        let exec = "cargo xtask gate --touched";
+        println!("land: git rebase --exec \"{exec}\" {}", short(&base));
+        let mut rebase = Command::new("git");
+        rebase
+            .current_dir(&wt)
+            .args(&driver)
+            .args([
+                "rebase",
+                "--no-autosquash",
+                "--no-update-refs",
+                "--exec",
+                exec,
+            ])
+            .arg(&base);
+        let replayed = land_env(&mut rebase, &build, &lock)
+            .status()
+            .map_err(|e| format!("could not run git rebase: {e}"))?;
+        if !replayed.success() {
+            return Err(replay_failure(&wt));
+        }
+    } else {
+        println!("land: the plain replay lands; the full gate checks its result");
     }
     let rebased = crate::git(&wt, &["rev-parse", "HEAD"])?.trim().to_string();
     if rebased == base {
@@ -927,14 +942,22 @@ mod tests {
     #[test]
     fn parses_arguments() {
         // Rocky Linux 9 is the default; --no-rocky opts out.
-        assert_eq!(parse(&["card/x"]).unwrap(), ("card/x".to_string(), true));
+        assert_eq!(
+            parse(&["card/x"]).unwrap(),
+            ("card/x".to_string(), true, false)
+        );
         assert_eq!(
             parse(&["--rocky", "card/x"]).unwrap(),
-            ("card/x".to_string(), true)
+            ("card/x".to_string(), true, false)
         );
         assert_eq!(
             parse(&["card/x", "--no-rocky"]).unwrap(),
-            ("card/x".to_string(), false)
+            ("card/x".to_string(), false, false)
+        );
+        // The plain replay lands; --per-commit also gates every replayed commit.
+        assert_eq!(
+            parse(&["card/x", "--per-commit"]).unwrap(),
+            ("card/x".to_string(), true, true)
         );
         assert!(parse(&[]).is_err());
         assert!(parse(&["a", "b"]).is_err());
