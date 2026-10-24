@@ -1545,9 +1545,18 @@ impl RgbCurve {
         curve
     }
 
-    /// The transform's spec: the binding's constructor of the curves (object specs), the
-    /// style and whether it is dynamic, then `setBypassLinToLog` (the direction follows).
-    pub(crate) fn calls(&self) -> Calls {
+    /// Whether the transform is dynamic.
+    pub(crate) fn is_dynamic(&self) -> bool {
+        self.dynamic
+    }
+
+    /// The style.
+    pub(crate) fn style(&self) -> GradingStyle {
+        self.style
+    }
+
+    /// The curves as an object spec: `GradingRGBCurve(red=, green=, blue=, master=)`.
+    pub(crate) fn value_spec(&self) -> serde_json::Value {
         let f = |v: f32| f64_spec(f64::from(v));
         let curve = |c: usize| {
             let values: Vec<serde_json::Value> = self.curves[c]
@@ -1558,18 +1567,21 @@ impl RgbCurve {
             serde_json::json!({"object": {"class": "GradingBSplineCurve", "args": [values],
                 "calls": [["setSlopes", slopes]]}})
         };
+        serde_json::json!({"object": {"class": "GradingRGBCurve", "args": {
+            "red": curve(0), "green": curve(1), "blue": curve(2), "master": curve(3),
+        }}})
+    }
+
+    /// The transform's spec: the binding's constructor of the curves (object specs), the
+    /// style and whether it is dynamic, then `setBypassLinToLog` (the direction follows).
+    pub(crate) fn calls(&self) -> Calls {
         let style = match self.style {
             GradingStyle::Log => "GRADING_LOG",
             GradingStyle::Lin => "GRADING_LIN",
             GradingStyle::Video => "GRADING_VIDEO",
         };
         Calls::new("GradingRGBCurveTransform")
-            .arg_fixed(
-                "values",
-                serde_json::json!({"object": {"class": "GradingRGBCurve", "args": {
-                    "red": curve(0), "green": curve(1), "blue": curve(2), "master": curve(3),
-                }}}),
-            )
+            .arg_fixed("values", self.value_spec())
             .arg_fixed("style", serde_json::json!({"enum": style}))
             .arg_fixed("dynamic", serde_json::json!(self.dynamic))
             .fixed("setBypassLinToLog", serde_json::json!(self.bypass))
