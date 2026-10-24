@@ -5965,7 +5965,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   runtime throws `std::system_error` ("resource deadlock would occur"), which reaches Python as
   RuntimeError "resource deadlock would occur: resource deadlock would occur" in the logging
   function (probed on Windows, 2026-10-24); libstdc++'s mutex on Linux is a pthread mutex, which
-  waits for itself: the Linux wheel's process hangs (probed in Rocky Linux 9, 2026-10-24).
+  waits for itself: the Linux wheel's process hangs (probed in Rocky Linux 9, 2026-10-24). The
+  Windows outcome is defined only while that error never leaves the logging function: one that
+  lets it out (a plain Python logging function that makes a menu) ends the wheel's process, as
+  any exception out of that logging does (U-183).
 - **Who notices:** an application whose logging function makes color space menus (with the
   logging level at info).
 - **A fix:** log after the mutex is released, or make the menus outside it.
@@ -6022,3 +6025,27 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `a_lut_loader_that_makes_the_same_processor_again_is_u182` (a mixing manager's LUT loader
   making the manager's processor, and another config's over the same file: compared with the
   wheel on Windows, the port's error and the outer processor on Linux; a 120 s limit).
+
+### U-183. A logging function's exception out of a menu's info message
+
+- **Upstream:** when a menu's parameters select nothing as given (app categories that match no
+  color space, encodings ignored, ...), `FindColorSpaceInfos` logs that at the info level from
+  the destructor of its `LogMessageHelper` (CategoryHelpers.cpp:297-346 @ v2.5.2), which is
+  implicitly `noexcept`. A logging function that raises there (a Python one: pybind11's
+  `error_already_set`) ends in `std::terminate`: the wheel's process aborts (Windows: exit
+  status 0xC0000409, the C runtime's fail-fast, probed 2026-10-24; Linux: "terminate called
+  after throwing an instance of 'pybind11::error_already_set'", SIGABRT, probed in Rocky Linux
+  9, 2026-10-24).
+  That includes a logging function that makes a menu and lets the error of U-181 out.
+- **Who notices:** an application whose logging function can raise, with the logging level at
+  info, while it makes color space menus.
+- **A fix:** log outside the destructor, or catch the logging function's exceptions there.
+- **Status:** the port doesn't end the process: the logging function's exception leaves the
+  menu's making, as from any other logging call (`ColorSpaceMenuHelper` raises it in Python;
+  the menus' lock and U-181's flag are released). In `p6-after-p5` (6.7c,
+  `crates/ocio/src/apphelpers/category_helpers.rs`, `LogMessageHelper`'s `Drop`);
+  `crates/ocio-py/tests/callbacks_oracle.rs`, `a_logging_function_that_raises_in_a_menu_is_u183`
+  (`int` as the logging function, and one that makes a menu and lets U-181's error out: the
+  wheel's crash report from py_eval, the steps before the menu succeeding in the wheel; the
+  port's menu raises `int`'s ValueError on the message the wheel logs, and the inner menu's
+  error, the wheel's on Windows and U-181's on Linux; a time limit).

@@ -32,7 +32,8 @@
 //!
 //! And, without the wheel, where its process dies or it keeps a value outside an enum: `None`
 //! for the proxy (U-124), for `LogMessage`'s message (U-123), a logging level outside the
-//! enumerators (U-112).
+//! enumerators (U-112); against the wheel's crash report, a logging function whose exception
+//! leaves a menu's info message (U-183).
 //!
 //! The logging and hash functions are the process's: one test runs every script in turn.
 #![cfg(feature = "python")]
@@ -1012,6 +1013,19 @@ fn callbacks_as_the_wheels() {
         Ok(Err(panic)) => std::panic::resume_unwind(panic),
         Err(_) => panic!("a menu made by a logging function waits for the menus' lock"),
     }
+
+    // A logging function whose exception leaves a menu's info logging (U-183), on a thread of
+    // its own: its inner menu (U-181) waits for the menus' lock in a regression.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(a_logging_function_that_raises_in_a_menu_is_u183);
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(300)) {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(_) => panic!("a logging function's menu waits for the menus' lock"),
+    }
 }
 
 /// U-181: a menu whose app categories match no color space logs that, at the info level, while
@@ -1105,6 +1119,182 @@ fn a_menu_made_while_a_menu_is_made() {
     );
     let text = String::from_utf8(ocio_testkit::oracle_values::bytes(&value["repr"])).unwrap();
     assert!(text.contains("(docs/improvements.md, U-181)."), "{text}");
+}
+
+/// What a logging function does with a menu's info message (U-183).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Logger {
+    /// It raises: `int`, whose ValueError the message gives.
+    Raises,
+    /// It makes another menu while the library makes one (U-181), and lets its error out: the
+    /// `__getitem__` of a `collections.defaultdict` whose factory is the `run` of a thread
+    /// (never started) making the inner menu.
+    MakesAMenu,
+    /// None of the script's own: the step interpreter's, which records the message.
+    Interpreters,
+}
+
+/// U-183: a menu whose app categories match no color space logs that at the info level from
+/// the destructor of a `LogMessageHelper` (CategoryHelpers.cpp:304 @ v2.5.2, implicitly
+/// `noexcept`), so a logging function's exception ends the wheel's process there. The script:
+/// a config, the menu's parameters (and the inner menu's), the logging level at info and the
+/// logging function `logger`, and last, the menu.
+fn menu_logger_script(logger: Logger) -> Script {
+    let mut sc = Script::new();
+    let y = MENU_CONFIG
+        .replace("menu logging", "u183")
+        .replace("colorspace: missing", "colorspace: raw");
+    let cfg = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(&y)]);
+    let mut params = Vec::new();
+    for categories in ["u183 inner", "u183 outer"] {
+        let p = sc.call(n("OCIO.ColorSpaceMenuParameters"), vec![r(cfg)]);
+        sc.call(ra(p, "setAppCategories"), vec![s(categories)]);
+        sc.call(ra(p, "setTreatNoCategoryAsAny"), vec![b(false)]);
+        params.push(p);
+    }
+    sc.call(
+        n("OCIO.SetLoggingLevel"),
+        vec![n("OCIO.LOGGING_LEVEL_INFO")],
+    );
+    match logger {
+        Logger::Raises => {
+            sc.call(n("OCIO.SetLoggingFunction"), vec![n("int")]);
+        }
+        Logger::MakesAMenu => {
+            let thread = sc.call_kw(
+                n("threading.Thread"),
+                vec![],
+                vec![
+                    ("target", n("OCIO.ColorSpaceMenuHelper")),
+                    ("args", t(vec![r(params[0])])),
+                ],
+                Expect::Value,
+            );
+            sc.unrepr(thread);
+            let collections = sc.call(
+                n("operator.getitem"),
+                vec![n("threading._sys.modules"), s("collections")],
+            );
+            let factory = sc.call(ra(collections, "defaultdict"), vec![ra(thread, "run")]);
+            sc.unrepr(factory);
+            sc.call(
+                n("OCIO.SetLoggingFunction"),
+                vec![ra(factory, "__getitem__")],
+            );
+        }
+        Logger::Interpreters => {}
+    }
+    sc.call(n("OCIO.ColorSpaceMenuHelper"), vec![r(params[1])]);
+    sc
+}
+
+/// U-183: the wheel's process dies where a logging function's exception leaves a menu's info
+/// logging (its crash report from py_eval; every step before the menu succeeds); the port's
+/// menu raises that exception: the ValueError of `int` given the message the wheel logs, and the
+/// error of the inner menu (U-181: on Windows, the one the wheel's inner menu raises when the
+/// logging function keeps it, `menu_in_menu_script`; on Linux, where the wheel's inner menu
+/// waits for itself, U-181's error, without the wheel).
+fn a_logging_function_that_raises_in_a_menu_is_u183() {
+    let loggers = [Logger::Raises, Logger::MakesAMenu];
+    // The Linux wheel's inner menu hangs (U-181): only the raising logger ends its process.
+    let in_wheel = if cfg!(windows) {
+        &loggers[..]
+    } else {
+        &loggers[..1]
+    };
+    let full: Vec<Value> = in_wheel
+        .iter()
+        .map(|&l| menu_logger_script(l).json())
+        .collect();
+    let result = ocio_testkit::Oracle::get()
+        .call("py_eval", json!({ "scripts": full }), &[])
+        .result;
+    let reports = result["scripts"].as_array().unwrap();
+    assert_eq!(reports.len(), in_wheel.len());
+    for (logger, report) in in_wheel.iter().zip(reports) {
+        let code = report["crashed"]["returncode"].as_i64();
+        assert!(code.is_some_and(|c| c != 0), "{logger:?}: {report}");
+    }
+    // The steps before the menu succeed in the wheel; the message it logs; the inner menu's
+    // error, when the logging function keeps it (Windows).
+    let mut shortened: Vec<Value> = in_wheel
+        .iter()
+        .map(|&l| {
+            let mut steps = menu_logger_script(l).json();
+            steps["steps"].as_array_mut().unwrap().pop();
+            steps
+        })
+        .collect();
+    let logged = menu_logger_script(Logger::Interpreters);
+    shortened.push(logged.json());
+    let inner = cfg!(windows).then(|| {
+        let (mut sc, raised) = menu_in_menu_script();
+        let text = sc.call(n("str"), vec![r(raised)]);
+        shortened.push(sc.json());
+        text
+    });
+    let theirs = common::wheel(&shortened);
+    for (logger, report) in in_wheel.iter().zip(&theirs) {
+        for step in report["steps"].as_array().unwrap() {
+            assert!(step.get("value").is_some(), "{logger:?}: {step}");
+        }
+    }
+    let menu = &theirs[in_wheel.len()]["steps"][logged.steps.len() - 1];
+    assert!(menu.get("value").is_some(), "{menu}");
+    let logs = menu["log"].as_array().unwrap();
+    assert_eq!(logs.len(), 1, "{menu}");
+    let wheel_log = String::from_utf8(ocio_testkit::oracle_values::bytes(&logs[0])).unwrap();
+    let wheel_log = wheel_log.trim_end_matches(char::from(10));
+    assert!(wheel_log.starts_with("[OpenColorIO Info]: "), "{wheel_log}");
+    let inner_message = inner.map(|k| {
+        let value = &theirs[in_wheel.len() + 1]["steps"][k]["value"];
+        String::from_utf8(ocio_testkit::oracle_values::bytes(&value["str"])).unwrap()
+    });
+
+    for logger in loggers {
+        // The process's logging level, set again after the script, with its logging function.
+        let mut level = Script::new();
+        level.call(n("OCIO.GetLoggingLevel"), vec![]);
+        let level = common::port(&level.json());
+        let name = level["steps"][0]["value"]["enum"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let sc = menu_logger_script(logger);
+        let ours = common::port(&sc.json());
+        let mut reset = Script::new();
+        reset.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+        reset.call(
+            n("OCIO.SetLoggingLevel"),
+            vec![n(&format!("OCIO.LoggingLevel.{name}"))],
+        );
+        common::port(&reset.json());
+
+        let steps = ours["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), sc.steps.len(), "{logger:?}");
+        let (last, before) = steps.split_last().unwrap();
+        for step in before {
+            assert!(step.get("value").is_some(), "{logger:?}: {step}");
+        }
+        let text = message(last);
+        match (logger, &inner_message) {
+            (Logger::Raises, _) => {
+                assert_eq!(last["raised"]["type"], "builtins.ValueError", "{last}");
+                assert!(text.contains(wheel_log), "{text} / {wheel_log}");
+            }
+            (_, Some(inner_message)) => {
+                assert_eq!(last["raised"]["type"], "builtins.RuntimeError", "{last}");
+                assert_eq!(&text, inner_message);
+            }
+            (_, None) => {
+                assert_eq!(
+                    last["raised"]["type"], "PyOpenColorIO.PyOpenColorIO.Exception",
+                    "{last}"
+                );
+                assert!(text.ends_with("(docs/improvements.md, U-181)."), "{text}");
+            }
+        }
+    }
 }
 
 /// A config whose view `v` shows a color space it doesn't have: it doesn't validate.
