@@ -5339,8 +5339,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `repr` writes no `colorSpaceType`, and a menu of them has no color space;
   `a_search_reference_type_outside_the_enumerators_is_the_ports_error`);
   the direction of `DisplayViewHelpers.GetProcessor`, which the wheel's display view transform
-  keeps and its validation refuses ("DisplayViewTransform validation failed: ...: invalid
-  direction."; `a_display_view_direction_outside_the_enumerators_is_the_ports_error`);
+  keeps and the config's `getProcessor` validates ("DisplayViewTransform validation failed:
+  ...: invalid direction."), unless the config's processor cache already holds the processor
+  of that display and view in the inverse direction, whose cache key is the same (the
+  transform's text writes a direction other than forward as `inverse`, ParseUtils.cpp:133-138
+  @ v2.5.2): the cache answers without validating, and then the pipeline the helper builds
+  refuses it ("LegacyViewingPipeline is not valid: DisplayViewTransform validation failed:
+  ...: invalid direction."), or, for a view whose processor has a dynamic exposure and gamma
+  and without a channel view, the wheel returns the cached inverse processor (probed on
+  Windows, 2026-10-24); the port raises before any of these
+  (`a_display_view_direction_outside_the_enumerators_is_the_ports_error`);
   and the direction of `MixingColorSpaceManager.getProcessor`, with which the wheel makes a
   processor (`a_mixing_direction_outside_the_enumerators_is_the_ports_error`).
 
@@ -5770,7 +5778,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   it had (owner decision 2026-10-22, P5-3 c: setters taking `Option<&Transform>` and returning
   `Result`, as `ColorSpace::set_transform`). In `p5-helpers-2` (5.7d,
   `apphelpers/legacy_viewing_pipeline.rs`, `editable_copy`); `legacy_viewing_pipeline_oracle.rs`
-  (`setters_refuse_an_invalid_fixed_function`).
+  (`setters_refuse_an_invalid_fixed_function`). The Python binding's `setLinearCC`,
+  `setColorTimingCC`, `setChannelView` and `setDisplayCC` raise that error (the text the wheel
+  raises for a transform made with those values: `FixedFunctionTransform(style, params)`, a
+  curve transform's `setValue`) and keep the transform they had, where the wheel's process dies
+  (`p6-after-p5`, 6.7c, `crates/ocio-py/src/apphelpers/py_legacy_viewing_pipeline.rs`,
+  `cc_setter`); `apphelpers_oracle.rs`, `a_pipeline_given_an_invalid_transform_raises`
+  (against `py_eval`'s crash report).
 
 ### U-152. A color picking role that names no color space
 

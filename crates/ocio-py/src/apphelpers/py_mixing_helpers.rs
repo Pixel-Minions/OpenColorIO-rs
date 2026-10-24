@@ -50,20 +50,27 @@ pub(crate) struct MixNode {
 type MixRc = Shared<MixNode>;
 
 /// `f` of the library's manager of `rc`, its config the node's as it is now (read before the
-/// manager is locked: the config's lock can wait for another thread's call).
+/// manager is locked: the config's lock can wait for another thread's call). `f` gets a copy
+/// of the manager, made under its lock and released before: the library can run Python code
+/// (the config's I/O proxy loading a LUT, a logging function), which may read or change the
+/// manager, as the wheel's can.
 fn with_current<R>(
     rc: &MixRc,
-    f: impl FnOnce(&mut MixingColorSpaceManager, &ocio::Config) -> PyResult<R>,
+    f: impl FnOnce(&MixingColorSpaceManager, &ocio::Config) -> PyResult<R>,
 ) -> PyResult<R> {
     loop {
         let config = rc.lock().config.clone();
         let arc = config_arc(&config)?;
-        let mut node = rc.lock();
-        // Another thread may have refreshed the manager meanwhile.
-        if node.config.same(&config) {
+        let manager = {
+            let mut node = rc.lock();
+            // Another thread may have refreshed the manager meanwhile.
+            if !node.config.same(&config) {
+                continue;
+            }
             node.manager.set_config_as_is(Arc::clone(&arc));
-            return f(&mut node.manager, &arc);
-        }
+            node.manager.clone()
+        };
+        return f(&manager, &arc);
     }
 }
 

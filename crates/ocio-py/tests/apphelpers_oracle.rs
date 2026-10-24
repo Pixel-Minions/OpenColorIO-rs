@@ -19,7 +19,7 @@ mod common;
 
 use std::sync::Once;
 
-use common::script::{Expect, Script, b, compare, f, i, l, n, none, r, ra, s};
+use common::script::{Expect, Script, b, by, compare, d, f, i, l, n, none, r, ra, s, t};
 use pyo3::prelude::*;
 use pyo3::types::PyCFunction;
 use serde_json::Value;
@@ -1125,6 +1125,94 @@ fn a_display_view_direction_outside_the_enumerators_is_the_ports_error() {
     outside_enumerators(&sc, &[], &[refused]);
 }
 
+/// A config whose view `vv` shows the color space `dyn` (its transform set by the script).
+const DYNAMIC_VIEW_CONFIG: &str = "ocio_profile_version: 2\nroles: {default: raw, scene_linear: raw}\n\
+     displays: {dd: [!<View> {name: vv, colorspace: dyn}]}\n\
+     colorspaces: [!<ColorSpace> {name: raw}, !<ColorSpace> {name: dyn}]\n";
+
+/// The same direction once the config's processor cache holds the view's inverse processor,
+/// whose cache key is the same (the direction's text is `inverse`, ParseUtils.cpp:133-138): the
+/// wheel's cache answers without validating, and the pipeline the helper builds refuses the
+/// direction (`LegacyViewingPipelineImpl::validate`'s text), or, for a view whose processor
+/// has a dynamic exposure and gamma and without a channel view, the helper returns the cached
+/// processor (DisplayViewHelpers.cpp:54-88). The port's error (U-112) in each case.
+#[test]
+fn a_display_view_direction_outside_the_enumerators_after_the_inverse_is_the_ports_error() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "display view direction outside, cached");
+    let dir = sc.call(n("OCIO.TransformDirection"), vec![i(5)]);
+    let get = |sc: &mut Script, cfg: usize, names: [&str; 3], dir: Value, expect: Expect| {
+        sc.call_kw(
+            n("OCIO.DisplayViewHelpers.GetProcessor"),
+            vec![r(cfg)],
+            vec![
+                ("workingSpaceName", s(names[0])),
+                ("displayName", s(names[1])),
+                ("viewName", s(names[2])),
+                ("direction", dir),
+            ],
+            expect,
+        )
+    };
+    let sample = ["lin_1", "DISP_1", "VIEW_1"];
+    let first = get(&mut sc, cfg, sample, r(dir), Expect::Raised);
+    let p = get(
+        &mut sc,
+        cfg,
+        sample,
+        n("OCIO.TRANSFORM_DIR_INVERSE"),
+        Expect::Value,
+    );
+    sc.unrepr(p);
+    let cached = get(&mut sc, cfg, sample, r(dir), Expect::Raised);
+    // A view whose processor is dynamic.
+    let dyn_cfg = sc.call(
+        n("OCIO.Config.CreateFromStream"),
+        vec![s(DYNAMIC_VIEW_CONFIG)],
+    );
+    let ec = sc.call_kw(
+        n("OCIO.ExposureContrastTransform"),
+        vec![],
+        vec![("style", n("OCIO.EXPOSURE_CONTRAST_LINEAR"))],
+        Expect::Value,
+    );
+    sc.call(ra(ec, "makeExposureDynamic"), vec![]);
+    sc.call(ra(ec, "makeGammaDynamic"), vec![]);
+    let cs = sc.call(ra(dyn_cfg, "getColorSpace"), vec![s("dyn")]);
+    sc.call(
+        ra(cs, "setTransform"),
+        vec![r(ec), n("OCIO.COLORSPACE_DIR_FROM_REFERENCE")],
+    );
+    sc.call(ra(dyn_cfg, "addColorSpace"), vec![r(cs)]);
+    let names = ["raw", "dd", "vv"];
+    let dyn_first = get(&mut sc, dyn_cfg, names, r(dir), Expect::Raised);
+    let p = get(
+        &mut sc,
+        dyn_cfg,
+        names,
+        n("OCIO.TRANSFORM_DIR_INVERSE"),
+        Expect::Value,
+    );
+    sc.unrepr(p);
+    let returned = get(&mut sc, dyn_cfg, names, r(dir), Expect::Value);
+    sc.unrepr(returned);
+    outside_enumerators(&sc, &[returned], &[first, cached, dyn_first]);
+    // The wheel's texts: the pipeline's for the cached processor only.
+    let theirs = common::wheel(&[sc.json()]).remove(0);
+    for (k, pipeline) in [(first, false), (cached, true), (dyn_first, false)] {
+        let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
+            &theirs["steps"][k]["raised"]["message"],
+        ))
+        .unwrap();
+        assert_eq!(
+            message.starts_with("LegacyViewingPipeline is not valid: "),
+            pipeline,
+            "{message}"
+        );
+        assert!(message.contains("DisplayViewTransform"), "{message}");
+    }
+}
+
 /// A direction outside the enumerators, with which the wheel's manager makes a processor: the
 /// port's error (U-112).
 #[test]
@@ -1138,4 +1226,694 @@ fn a_mixing_direction_outside_the_enumerators_is_the_ports_error() {
         vec![s("lin_1"), s("DISP_1"), s("VIEW_1"), r(dir)],
     );
     outside_enumerators(&sc, &[stored], &[]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Python code the library runs while a helper's call works on it
+
+/// How long a guarded test may take (a pass takes seconds).
+const LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Runs `test` on a thread of its own and fails if it panics or takes longer than [`LIMIT`]:
+/// a regression can leave a thread waiting on a helper's lock with the GIL held, which no
+/// Python timeout interrupts (as `config_wait_cycles.rs`).
+fn guarded(test: impl FnOnce() + Send + 'static) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(test));
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(LIMIT) {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(_) => panic!("no end within {LIMIT:?}: a helper's lock waits for itself"),
+    }
+}
+
+/// Configs read through a proxy whose LUT loader calls `read()` and records what it returned
+/// (or raised), and the helpers' calls that load a LUT through it, in this thread and with
+/// another thread reading the helper while the loader waits for it. Each config's LUT has a
+/// name and a hash of its own (`RUN` tells this test's from another's), so no file cache
+/// answers for the proxy. Every wait has a timeout.
+const HELPER_CALLBACKS: &std::ffi::CStr = c"
+import threading
+Y = '''ocio_profile_version: 2
+roles: {default: raw, scene_linear: raw, color_picking: lut}
+displays: {d: [!<View> {name: v, colorspace: raw}]}
+colorspaces:
+  - !<ColorSpace> {name: raw}
+  - !<ColorSpace> {name: lut, from_scene_reference: !<FileTransform> {src: NAME.spi1d}}
+'''
+LUT = list(b'Version 1\\nFrom 0 1\\nLength 2\\nComponents 1\\n{\\n0\\n0.5\\n}\\n')
+count = [0]
+
+def outcome(f):
+    try:
+        return ('ok', f())
+    except Exception as e:
+        return (type(e).__name__, str(e))
+
+class Proxy(OCIO.PyConfigIOProxy):
+    def __init__(s, read):
+        super().__init__()
+        count[0] += 1
+        s.name = 'helper_%d_%d' % (RUN, count[0])
+        s.read = read
+        s.seen = []
+    def getConfigData(s):
+        return Y.replace('NAME', s.name)
+    def getLutData(s, path):
+        s.seen.append(outcome(s.read))
+        return LUT
+    def getFastLutFileHash(s, path):
+        return 'h' + s.name
+
+def pipeline(read):
+    p = OCIO.LegacyViewingPipeline()
+    px = Proxy(lambda: read(p))
+    cfg = OCIO.Config.CreateFromConfigIOProxy(px)
+    p.setDisplayViewTransform(OCIO.DisplayViewTransform(src='raw', display='d', view='v'))
+    p.setLinearCC(OCIO.FileTransform(src=px.name + '.spi1d'))
+    p.setLooksOverride('looks from the test')
+    p.setLooksOverrideEnabled(False)
+    return p, px, cfg
+
+def manager(read):
+    holder = []
+    px = Proxy(lambda: read(holder[0]))
+    cfg = OCIO.Config.CreateFromConfigIOProxy(px)
+    m = OCIO.MixingColorSpaceManager(cfg)
+    holder.append(m)
+    m.setSelectedMixingEncodingIdx(1)
+    return m, px, cfg
+
+def pipeline_reads():
+    p, px, cfg = pipeline(lambda p: (p.getLooksOverride(), p.getLooksOverrideEnabled(),
+                                     type(repr(p)).__name__, type(p.getLinearCC()).__name__))
+    done = outcome(lambda: type(p.getProcessor(cfg)).__name__)
+    return done, px.seen
+
+def manager_reads():
+    m, px, cfg = manager(lambda m: (m.getSelectedMixingEncodingIdx(),
+                                    type(m.getSlider()).__name__,
+                                    type(repr(m)).__name__, len(m.getMixingSpaces())))
+    done = outcome(lambda: type(m.getProcessor('raw', 'd', 'v')).__name__)
+    return done, px.seen
+
+def two_threads(make, read, call):
+    entered, answered = threading.Event(), threading.Event()
+    def wait():
+        entered.set()
+        return answered.wait(20)
+    obj, px, cfg = make(lambda o: wait())
+    got = {}
+    def other():
+        entered.wait(20)
+        got['read'] = outcome(lambda: read(obj))
+        answered.set()
+    t = threading.Thread(target=other, daemon=True)
+    t.start()
+    done = outcome(lambda: type(call(obj, cfg)).__name__)
+    t.join(30)
+    return done, px.seen, got.get('read'), t.is_alive()
+
+def pipeline_two_threads():
+    return two_threads(pipeline, lambda p: p.getLooksOverride(), lambda p, c: p.getProcessor(c))
+
+def manager_two_threads():
+    return two_threads(manager, lambda m: m.getSelectedMixingEncodingIdx(),
+                       lambda m, c: m.getProcessor('raw', 'd', 'v'))
+
+def menu_logs():
+    cfg = OCIO.Config.CreateRaw()
+    count[0] += 1
+    # A role naming no color space: the config doesn't validate, which the menu logs.
+    cfg.setRole('scene_linear', 'missing_%d_%d' % (RUN, count[0]))
+    params = OCIO.ColorSpaceMenuParameters(cfg)
+    params.setAppCategories('categories from the test')
+    seen = []
+    OCIO.SetLoggingFunction(lambda message: seen.append(outcome(params.getAppCategories)))
+    try:
+        done = outcome(lambda: type(OCIO.ColorSpaceMenuHelper(params)).__name__)
+    finally:
+        OCIO.ResetToDefaultLoggingFunction()
+    return done, seen
+";
+
+/// The globals [`HELPER_CALLBACKS`] runs in: the module and `RUN` (a number of this call's own).
+fn helper_globals(py: Python<'_>) -> Bound<'_, pyo3::types::PyDict> {
+    static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let globals = pyo3::types::PyDict::new(py);
+    globals
+        .set_item("OCIO", py.import("PyOpenColorIO").unwrap())
+        .unwrap();
+    globals
+        .set_item(
+            "RUN",
+            RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        )
+        .unwrap();
+    py.run(HELPER_CALLBACKS, Some(&globals), None)
+        .unwrap_or_else(|e| panic!("{e}"));
+    globals
+}
+
+/// The value of `expr` in `globals`.
+fn eval_in<'py>(
+    globals: &Bound<'py, pyo3::types::PyDict>,
+    expr: &std::ffi::CStr,
+) -> Bound<'py, PyAny> {
+    globals
+        .py()
+        .eval(expr, Some(globals), None)
+        .unwrap_or_else(|e| panic!("{expr:?}: {e}"))
+}
+
+/// `value == expected` in Python (`expected` a Python expression of the test's own values).
+fn assert_py_eq(
+    globals: &Bound<'_, pyo3::types::PyDict>,
+    value: &Bound<'_, PyAny>,
+    expected: &str,
+) {
+    let code = std::ffi::CString::new(expected).unwrap();
+    let expected_value = eval_in(globals, &code);
+    assert!(
+        value.eq(&expected_value).unwrap(),
+        "{} != {expected}",
+        value.repr().unwrap()
+    );
+}
+
+/// A pipeline's processor loads a LUT through the config's proxy, whose loader reads the
+/// pipeline (its looks override, `repr`, a transform): the wheel's call works on the pipeline
+/// it reads (`LegacyViewingPipelineImpl::getProcessor` takes no lock), and so does the port's,
+/// in this thread and in another one while the loader waits for it. The values read are the
+/// test's own.
+#[test]
+fn a_callback_reads_the_pipeline_that_makes_a_processor() {
+    guarded(|| {
+        start();
+        Python::attach(|py| {
+            let globals = helper_globals(py);
+            let got = eval_in(&globals, c"pipeline_reads()");
+            let read = "('ok', ('looks from the test', False, 'str', 'FileTransform'))";
+            assert_py_eq(&globals, &got, &format!("(('ok', 'Processor'), [{read}])"));
+            let got = eval_in(&globals, c"pipeline_two_threads()");
+            assert_py_eq(
+                &globals,
+                &got,
+                "(('ok', 'Processor'), [('ok', True)], ('ok', 'looks from the test'), False)",
+            );
+        });
+    });
+}
+
+/// As [`a_callback_reads_the_pipeline_that_makes_a_processor`], for a mixing manager whose
+/// color picking role's color space reads a LUT (`MixingColorSpaceManagerImpl::getProcessor`):
+/// the encoding the test selected, the slider, and one mixing space, the color picking role's
+/// (MixingHelpers.cpp:150-154 @ v2.5.2).
+#[test]
+fn a_callback_reads_the_manager_that_makes_a_processor() {
+    guarded(|| {
+        start();
+        Python::attach(|py| {
+            let globals = helper_globals(py);
+            let got = eval_in(&globals, c"manager_reads()");
+            assert_py_eq(
+                &globals,
+                &got,
+                "(('ok', 'Processor'), [('ok', (1, 'MixingSlider', 'str', 1))])",
+            );
+            let got = eval_in(&globals, c"manager_two_threads()");
+            assert_py_eq(
+                &globals,
+                &got,
+                "(('ok', 'Processor'), [('ok', True)], ('ok', 1), False)",
+            );
+        });
+    });
+}
+
+/// A menu of a config that doesn't validate logs a warning (ColorSpaceHelpers.cpp:385-395 @ v2.5.2),
+/// and the logging function reads the menu's parameters: the port's parameters aren't locked
+/// while the library makes the menu.
+#[test]
+fn a_logging_function_reads_the_parameters_of_a_menu_being_made() {
+    guarded(|| {
+        start();
+        Python::attach(|py| {
+            let globals = helper_globals(py);
+            let got = eval_in(&globals, c"menu_logs()");
+            let (done, seen) = (got.get_item(0).unwrap(), got.get_item(1).unwrap());
+            assert_py_eq(&globals, &done, "('ok', 'ColorSpaceMenuHelper')");
+            // Other tests of this process may log meanwhile: every message reads the same.
+            assert!(seen.len().unwrap() > 0);
+            for read in seen.try_iter().unwrap() {
+                assert_py_eq(
+                    &globals,
+                    &read.unwrap(),
+                    "('ok', 'categories from the test')",
+                );
+            }
+        });
+    });
+}
+
+// ---------------------------------------------------------------------------------------------
+// The verifier's cases (6.7c)
+
+/// `ACES_GAMUT_COMP_13`'s parameters in upstream's tests (FixedFunctionTransformTest.py:98).
+fn gamut_comp_params() -> Value {
+    l([1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2]
+        .into_iter()
+        .map(f)
+        .collect())
+}
+
+/// A pipeline without a display view transform refuses to make a processor before it looks at
+/// its other transforms (`LegacyViewingPipelineImpl::validate`), one of which Python made
+/// invalid in place; with one, the invalid transform is the error.
+#[test]
+fn a_pipeline_without_a_display_view_transform_is_refused_first() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "pipeline without a display view transform");
+    let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+    let ff = sc.call(
+        n("OCIO.FixedFunctionTransform"),
+        vec![
+            n("OCIO.FIXED_FUNCTION_ACES_GAMUT_COMP_13"),
+            gamut_comp_params(),
+        ],
+    );
+    sc.call(ra(vp, "setLinearCC"), vec![r(ff)]);
+    let held = sc.call(ra(vp, "getLinearCC"), vec![]);
+    sc.call(ra(held, "setParams"), vec![l(vec![f(1.0)])]);
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    let dvt = sc.call_kw(
+        n("OCIO.DisplayViewTransform"),
+        vec![],
+        vec![
+            ("src", s("in_1")),
+            ("display", s("DISP_2")),
+            ("view", s("VIEW_2")),
+        ],
+        Expect::Value,
+    );
+    sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    run(&[sc]);
+}
+
+/// The context a pipeline's processor resolves its files in is the one given: a new context
+/// whose `LUT` names the file.
+#[test]
+fn a_pipeline_resolves_files_in_the_context_given() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "pipeline context");
+    let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+    let dvt = sc.call_kw(
+        n("OCIO.DisplayViewTransform"),
+        vec![],
+        vec![
+            ("src", s("in_1")),
+            ("display", s("DISP_2")),
+            ("view", s("VIEW_2")),
+        ],
+        Expect::Value,
+    );
+    sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+    let ft = sc.call(n("OCIO.FileTransform"), vec![s("$LUT.spi1d")]);
+    sc.call(ra(vp, "setLinearCC"), vec![r(ft)]);
+    let ctx = sc.call(n("OCIO.Context"), vec![]);
+    sc.step(
+        serde_json::json!({ "setitem": r(ctx), "index": s("LUT"), "value": s("from_ctx") }),
+        Expect::Value,
+    );
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg), r(ctx)]);
+    sc.call_kw(
+        ra(vp, "getProcessor"),
+        vec![],
+        vec![("config", r(cfg)), ("context", r(ctx))],
+        Expect::Raised,
+    );
+    // The config's own context has no `LUT`.
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    run(&[sc]);
+}
+
+/// A display view transform that bypasses its looks, for a view whose looks the config
+/// doesn't have: the pipeline doesn't apply them, and makes the processor.
+#[test]
+fn a_pipeline_bypasses_the_missing_looks_of_its_view() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "pipeline looks bypass");
+    sc.call_kw(
+        ra(cfg, "addDisplayView"),
+        vec![],
+        vec![
+            ("display", s("DISP_1")),
+            ("view", s("VIEW_LOOKS")),
+            ("colorSpaceName", s("view_1")),
+            ("looks", s("missing_look")),
+        ],
+        Expect::Value,
+    );
+    let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+    let dvt = sc.call_kw(
+        n("OCIO.DisplayViewTransform"),
+        vec![],
+        vec![
+            ("src", s("lin_1")),
+            ("display", s("DISP_1")),
+            ("view", s("VIEW_LOOKS")),
+        ],
+        Expect::Value,
+    );
+    sc.call(ra(dvt, "setLooksBypass"), vec![b(true)]);
+    sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    // Without the bypass, the missing look is the error.
+    sc.call(ra(dvt, "setLooksBypass"), vec![b(false)]);
+    sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+    sc.raises(ra(vp, "getProcessor"), vec![r(cfg)]);
+    run(&[sc]);
+}
+
+/// A menu made before anything else computed its config's cache ID; then a color space the
+/// config hands out is changed in place (its description), which doesn't reset the config's
+/// cache ID: the menu's and the parameters' text keep it.
+#[test]
+fn a_menu_made_first_keeps_its_configs_cache_id() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "menu first");
+    let p = sc.call(n("OCIO.ColorSpaceMenuParameters"), vec![r(cfg)]);
+    let h = sc.call(n("OCIO.ColorSpaceMenuHelper"), vec![r(p)]);
+    let cs = sc.call(ra(cfg, "getColorSpace"), vec![s("lin_1")]);
+    sc.call(ra(cs, "setDescription"), vec![s("changed in place")]);
+    sc.repr(r(h));
+    sc.repr(r(p));
+    sc.call(ra(cfg, "getCacheID"), vec![]);
+    sc.call(ra(h, "getDescription"), vec![i(0)]);
+    run(&[sc]);
+}
+
+/// A color picking role: one mixing space and two encodings; the encodings' `__next__` walks a
+/// space iterator over the encodings (I-396).
+#[test]
+fn the_encodings_next_walks_a_space_iterator_of_one_space() {
+    let mut sc = Script::new();
+    let cfg = config(&mut sc, "mixing color picking");
+    sc.call(
+        ra(cfg, "setRole"),
+        vec![n("OCIO.ROLE_COLOR_PICKING"), s("log_1")],
+    );
+    let m = sc.call(n("OCIO.MixingColorSpaceManager"), vec![r(cfg)]);
+    let walked = sc.call(ra(m, "getMixingSpaces"), vec![]);
+    sc.unrepr(walked);
+    sc.call(n("len"), vec![r(walked)]);
+    let next = "OCIO.MixingColorSpaceManager.MixingEncodingIterator.__next__";
+    sc.call(n(next), vec![r(walked)]);
+    sc.call(n(next), vec![r(walked)]);
+    sc.raises(n(next), vec![r(walked)]);
+    let spaces = sc.call(ra(m, "getMixingSpaces"), vec![]);
+    sc.unrepr(spaces);
+    sc.call(n("list"), vec![r(spaces)]);
+    let encodings = sc.call(ra(m, "getMixingEncodings"), vec![]);
+    sc.unrepr(encodings);
+    sc.call(n("len"), vec![r(encodings)]);
+    run(&[sc]);
+}
+
+/// The submodules are in `sys.modules` under their full names, the module's attributes
+/// (pybind11's `def_submodule`); the wheel's have the extension's `__file__`, which the port's
+/// `def_submodule` gives them from the module it is given (the module embedded in this test
+/// has none).
+#[test]
+fn the_submodules_are_registered_as_the_wheels() {
+    start();
+    let mut sc = Script::new();
+    for sub in ["ColorSpaceHelpers", "DisplayViewHelpers"] {
+        let name = sc.eval(n(&format!("OCIO.{sub}.__name__")), &[]);
+        let got = sc.call(n("threading._sys.modules.get"), vec![r(name)]);
+        sc.unrepr(got);
+        sc.call(n("operator.is_"), vec![r(got), n(&format!("OCIO.{sub}"))]);
+    }
+    compare(&[sc]);
+    // The wheel's `__file__`: the extension's.
+    let mut sc = Script::new();
+    let mut same = Vec::new();
+    for sub in ["ColorSpaceHelpers", "DisplayViewHelpers"] {
+        same.push(sc.call(
+            n("operator.eq"),
+            vec![
+                n(&format!("OCIO.{sub}.__file__")),
+                n("OCIO.PyOpenColorIO.__file__"),
+            ],
+        ));
+    }
+    let theirs = common::wheel(&[sc.json()]).remove(0);
+    for k in same {
+        assert_eq!(theirs["steps"][k]["value"]["bool"], true, "{theirs}");
+    }
+    // The port's, of a module with a `__file__`.
+    Python::attach(|py| {
+        let parent = pyo3::types::PyModule::new(py, "ocio_rs_submodule_probe").unwrap();
+        let file = pyo3::types::PyString::new(py, "probe file");
+        parent.setattr("__file__", &file).unwrap();
+        let sub = ocio_py::pybind11::def_submodule(&parent, "ProbeSubmodule").unwrap();
+        assert!(sub.getattr("__file__").unwrap().is(&file));
+        assert!(parent.getattr("ProbeSubmodule").unwrap().is(&sub));
+        let modules = py.import("sys").unwrap().getattr("modules").unwrap();
+        let name = sub.name().unwrap();
+        assert!(modules.get_item(&name).unwrap().is(&sub));
+    });
+}
+
+/// The first control point of the curve whose control points step `points` iterates set to
+/// (1.5, 0.5), past the next one: the curve no longer validates.
+fn move_point(sc: &mut Script, points: usize) {
+    let point = sc.call(n("OCIO.GradingControlPoint"), vec![f(1.5), f(0.5)]);
+    sc.step(
+        serde_json::json!({ "setitem": r(points), "index": i(0), "value": r(point) }),
+        Expect::Value,
+    );
+}
+
+/// The wheel's process dies where a pipeline's setter copies a transform that doesn't validate
+/// (a fixed function's parameters, a curve, changed in place; U-151): the port's setters raise
+/// the copy's error, the wheel's text for the same transform made with those values, and the
+/// pipeline keeps the transform it had.
+#[test]
+fn a_pipeline_given_an_invalid_transform_raises() {
+    start();
+    // Each script gives the pipeline a valid transform, makes the other one and changes it in
+    // place, then calls the setter: the wheel dies at the last step.
+    let mut scripts = Vec::new();
+    for set in [
+        "setLinearCC",
+        "setColorTimingCC",
+        "setChannelView",
+        "setDisplayCC",
+    ] {
+        for curve in [false, true] {
+            let mut sc = Script::new();
+            let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+            let old = sc.call(n("OCIO.MatrixTransform"), vec![]);
+            sc.call(ra(vp, set), vec![r(old)]);
+            // The pipeline's copy, the same object while the pipeline holds it.
+            let held = sc.call(ra(vp, &set.replacen("set", "get", 1)), vec![]);
+            let bad = if curve {
+                let t = sc.call(n("OCIO.GradingRGBCurveTransform"), vec![]);
+                let v = sc.call(ra(t, "getValue"), vec![]);
+                let red = sc.call(ra(v, "red.getControlPoints"), vec![]);
+                move_point(&mut sc, red);
+                t
+            } else {
+                let t = sc.call(
+                    n("OCIO.FixedFunctionTransform"),
+                    vec![
+                        n("OCIO.FIXED_FUNCTION_ACES_GAMUT_COMP_13"),
+                        gamut_comp_params(),
+                    ],
+                );
+                sc.call(ra(t, "setParams"), vec![l(vec![f(1.0)])]);
+                t
+            };
+            sc.call(ra(vp, set), vec![r(bad)]);
+            scripts.push((sc, vp, held, set, curve));
+        }
+    }
+    let json: Vec<Value> = scripts.iter().map(|(sc, ..)| sc.json()).collect();
+    let result = ocio_testkit::Oracle::get()
+        .call("py_eval", serde_json::json!({ "scripts": json }), &[])
+        .result;
+    let reports = result["scripts"].as_array().unwrap();
+    assert_eq!(reports.len(), scripts.len());
+    for (k, report) in reports.iter().enumerate() {
+        let code = report["crashed"]["returncode"].as_i64();
+        assert!(code.is_some_and(|c| c != 0), "script {k}: {report}");
+    }
+    // The steps before the setter succeed in the wheel; the wheel's error for the values.
+    let mut shortened = Vec::new();
+    let mut errors = Vec::new();
+    for (sc, ..) in &scripts {
+        let mut steps = sc.json();
+        steps["steps"].as_array_mut().unwrap().pop();
+        shortened.push(steps);
+    }
+    let mut sc = Script::new();
+    let ff = sc.raises(
+        n("OCIO.FixedFunctionTransform"),
+        vec![n("OCIO.FIXED_FUNCTION_ACES_GAMUT_COMP_13"), l(vec![f(1.0)])],
+    );
+    let t = sc.call(n("OCIO.GradingRGBCurveTransform"), vec![]);
+    let v = sc.call(ra(t, "getValue"), vec![]);
+    let red = sc.call(ra(v, "red.getControlPoints"), vec![]);
+    move_point(&mut sc, red);
+    let curve = sc.raises(ra(t, "setValue"), vec![r(v)]);
+    shortened.push(sc.json());
+    let theirs = common::wheel(&shortened);
+    for report in &theirs[..scripts.len()] {
+        for step in report["steps"].as_array().unwrap() {
+            assert!(step.get("value").is_some(), "{step}");
+        }
+    }
+    for k in [ff, curve] {
+        errors.push(theirs[scripts.len()]["steps"][k]["raised"].clone());
+        assert!(
+            errors.last().unwrap().is_object(),
+            "{}",
+            theirs[scripts.len()]
+        );
+    }
+    for (sc, vp, held, set, curve) in &scripts {
+        let get = set.replacen("set", "get", 1);
+        let (setter, kept) = (sc.steps.len() - 1, sc.steps.len() + 1);
+        let mut json = sc.json();
+        let steps = json["steps"].as_array_mut().unwrap();
+        steps.push(serde_json::json!({ "call": ra(*vp, &get), "args": [] }));
+        steps.push(
+            serde_json::json!({ "call": n("operator.is_"), "args": [r(setter + 1), r(*held)] }),
+        );
+        let ours = common::port(&json);
+        let steps = ours["steps"].as_array().unwrap();
+        let setter = &steps[setter];
+        assert_eq!(
+            setter["raised"],
+            errors[usize::from(*curve)],
+            "{set}, curve {curve}: {setter}"
+        );
+        assert_eq!(steps[kept]["value"]["bool"], true, "{set}: {}", steps[kept]);
+    }
+}
+
+/// A config read through a proxy: its color space `lut` reads the file `SRC`.
+const PROXY_CONFIG: &str = "ocio_profile_version: 2\nroles: {default: raw, scene_linear: raw}\n\
+     displays: {d: [!<View> {name: v, colorspace: raw}]}\n\
+     colorspaces:\n  - !<ColorSpace> {name: raw}\n  \
+     - !<ColorSpace> {name: lut, from_scene_reference: !<FileTransform> {src: SRC}}\n";
+
+/// The LUT the proxies give.
+const LUT_TEXT: &[u8] = b"Version 1\nFrom 0 1\nLength 2\nComponents 1\n{\n0\n0.5\n}\n";
+
+/// A subclass of `PyConfigIOProxy` and an instance of it whose config is `config`: the
+/// instance's step (as `callbacks_oracle.rs`).
+fn proxy_of(sc: &mut Script, config: &str) -> usize {
+    // The port's tests share a process, and the library's file cache.
+    sc.call(n("OCIO.ClearAllCaches"), vec![]);
+    let cls = sc.call(
+        n("type"),
+        vec![
+            s("P"),
+            t(vec![n("OCIO.PyConfigIOProxy")]),
+            d(vec![(s("__module__"), s("probe"))]),
+        ],
+    );
+    let obj = sc.call(r(cls), vec![]);
+    let it = sc.call(n("iter"), vec![l(vec![s(config)])]);
+    let hash = sc.call(n("str"), vec![s("h%.0s")]);
+    for (name, value) in [
+        ("getConfigData", ra(it, "__next__")),
+        ("getFastLutFileHash", ra(hash, "__mod__")),
+    ] {
+        sc.step(
+            serde_json::json!({ "setattr": r(obj), "name": name, "value": value }),
+            Expect::Value,
+        );
+    }
+    obj
+}
+
+/// Gives the proxy `px` a LUT loader that calls `init(path)` (a method of a helper) and returns
+/// [`LUT_TEXT`]: a class (the step interpreter defines no functions) of lists whose `__init__`
+/// is `init`, and whose length, items and iterator are those of the text's bytes.
+fn load_calls(sc: &mut Script, px: usize, init: Value) {
+    let data = sc.call(n("list"), vec![by(LUT_TEXT)]);
+    let class = sc.call(
+        n("type"),
+        vec![
+            s("LutData"),
+            t(vec![n("list")]),
+            d(vec![
+                (s("__module__"), s("probe")),
+                (s("__init__"), init),
+                (s("__len__"), ra(data, "__len__")),
+                (s("__getitem__"), ra(data, "__getitem__")),
+                (s("__iter__"), ra(data, "__iter__")),
+            ]),
+        ],
+    );
+    sc.step(
+        serde_json::json!({ "setattr": r(px), "name": "getLutData", "value": r(class) }),
+        Expect::Value,
+    );
+}
+
+/// A pipeline's processor loads its linear CC's LUT through the config's proxy, whose loader
+/// sets the pipeline's looks override (to the path it loads): the wheel's call works on the
+/// pipeline the loader changes, and so does the port's (its lock isn't held while the library
+/// builds the processor). The looks override isn't enabled, so the processor is the same.
+#[test]
+fn a_lut_loader_changes_the_pipeline_that_makes_a_processor() {
+    let mut sc = Script::new();
+    let px = proxy_of(&mut sc, &PROXY_CONFIG.replace("SRC", "lut_pipeline.spi1d"));
+    let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
+    let vp = sc.call(n("OCIO.LegacyViewingPipeline"), vec![]);
+    load_calls(&mut sc, px, ra(vp, "setLooksOverride"));
+    let dvt = sc.call_kw(
+        n("OCIO.DisplayViewTransform"),
+        vec![],
+        vec![("src", s("raw")), ("display", s("d")), ("view", s("v"))],
+        Expect::Value,
+    );
+    sc.call(ra(vp, "setDisplayViewTransform"), vec![r(dvt)]);
+    let ft = sc.call(n("OCIO.FileTransform"), vec![s("lut_pipeline.spi1d")]);
+    sc.call(ra(vp, "setLinearCC"), vec![r(ft)]);
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    let p = sc.call(ra(vp, "getProcessor"), vec![r(cfg)]);
+    sc.unrepr(p);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    sc.eval(r(vp), &PIPELINE_GETTERS);
+    guarded(move || run(&[sc]));
+}
+
+/// As [`a_lut_loader_changes_the_pipeline_that_makes_a_processor`], for a mixing manager
+/// whose color picking role's color space reads the LUT, and a loader that selects a mixing
+/// space by the path it loads (which isn't one: the loader raises, and so does the call).
+#[test]
+fn a_lut_loader_uses_the_manager_that_makes_a_processor() {
+    let mut sc = Script::new();
+    let config = PROXY_CONFIG
+        .replace("SRC", "lut_mixing.spi1d")
+        .replace("scene_linear: raw", "scene_linear: raw, color_picking: lut");
+    let px = proxy_of(&mut sc, &config);
+    let cfg = sc.call(n("OCIO.Config.CreateFromConfigIOProxy"), vec![r(px)]);
+    let m = sc.call(n("OCIO.MixingColorSpaceManager"), vec![r(cfg)]);
+    load_calls(&mut sc, px, ra(m, "setSelectedMixingSpace"));
+    sc.eval(r(m), &MIXING_GETTERS);
+    sc.raises(ra(m, "getProcessor"), vec![s("raw"), s("d"), s("v")]);
+    sc.eval(r(m), &MIXING_GETTERS);
+    guarded(move || run(&[sc]));
 }

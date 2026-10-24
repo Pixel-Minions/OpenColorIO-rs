@@ -57,7 +57,10 @@ type ParamsRc = Shared<ParamsNode>;
 
 /// `f` of the library's parameters of `rc`, their config the node's as it is now (read
 /// before the parameters are locked: the config's lock can wait for another thread's call);
-/// `reads_cache_id`: `f` reads the config's cache ID ([`config_arc_with_cache_id`]).
+/// `reads_cache_id`: `f` reads the config's cache ID ([`config_arc_with_cache_id`]). `f` gets
+/// a copy of the parameters, made under their lock and released before: the library can run
+/// Python code (a logging function, while it makes a menu), which may read or change the
+/// parameters, as the wheel's can.
 fn with_current<R>(
     rc: &ParamsRc,
     reads_cache_id: bool,
@@ -70,13 +73,16 @@ fn with_current<R>(
         } else {
             config_arc(&config)?
         };
-        let mut node = rc.lock();
-        // Another thread may have set another config meanwhile.
-        if node.config.same(&config) {
+        let params = {
+            let mut node = rc.lock();
+            // Another thread may have set another config meanwhile.
+            if !node.config.same(&config) {
+                continue;
+            }
             node.params.set_config(arc);
-            let node = &*node;
-            return f(&node.params, &node.config);
-        }
+            node.params.clone()
+        };
+        return f(&params, &config);
     }
 }
 

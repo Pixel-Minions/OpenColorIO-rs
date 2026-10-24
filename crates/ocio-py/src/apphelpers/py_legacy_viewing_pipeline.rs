@@ -283,7 +283,10 @@ fn none_value(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
 // .def("getProcessor", [](LegacyViewingPipelineRcPtr & self, const ConstConfigRcPtr & config,
 // const ConstContextRcPtr & context) {...}, "config"_a.none(false), "context"_a =
 // ConstContextRcPtr()) (PyLegacyViewingPipeline.cpp:46-55 @ v2.5.2): a null context is the
-// config's current one.
+// config's current one. The library builds the processor of a copy of the pipeline, made
+// under its lock and released before: building it can run Python code (the config's I/O
+// proxy loading a LUT, a logging function), which may read or change the pipeline, as the
+// wheel's can.
 static GET_PROCESSOR: Function = method_def!(
     "getProcessor",
     [
@@ -304,9 +307,14 @@ static GET_PROCESSOR: Function = method_def!(
         };
         let p = with_config(&config, |n| {
             let context = context.as_ref().map(context_value);
-            let mut node = rc.lock();
-            py_result(py, node.validate()?)?;
-            let pipeline = node.current()?;
+            let pipeline = {
+                let mut node = rc.lock();
+                match node.validate()? {
+                    Ok(()) => Ok(node.current()?.clone()),
+                    Err(e) => Err(e),
+                }
+            };
+            let pipeline = py_result(py, pipeline)?;
             py_result(py, pipeline.processor(&n.config, context.as_ref()))
         })?;
         processor_out(py, p)
