@@ -377,6 +377,27 @@ fn a_shared_module_unresolved_at_import_gives_every_key_the_full_one() {
     assert!(!private.modules_of("x_cmd").unwrap().contains(&"g.py"));
 }
 
+/// A file of the package that can't be read (a dangling link, as an editor's lock file
+/// `.#d.py`) never fails the analysis, isn't a module, and changes every key, by its link's
+/// target (verifier 3).
+#[test]
+fn an_unreadable_file_changes_every_key() {
+    let dir = package("unreadable");
+    let before = keys(&scopes(&dir), &COMMANDS);
+    assert!(before.iter().all(|&k| k != FULL), "{before:x?}");
+    let lock = dir.join("ocio_oracle").join(".#d.py");
+    crate::oracle::tests::symlink(Path::new("user@host.123"), &lock, false);
+    let locked = keys(&scopes(&dir), &COMMANDS);
+    std::fs::remove_file(&lock).unwrap();
+    crate::oracle::tests::symlink(Path::new("user@host.456"), &lock, false);
+    let relocked = keys(&scopes(&dir), &COMMANDS);
+    std::fs::remove_file(&lock).unwrap();
+    assert_eq!(keys(&scopes(&dir), &COMMANDS), before);
+    assert!(locked.iter().all(|&k| k != FULL), "{locked:x?}");
+    assert_eq!(changed(&COMMANDS, &before, &locked), COMMANDS);
+    assert_eq!(changed(&COMMANDS, &locked, &relocked), COMMANDS);
+}
+
 /// Changing a shared source changes every key: the modules every process runs and what they
 /// import, a module whose top level runs code, a file of the package that isn't a top-level
 /// module, the environment's files, and the environment's hash.

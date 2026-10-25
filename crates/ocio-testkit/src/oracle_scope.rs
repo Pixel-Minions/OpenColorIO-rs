@@ -54,6 +54,8 @@ use std::process::{Command, Stdio};
 use serde_json::Value;
 use xxhash_rust::xxh3::{Xxh3, xxh3_128};
 
+use crate::oracle::OracleFile;
+
 /// The analysis, run by the oracle's Python.
 pub(crate) const ANALYZER: &str = include_str!("oracle_scope.py");
 
@@ -202,12 +204,26 @@ fn fingerprint(oracle_dir: &Path, analyzer: &str) -> Result<Fingerprint, String>
             .map_err(|e| e.to_string())?
             .to_string_lossy()
             .replace('\\', "/");
-        let bytes = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-        match rel.strip_prefix("ocio_oracle/") {
-            Some(name) if name.ends_with(".py") && !name.contains('/') => {
+        // A file Python can't read isn't a module (the analysis lists files it can read): it is
+        // hashed by its link's target with every other file.
+        match (
+            crate::oracle::read_oracle_file(oracle_dir, &file)?,
+            rel.strip_prefix("ocio_oracle/"),
+        ) {
+            (OracleFile::Bytes(bytes), Some(name))
+                if name.ends_with(".py") && !name.contains('/') =>
+            {
                 modules.push((name.to_string(), xxh3_128(&bytes)));
             }
-            _ => hash_named(&mut base, &rel, &bytes),
+            (OracleFile::Bytes(bytes), _) => hash_named(&mut base, &rel, &bytes),
+            (OracleFile::Unreadable(target), _) => {
+                // No file's name holds a NUL.
+                hash_named(
+                    &mut base,
+                    &format!("\0unreadable\0{rel}"),
+                    target.as_bytes(),
+                );
+            }
         }
     }
     let base = base.digest128();

@@ -150,11 +150,10 @@ impl Oracle {
                 status.expect("uv ran")
             ));
         }
-        let cache_dir = if std::env::var_os("OCIO_RS_ORACLE_NO_CACHE").is_some() {
-            None
-        } else {
-            Some(paths::target_dir().join("oracle-cache"))
-        };
+        let cache_dir = cache_dir_for(
+            std::env::var_os("OCIO_RS_ORACLE_NO_CACHE"),
+            paths::target_dir(),
+        );
         let environment = environment(&upstream_tests_dir(), &ALLOWED_VARIABLES);
         let identity = identity_from(&oracle_dir, environment)?;
         let scopes = cache_dir.as_ref().and_then(|dir| {
@@ -356,6 +355,15 @@ impl Oracle {
         let mut command = self.command();
         command.args(["-X", "utf8", "-m", "ocio_oracle"]);
         exchange(command, request)
+    }
+}
+
+/// The response cache's directory, `<target>/oracle-cache` in the target directory `target`;
+/// none when `OCIO_RS_ORACLE_NO_CACHE` is set (`no_cache`, with any value), as CI sets it.
+fn cache_dir_for(no_cache: Option<std::ffi::OsString>, target: &Path) -> Option<PathBuf> {
+    match no_cache {
+        Some(_) => None,
+        None => Some(target.join("oracle-cache")),
     }
 }
 
@@ -744,12 +752,51 @@ fn identity_from(oracle_dir: &Path, environment: u128) -> Result<u128, String> {
     for file in &files {
         let rel = file.strip_prefix(oracle_dir).unwrap_or(file);
         h.update(rel.to_string_lossy().replace('\\', "/").as_bytes());
-        let bytes = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
-        h.update(&(bytes.len() as u64).to_le_bytes());
-        h.update(&bytes);
+        match read_oracle_file(oracle_dir, file)? {
+            OracleFile::Bytes(bytes) => {
+                h.update(&(bytes.len() as u64).to_le_bytes());
+                h.update(&bytes);
+            }
+            OracleFile::Unreadable(target) => {
+                h.update(&u64::MAX.to_le_bytes());
+                h.update(target.as_bytes());
+            }
+        }
     }
     h.update(&environment.to_le_bytes());
     Ok(h.digest128())
+}
+
+/// What the cache keys read of a file of the oracle's directory ([`oracle_files`]).
+#[derive(Debug, PartialEq)]
+pub(crate) enum OracleFile {
+    /// Its bytes.
+    Bytes(Vec<u8>),
+    /// A file that can't be read: a dangling symbolic link (an editor's lock file, `.#x.py`), a
+    /// link to a directory listed already (a loop), or one this user can't read. Python can't
+    /// read it either, so it changes nothing the oracle does until it can be read; it is hashed
+    /// by its link's target (empty for no link), so that every key changes when it changes.
+    Unreadable(String),
+}
+
+/// Reads the oracle's file `file` in `oracle_dir` ([`OracleFile`]). The environment's files
+/// must be read: a missing `uv.lock` fails the oracle's identity.
+pub(crate) fn read_oracle_file(oracle_dir: &Path, file: &Path) -> Result<OracleFile, String> {
+    match std::fs::read(file) {
+        Ok(bytes) => Ok(OracleFile::Bytes(bytes)),
+        Err(e)
+            if crate::oracle_scope::ENVIRONMENT_FILES
+                .iter()
+                .any(|name| oracle_dir.join(name) == file) =>
+        {
+            Err(format!("{}: {e}", file.display()))
+        }
+        Err(_) => Ok(OracleFile::Unreadable(
+            std::fs::read_link(file)
+                .map(|target| target.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default(),
+        )),
+    }
 }
 
 /// Hash of what determines the oracle's answers besides its own directory: upstream's tests in
@@ -799,9 +846,10 @@ fn hash_test_data(h: &mut Xxh3, data: &Path) {
 /// module search path, so a file there can change what the oracle does (`oracle/json.py`
 /// would shadow `json`). Left out: Python's bytecode caches (`__pycache__`, which the
 /// interpreter may write) and a virtual environment (`.venv`, which git ignores there and the
-/// oracle doesn't run from).
+/// oracle doesn't run from). A directory reached a second time through a link (a loop) is
+/// listed as a file, which [`read_oracle_file`] can't read.
 pub(crate) fn oracle_files(oracle_dir: &Path) -> Vec<PathBuf> {
-    fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
+    fn collect(dir: &Path, out: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -812,7 +860,10 @@ pub(crate) fn oracle_files(oracle_dir: &Path) -> Vec<PathBuf> {
                     .file_name()
                     .is_some_and(|n| n != "__pycache__" && n != ".venv")
                 {
-                    collect(&path, out);
+                    match std::fs::canonicalize(&path) {
+                        Ok(real) if seen.insert(real.clone()) => collect(&path, out, seen),
+                        _ => out.push(path),
+                    }
                 }
             } else {
                 out.push(path);
@@ -820,7 +871,9 @@ pub(crate) fn oracle_files(oracle_dir: &Path) -> Vec<PathBuf> {
         }
     }
     let mut files = Vec::new();
-    collect(oracle_dir, &mut files);
+    let mut seen = HashSet::new();
+    seen.insert(std::fs::canonicalize(oracle_dir).unwrap_or_else(|_| oracle_dir.to_path_buf()));
+    collect(oracle_dir, &mut files, &mut seen);
     for name in crate::oracle_scope::ENVIRONMENT_FILES {
         let file = oracle_dir.join(name);
         if !files.contains(&file) {
@@ -1136,7 +1189,7 @@ pub fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 
     /// A batch goes to one process while its distinct input blobs fit, and is cut into runs
     /// of consecutive calls under the limit otherwise; a blob shared by calls counts once in a
@@ -1560,13 +1613,61 @@ mod tests {
 
     use super::*;
 
+    /// A test's directory, deleted when the test ends, failed or not.
+    struct TestDir(PathBuf);
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// This process's oracle with a response cache of its own, in a new directory, whatever
+    /// `OCIO_RS_ORACLE_NO_CACHE` says: the tests of the cache's own rules run in CI too, which
+    /// sets it. Its keys are the whole oracle's.
+    fn with_private_cache(test: &str) -> (Oracle, TestDir) {
+        let dir = paths::target_dir().join(format!("testkit-cache-{test}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let shared = Oracle::get();
+        let oracle = Oracle {
+            python: shared.python.clone(),
+            identity: shared.identity,
+            scopes: None,
+            cache_dir: Some(dir.clone()),
+        };
+        (oracle, TestDir(dir))
+    }
+
+    /// `OCIO_RS_ORACLE_NO_CACHE`, with any value, turns the shared response cache off, as CI
+    /// sets it; without it the cache is `<target>/oracle-cache`. This process's oracle follows
+    /// the variable, and the cache tests' private caches don't.
+    #[test]
+    fn the_variable_turns_the_shared_cache_off() {
+        let target = Path::new("t");
+        assert_eq!(cache_dir_for(Some("1".into()), target), None);
+        assert_eq!(cache_dir_for(Some("".into()), target), None);
+        assert_eq!(
+            cache_dir_for(None, target),
+            Some(target.join("oracle-cache"))
+        );
+        let off = std::env::var_os("OCIO_RS_ORACLE_NO_CACHE").is_some();
+        assert_eq!(
+            Oracle::get().cache_dir.is_none(),
+            off,
+            "this process's oracle doesn't follow OCIO_RS_ORACLE_NO_CACHE"
+        );
+        let (private, dir) = with_private_cache("variable");
+        assert_eq!(private.cache_dir.as_deref(), Some(dir.0.as_path()));
+    }
+
     /// A batch in which a call raised is never cached, and never replayed from the cache: the
     /// failure may be transient (a `MemoryError`), so the next run must ask the oracle again. A
-    /// batch without failures is cached as before. (With `OCIO_RS_ORACLE_NO_CACHE` set there is
-    /// no cache to check.)
+    /// batch without failures is cached as before. In a cache of its own, so that it runs with
+    /// `OCIO_RS_ORACLE_NO_CACHE` set too.
     #[test]
     fn a_batch_with_a_failed_call_is_never_cached() {
-        let oracle = Oracle::get();
+        let (oracle, _dir) = with_private_cache("failed-batch");
+        let oracle = &oracle;
         let pixels = f32_to_bytes(&[0.25, 0.5, 1.0, 1.0]);
         let log =
             |base: f64| json!({"transform": {"class": "LogTransform", "args": {"base": base}}});
@@ -1589,10 +1690,7 @@ mod tests {
             log(2.0),
             json!({"transform": {"class": "NoSuchTransform"}}),
         ]);
-        let Some(failing_file) = cache_file(&failing) else {
-            return;
-        };
-        let _ = std::fs::remove_file(&failing_file);
+        let failing_file = cache_file(&failing).expect("the cache is on");
         let results = oracle.batch(&failing, true);
         assert!(results[0].is_ok() && results[1].is_err(), "{results:?}");
         assert!(
@@ -1699,10 +1797,11 @@ mod tests {
     /// replayed from it (a stale entry of an earlier version is replaced), and a failed call
     /// isn't cached; a child's success is. On Windows the wheel stops the child for a variable
     /// of 32,767 UTF-16 units (`crates/ocio-testkit/tests/context_env_calls_oracle.rs`); Linux
-    /// takes it. (With `OCIO_RS_ORACLE_NO_CACHE` set there is no cache to check.)
+    /// takes it. In a cache of its own, so that it runs with `OCIO_RS_ORACLE_NO_CACHE` set too.
     #[test]
     fn a_call_whose_child_died_is_asked_again() {
-        let oracle = Oracle::get();
+        let (oracle, _dir) = with_private_cache("dead-child");
+        let oracle = &oracle;
         let set = |value: String| {
             json!({
                 "context": "new",
@@ -1717,10 +1816,7 @@ mod tests {
 
         // A child that succeeds: cached.
         let short = set("x".to_string());
-        let Some(short_file) = file(&short) else {
-            return;
-        };
-        let _ = std::fs::remove_file(&short_file);
+        let short_file = file(&short).expect("the cache is on");
         let result = oracle.call("context_env_calls", short.clone(), &[]).result;
         assert!(result.get("crashed").is_none(), "{result}");
         assert!(short_file.exists(), "a child's success wasn't cached");
@@ -1783,6 +1879,21 @@ mod tests {
         std::fs::write(package.join("table.json"), "[2]").unwrap();
         let data_changed = identity(&dir).unwrap();
         std::fs::write(package.join("table.json"), "[1]").unwrap();
+        // A file of a nested directory, whatever the directory's name.
+        std::fs::create_dir_all(package.join("data")).unwrap();
+        std::fs::write(package.join("data").join("t.json"), "[1]").unwrap();
+        let nested_data = identity(&dir).unwrap();
+        std::fs::write(package.join("data").join("t.json"), "[2]").unwrap();
+        let nested_data_changed = identity(&dir).unwrap();
+        std::fs::remove_dir_all(package.join("data")).unwrap();
+        assert_ne!(
+            nested_data, before,
+            "package/data/t.json didn't change the identity"
+        );
+        assert_ne!(
+            nested_data_changed, nested_data,
+            "a change of package/data/t.json didn't change the identity"
+        );
         std::fs::write(package.join("commands.py"), "c2").unwrap();
         let code_changed = identity(&dir).unwrap();
         std::fs::write(package.join("commands.py"), "c").unwrap();
@@ -1817,6 +1928,94 @@ mod tests {
         );
         assert_ne!(nested, before, "oracle/struct/ didn't change the identity");
         assert!(missing.is_err(), "a missing uv.lock gave an identity");
+    }
+
+    /// Makes `link` a symbolic link to `target` (a file's on Windows, or a directory's with
+    /// `dir`). Windows lets a user make one in developer mode, and GitHub's runners as
+    /// administrators.
+    pub(crate) fn symlink(target: &Path, link: &Path, dir: bool) {
+        #[cfg(windows)]
+        let made = if dir {
+            std::os::windows::fs::symlink_dir(target, link)
+        } else {
+            std::os::windows::fs::symlink_file(target, link)
+        };
+        #[cfg(not(windows))]
+        let made = {
+            let _ = dir;
+            std::os::unix::fs::symlink(target, link)
+        };
+        made.unwrap_or_else(|e| {
+            panic!(
+                "symbolic link {} -> {}: {e} (on Windows, turn on developer mode)",
+                link.display(),
+                target.display()
+            )
+        });
+    }
+
+    /// A file of the oracle's directory that can't be read never fails the identity (and so
+    /// never stops `Oracle::get`): a dangling symbolic link, as an editor's lock file
+    /// (`.#commands.py -> user@host.123`), and a directory link that loops. It is hashed by its
+    /// link's target, so a new one, or a new target, changes the identity. The environment's
+    /// files must still be read.
+    #[test]
+    fn an_unreadable_file_never_fails_the_identity() {
+        let dir =
+            TestDir(paths::target_dir().join(format!("testkit-unreadable-{}", std::process::id())));
+        let package = dir.0.join("ocio_oracle");
+        let _ = std::fs::remove_dir_all(&dir.0);
+        std::fs::create_dir_all(&package).unwrap();
+        for (name, text) in [
+            ("pyproject.toml", "p"),
+            ("uv.lock", "l"),
+            (".python-version", "3.13"),
+        ] {
+            std::fs::write(dir.0.join(name), text).unwrap();
+        }
+        std::fs::write(package.join("commands.py"), "c").unwrap();
+        let before = identity(&dir.0).unwrap();
+
+        let lock = package.join(".#commands.py");
+        symlink(Path::new("user@host.123"), &lock, false);
+        let locked = identity(&dir.0).expect("a dangling link failed the identity");
+        assert_eq!(
+            read_oracle_file(&dir.0, &lock),
+            Ok(OracleFile::Unreadable("user@host.123".to_string()))
+        );
+        std::fs::remove_file(&lock).unwrap();
+        symlink(Path::new("user@host.456"), &lock, false);
+        let relocked = identity(&dir.0).expect("a dangling link failed the identity");
+        std::fs::remove_file(&lock).unwrap();
+        assert_eq!(identity(&dir.0).unwrap(), before);
+        assert_ne!(locked, before, "a dangling link didn't change the identity");
+        assert_ne!(
+            relocked, locked,
+            "a link's new target didn't change the identity"
+        );
+
+        // A directory link to the oracle's directory: listed once, not followed again.
+        symlink(&dir.0, &package.join("loop"), true);
+        let looped = identity(&dir.0).expect("a looping link failed the identity");
+        assert_ne!(looped, before, "a looping link didn't change the identity");
+        assert!(
+            oracle_files(&dir.0)
+                .iter()
+                .all(|f| !f.starts_with(package.join("loop").join("ocio_oracle"))),
+            "a looping link was followed"
+        );
+        #[cfg(windows)]
+        std::fs::remove_dir(package.join("loop")).unwrap();
+        #[cfg(not(windows))]
+        std::fs::remove_file(package.join("loop")).unwrap();
+
+        // An environment file that is a dangling link fails it, as a missing one does.
+        std::fs::remove_file(dir.0.join("uv.lock")).unwrap();
+        symlink(Path::new("nowhere.lock"), &dir.0.join("uv.lock"), false);
+        assert!(
+            identity(&dir.0).is_err(),
+            "a dangling uv.lock gave an identity"
+        );
     }
 
     /// The directory the cache identity hashes is upstream's tests directory: it holds the
