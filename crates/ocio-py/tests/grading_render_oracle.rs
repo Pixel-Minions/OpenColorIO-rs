@@ -5,7 +5,7 @@
 //! through `getValue` (which the binding holds as they are, `set_value_as_is`, and the library
 //! fits when it builds the processor's op, as upstream's copy of the op data does) gives the
 //! wheel's processor: its CPU processor's cache ID and pixels. The processors come from
-//! `common::processors` (stand-ins in the port's interpreter).
+//! `common::processors`.
 #![cfg(feature = "python")]
 
 mod common;

@@ -51,6 +51,8 @@ pub(crate) mod py_file_rules;
 #[cfg(feature = "python")]
 pub(crate) mod py_format_metadata;
 #[cfg(feature = "python")]
+pub(crate) mod py_gpu_processor;
+#[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
 #[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_desc;

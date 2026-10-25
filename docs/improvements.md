@@ -5363,6 +5363,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   buffer, before the library's own checks; in `p6-processors` (6.3h,
   `crates/ocio-py/src/py_gpu_shader_creator.rs`, `gpu_language`; `py_gpu_shader_desc.rs`);
   `gpu_shader_desc_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error`.
+  Also the bit depths of `Processor.getOptimizedProcessor` and `getOptimizedCPUProcessor`,
+  which the wheel hands the library: its cache key writes the number, and the processor is
+  made unless a bit depth's value is needed (`OptimizeSeparablePrefix`, a CPU processor's
+  bit-depth ops), where it raises "Bit depth is not supported: unknown." (probed on Windows,
+  2026-10-25); the port raises before the library runs, in both cases; in `p6-processors`
+  (6.3h, `crates/ocio-py/src/py_processor.rs`, `bit_depth`); `processor_oracle.rs`,
+  `a_bit_depth_outside_the_enumerators_is_the_ports_error`.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -6130,3 +6137,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   holds (docs/improvements.md, U-194)" where the count exceeds the texture's floats, in
   `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_shader_desc.rs`, `TX_GET_VALUES`); not
   tested (the buffer it takes).
+
+### U-195. A GPU processor's shader information extracted into `None`
+
+- **Upstream:** `GPUProcessor.extractGpuShaderInfo` takes a `GpuShaderDescRcPtr &`, and
+  pybind11's holder caster passes `None` (with conversions, the only overload's call) as an
+  empty pointer (PyGPUProcessor.cpp:20-24 @ v2.5.2), which `GPUProcessor::Impl::
+  extractGpuShaderInfo` calls through (GPUProcessor.cpp): the wheel's process dies.
+- **Who notices:** Python code that passes `None` as the description.
+- **A fix:** refuse `None` (`"shaderDesc"_a.none(false)`).
+- **Status:** the port raises ValueError "GPUProcessor.extractGpuShaderInfo(shaderDesc): None,
+  a null GpuShaderDesc, through which the wheel calls (docs/improvements.md, U-195)", in
+  `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_processor.rs`); `processor_oracle.rs`,
+  `extracting_into_none_is_the_ports_error`.

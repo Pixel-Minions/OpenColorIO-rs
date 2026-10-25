@@ -83,6 +83,59 @@ pub fn processor_from_python(
     })
 }
 
+/// The Python `PyOpenColorIO.Processor` of `processor`, sharing it: the object the module made
+/// for that processor while it lives, else a new one (as pybind11 returns a
+/// `ConstProcessorRcPtr`). The interpreter must have imported `PyOpenColorIO`.
+///
+/// # Errors
+///
+/// A Python error making the object.
+pub fn processor_to_python(
+    py: pyo3::Python<'_>,
+    processor: &std::sync::Arc<ocio::Processor>,
+) -> pyo3::PyResult<pyo3::Py<pyo3::PyAny>> {
+    crate::shared::to_py(
+        py,
+        crate::py_processor::PROCESSOR,
+        &crate::py_processor::ProcessorRc(processor.clone()),
+    )
+    .map(pyo3::Bound::unbind)
+}
+
+/// The Python `PyOpenColorIO.GPUProcessor` of `gpu`, sharing it: the object the module made for
+/// that processor while it lives, else a new one. The interpreter must have imported
+/// `PyOpenColorIO`.
+///
+/// # Errors
+///
+/// A Python error making the object.
+pub fn gpu_processor_to_python(
+    py: pyo3::Python<'_>,
+    gpu: &std::sync::Arc<ocio_gpu::gpu_processor::GpuProcessor>,
+) -> pyo3::PyResult<pyo3::Py<pyo3::PyAny>> {
+    crate::shared::to_py(
+        py,
+        crate::py_gpu_processor::GPU_PROCESSOR,
+        &crate::py_gpu_processor::GpuProcessorRc(gpu.clone()),
+    )
+    .map(pyo3::Bound::unbind)
+}
+
+/// The GPU processor the Python `PyOpenColorIO.GPUProcessor` `obj` holds, shared.
+///
+/// # Errors
+///
+/// TypeError when `obj` isn't a `GPUProcessor`.
+pub fn gpu_processor_from_python(
+    obj: &pyo3::Bound<'_, pyo3::PyAny>,
+) -> pyo3::PyResult<std::sync::Arc<ocio_gpu::gpu_processor::GpuProcessor>> {
+    crate::py_gpu_processor::gpu_processor_of(obj)?.ok_or_else(|| {
+        pyo3::exceptions::PyTypeError::new_err(
+            "gpu_processor_from_python: not a PyOpenColorIO.GPUProcessor",
+        )
+    })
+}
+
 /// A copy of the transform the Python `PyOpenColorIO.Transform` (of any class) `obj` holds, as
 /// the library holds one (a group with copies of its children): a later change Python makes
 /// isn't the copy's.

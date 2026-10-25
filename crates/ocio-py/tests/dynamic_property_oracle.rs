@@ -9,8 +9,8 @@
 //! keeps a change made through it until a setter replaces the curves), what a setter changes
 //! in the pixels the processor renders, and the casters.
 //!
-//! The processors come from `Config.CreateRaw().getProcessor(t).getDefaultCPUProcessor()`,
-//! stand-ins in the port's interpreter until the port binds those (`common::processors`).
+//! The processors come from `Config.CreateRaw().getProcessor(t).getDefaultCPUProcessor()`
+//! (`common::processors`), each step compared with the wheel's.
 #![cfg(feature = "python")]
 
 mod common;
