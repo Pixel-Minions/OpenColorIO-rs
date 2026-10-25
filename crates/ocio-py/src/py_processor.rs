@@ -12,8 +12,10 @@
 //! **Metadata.** `getProcessorMetadata` returns the processor's `ConstProcessorMetadataRcPtr`,
 //! which the processors made from it share (`Processor::Impl::operator=` copies the pointer),
 //! and which Python can change (pybind11 drops the `const`): the binding keeps one object per
-//! metadata the library shares ([`processor_metadata`]), so a change shows through every
-//! processor that shares it, as in the wheel; the library itself never reads it back.
+//! metadata the library shares, for as long as the library's metadata lives
+//! ([`processor_metadata`]), so a change shows through every processor that shares it, as in
+//! the wheel; the library itself never reads it back. (A Rust host reading the library's
+//! metadata doesn't see Python's changes: the binding's object is a copy.)
 //! `getFormatMetadata` and the iterator's items are references into the processor's metadata
 //! and its ops' ([`crate::py_format_metadata`]): read as the wheel's, never changed (D-13).
 
@@ -78,36 +80,31 @@ fn flags(v: i64) -> OptimizationFlags {
 // ---------------------------------------------------------------------------------------------
 // ProcessorMetadata, shared
 
-/// A metadata the library shares, its Python object's value, and the processors seen holding
-/// it (while one lives, the metadata does: its address is never another's).
+/// A metadata the library shares (weakly: while the entry is listed, its address is never
+/// another metadata's) and its Python object's value.
 struct SharedMetadata {
-    key: usize,
-    owners: Vec<Weak<Processor>>,
+    metadata: Weak<ProcessorMetadata>,
     rc: Shared<ProcessorMetadata>,
 }
 
 static METADATA: Mutex<Vec<SharedMetadata>> = Mutex::new(Vec::new());
 
 /// The value of the `ProcessorMetadata` the processor `p` shares: the one made for its metadata
-/// while a processor holding it lives, else a new one of the metadata.
+/// while the library's metadata lives (some processor holds it, whichever called this), else a
+/// new one of the metadata. A Python object of it that outlives the library's keeps its value.
 fn processor_metadata(p: &Arc<Processor>) -> Shared<ProcessorMetadata> {
-    let md = p.processor_metadata();
-    let key = std::ptr::from_ref(md) as usize;
+    let md = p.processor_metadata_rc();
+    let weak = Arc::downgrade(md);
     let mut list = METADATA
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    list.retain(|e| e.owners.iter().any(|w| w.strong_count() > 0));
-    if let Some(e) = list.iter_mut().find(|e| e.key == key) {
-        let weak = Arc::downgrade(p);
-        if !e.owners.iter().any(|w| w.ptr_eq(&weak)) {
-            e.owners.push(weak);
-        }
+    list.retain(|e| e.metadata.strong_count() > 0);
+    if let Some(e) = list.iter().find(|e| e.metadata.ptr_eq(&weak)) {
         return e.rc.clone();
     }
-    let rc = Shared::new(md.clone());
+    let rc = Shared::new(ProcessorMetadata::clone(md));
     list.push(SharedMetadata {
-        key,
-        owners: vec![Arc::downgrade(p)],
+        metadata: weak,
         rc: rc.clone(),
     });
     rc

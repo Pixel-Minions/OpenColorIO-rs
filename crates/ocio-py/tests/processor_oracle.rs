@@ -1141,3 +1141,133 @@ def nested_reads():
         OCIO.ResetToDefaultLoggingFunction()
     return seen
 ";
+
+// ---------------------------------------------------------------------------------------------
+// The shared ProcessorMetadata outlives the processor it came from (verifier 6.3h, H2)
+
+/// The cache flags of the lifetime tests: with the config's cache on, it holds the processor;
+/// off, nothing but Python does.
+const METADATA_CACHE_FLAGS: [&str; 2] =
+    ["OCIO.PROCESSOR_CACHE_DEFAULT", "OCIO.PROCESSOR_CACHE_OFF"];
+
+/// The wheel's steps of [`metadata_lifetime_steps`], every object alive: a processor's metadata
+/// given a file and a look, the processor optimized, and the optimized processor's metadata
+/// (the same object), its files and its looks.
+fn metadata_sharing_script(flags: &str) -> Script {
+    let mut sc = Script::new();
+    let cfg = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    sc.call(ra(cfg, "setProcessorCacheFlags"), vec![n(flags)]);
+    let m = sc.call_kw(
+        n("OCIO.MatrixTransform"),
+        vec![],
+        vec![("offset", common::script::fl(&[0.1, 0.0, 0.0, 0.0]))],
+        Expect::Value,
+    );
+    let p = sc.call(ra(cfg, "getProcessor"), vec![r(m)]);
+    let pm = sc.call(ra(p, "getProcessorMetadata"), vec![]);
+    sc.call(ra(pm, "addFile"), vec![s("a.clf")]);
+    sc.call(ra(pm, "addLook"), vec![s("look a")]);
+    let o = sc.call(
+        ra(p, "getOptimizedProcessor"),
+        vec![n("OCIO.OPTIMIZATION_NONE")],
+    );
+    let om = sc.call(ra(o, "getProcessorMetadata"), vec![]);
+    assert_eq!(om, pm + 4);
+    let files = sc.call(ra(om, "getFiles"), vec![]);
+    sc.call(n("list"), vec![r(files)]);
+    let looks = sc.call(ra(om, "getLooks"), vec![]);
+    sc.call(n("list"), vec![r(looks)]);
+    sc
+}
+
+/// The port's Python of the same steps, with the processor (and its metadata's object, or not)
+/// gone before the optimized processor's metadata is read: whether that is the first metadata's
+/// object, its files and its looks.
+const METADATA_LIFETIME: &std::ffi::CStr = c"
+import gc
+import PyOpenColorIO as OCIO
+
+def lifetime(flags, keep_object):
+    cfg = OCIO.Config.CreateRaw()
+    cfg.setProcessorCacheFlags(flags)
+    p = cfg.getProcessor(OCIO.MatrixTransform(offset=[0.1, 0, 0, 0]))
+    pm = p.getProcessorMetadata()
+    pm.addFile('a.clf')
+    pm.addLook('look a')
+    o = p.getOptimizedProcessor(OCIO.OPTIMIZATION_NONE)
+    del p
+    if not keep_object:
+        pm = None
+    gc.collect()
+    om = o.getProcessorMetadata()
+    return om is pm, list(om.getFiles()), list(om.getLooks())
+";
+
+/// The optimized processor's metadata is the one its processor shared, after that processor is
+/// gone: in the wheel the metadata is a `shared_ptr` the optimized processor holds, whichever
+/// processor's Python object lives (pybind11's registered instance is the metadata's own, kept
+/// by Python's object). The wheel's steps keep every object alive (the step interpreter does),
+/// which can't change its answers: the port's, with the processor gone and the metadata's
+/// object kept or not, are the wheel's (the object is the first one while Python holds it, the
+/// file and the look added through it are there). The port tied its metadata's object to the
+/// processors that had asked for it, and lost them with the processor.
+#[test]
+fn a_processors_metadata_outlives_the_processor() {
+    common::start_python();
+    let scripts: Vec<Script> = METADATA_CACHE_FLAGS
+        .iter()
+        .map(|flags| metadata_sharing_script(flags))
+        .collect();
+    let json: Vec<Value> = scripts.iter().map(Script::json).collect();
+    let theirs = common::wheel(&json);
+    common::script::compare_with(&scripts, &theirs);
+    let _turn = common::turn();
+    Python::attach(|py| {
+        let globals = pyo3::types::PyDict::new(py);
+        py.run(METADATA_LIFETIME, Some(&globals), None)
+            .unwrap_or_else(|e| panic!("{e}"));
+        for (flags, theirs) in METADATA_CACHE_FLAGS.iter().zip(&theirs) {
+            let steps = theirs["steps"].as_array().unwrap();
+            let n_steps = steps.len();
+            let items = |k: usize| -> Vec<String> {
+                steps[k]["value"]["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| String::from_utf8(bytes(&v["str"])).unwrap())
+                    .collect()
+            };
+            let (files, looks) = (items(n_steps - 3), items(n_steps - 1));
+            assert_eq!(files, ["a.clf"], "{flags}: the wheel's files");
+            assert_eq!(looks, ["look a"], "{flags}: the wheel's looks");
+            let om = &steps[n_steps - 5];
+            let same: Vec<u64> = om["same_as"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_u64().unwrap())
+                .collect();
+            assert_eq!(
+                same,
+                [(n_steps - 9) as u64],
+                "{flags}: the wheel's identity"
+            );
+            for keep in [true, false] {
+                let code = std::ffi::CString::new(
+                    format!("lifetime({flags}, {keep:?})")
+                        .replace("true", "True")
+                        .replace("false", "False"),
+                )
+                .unwrap();
+                let got = py
+                    .eval(&code, Some(&globals), None)
+                    .unwrap_or_else(|e| panic!("{code:?}: {e}"));
+                let (is_same, got_files, got_looks): (bool, Vec<String>, Vec<String>) =
+                    got.extract().unwrap();
+                assert_eq!(is_same, keep, "{code:?}: the first metadata's object");
+                assert_eq!(got_files, files, "{code:?}");
+                assert_eq!(got_looks, looks, "{code:?}");
+            }
+        }
+    });
+}
