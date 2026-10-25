@@ -4015,13 +4015,16 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`fileRulesAreEqual`, `SectionMerger.cpp:425-472` @ v2.5.2). Rules whose regular expressions
   (`a` and `A`), patterns or extensions differ only in case match different files, yet the merge
   sees no conflict: it reports none, even with `error_on_conflict`, and keeps the rule of the
-  config that comes first. Probed on the Windows wheel (2026-10-25).
+  config that comes first. The viewing rules compare their custom key values ignoring case too
+  (`viewingRulesAreEqual`, `SectionMerger.cpp:731-810`). Probed on the Windows wheel
+  (2026-10-25).
 - **Who notices:** merges of configs whose rules tell files apart by case (on case-sensitive
   file systems), or whose custom keys differ in case.
 - **A fix:** compare the patterns, expressions, extensions and custom key values exactly (the
   color space names may stay case-insensitive, as the config's own lookups are).
 - **Status:** matched in `p9-merge-2` (9.2e, `apphelpers/mergeconfigs/section_merger.rs`,
-  `file_rules_are_equal`); `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`).
+  `file_rules_are_equal`; 9.2f, `viewing_rules_are_equal`); `section_merger_oracle_tests.rs`
+  (`whole_merges_match_the_wheel`).
 
 ### I-428. A merge drops the custom keys of the path search rule it copies
 
@@ -4048,6 +4051,36 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   report a conflict as the other sections do.
 - **Status:** matched in `p9-merge-2` (9.2e, `section_merger.rs`, `LooksMerger`);
   `MergeConfigs/looks_section` and `section_merger_oracle_tests.rs`.
+
+### I-430. The Remove strategy keeps most of the input's active displays and views
+
+- **Upstream:** with the displays and views strategy `Remove`, the merge splits the base's and
+  the input's active displays (and views) at each comma, without trimming, and removes from the
+  base's list each entry of the input's that matches one ignoring case
+  (`SectionMerger.cpp:1631-1653` @ v2.5.2). The lists come from `getActiveDisplays`, which
+  writes `, ` between the names, so every entry but the first starts with a space: an entry is
+  removed only when it is first in both lists or past the first in both. Base `[A, B]` and input
+  `[B, A]` remove nothing. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** merges that remove displays or views with `Remove`.
+- **A fix:** trim the entries before comparing them, as the other strategies do
+  (`mergeStringsWithoutDuplicates`).
+- **Status:** matched in `p9-merge-2` (9.2f, `apphelpers/mergeconfigs/section_merger.rs`,
+  `DisplayViewMerger::handle_remove`); `section_merger_oracle_tests.rs`
+  (`whole_merges_match_the_wheel`, the "active lists" configs).
+
+### I-431. A merge splits an active display or view whose name holds a comma
+
+- **Upstream:** the displays and views section splits the active lists at every comma, with a
+  TODO saying that quoted names aren't handled (`splitActiveList`, `SectionMerger.cpp:31-38` @
+  v2.5.2), although `getActiveDisplays` quotes a name that holds a comma. The merged list then
+  joins the pieces again: the strategies that trim the entries give the name back, while
+  `Remove` writes `"x,  y"` for a display `x, y`, which then names another display. Probed on
+  the Windows wheel (2026-10-25).
+- **Who notices:** configs with display or view names that hold a comma.
+- **A fix:** split the lists as the config reads them (`Config::setActiveDisplays`), quotes
+  respected.
+- **Status:** matched in `p9-merge-2` (9.2f, `section_merger.rs`, `split_active_list`);
+  `section_merger_oracle_tests.rs` (the "active lists" configs).
 
 ## Undefined behaviour upstream
 

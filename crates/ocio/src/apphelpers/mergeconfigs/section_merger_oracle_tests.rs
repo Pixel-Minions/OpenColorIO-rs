@@ -11,10 +11,10 @@
 //! duplicate search or the reference-space conversion, so that they neither raise nor change
 //! these.
 //!
-//! From 9.2e on, whole merges are compared too: with the sections not ported yet keeping the
-//! base's (whose `BaseOnly` handlers change nothing configs without named transforms, view
-//! transforms or inactive color spaces have), the merged config's `serialize()` byte for byte,
-//! the whole log, or the exception.
+//! From 9.2e on, whole merges are compared too (the displays and views from 9.2f): with the
+//! sections not ported yet keeping the base's (whose `BaseOnly` handlers change nothing that
+//! configs without named transforms, view transforms or inactive color spaces have), the merged
+//! config's `serialize()` byte for byte, the whole log, or the exception.
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -589,48 +589,234 @@ colorspaces:
     name: a
 "#,
     },
+    Pair {
+        label: "displays and views",
+        base: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+shared_views:
+  - !<View> {name: SHARED_1, colorspace: lin}
+  - !<View> {name: SHARED_2, view_transform: vt, display_colorspace: <USE_DISPLAY_NAME>}
+
+viewing_rules:
+  - !<Rule> {name: RULE_1, colorspaces: [lin]}
+  - !<Rule> {name: RULE_2, encodings: [scene-linear], custom: {k: v}}
+  - !<Rule> {name: RULE_4, encodings: [sdr-video, log]}
+
+displays:
+  DISP_1:
+    - !<View> {name: VIEW_1, colorspace: lin, rule: RULE_1}
+    - !<Views> [SHARED_1, SHARED_2]
+  DISP_2:
+    - !<View> {name: VIEW_1, colorspace: lin, rule: RULE_2}
+    - !<View> {name: VIEW_2, colorspace: log, looks: lk}
+
+virtual_display:
+  - !<View> {name: ACES, view_transform: vt, display_colorspace: <USE_DISPLAY_NAME>}
+  - !<View> {name: Log, colorspace: log}
+  - !<Views> [SHARED_1]
+
+active_displays: [DISP_1, DISP_2]
+active_views: [SHARED_1, SHARED_2, VIEW_1, VIEW_2]
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+  - !<ColorSpace>
+    name: lin
+  - !<ColorSpace>
+    name: log
+"#,
+        input: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+shared_views:
+  - !<View> {name: SHARED_1, colorspace: log}
+  - !<View> {name: SHARED_3, colorspace: lin, description: from input}
+  - !<View> {name: VIEW_2, colorspace: log, looks: lk}
+
+viewing_rules:
+  - !<Rule> {name: RULE_1, colorspaces: [log, lin]}
+  - !<Rule> {name: RULE_3, colorspaces: [lin]}
+  - !<Rule> {name: rule_2, encodings: [SCENE-LINEAR], custom: {k: V}}
+  - !<Rule> {name: RULE_4, encodings: [log]}
+
+displays:
+  DISP_1:
+    - !<View> {name: VIEW_1, colorspace: log, rule: RULE_3}
+    - !<Views> [SHARED_3, SHARED_1]
+  DISP_3:
+    - !<View> {name: VIEW_1, colorspace: lin}
+    - !<View> {name: VIEW_3, colorspace: log, looks: lk}
+  DISP_2:
+    - !<Views> [VIEW_2]
+
+virtual_display:
+  - !<View> {name: ACES, view_transform: vt, display_colorspace: <USE_DISPLAY_NAME>}
+  - !<View> {name: Lin, colorspace: lin}
+  - !<View> {name: SHARED_1, colorspace: raw}
+  - !<Views> [SHARED_3]
+
+active_displays: [DISP_1, DISP_3]
+active_views: [SHARED_1, SHARED_3, VIEW_1, VIEW_3]
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+  - !<ColorSpace>
+    name: lin
+  - !<ColorSpace>
+    name: log
+"#,
+    },
+    Pair {
+        label: "active lists",
+        base: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+displays:
+  A:
+    - !<View> {name: v, colorspace: raw}
+    - !<View> {name: w, colorspace: raw}
+  B:
+    - !<View> {name: v, colorspace: raw}
+  "x, y":
+    - !<View> {name: v, colorspace: raw}
+
+active_displays: [A, B, "x, y"]
+active_views: [v, w]
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+"#,
+        input: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+displays:
+  b:
+    - !<View> {name: V, colorspace: raw}
+  C:
+    - !<View> {name: v, colorspace: raw}
+
+active_displays: [b, C]
+active_views: [w, V]
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+"#,
+    },
+    Pair {
+        label: "v1 displays",
+        base: r#"ocio_profile_version: 1
+
+roles:
+  default: raw
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+    - !<View> {name: Film, colorspace: lin, looks: +lk}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+  - !<ColorSpace>
+    name: lin
+"#,
+        input: r#"ocio_profile_version: 1
+
+roles:
+  default: raw
+
+displays:
+  sRGB:
+    - !<View> {name: Film, colorspace: lin}
+  Rec709:
+    - !<View> {name: Raw, colorspace: raw}
+
+active_views: [Film]
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+  - !<ColorSpace>
+    name: lin
+"#,
+    },
 ];
+
+/// The index in [`WHOLE_PAIRS`] of the first pair with displays: the displays and views section
+/// takes every strategy over these, the file rules and looks sections over the others.
+const FIRST_DISPLAY_PAIR: usize = 3;
+
+/// The active displays and views the overrides set, when a case sets them.
+const ACTIVE_DISPLAYS_OVERRIDE: &str = "DISP_2, A";
+const ACTIVE_VIEWS_OVERRIDE: &str = "VIEW_2, v";
 
 /// The setters of the sections the whole merges keep the base's: the sections not ported yet.
-const NOT_PORTED_SECTIONS: &[&str] = &[
-    "setDisplayViews",
-    "setViewTransforms",
-    "setColorspaces",
-    "setNamedTransforms",
-];
+const NOT_PORTED_SECTIONS: &[&str] = &["setViewTransforms", "setColorspaces", "setNamedTransforms"];
 
 /// One whole merge: a pair of [`WHOLE_PAIRS`], the default strategy (which the general and
-/// roles sections take), the file rules' and the looks' (indices into [`STRATEGIES`]), the
-/// input-first and error-on-conflict options.
+/// roles sections take), the file rules', the displays and views' and the looks' (indices into
+/// [`STRATEGIES`]), the input-first and error-on-conflict options, and whether the active
+/// displays and views are overridden.
 #[derive(Debug, Clone, Copy)]
 struct WholeCase {
     pair: usize,
     default: usize,
     file_rules: usize,
+    display_views: usize,
     looks: usize,
     input_first: bool,
     error_on_conflict: bool,
+    active_overrides: bool,
 }
 
 /// Every pair with every default strategy but `STRATEGY_UNSPECIFIED` (none set is the default
-/// default, `PreferInput`), every file rules and looks strategy, and both options.
+/// default, `PreferInput`) and both options: the pairs without displays with every file rules
+/// and looks strategy, the others with every displays and views strategy, with and without the
+/// overrides of the active lists. Unset strategies follow the default.
 fn whole_cases() -> Vec<WholeCase> {
     let mut cases = Vec::new();
     for pair in 0..WHOLE_PAIRS.len() {
         for default in 0..STRATEGIES.len() - 1 {
-            for file_rules in 0..STRATEGIES.len() {
-                for looks in 0..STRATEGIES.len() {
-                    for input_first in [true, false] {
-                        for error_on_conflict in [false, true] {
-                            cases.push(WholeCase {
-                                pair,
-                                default,
-                                file_rules,
-                                looks,
-                                input_first,
-                                error_on_conflict,
-                            });
-                        }
+            let mut sections = Vec::new();
+            if pair < FIRST_DISPLAY_PAIR {
+                for file_rules in 0..STRATEGIES.len() {
+                    for looks in 0..STRATEGIES.len() {
+                        sections.push((file_rules, 0, looks, false));
+                    }
+                }
+            } else {
+                for display_views in 0..STRATEGIES.len() {
+                    for active_overrides in [false, true] {
+                        sections.push((0, display_views, 0, active_overrides));
+                    }
+                }
+            }
+            for (file_rules, display_views, looks, active_overrides) in sections {
+                for input_first in [true, false] {
+                    for error_on_conflict in [false, true] {
+                        cases.push(WholeCase {
+                            pair,
+                            default,
+                            file_rules,
+                            display_views,
+                            looks,
+                            input_first,
+                            error_on_conflict,
+                            active_overrides,
+                        });
                     }
                 }
             }
@@ -658,6 +844,12 @@ fn whole_calls(case: &WholeCase) -> Vec<Value> {
         json!({"call": "setInputFirst", "on": "p", "args": [case.input_first]}),
         json!({"call": "setErrorOnConflict", "on": "p", "args": [case.error_on_conflict]}),
     ];
+    if case.active_overrides {
+        calls.push(
+            json!({"call": "setActiveDisplays", "on": "p", "args": [ACTIVE_DISPLAYS_OVERRIDE]}),
+        );
+        calls.push(json!({"call": "setActiveViews", "on": "p", "args": [ACTIVE_VIEWS_OVERRIDE]}));
+    }
     for setter in NOT_PORTED_SECTIONS {
         calls
             .push(json!({"call": setter, "on": "p", "args": [strategy_arg("STRATEGY_BASE_ONLY")]}));
@@ -665,6 +857,7 @@ fn whole_calls(case: &WholeCase) -> Vec<Value> {
     for (setter, index) in [
         ("setDefaultStrategy", case.default),
         ("setFileRules", case.file_rules),
+        ("setDisplayViews", case.display_views),
         ("setLooks", case.looks),
     ] {
         if let Some(name) = STRATEGIES[index].0 {
@@ -698,8 +891,15 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
     params.set_adjust_input_reference_space(false);
     params.set_input_first(case.input_first);
     params.set_error_on_conflict(case.error_on_conflict);
-    let not_ported: [StrategySetter; 4] = [
-        ConfigMergingParameters::set_display_views,
+    if case.active_overrides {
+        params
+            .set_active_displays(ACTIVE_DISPLAYS_OVERRIDE)
+            .expect("setActiveDisplays");
+        params
+            .set_active_views(ACTIVE_VIEWS_OVERRIDE)
+            .expect("setActiveViews");
+    }
+    let not_ported: [StrategySetter; 3] = [
         ConfigMergingParameters::set_view_transforms,
         ConfigMergingParameters::set_colorspaces,
         ConfigMergingParameters::set_named_transforms,
@@ -707,9 +907,13 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
     for setter in not_ported {
         setter(&params, MergeStrategies::BaseOnly);
     }
-    let ported: [(StrategySetter, usize); 3] = [
+    let ported: [(StrategySetter, usize); 4] = [
         (ConfigMergingParameters::set_default_strategy, case.default),
         (ConfigMergingParameters::set_file_rules, case.file_rules),
+        (
+            ConfigMergingParameters::set_display_views,
+            case.display_views,
+        ),
         (ConfigMergingParameters::set_looks, case.looks),
     ];
     for (setter, index) in ported {
@@ -728,6 +932,7 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
         GeneralMerger::new(&mut options).and_then(|mut m| m.merge())?;
         RolesMerger::new(&mut options).and_then(|mut m| m.merge())?;
         FileRulesMerger::new(&mut options).and_then(|mut m| m.merge())?;
+        DisplayViewMerger::new(&mut options).and_then(|mut m| m.merge())?;
         LooksMerger::new(&mut options).and_then(|mut m| m.merge())
     });
     (
@@ -739,7 +944,8 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
 
 /// Whole merges whose other sections keep the base's, as the wheel's `MergeConfigs` makes
 /// them: the merged config's `serialize()` byte for byte, the log, or the exception, over the
-/// strategies of the general, roles, file rules and looks sections and both options.
+/// strategies of the general, roles, file rules, displays and views and looks sections, both
+/// options, and the overrides of the active lists.
 #[test]
 fn whole_merges_match_the_wheel() {
     let cases = whole_cases();
@@ -760,6 +966,7 @@ fn whole_merges_match_the_wheel() {
 
     let (mut raised, mut logged) = (0, 0);
     let mut texts = std::collections::BTreeSet::new();
+    let mut display_texts = std::collections::BTreeSet::new();
     let mut mismatches = Vec::new();
     for (case, response) in cases.iter().zip(responses) {
         let response = response.unwrap_or_else(|e| panic!("{case:?}: {e}")).result;
@@ -809,6 +1016,9 @@ fn whole_merges_match_the_wheel() {
                         String::from_utf8_lossy(&text)
                     ));
                 }
+                if case.pair >= FIRST_DISPLAY_PAIR {
+                    display_texts.insert(text.clone());
+                }
                 texts.insert(text);
             }
             (wheel, port) => problems.push(format!("outcome: wheel {wheel:?}, port {port:?}")),
@@ -832,5 +1042,10 @@ fn whole_merges_match_the_wheel() {
         texts.len() >= 40,
         "{} different merged configs",
         texts.len()
+    );
+    assert!(
+        display_texts.len() >= 20,
+        "{} different merged configs with displays",
+        display_texts.len()
     );
 }

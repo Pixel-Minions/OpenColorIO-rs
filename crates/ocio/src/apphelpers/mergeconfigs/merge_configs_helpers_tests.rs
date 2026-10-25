@@ -6,12 +6,14 @@
 
 use super::*;
 use crate::apphelpers::mergeconfigs::section_merger::{
-    FileRulesMerger, GeneralMerger, LooksMerger, MergeHandlerOptions, RolesMerger, Section,
+    DisplayViewMerger, FileRulesMerger, GeneralMerger, LooksMerger, MergeHandlerOptions,
+    RolesMerger, Section,
 };
 use crate::file_rules::FileRules;
 use crate::fileformats::test_utils::get_test_files_dir;
+use crate::viewing_rules::ViewingRules;
 use ocio_ops::logging::{get_logging_level, set_logging_level};
-use ocio_ops::open_color_types::LoggingLevel;
+use ocio_ops::open_color_types::{LoggingLevel, ViewType};
 use ocio_ops::std_regex::{Regex, regex_replace};
 use ocio_ops::utils::pystring::os_path;
 use ocio_testkit::upstream::check_close;
@@ -1815,5 +1817,1251 @@ fn looks_section() {
         assert_eq!(merged_config.num_looks(), 1);
         assert_eq!(merged_config.look_name_by_index(0), b"look_base");
         assert_eq!(look_process_space(&merged_config, 0), b"log_1");
+    }
+}
+
+/// Upstream's `setupBasics` of the displays and views section's test: a merger with new
+/// parameters, whose displays and views strategy is `strategy`; the parameters.
+fn setup_display_views_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    merger.params(0).unwrap().set_display_views(strategy);
+    params
+}
+
+/// `rules->getColorSpace(rule, index)` of a color space the rule has.
+fn rule_color_space(rules: &ViewingRules, rule: usize, index: usize) -> &[u8] {
+    rules.color_space(rule, index).unwrap().unwrap()
+}
+
+/// `rules->getEncoding(rule, index)` of an encoding the rule has.
+fn rule_encoding(rules: &ViewingRules, rule: usize, index: usize) -> &[u8] {
+    rules.encoding(rule, index).unwrap().unwrap()
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, displays_views_section)` @ v2.5.2.
+#[test]
+fn displays_views_section() {
+    const VIEW_DISPLAY_DEFINED: ViewType = ViewType::DisplayDefined;
+    const VIEW_SHARED: ViewType = ViewType::Shared;
+
+    let base_config = get_base_config().unwrap();
+    let input_config = get_input_config().unwrap();
+
+    let setup_basics = setup_display_views_basics;
+
+    // Allowed strategies: All
+    // Allowed merge options: All
+
+    // Test that the default strategy is used as a fallback if the section strategy was not defined.
+    {
+        let mut merger = ConfigMerger::new();
+
+        // Using STRATEGY_UNSPECIFIED as this simulates that the section
+        // is missing from the OCIOM file.
+        let params = setup_basics(&mut merger, MergeStrategies::Unspecified);
+        // Simulate settings from OCIOM file.
+        merger
+            .params(0)
+            .unwrap()
+            .set_default_strategy(MergeStrategies::InputOnly);
+        merger.params(0).unwrap().set_input_first(true);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            DisplayViewMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.active_displays(), b"DISP_1, DISP_3");
+        assert_eq!(
+            merged_config.active_views(),
+            b"SHARED_1, SHARED_3, VIEW_1, VIEW_3"
+        );
+
+        // Validate shared_views
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, b""), 2);
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 0), b"SHARED_1");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 1), b"SHARED_3");
+
+        // Validate displays
+        assert_eq!(merged_config.num_displays_all(), 2);
+        assert_eq!(merged_config.display(0), b"DISP_1");
+        assert_eq!(merged_config.display(1), b"DISP_3");
+
+        // Validate display/views
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_1"),
+            1
+        );
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, "DISP_1"), 2);
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_1", 0),
+            b"VIEW_1"
+        );
+        // Make sure this is the right VIEW_1 by checking the colorspace.
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "VIEW_1"),
+            b"view_1B"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 0),
+            b"SHARED_3"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_3"),
+            b"log_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 1),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_1"),
+            b"lin_3"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_3"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 1),
+            b"VIEW_3"
+        );
+
+        // Validate viewing_rules
+        let rules = merged_config.viewing_rules().get();
+
+        assert_eq!(rules.num_entries(), 2);
+
+        assert_eq!(rules.name(0).unwrap(), b"RULE_1");
+        assert_eq!(rules.num_color_spaces(0).unwrap(), 1);
+        assert_eq!(rule_color_space(&rules, 0, 0), b"sRGB - Texture");
+
+        assert_eq!(rules.name(1).unwrap(), b"RULE_3");
+        assert_eq!(rules.num_color_spaces(1).unwrap(), 2);
+        assert_eq!(rule_color_space(&rules, 1, 0), b"Linear Rec.2020");
+        assert_eq!(rule_color_space(&rules, 1, 1), b"ACEScct - SomeOtherName");
+
+        // Validate virtual_display
+        assert_eq!(
+            merged_config.virtual_display_num_views(VIEW_DISPLAY_DEFINED),
+            2
+        );
+        assert_eq!(merged_config.virtual_display_num_views(VIEW_SHARED), 1);
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 0),
+            b"ACES"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 1),
+            b"Lin"
+        );
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 0),
+            b"SHARED_3"
+        );
+    }
+
+    // Test display/views with strategy = PreferInput, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(true);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    DisplayViewMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: shared_views: SHARED_1",
+                "The Input config contains a value that would override the Base config: display: DISP_1, view: VIEW_1",
+                "The Input config contains a value that would override the Base config: viewing_rules: RULE_1",
+            ],
+        );
+
+        assert_eq!(merged_config.active_displays(), b"DISP_1, DISP_3, DISP_2");
+        assert_eq!(
+            merged_config.active_views(),
+            b"SHARED_1, SHARED_3, VIEW_1, VIEW_3, SHARED_2, VIEW_2"
+        );
+
+        // Validate shared_views
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, b""), 3);
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 0), b"SHARED_1");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 1), b"SHARED_3");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 2), b"SHARED_2");
+
+        // Validate displays
+        assert_eq!(merged_config.num_displays_all(), 3);
+        assert_eq!(merged_config.display(0), b"DISP_1");
+        assert_eq!(merged_config.display(1), b"DISP_3");
+        assert_eq!(merged_config.display(2), b"DISP_2");
+
+        // Validate display/views
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_1"),
+            1
+        );
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, "DISP_1"), 3);
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_1", 0),
+            b"VIEW_1"
+        );
+        // Make sure this is the right VIEW_1 by checking the colorspace.
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "VIEW_1"),
+            b"view_1B"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_1", "VIEW_1"),
+            b"RULE_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 0),
+            b"SHARED_3"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_3"),
+            b"log_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 1),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_1"),
+            b"lin_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 2),
+            b"SHARED_2"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_2"),
+            b"<USE_DISPLAY_NAME>"
+        );
+        assert_eq!(
+            merged_config.display_view_transform_name("DISP_1", "SHARED_2"),
+            b"SDR Video"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_3"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 1),
+            b"VIEW_3"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_3", "VIEW_3"),
+            b"look_input"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_2"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 1),
+            b"VIEW_2"
+        );
+
+        // Validate viewing_rules
+        let rules = merged_config.viewing_rules().get();
+
+        assert_eq!(rules.num_entries(), 3);
+
+        assert_eq!(rules.name(0).unwrap(), b"RULE_1");
+        assert_eq!(rules.num_color_spaces(0).unwrap(), 1);
+        assert_eq!(rule_color_space(&rules, 0, 0), b"sRGB - Texture");
+
+        assert_eq!(rules.name(1).unwrap(), b"RULE_3");
+        assert_eq!(rules.num_color_spaces(1).unwrap(), 2);
+        assert_eq!(rule_color_space(&rules, 1, 0), b"Linear Rec.2020");
+        assert_eq!(rule_color_space(&rules, 1, 1), b"ACEScct - SomeOtherName");
+
+        assert_eq!(rules.name(2).unwrap(), b"RULE_2");
+        assert_eq!(rules.num_encodings(2).unwrap(), 1);
+        assert_eq!(rule_encoding(&rules, 2, 0), b"scene-linear");
+
+        // Validate virtual_display
+        assert_eq!(
+            merged_config.virtual_display_num_views(VIEW_DISPLAY_DEFINED),
+            3
+        );
+        assert_eq!(merged_config.virtual_display_num_views(VIEW_SHARED), 2);
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 0),
+            b"ACES"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 1),
+            b"Lin"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 2),
+            b"Log"
+        );
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 0),
+            b"SHARED_3"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 1),
+            b"SHARED_1"
+        );
+    }
+
+    // Test display/views with strategy=PreferInput, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(false);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    DisplayViewMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: shared_views: SHARED_1",
+                "The Input config contains a value that would override the Base config: display: DISP_1, view: VIEW_1",
+                "The Input config contains a value that would override the Base config: viewing_rules: RULE_1",
+            ],
+        );
+
+        assert_eq!(merged_config.active_displays(), b"DISP_1, DISP_2, DISP_3");
+        assert_eq!(
+            merged_config.active_views(),
+            b"SHARED_1, SHARED_2, VIEW_1, VIEW_2, SHARED_3, VIEW_3"
+        );
+
+        // Validate shared_views
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, b""), 3);
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 0), b"SHARED_1");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 1), b"SHARED_2");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 2), b"SHARED_3");
+
+        // Validate displays
+        assert_eq!(merged_config.num_displays_all(), 3);
+        assert_eq!(merged_config.display(0), b"DISP_1");
+        assert_eq!(merged_config.display(1), b"DISP_2");
+        assert_eq!(merged_config.display(2), b"DISP_3");
+
+        // Validate display/views
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_1"),
+            1
+        );
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, "DISP_1"), 3);
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_1", 0),
+            b"VIEW_1"
+        );
+        // Make sure this is the right VIEW_1 by checking the colorspace.
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "VIEW_1"),
+            b"view_1B"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_1", "VIEW_1"),
+            b"RULE_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 0),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_1"),
+            b"lin_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 1),
+            b"SHARED_2"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_2"),
+            b"<USE_DISPLAY_NAME>"
+        );
+        assert_eq!(
+            merged_config.display_view_transform_name("DISP_1", "SHARED_2"),
+            b"SDR Video"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 2),
+            b"SHARED_3"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_3"),
+            b"log_3"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_2"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 1),
+            b"VIEW_2"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_3"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 1),
+            b"VIEW_3"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_3", "VIEW_3"),
+            b"look_input"
+        );
+
+        // Validate viewing_rules
+        let rules = merged_config.viewing_rules().get();
+
+        assert_eq!(rules.num_entries(), 3);
+
+        assert_eq!(rules.name(0).unwrap(), b"RULE_1");
+        assert_eq!(rules.num_color_spaces(0).unwrap(), 1);
+        assert_eq!(rule_color_space(&rules, 0, 0), b"sRGB - Texture");
+
+        assert_eq!(rules.name(1).unwrap(), b"RULE_2");
+        assert_eq!(rules.num_encodings(1).unwrap(), 1);
+        assert_eq!(rule_encoding(&rules, 1, 0), b"scene-linear");
+
+        assert_eq!(rules.name(2).unwrap(), b"RULE_3");
+        assert_eq!(rules.num_color_spaces(2).unwrap(), 2);
+        assert_eq!(rule_color_space(&rules, 2, 0), b"Linear Rec.2020");
+        assert_eq!(rule_color_space(&rules, 2, 1), b"ACEScct - SomeOtherName");
+
+        // Validate virtual_display
+        assert_eq!(
+            merged_config.virtual_display_num_views(VIEW_DISPLAY_DEFINED),
+            3
+        );
+        assert_eq!(merged_config.virtual_display_num_views(VIEW_SHARED), 2);
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 0),
+            b"ACES"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 1),
+            b"Log"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 2),
+            b"Lin"
+        );
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 0),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 1),
+            b"SHARED_3"
+        );
+    }
+
+    // Test display/views with strategy = PreferBase, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(true);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    DisplayViewMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: shared_views: SHARED_1",
+                "The Input config contains a value that would override the Base config: display: DISP_1, view: VIEW_1",
+                "The Input config contains a value that would override the Base config: viewing_rules: RULE_1",
+            ],
+        );
+
+        assert_eq!(merged_config.active_displays(), b"DISP_1, DISP_3, DISP_2");
+        assert_eq!(
+            merged_config.active_views(),
+            b"SHARED_1, SHARED_3, VIEW_1, VIEW_3, SHARED_2, VIEW_2"
+        );
+
+        // Validate shared_views
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, b""), 3);
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 0), b"SHARED_1");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 1), b"SHARED_3");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 2), b"SHARED_2");
+
+        // Validate displays
+        assert_eq!(merged_config.num_displays_all(), 3);
+        assert_eq!(merged_config.display(0), b"DISP_1");
+        assert_eq!(merged_config.display(1), b"DISP_3");
+        assert_eq!(merged_config.display(2), b"DISP_2");
+
+        // Validate display/views
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_1"),
+            1
+        );
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, "DISP_1"), 3);
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_1", 0),
+            b"VIEW_1"
+        );
+        // Make sure this is the right VIEW_1 by checking the colorspace.
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "VIEW_1"),
+            b"view_1"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_1", "VIEW_1"),
+            b"RULE_1"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 0),
+            b"SHARED_3"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_3"),
+            b"log_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 1),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_1"),
+            b"lin_1"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 2),
+            b"SHARED_2"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_2"),
+            b"<USE_DISPLAY_NAME>"
+        );
+        assert_eq!(
+            merged_config.display_view_transform_name("DISP_1", "SHARED_2"),
+            b"SDR Video"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_3"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 1),
+            b"VIEW_3"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_3", "VIEW_3"),
+            b"look_input"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_2"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_2", "VIEW_1"),
+            b"RULE_2"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 1),
+            b"VIEW_2"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_2", "VIEW_2"),
+            b"look_base"
+        );
+
+        // Validate viewing_rules
+        let rules = merged_config.viewing_rules().get();
+
+        assert_eq!(rules.num_entries(), 3);
+
+        assert_eq!(rules.name(0).unwrap(), b"RULE_1");
+        assert_eq!(rules.num_color_spaces(0).unwrap(), 1);
+        assert_eq!(rule_color_space(&rules, 0, 0), b"Gamma 2.2 AP1 - Texture");
+
+        assert_eq!(rules.name(1).unwrap(), b"RULE_3");
+        assert_eq!(rules.num_color_spaces(1).unwrap(), 2);
+        assert_eq!(rule_color_space(&rules, 1, 0), b"Linear Rec.2020");
+        assert_eq!(rule_color_space(&rules, 1, 1), b"ACEScct - SomeOtherName");
+
+        assert_eq!(rules.name(2).unwrap(), b"RULE_2");
+        assert_eq!(rules.num_encodings(2).unwrap(), 1);
+        assert_eq!(rule_encoding(&rules, 2, 0), b"scene-linear");
+
+        // Validate virtual_display
+        assert_eq!(
+            merged_config.virtual_display_num_views(VIEW_DISPLAY_DEFINED),
+            3
+        );
+        assert_eq!(merged_config.virtual_display_num_views(VIEW_SHARED), 2);
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 0),
+            b"ACES"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 1),
+            b"Lin"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 2),
+            b"Log"
+        );
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 0),
+            b"SHARED_3"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 1),
+            b"SHARED_1"
+        );
+    }
+
+    // Test display/views with strategy = PreferBase, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(false);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    DisplayViewMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: shared_views: SHARED_1",
+                "The Input config contains a value that would override the Base config: display: DISP_1, view: VIEW_1",
+                "The Input config contains a value that would override the Base config: viewing_rules: RULE_1",
+            ],
+        );
+
+        assert_eq!(merged_config.active_displays(), b"DISP_1, DISP_2, DISP_3");
+        assert_eq!(
+            merged_config.active_views(),
+            b"SHARED_1, SHARED_2, VIEW_1, VIEW_2, SHARED_3, VIEW_3"
+        );
+
+        // Validate shared_views
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, b""), 3);
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 0), b"SHARED_1");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 1), b"SHARED_2");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 2), b"SHARED_3");
+
+        // Validate displays
+        assert_eq!(merged_config.num_displays_all(), 3);
+        assert_eq!(merged_config.display(0), b"DISP_1");
+        assert_eq!(merged_config.display(1), b"DISP_2");
+        assert_eq!(merged_config.display(2), b"DISP_3");
+
+        // Validate display/views
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_1"),
+            1
+        );
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, "DISP_1"), 3);
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_1", 0),
+            b"VIEW_1"
+        );
+        // Make sure this is the right VIEW_1 by checking the colorspace.
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "VIEW_1"),
+            b"view_1"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_1", "VIEW_1"),
+            b"RULE_1"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 0),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_1"),
+            b"lin_1"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 1),
+            b"SHARED_2"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_2"),
+            b"<USE_DISPLAY_NAME>"
+        );
+        assert_eq!(
+            merged_config.display_view_transform_name("DISP_1", "SHARED_2"),
+            b"SDR Video"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 2),
+            b"SHARED_3"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_3"),
+            b"log_3"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_2"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_2", "VIEW_1"),
+            b"RULE_2"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 1),
+            b"VIEW_2"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_2", "VIEW_2"),
+            b"look_base"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_3"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 1),
+            b"VIEW_3"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_3", "VIEW_3"),
+            b"look_input"
+        );
+
+        // Validate viewing_rules
+        let rules = merged_config.viewing_rules().get();
+
+        assert_eq!(rules.num_entries(), 3);
+
+        assert_eq!(rules.name(0).unwrap(), b"RULE_1");
+        assert_eq!(rules.num_color_spaces(0).unwrap(), 1);
+        assert_eq!(rule_color_space(&rules, 0, 0), b"Gamma 2.2 AP1 - Texture");
+
+        assert_eq!(rules.name(1).unwrap(), b"RULE_2");
+        assert_eq!(rules.num_encodings(1).unwrap(), 1);
+        assert_eq!(rule_encoding(&rules, 1, 0), b"scene-linear");
+
+        assert_eq!(rules.name(2).unwrap(), b"RULE_3");
+        assert_eq!(rules.num_color_spaces(2).unwrap(), 2);
+        assert_eq!(rule_color_space(&rules, 2, 0), b"Linear Rec.2020");
+        assert_eq!(rule_color_space(&rules, 2, 1), b"ACEScct - SomeOtherName");
+
+        // Validate virtual_display
+        assert_eq!(
+            merged_config.virtual_display_num_views(VIEW_DISPLAY_DEFINED),
+            3
+        );
+        assert_eq!(merged_config.virtual_display_num_views(VIEW_SHARED), 2);
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 0),
+            b"ACES"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 1),
+            b"Log"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 2),
+            b"Lin"
+        );
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 0),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 1),
+            b"SHARED_3"
+        );
+    }
+
+    // Test display/views with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            DisplayViewMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.active_displays(), b"DISP_1, DISP_2");
+        assert_eq!(
+            merged_config.active_views(),
+            b"SHARED_1, SHARED_2, VIEW_1, VIEW_2"
+        );
+
+        // Validate shared_views
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, b""), 2);
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 0), b"SHARED_1");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 1), b"SHARED_2");
+
+        // Validate displays
+        assert_eq!(merged_config.num_displays_all(), 2);
+        assert_eq!(merged_config.display(0), b"DISP_1");
+        assert_eq!(merged_config.display(1), b"DISP_2");
+
+        // Validate display/views
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_1"),
+            1
+        );
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, "DISP_1"), 2);
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_1", 0),
+            b"VIEW_1"
+        );
+        // Make sure this is the right VIEW_1 by checking the colorspace.
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "VIEW_1"),
+            b"view_1"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_1", "VIEW_1"),
+            b"RULE_1"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 0),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_1"),
+            b"lin_1"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 1),
+            b"SHARED_2"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_2"),
+            b"<USE_DISPLAY_NAME>"
+        );
+        assert_eq!(
+            merged_config.display_view_transform_name("DISP_1", "SHARED_2"),
+            b"SDR Video"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_2"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_2", "VIEW_1"),
+            b"RULE_2"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 1),
+            b"VIEW_2"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_2", "VIEW_2"),
+            b"look_base"
+        );
+
+        // Validate viewing_rules
+        let rules = merged_config.viewing_rules().get();
+
+        assert_eq!(rules.num_entries(), 2);
+
+        assert_eq!(rules.name(0).unwrap(), b"RULE_1");
+        assert_eq!(rules.num_color_spaces(0).unwrap(), 1);
+        assert_eq!(rule_color_space(&rules, 0, 0), b"Gamma 2.2 AP1 - Texture");
+
+        assert_eq!(rules.name(1).unwrap(), b"RULE_2");
+        assert_eq!(rules.num_encodings(1).unwrap(), 1);
+        assert_eq!(rule_encoding(&rules, 1, 0), b"scene-linear");
+
+        // Validate virtual_display
+        assert_eq!(
+            merged_config.virtual_display_num_views(VIEW_DISPLAY_DEFINED),
+            2
+        );
+        assert_eq!(merged_config.virtual_display_num_views(VIEW_SHARED), 1);
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 0),
+            b"ACES"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 1),
+            b"Log"
+        );
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 0),
+            b"SHARED_1"
+        );
+    }
+
+    // Test display/views with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            DisplayViewMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.active_displays(), b"DISP_1, DISP_3");
+        assert_eq!(
+            merged_config.active_views(),
+            b"SHARED_1, SHARED_3, VIEW_1, VIEW_3"
+        );
+
+        // Validate shared_views
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, b""), 2);
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 0), b"SHARED_1");
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 1), b"SHARED_3");
+
+        // Validate displays
+        assert_eq!(merged_config.num_displays_all(), 2);
+        assert_eq!(merged_config.display(0), b"DISP_1");
+        assert_eq!(merged_config.display(1), b"DISP_3");
+
+        // Validate display/views
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_1"),
+            1
+        );
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, "DISP_1"), 2);
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_1", 0),
+            b"VIEW_1"
+        );
+        // Make sure this is the right VIEW_1 by checking the colorspace.
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "VIEW_1"),
+            b"view_1B"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_1", "VIEW_1"),
+            b"RULE_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 0),
+            b"SHARED_3"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_3"),
+            b"log_3"
+        );
+
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 1),
+            b"SHARED_1"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_1"),
+            b"lin_3"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_3"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_3", 1),
+            b"VIEW_3"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_3", "VIEW_3"),
+            b"look_input"
+        );
+
+        // Validate viewing_rules
+        let rules = merged_config.viewing_rules().get();
+
+        assert_eq!(rules.num_entries(), 2);
+
+        assert_eq!(rules.name(0).unwrap(), b"RULE_1");
+        assert_eq!(rules.num_color_spaces(0).unwrap(), 1);
+        assert_eq!(rule_color_space(&rules, 0, 0), b"sRGB - Texture");
+
+        assert_eq!(rules.name(1).unwrap(), b"RULE_3");
+        assert_eq!(rules.num_color_spaces(1).unwrap(), 2);
+        assert_eq!(rule_color_space(&rules, 1, 0), b"Linear Rec.2020");
+        assert_eq!(rule_color_space(&rules, 1, 1), b"ACEScct - SomeOtherName");
+
+        // Validate virtual_display
+        assert_eq!(
+            merged_config.virtual_display_num_views(VIEW_DISPLAY_DEFINED),
+            2
+        );
+        assert_eq!(merged_config.virtual_display_num_views(VIEW_SHARED), 1);
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 0),
+            b"ACES"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 1),
+            b"Lin"
+        );
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 0),
+            b"SHARED_3"
+        );
+    }
+
+    // Test display/views with strategy = Remove
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::Remove);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            DisplayViewMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.active_displays(), b"DISP_2");
+        assert_eq!(merged_config.active_views(), b"SHARED_2, VIEW_2");
+
+        // Validate shared_views
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, b""), 1);
+        assert_eq!(merged_config.view_of_type(VIEW_SHARED, b"", 0), b"SHARED_2");
+
+        // Validate displays
+        assert_eq!(merged_config.num_displays_all(), 2);
+        assert_eq!(merged_config.display_all(0), b"DISP_1");
+        assert_eq!(merged_config.display_all(1), b"DISP_2");
+
+        // Validate display/views
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_1"),
+            0
+        );
+        assert_eq!(merged_config.num_views_of_type(VIEW_SHARED, "DISP_1"), 1);
+        assert_eq!(
+            merged_config.view_of_type(VIEW_SHARED, "DISP_1", 0),
+            b"SHARED_2"
+        );
+        assert_eq!(
+            merged_config.display_view_color_space_name("DISP_1", "SHARED_2"),
+            b"<USE_DISPLAY_NAME>"
+        );
+        assert_eq!(
+            merged_config.display_view_transform_name("DISP_1", "SHARED_2"),
+            b"SDR Video"
+        );
+
+        assert_eq!(
+            merged_config.num_views_of_type(VIEW_DISPLAY_DEFINED, "DISP_2"),
+            2
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 0),
+            b"VIEW_1"
+        );
+        assert_eq!(
+            merged_config.display_view_rule("DISP_2", "VIEW_1"),
+            b"RULE_2"
+        );
+        assert_eq!(
+            merged_config.view_of_type(VIEW_DISPLAY_DEFINED, "DISP_2", 1),
+            b"VIEW_2"
+        );
+        assert_eq!(
+            merged_config.display_view_looks("DISP_2", "VIEW_2"),
+            b"look_base"
+        );
+
+        // Validate viewing_rules
+        let rules = merged_config.viewing_rules().get();
+        assert_eq!(rules.num_entries(), 1);
+        assert_eq!(rules.name(0).unwrap(), b"RULE_2");
+        assert_eq!(rules.num_encodings(0).unwrap(), 1);
+        assert_eq!(rule_encoding(&rules, 0, 0), b"scene-linear");
+
+        // Validate virtual_display
+        assert_eq!(
+            merged_config.virtual_display_num_views(VIEW_DISPLAY_DEFINED),
+            1
+        );
+        assert_eq!(merged_config.virtual_display_num_views(VIEW_SHARED), 1);
+
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_DISPLAY_DEFINED, 0),
+            b"Log"
+        );
+        assert_eq!(
+            merged_config.virtual_display_view(VIEW_SHARED, 0),
+            b"SHARED_1"
+        );
+    }
+
+    // Test that error_on_conflicts is processed correctly.
+    // strategy = PreferInput, InputFirst = false
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+
+        let params = ConfigMergingParameters::new().unwrap();
+        merger.add_params(Some(params.clone()));
+        merger
+            .params(0)
+            .unwrap()
+            .set_display_views(MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(false);
+        merger.params(0).unwrap().set_error_on_conflict(true);
+
+        const PREFIX: &str =
+            "The Input config contains a value that would override the Base config: ";
+
+        // Test that an error is thrown when the input config values are different.
+        {
+            check_for_log_or_exception(
+                LogType::Error,
+                || {
+                    merge_section!(
+                        DisplayViewMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    )
+                },
+                &[
+                    &format!("{PREFIX}shared_views: SHARED_1"),
+                    &format!("{PREFIX}display: DISP_1, views: VIEW_1"),
+                    &format!("{PREFIX}viewing_rules: RULE_1"),
+                    &format!("{PREFIX}virtual_display: ACES"),
+                ],
+            );
+        }
     }
 }

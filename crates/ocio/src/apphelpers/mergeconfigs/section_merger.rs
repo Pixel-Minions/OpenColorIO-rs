@@ -7,7 +7,7 @@
 //! A merge copies the base config, then lets one merger per section of the config change that
 //! copy, each by its strategy (`ConfigMerger::mergeConfigs`, `ConfigMergingHelpers::MergeConfigs`,
 //! MergeConfigsHelpers.cpp:681-760): [`GeneralMerger`], [`RolesMerger`], [`FileRulesMerger`],
-//! the displays and views, the view transforms, [`LooksMerger`], the color spaces and the named
+//! [`DisplayViewMerger`], the view transforms, [`LooksMerger`], the color spaces and the named
 //! transforms.
 //!
 //! Upstream's mergers are classes over [`MergeHandlerOptions`]: a base class, `SectionMerger`,
@@ -24,7 +24,9 @@
 
 use ocio_ops::exception::{Exception, ExceptionKind, Result};
 use ocio_ops::logging::log_warning;
+use ocio_ops::open_color_types::ViewType;
 use ocio_ops::platform::strcasecmp;
+use ocio_ops::utils::string_utils::{StringVec, contain, join, remove, split, trim, trim_vec};
 
 use crate::apphelpers::mergeconfigs::merge_configs_helpers::{
     ConfigMergingParameters, MergeStrategies,
@@ -32,6 +34,8 @@ use crate::apphelpers::mergeconfigs::merge_configs_helpers::{
 use crate::config::Config;
 use crate::custom_keys::CustomKeysContainer;
 use crate::file_rules::FileRules;
+use crate::tokens_manager::TokensManager;
+use crate::viewing_rules::ViewingRules;
 
 /// The configs and parameters of a merge.
 ///
@@ -891,6 +895,964 @@ impl<'o, 'a> Section<'o, 'a> for FileRulesMerger<'o, 'a> {
             // Do nothing if it is not present.
         }
         m.merged_config.set_file_rules(&merged_file_rules);
+        Ok(())
+    }
+}
+
+/////////////////////////////////// DisplayViewMerger ////////////////////////////////////
+
+/// The entries of a comma-separated list, as they are (not trimmed); empty for an empty list.
+/// Quotes aren't read: a quoted entry that holds a comma is split.
+///
+/// Port of `splitActiveList` (SectionMerger.cpp:31-38 @ v2.5.2).
+fn split_active_list(list: &[u8], result: &mut StringVec) {
+    if !list.is_empty() {
+        // TODO: Need to handle quoted substrings.
+        *result = split(list, b',');
+    }
+}
+
+/// Trims the entries of `merged_vec`, then adds each entry of `input_vec`, trimmed, that isn't
+/// empty and that `merged_vec` doesn't have (ignoring case).
+///
+/// Port of `mergeStringsWithoutDuplicates` (SectionMerger.cpp:40-58 @ v2.5.2).
+fn merge_strings_without_duplicates(input_vec: &StringVec, merged_vec: &mut StringVec) {
+    // Note that Contain requires a full exact match, not a partial match.
+    // Hence it's important that the items in mergedVec be trimmed as well.
+    trim_vec(merged_vec);
+
+    for item in input_vec {
+        let trimmed_item = trim(item);
+        if !trimmed_item.is_empty() && !contain(merged_vec, trimmed_item) {
+            merged_vec.push(trimmed_item.to_vec());
+        }
+    }
+}
+
+/// The color space or encoding a viewing rule lists at an index it has.
+fn listed(token: Option<&[u8]>) -> &[u8] {
+    // (In range, the rules always give a name.)
+    token.unwrap_or_default()
+}
+
+/// Whether the rule `r1_idx` of `r1` and the rule `r2_idx` of `r2` have the same color spaces,
+/// encodings and custom keys, each in any order (as the rules' tokens compare, and the custom
+/// keys' values ignoring case). The names aren't compared.
+///
+/// Port of `viewingRulesAreEqual` (SectionMerger.cpp:731-810 @ v2.5.2).
+fn viewing_rules_are_equal(
+    r1: &ViewingRules,
+    r1_idx: usize,
+    r2: &ViewingRules,
+    r2_idx: usize,
+) -> Result<bool> {
+    // NB: No need to compare the name of the rules, that should be done in the caller.
+
+    // Compare color space tokens, handling the case where they may be in a different order.
+
+    if r1.num_color_spaces(r1_idx)? != r2.num_color_spaces(r2_idx)? {
+        return Ok(false);
+    }
+
+    let mut r1_color_spaces = TokensManager::default();
+    for m in 0..r1.num_color_spaces(r1_idx)? {
+        r1_color_spaces.add_token(listed(r1.color_space(r1_idx, m)?));
+    }
+
+    for m in 0..r2.num_color_spaces(r2_idx)? {
+        if !r1_color_spaces.has_token(listed(r2.color_space(r2_idx, m)?)) {
+            return Ok(false);
+        }
+    }
+
+    // Compare encoding tokens, handling the case where they may be in a different order.
+
+    if r1.num_encodings(r1_idx)? != r2.num_encodings(r2_idx)? {
+        return Ok(false);
+    }
+
+    let mut r1_encodings = TokensManager::default();
+    for m in 0..r1.num_encodings(r1_idx)? {
+        r1_encodings.add_token(listed(r1.encoding(r1_idx, m)?));
+    }
+
+    for m in 0..r2.num_encodings(r2_idx)? {
+        if !r1_encodings.has_token(listed(r2.encoding(r2_idx, m)?)) {
+            return Ok(false);
+        }
+    }
+
+    // Compare the custom keys, handling the case where they may be in a different order.
+
+    if r1.num_custom_keys(r1_idx)? != r2.num_custom_keys(r2_idx)? {
+        return Ok(false);
+    }
+
+    let mut r1_custom_keys = CustomKeysContainer::default();
+    for m in 0..r1.num_custom_keys(r1_idx)? {
+        r1_custom_keys.set(
+            r1.custom_key_name(r1_idx, m)?,
+            r1.custom_key_value(r1_idx, m)?,
+        )?;
+    }
+
+    for m in 0..r2.num_custom_keys(r2_idx)? {
+        // A key the first doesn't have, or of another value (`hasKey`, then `getValueForKey`).
+        let key = r2.custom_key_name(r2_idx, m)?;
+        if !r1_custom_keys.has_key(key)
+            || strcasecmp(
+                r1_custom_keys.value_for_key(key)?,
+                r2.custom_key_value(r2_idx, m)?,
+            )
+            .is_ne()
+        {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+/// Inserts a copy of the rule `src_idx` of `src` at `dst_idx` of `rules`: its name, color
+/// spaces, encodings and custom keys. At the first error the copy stops, without a word, and
+/// what it inserted stays.
+///
+/// Port of `copyViewingRule` (SectionMerger.cpp:812-841 @ v2.5.2).
+fn copy_viewing_rule(src: &ViewingRules, src_idx: usize, dst_idx: usize, rules: &mut ViewingRules) {
+    let mut copy = || -> Result<()> {
+        rules.insert_rule(dst_idx, src.name(src_idx)?)?;
+
+        for j in 0..src.num_color_spaces(src_idx)? as i32 {
+            rules.add_color_space(dst_idx, listed(src.color_space(src_idx, j as usize)?))?;
+        }
+
+        for k in 0..src.num_encodings(src_idx)? as i32 {
+            rules.add_encoding(dst_idx, listed(src.encoding(src_idx, k as usize)?))?;
+        }
+
+        for l in 0..src.num_custom_keys(src_idx)? as i32 {
+            rules.set_custom_key(
+                dst_idx,
+                src.custom_key_name(src_idx, l as usize)?,
+                src.custom_key_value(src_idx, l as usize)?,
+            )?;
+        }
+        Ok(())
+    };
+    // Don't add it if any errors.
+    // Continue.
+    let _ = copy();
+}
+
+/// Adds to `merged_rules` the rules of `rules` it doesn't have (by name), at its end.
+///
+/// Port of `addUniqueViewingRules` (SectionMerger.cpp:843-861 @ v2.5.2).
+fn add_unique_viewing_rules(rules: &ViewingRules, merged_rules: &mut ViewingRules) -> Result<()> {
+    for i in 0..rules.num_entries() {
+        let name = rules.name(i)?;
+        // Take the rule from the first config if it does not exist.
+        if merged_rules.index_for_rule(name).is_err() {
+            // Rule does not exist in merged rules.
+            // Add it.
+            let end = merged_rules.num_entries();
+            copy_viewing_rule(rules, i, end, merged_rules);
+        }
+    }
+    Ok(())
+}
+
+/// The arguments of `addDisplayView` or `addSharedView` for the view `view` of `display` of
+/// `cfg` (an empty display for the config's shared views): its view transform, color space,
+/// looks, rule and description.
+fn view_of<'c>(cfg: &'c Config, display: &[u8], view: &[u8]) -> [&'c [u8]; 5] {
+    [
+        cfg.display_view_transform_name(display, view),
+        cfg.display_view_color_space_name(display, view),
+        cfg.display_view_looks(display, view),
+        cfg.display_view_rule(display, view),
+        cfg.display_view_description(display, view),
+    ]
+}
+
+/// The same for the view `view` of the virtual display of `cfg`.
+fn virtual_view_of<'c>(cfg: &'c Config, view: &[u8]) -> [&'c [u8]; 5] {
+    [
+        cfg.virtual_display_view_transform_name(view),
+        cfg.virtual_display_view_color_space_name(view),
+        cfg.virtual_display_view_looks(view),
+        cfg.virtual_display_view_rule(view),
+        cfg.virtual_display_view_description(view),
+    ]
+}
+
+/// `m_mergedConfig->addDisplayView(display, view, <the view of cfg>)`.
+fn add_display_view_of(
+    merged: &mut Config,
+    cfg: &Config,
+    display: &[u8],
+    view: &[u8],
+) -> Result<()> {
+    let [vt, cs, looks, rule, desc] = view_of(cfg, display, view);
+    merged.add_display_view_with_view_transform(display, view, vt, cs, looks, rule, desc)
+}
+
+/// `m_mergedConfig->addSharedView(view, <the shared view of cfg>)`.
+fn add_shared_view_of(merged: &mut Config, cfg: &Config, view: &[u8]) -> Result<()> {
+    let [vt, cs, looks, rule, desc] = view_of(cfg, b"", view);
+    merged.add_shared_view(view, vt, cs, looks, rule, desc)
+}
+
+/// `m_mergedConfig->addVirtualDisplayView(view, <the virtual view of cfg>)`.
+fn add_virtual_view_of(merged: &mut Config, cfg: &Config, view: &[u8]) -> Result<()> {
+    let [vt, cs, looks, rule, desc] = virtual_view_of(cfg, view);
+    merged.add_virtual_display_view(view, vt, cs, looks, rule, desc)
+}
+
+/// Merges the displays and their views, the shared views, the virtual display, the active
+/// displays and views, and the viewing rules.
+///
+/// Port of `DisplayViewMerger` (SectionMerger.h:198-243, SectionMerger.cpp:865-1677 @ v2.5.2).
+pub(crate) struct DisplayViewMerger<'o, 'a>(SectionMerger<'o, 'a>);
+
+impl<'o, 'a> DisplayViewMerger<'o, 'a> {
+    /// Port of `DisplayViewMerger::DisplayViewMerger` (SectionMerger.h:201-212 @ v2.5.2).
+    pub(crate) fn new(options: &'o mut MergeHandlerOptions<'a>) -> Result<Self> {
+        let mut m = SectionMerger::new(options)?;
+        m.strategy = section_strategy(m.params.display_views(), m.params);
+        Ok(DisplayViewMerger(m))
+    }
+
+    /// Adds, for each display of `cfg`, the views of `cfg` that the merged config's display
+    /// doesn't have (by name, either kind), as the same kind of view.
+    ///
+    /// Port of `DisplayViewMerger::addUniqueDisplays` (SectionMerger.cpp:865-908 @ v2.5.2).
+    fn add_unique_displays(&mut self, cfg: &Config) -> Result<()> {
+        let merged = &mut *self.0.merged_config;
+        // For each display, add any views from cfg that are not already in the merged config.
+
+        for i in 0..cfg.num_displays_all() {
+            let disp_name = cfg.display_all(i);
+
+            // Display defined views.
+            for v in 0..cfg.num_views_of_type(ViewType::DisplayDefined, disp_name) {
+                let display_defined_view = cfg.view_of_type(ViewType::DisplayDefined, disp_name, v);
+
+                // This will return true if the display contains either a display-defined or
+                // shared view with this name.
+                let disp_defined_exists = merged.has_view(disp_name, display_defined_view);
+
+                if !display_defined_view.is_empty() && !disp_defined_exists {
+                    // (Note this works for either the new or old style of view.)
+                    add_display_view_of(merged, cfg, disp_name, display_defined_view)?;
+                }
+            }
+
+            // Shared views.
+            for v in 0..cfg.num_views_of_type(ViewType::Shared, disp_name) {
+                let shared_view_name = cfg.view_of_type(ViewType::Shared, disp_name, v);
+
+                let shared_view_exists = merged.has_view(disp_name, shared_view_name);
+
+                if !shared_view_name.is_empty() && !shared_view_exists {
+                    merged.add_display_shared_view(disp_name, shared_view_name)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Adds the views of the virtual display of `cfg` that the merged config's doesn't have.
+    ///
+    /// Port of `DisplayViewMerger::addUniqueVirtualViews` (SectionMerger.cpp:910-938 @ v2.5.2).
+    fn add_unique_virtual_views(&mut self, cfg: &Config) -> Result<()> {
+        let merged = &mut *self.0.merged_config;
+        // Display defined views.
+        for v in 0..cfg.virtual_display_num_views(ViewType::DisplayDefined) {
+            let display_defined_view = cfg.virtual_display_view(ViewType::DisplayDefined, v);
+            let disp_defined_exists = merged.has_virtual_view(display_defined_view);
+            if !display_defined_view.is_empty() && !disp_defined_exists {
+                add_virtual_view_of(merged, cfg, display_defined_view)?;
+            }
+        }
+
+        // Shared views.
+        for v in 0..cfg.virtual_display_num_views(ViewType::Shared) {
+            let shared_view_name = cfg.virtual_display_view(ViewType::Shared, v);
+            let shared_view_exists = merged.has_virtual_view(shared_view_name);
+            if !shared_view_name.is_empty() && !shared_view_exists {
+                merged.add_virtual_display_shared_view(shared_view_name)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The displays of `first`, in its order, each with its views, then those `second` adds. A
+    /// view of both is taken from `second` with `prefer_second` (as the kind of view it is
+    /// there), else from `first`; a display-defined view of both that differs is a conflict.
+    ///
+    /// Port of `DisplayViewMerger::processDisplays` (SectionMerger.cpp:940-1062 @ v2.5.2).
+    fn process_displays(
+        &mut self,
+        first: &Config,
+        second: &Config,
+        prefer_second: bool,
+    ) -> Result<()> {
+        // Iterate over the first config's displays.
+
+        for i in 0..first.num_displays_all() {
+            let disp_name = first.display_all(i);
+
+            // Iterate over this display's display-defined views.
+
+            for v in 0..first.num_views_of_type(ViewType::DisplayDefined, disp_name) {
+                let display_defined_view =
+                    first.view_of_type(ViewType::DisplayDefined, disp_name, v);
+
+                if !display_defined_view.is_empty() {
+                    // One case to be aware of is where both configs have the same display with
+                    // the same view name, but it's a display-defined view in one and a shared
+                    // view in the other. This check will return true if it exists in either
+                    // form.
+                    let exists_in_second = second.has_view(disp_name, display_defined_view);
+
+                    if exists_in_second
+                        && !Config::are_views_equal(first, second, disp_name, display_defined_view)
+                    {
+                        // Throw or log on conflict.
+                        let os = [
+                            b"The Input config contains a value that would override the Base \
+                              config: display: "
+                                .as_slice(),
+                            disp_name,
+                            b", view: ",
+                            display_defined_view,
+                        ]
+                        .concat();
+                        self.0.notify(&os, self.0.params.is_error_on_conflict())?;
+                    }
+
+                    let merged = &mut *self.0.merged_config;
+                    // Display defined views.
+                    if exists_in_second && prefer_second {
+                        // Take the view from the second config.
+
+                        // This was a display-defined view in the first config but it may not be
+                        // in the second config.  Want to add it as the same type of view.
+                        if second.is_view_shared(disp_name, display_defined_view) {
+                            // Note that this may change the order in a way that does not follow
+                            // the preference of input-first or base-first.
+                            merged.add_display_shared_view(disp_name, display_defined_view)?;
+                        } else {
+                            add_display_view_of(merged, second, disp_name, display_defined_view)?;
+                        }
+                    } else {
+                        // Take the view from the first config (where it is display-defined).
+                        // (Note this works for either the new or old style of view.)
+                        add_display_view_of(merged, first, disp_name, display_defined_view)?;
+                    }
+                }
+            }
+
+            // Iterate over this display's shared views.
+
+            for v in 0..first.num_views_of_type(ViewType::Shared, disp_name) {
+                let shared_view_name = first.view_of_type(ViewType::Shared, disp_name, v);
+
+                if !shared_view_name.is_empty() {
+                    let exists_in_second = second.has_view(disp_name, shared_view_name);
+
+                    if exists_in_second && prefer_second {
+                        // This was a shared view in the first config but it may not be in
+                        // the second config.  Want to add it as the same type of view.
+                        if second.is_view_shared(disp_name, shared_view_name) {
+                            self.0
+                                .merged_config
+                                .add_display_shared_view(disp_name, shared_view_name)?;
+                        } else {
+                            if !Config::are_views_equal(first, second, disp_name, shared_view_name)
+                            {
+                                // Throw or log on conflict.
+                                let os = [
+                                    b"The Input config contains a value that would override the \
+                                      Base config: display: "
+                                        .as_slice(),
+                                    disp_name,
+                                    b", view: ",
+                                    shared_view_name,
+                                ]
+                                .concat();
+                                self.0.notify(&os, self.0.params.is_error_on_conflict())?;
+                            }
+                            add_display_view_of(
+                                self.0.merged_config,
+                                second,
+                                disp_name,
+                                shared_view_name,
+                            )?;
+                        }
+                    } else {
+                        // Note: The error-on-conflict check happens in processSharedViews,
+                        // this is just adding the reference, so it's not checked again here.
+                        self.0
+                            .merged_config
+                            .add_display_shared_view(disp_name, shared_view_name)?;
+                    }
+                }
+            }
+        }
+
+        // Add the remaining views for all displays from the second config. (This only adds
+        // views that are not already present.)
+
+        self.add_unique_displays(second)
+    }
+
+    /// The views of the virtual display of `first`, then those `second` adds, as
+    /// [`DisplayViewMerger::process_displays`] does for a display.
+    ///
+    /// Port of `DisplayViewMerger::processVirtualDisplay` (SectionMerger.cpp:1064-1169 @
+    /// v2.5.2).
+    fn process_virtual_display(
+        &mut self,
+        first: &Config,
+        second: &Config,
+        prefer_second: bool,
+    ) -> Result<()> {
+        for v in 0..first.virtual_display_num_views(ViewType::DisplayDefined) {
+            let display_defined_view = first.virtual_display_view(ViewType::DisplayDefined, v);
+
+            if !display_defined_view.is_empty() {
+                // Check if it displays shared view exists in second config.
+                let exists_in_second = second.has_virtual_view(display_defined_view);
+
+                if exists_in_second
+                    && !Config::are_virtual_views_equal(first, second, display_defined_view)
+                {
+                    // Throw or log on conflict.
+                    let os = override_message(b"virtual_display", display_defined_view);
+                    self.0.notify(&os, self.0.params.is_error_on_conflict())?;
+                }
+
+                let merged = &mut *self.0.merged_config;
+                // Display defined views.
+                if exists_in_second && prefer_second {
+                    // Take the view from the second config.
+
+                    // This was a display-defined view in the first config but it may not be in
+                    // the second config.  Want to add it as the same type of view.
+                    if second.is_virtual_view_shared(display_defined_view) {
+                        merged.add_virtual_display_shared_view(display_defined_view)?;
+                    } else {
+                        add_virtual_view_of(merged, second, display_defined_view)?;
+                    }
+                } else {
+                    // Take the view from the first config (where it is display-defined).
+                    // (Note this works for either the new or old style of view.)
+                    add_virtual_view_of(merged, first, display_defined_view)?;
+                }
+            }
+        }
+
+        // Iterate over this display's shared views.
+
+        for v in 0..first.virtual_display_num_views(ViewType::Shared) {
+            let shared_view_name = first.virtual_display_view(ViewType::Shared, v);
+
+            if !shared_view_name.is_empty() {
+                let exists_in_second = second.has_virtual_view(shared_view_name);
+
+                if exists_in_second && prefer_second {
+                    // This was a shared view in the first config but it may not be in
+                    // the second config.  Want to add it as the same type of view.
+                    if second.is_virtual_view_shared(shared_view_name) {
+                        self.0
+                            .merged_config
+                            .add_virtual_display_shared_view(shared_view_name)?;
+                    } else {
+                        if !Config::are_virtual_views_equal(first, second, shared_view_name) {
+                            // Throw or log on conflict.
+                            let os = override_message(b"virtual_display", shared_view_name);
+                            self.0.notify(&os, self.0.params.is_error_on_conflict())?;
+                        }
+                        add_virtual_view_of(self.0.merged_config, second, shared_view_name)?;
+                    }
+                } else {
+                    // Note: The error-on-conflict check happens in processSharedViews,
+                    // this is just adding the reference, so it's not checked again here.
+                    self.0
+                        .merged_config
+                        .add_virtual_display_shared_view(shared_view_name)?;
+                }
+            }
+        }
+
+        // Add the remaining views from the second config.
+
+        self.add_unique_virtual_views(second)
+    }
+
+    /// Adds the shared views of `cfg` that the merged config doesn't have.
+    ///
+    /// Port of `DisplayViewMerger::addUniqueSharedViews` (SectionMerger.cpp:1171-1192 @
+    /// v2.5.2).
+    fn add_unique_shared_views(&mut self, cfg: &Config) -> Result<()> {
+        let merged = &mut *self.0.merged_config;
+        // Add any shared views that are not already in the merged config.
+
+        for v in 0..cfg.num_views_of_type(ViewType::Shared, b"") {
+            let shared_view_name = cfg.view_of_type(ViewType::Shared, b"", v);
+
+            // Check if shared view exists in merged config.
+            let shared_view_exists = merged.has_view(b"", shared_view_name);
+
+            if !shared_view_name.is_empty() && !shared_view_exists {
+                add_shared_view_of(merged, cfg, shared_view_name)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The shared views of `first`, each from `second` where it has one and `prefer_second`,
+    /// then those only `second` has; one of both that differs is a conflict.
+    ///
+    /// Port of `DisplayViewMerger::processSharedViews` (SectionMerger.cpp:1194-1244 @ v2.5.2).
+    fn process_shared_views(
+        &mut self,
+        first: &Config,
+        second: &Config,
+        prefer_second: bool,
+    ) -> Result<()> {
+        // Iterate over all shared views in the first config.
+        for v in 0..first.num_views_of_type(ViewType::Shared, b"") {
+            let shared_view_name = first.view_of_type(ViewType::Shared, b"", v);
+
+            if !shared_view_name.is_empty() {
+                // Check if shared view exists in second config.
+                let exists_in_second = second.has_view(b"", shared_view_name);
+
+                if exists_in_second
+                    && !Config::are_views_equal(first, second, b"", shared_view_name)
+                {
+                    // Throw or log on conflict.
+                    let os = override_message(b"shared_views", shared_view_name);
+                    self.0.notify(&os, self.0.params.is_error_on_conflict())?;
+                }
+
+                if exists_in_second && prefer_second {
+                    // Take the shared view from the second config.
+                    // (Note this works for either the new or old style of view.)
+                    add_shared_view_of(self.0.merged_config, second, shared_view_name)?;
+                } else {
+                    // Take the shared view from the first config.
+                    add_shared_view_of(self.0.merged_config, first, shared_view_name)?;
+                }
+            }
+        }
+
+        // Add the remaining shared views that are only in the second config.
+
+        self.add_unique_shared_views(second)
+    }
+
+    /// The active displays and views: the overrides where they aren't empty, else both
+    /// configs' lists, either first, without duplicates.
+    ///
+    /// Port of `DisplayViewMerger::processActiveLists` (SectionMerger.cpp:1246-1312 @ v2.5.2).
+    fn process_active_lists(&mut self) -> Result<()> {
+        let m = &mut self.0;
+        // Merge active_displays.
+        let active_displays = m.params.active_displays();
+        if !active_displays.is_empty() {
+            // Take active_displays from overrides.
+            m.merged_config.set_active_displays(&active_displays)?;
+        } else {
+            // Take active_displays from config.
+
+            let mut merged_active_displays = StringVec::new();
+            if m.params.is_input_first() {
+                let mut base_active_displays = StringVec::new();
+                split_active_list(&m.base_config.active_displays(), &mut base_active_displays);
+                split_active_list(
+                    &m.input_config.active_displays(),
+                    &mut merged_active_displays,
+                );
+
+                merge_strings_without_duplicates(
+                    &base_active_displays,
+                    &mut merged_active_displays,
+                );
+            } else {
+                let mut input_active_displays = StringVec::new();
+                split_active_list(
+                    &m.input_config.active_displays(),
+                    &mut input_active_displays,
+                );
+                split_active_list(
+                    &m.base_config.active_displays(),
+                    &mut merged_active_displays,
+                );
+
+                merge_strings_without_duplicates(
+                    &input_active_displays,
+                    &mut merged_active_displays,
+                );
+            }
+
+            // NB: StringUtils::Join adds a space after the comma.
+            m.merged_config
+                .set_active_displays(join(&merged_active_displays, b','))?;
+        }
+
+        // Merge active_views.
+        let active_views = m.params.active_views();
+        if !active_views.is_empty() {
+            // Take active_views from overrides.
+            m.merged_config.set_active_views(&active_views)?;
+        } else {
+            // Take active_views from config.
+
+            let mut merged_active_views = StringVec::new();
+            if m.params.is_input_first() {
+                let mut base_active_views = StringVec::new();
+                split_active_list(&m.base_config.active_views(), &mut base_active_views);
+                split_active_list(&m.input_config.active_views(), &mut merged_active_views);
+
+                merge_strings_without_duplicates(&base_active_views, &mut merged_active_views);
+            } else {
+                let mut input_active_views = StringVec::new();
+                split_active_list(&m.input_config.active_views(), &mut input_active_views);
+                split_active_list(&m.base_config.active_views(), &mut merged_active_views);
+
+                merge_strings_without_duplicates(&input_active_views, &mut merged_active_views);
+            }
+
+            m.merged_config
+                .set_active_views(join(&merged_active_views, b','))?;
+        }
+        Ok(())
+    }
+
+    /// The viewing rules of `first`, in its order, each from `second` where it has a rule of
+    /// that name that differs and `prefer_second` (a conflict, either way), then those only
+    /// `second` has.
+    ///
+    /// Port of `DisplayViewMerger::processViewingRules` (SectionMerger.cpp:1314-1373 @ v2.5.2).
+    fn process_viewing_rules(
+        &mut self,
+        first: &Config,
+        second: &Config,
+        prefer_second: bool,
+    ) -> Result<()> {
+        let mut merged_rules = ViewingRules::new();
+
+        let first_rules = first.viewing_rules().get();
+        let second_rules = second.viewing_rules().get();
+
+        for i in 0..first_rules.num_entries() {
+            let mut has_conflict = false;
+
+            let name = first_rules.name(i)?;
+            let attempt = (|| -> Result<()> {
+                // Check if it exists in second rules, will throw if not.
+                let idx = second_rules.index_for_rule(name)?;
+
+                if !viewing_rules_are_equal(&first_rules, i, &second_rules, idx)? {
+                    has_conflict = true;
+
+                    let end = merged_rules.num_entries();
+                    if prefer_second {
+                        // Take rule from the second config.
+                        copy_viewing_rule(&second_rules, idx, end, &mut merged_rules);
+                    } else {
+                        // Found, but not overriding. Take rule from the first config.
+                        copy_viewing_rule(&first_rules, i, end, &mut merged_rules);
+                    }
+
+                    return Err(Exception::new(override_message(b"viewing_rules", name)));
+                }
+                Ok(())
+            })();
+
+            if let Err(e) = attempt {
+                if !is_ocio_exception(&e) {
+                    return Err(e);
+                }
+                if has_conflict {
+                    self.0
+                        .notify(e.what(), self.0.params.is_error_on_conflict())?;
+                } else {
+                    // Not found in second rules. Take rule from the first config.
+                    let end = merged_rules.num_entries();
+                    copy_viewing_rule(&first_rules, i, end, &mut merged_rules);
+                }
+            }
+        }
+
+        // Add the remaining rules.
+        add_unique_viewing_rules(&second_rules, &mut merged_rules)?;
+
+        self.0.merged_config.set_viewing_rules(&merged_rules);
+        Ok(())
+    }
+
+    /// The shared views, displays, virtual display and viewing rules of the input and the
+    /// base, `first` first, preferring `second`'s with `prefer_second`; the active lists.
+    ///
+    /// The body of `DisplayViewMerger::handlePreferInput` and `handlePreferBase`
+    /// (SectionMerger.cpp:1375-1464 @ v2.5.2).
+    fn merge_both(&mut self, first_is_input: bool, prefer_second: bool) -> Result<()> {
+        let (first, second) = if first_is_input {
+            (self.0.input_config, self.0.base_config)
+        } else {
+            (self.0.base_config, self.0.input_config)
+        };
+
+        // Clear displays and shared_views from merged config.
+        self.0.merged_config.clear_displays();
+        self.0.merged_config.clear_shared_views();
+
+        // Merge displays and views.
+        // The order is important: shared_views, and then displays.
+        self.process_shared_views(first, second, prefer_second)?;
+        self.process_displays(first, second, prefer_second)?;
+
+        // Merge virtual_display.
+        self.0.merged_config.clear_virtual_display();
+        self.process_virtual_display(first, second, prefer_second)?;
+
+        // Merge active_displays and active_views.
+        self.process_active_lists()?;
+
+        // Merge viewing_rules.
+        self.process_viewing_rules(first, second, prefer_second)
+    }
+}
+
+impl<'o, 'a> Section<'o, 'a> for DisplayViewMerger<'o, 'a> {
+    fn state(&self) -> &SectionMerger<'o, 'a> {
+        &self.0
+    }
+
+    /// Port of `DisplayViewMerger::getName` (SectionMerger.h:215 @ v2.5.2).
+    fn name(&self) -> &'static str {
+        "Display/Views"
+    }
+
+    /// Both configs' views and rules, the input's where both have one.
+    ///
+    /// Port of `DisplayViewMerger::handlePreferInput` (SectionMerger.cpp:1375-1420 @ v2.5.2).
+    fn handle_prefer_input(&mut self) -> Result<()> {
+        // The error_on_conflict option implies to shared_views, displays/views,
+        // virtual_display, view_transforms, default_view_transform, and viewing_rules.
+        if self.0.params.is_input_first() {
+            self.merge_both(true, false)
+        } else {
+            self.merge_both(false, true)
+        }
+    }
+
+    /// Both configs' views and rules, the base's where both have one.
+    ///
+    /// Port of `DisplayViewMerger::handlePreferBase` (SectionMerger.cpp:1422-1464 @ v2.5.2).
+    fn handle_prefer_base(&mut self) -> Result<()> {
+        if self.0.params.is_input_first() {
+            self.merge_both(true, true)
+        } else {
+            self.merge_both(false, false)
+        }
+    }
+
+    /// The input's views, virtual display, viewing rules and active lists (the overrides of the
+    /// active lists where they aren't empty).
+    ///
+    /// Port of `DisplayViewMerger::handleInputOnly` (SectionMerger.cpp:1466-1508 @ v2.5.2).
+    fn handle_input_only(&mut self) -> Result<()> {
+        let input = self.0.input_config;
+        // Clear displays and shared_views from merged config.
+        self.0.merged_config.clear_displays();
+        self.0.merged_config.clear_shared_views();
+
+        // Merge displays and views.
+        self.add_unique_shared_views(input)?;
+        self.add_unique_displays(input)?;
+
+        // Merge virtual_display.
+        self.0.merged_config.clear_virtual_display();
+        self.add_unique_virtual_views(input)?;
+
+        let m = &mut self.0;
+        // Merge active_displays.
+        let active_displays = m.params.active_displays();
+        if !active_displays.is_empty() {
+            // Take active_displays from overrides.
+            m.merged_config.set_active_displays(&active_displays)?;
+        } else {
+            // Take active_displays from config.
+            m.merged_config
+                .set_active_displays(input.active_displays())?;
+        }
+
+        // Merge active_views.
+        let active_views = m.params.active_views();
+        if !active_views.is_empty() {
+            // Take active_views from overrides.
+            m.merged_config.set_active_views(&active_views)?;
+        } else {
+            // Take active_views from config.
+            m.merged_config.set_active_views(input.active_views())?;
+        }
+
+        // Merge viewing_rules.
+        let rules = input.viewing_rules().get();
+        m.merged_config.set_viewing_rules(&rules);
+        Ok(())
+    }
+
+    /// The base's, with the overrides of the active lists where they aren't empty.
+    ///
+    /// Port of `DisplayViewMerger::handleBaseOnly` (SectionMerger.cpp:1510-1528 @ v2.5.2).
+    fn handle_base_only(&mut self) -> Result<()> {
+        let m = &mut self.0;
+        // Process the overrides only since the merged config is initialized to
+        // the base config.
+
+        let active_displays = m.params.active_displays();
+        if !active_displays.is_empty() {
+            // Take active_displays from overrides.
+            m.merged_config.set_active_displays(&active_displays)?;
+        }
+
+        let active_views = m.params.active_views();
+        if !active_views.is_empty() {
+            // Take active_views from overrides.
+            m.merged_config.set_active_views(&active_views)?;
+        }
+        Ok(())
+    }
+
+    /// The base's shared views, views, virtual views, active displays and views and viewing
+    /// rules without those the input has (by name).
+    ///
+    /// Port of `DisplayViewMerger::handleRemove` (SectionMerger.cpp:1530-1677 @ v2.5.2).
+    fn handle_remove(&mut self) -> Result<()> {
+        let m = &mut self.0;
+        let (base, input) = (m.base_config, m.input_config);
+        let merged = &mut *m.merged_config;
+
+        // Remove shared_views.
+
+        merged.clear_shared_views();
+
+        for v in 0..base.num_views_of_type(ViewType::Shared, b"") {
+            // Add shared views that are present in the base config and NOT present in the
+            // input config.
+            let shared_view_name = base.view_of_type(ViewType::Shared, b"", v);
+            if !shared_view_name.is_empty() && !input.has_view(b"", shared_view_name) {
+                add_shared_view_of(merged, base, shared_view_name)?;
+            }
+        }
+
+        // Remove views from displays.
+
+        merged.clear_displays();
+
+        for i in 0..base.num_displays_all() {
+            // Add views that are present in the base config and NOT present in the input config.
+
+            // Display-defined views.
+            let disp_name = base.display_all(i);
+            for v in 0..base.num_views_of_type(ViewType::DisplayDefined, disp_name) {
+                let display_defined_view =
+                    base.view_of_type(ViewType::DisplayDefined, disp_name, v);
+                // Check if the view is not present in the input config.
+                if !display_defined_view.is_empty()
+                    && !input.has_view(disp_name, display_defined_view)
+                {
+                    add_display_view_of(merged, base, disp_name, display_defined_view)?;
+                }
+            }
+
+            // Shared views.
+            for v in 0..base.num_views_of_type(ViewType::Shared, disp_name) {
+                let shared_view_name = base.view_of_type(ViewType::Shared, disp_name, v);
+                // Check if the view is not present in the input config.
+                if !shared_view_name.is_empty() && !input.has_view(disp_name, shared_view_name) {
+                    merged.add_display_shared_view(disp_name, shared_view_name)?;
+                }
+            }
+        }
+
+        // Remove views from virtual_display.
+
+        merged.clear_virtual_display();
+
+        {
+            // Add virtual views that are present in the base config and NOT present in the
+            // input config.
+
+            // Display-defined views.
+            for v in 0..base.virtual_display_num_views(ViewType::DisplayDefined) {
+                let display_defined_view = base.virtual_display_view(ViewType::DisplayDefined, v);
+                // Check if the view is not present in the input config.
+                if !display_defined_view.is_empty() && !input.has_virtual_view(display_defined_view)
+                {
+                    // Add the display defined view
+                    add_virtual_view_of(merged, base, display_defined_view)?;
+                }
+            }
+
+            // Shared views.
+            for v in 0..base.virtual_display_num_views(ViewType::Shared) {
+                let shared_view_name = base.virtual_display_view(ViewType::Shared, v);
+                // Check if the view is not present in the input config.
+                if !shared_view_name.is_empty() && !input.has_virtual_view(shared_view_name) {
+                    // Add the shared view
+                    merged.add_virtual_display_shared_view(shared_view_name)?;
+                }
+            }
+        }
+
+        // Remove from active_displays.
+
+        let mut input_active_displays = StringVec::new();
+        let mut merged_active_displays = StringVec::new();
+        split_active_list(&input.active_displays(), &mut input_active_displays);
+        split_active_list(&base.active_displays(), &mut merged_active_displays);
+
+        for disp in &input_active_displays {
+            remove(&mut merged_active_displays, disp);
+        }
+        merged.set_active_displays(join(&merged_active_displays, b','))?;
+
+        // Remove from active_views.
+
+        let mut input_active_views = StringVec::new();
+        let mut merged_active_views = StringVec::new();
+        split_active_list(&input.active_views(), &mut input_active_views);
+        split_active_list(&base.active_views(), &mut merged_active_views);
+
+        for view in &input_active_views {
+            remove(&mut merged_active_views, view);
+        }
+        merged.set_active_views(join(&merged_active_views, b','))?;
+
+        // Handle viewing_rules.
+
+        let mut merged_rules = ViewingRules::new();
+        let input_rules = input.viewing_rules().get();
+        let base_rules = base.viewing_rules().get();
+
+        for i in 0..base_rules.num_entries() {
+            let name = base_rules.name(i)?;
+            // Throws if the input doesn't have the base rule.
+            if input_rules.index_for_rule(name).is_err() {
+                // Keep any base rules that aren't in the input.
+                let end = merged_rules.num_entries();
+                copy_viewing_rule(&base_rules, i, end, &mut merged_rules);
+            }
+        }
+
+        merged.set_viewing_rules(&merged_rules);
         Ok(())
     }
 }
