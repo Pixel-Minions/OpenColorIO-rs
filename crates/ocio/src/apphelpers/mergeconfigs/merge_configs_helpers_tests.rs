@@ -7,13 +7,14 @@
 use super::*;
 use crate::apphelpers::mergeconfigs::section_merger::{
     DisplayViewMerger, FileRulesMerger, GeneralMerger, LooksMerger, MergeHandlerOptions,
-    RolesMerger, Section,
+    RolesMerger, Section, ViewTransformsMerger,
 };
 use crate::file_rules::FileRules;
 use crate::fileformats::test_utils::get_test_files_dir;
+use crate::transform::Transform;
 use crate::viewing_rules::ViewingRules;
 use ocio_ops::logging::{get_logging_level, set_logging_level};
-use ocio_ops::open_color_types::{LoggingLevel, ViewType};
+use ocio_ops::open_color_types::{LoggingLevel, ViewTransformDirection, ViewType};
 use ocio_ops::std_regex::{Regex, regex_replace};
 use ocio_ops::utils::pystring::os_path;
 use ocio_testkit::upstream::check_close;
@@ -3060,6 +3061,408 @@ fn displays_views_section() {
                     &format!("{PREFIX}display: DISP_1, views: VIEW_1"),
                     &format!("{PREFIX}viewing_rules: RULE_1"),
                     &format!("{PREFIX}virtual_display: ACES"),
+                ],
+            );
+        }
+    }
+}
+
+/// Upstream's `setupBasics` of the view transforms section's test: a merger with new
+/// parameters, whose view transforms strategy is `strategy`; the parameters.
+fn setup_view_transforms_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    merger.params(0).unwrap().set_view_transforms(strategy);
+    params
+}
+
+/// The style of the built-in transform from the reference of the view transform `name`.
+fn vt_from_ref_builtin_style(config: &Config, name: &str) -> &'static [u8] {
+    let tf = config
+        .view_transform(name)
+        .unwrap()
+        .transform(ViewTransformDirection::FromReference)
+        .unwrap();
+    let Transform::Builtin(bi) = tf else {
+        panic!("not a BuiltinTransform: {tf}");
+    };
+    bi.style()
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, view_transforms_section)` @ v2.5.2.
+#[test]
+fn view_transforms_section() {
+    let base_config = get_base_config().unwrap();
+    let input_config = get_input_config().unwrap();
+
+    let setup_basics = setup_view_transforms_basics;
+
+    // Allowed strategies: All
+    // Allowed merge options: All
+
+    // Test that the default strategy is used as a fallback if the section strategy was not defined.
+    {
+        let mut merger = ConfigMerger::new();
+
+        // Using STRATEGY_UNSPECIFIED as this simulates that the section
+        // is missing from the OCIOM file.
+        let params = setup_basics(&mut merger, MergeStrategies::Unspecified);
+        // Simulate settings from OCIOM file.
+        merger
+            .params(0)
+            .unwrap()
+            .set_default_strategy(MergeStrategies::InputOnly);
+        merger.params(0).unwrap().set_input_first(true);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ViewTransformsMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(
+            merged_config.default_view_transform_name(),
+            b"Un-tone-mapped-2"
+        );
+
+        // Validate view_transforms
+
+        assert_eq!(merged_config.num_view_transforms(), 3);
+        assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+        assert_eq!(
+            merged_config.view_transform_name_by_index(1),
+            b"Un-tone-mapped-2"
+        );
+        assert_eq!(merged_config.view_transform_name_by_index(2), b"Equal");
+    }
+
+    // Test display/views with strategy = PreferInput, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(true);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ViewTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: view_transforms: SDR Video",
+                "The Input config contains a value that would override the Base config: default_view_transform: Un-tone-mapped-2",
+            ],
+        );
+
+        // Validate default_view_transform
+        assert_eq!(
+            merged_config.default_view_transform_name(),
+            b"Un-tone-mapped-2"
+        );
+
+        // Validate view_transforms
+
+        assert_eq!(merged_config.num_view_transforms(), 4);
+        assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+        // Note that the style of "SDR Video" differs between input and base, which is why a warning is
+        // logged for that one, whereas the transform for "Equal" is the same in input and base.
+        assert_eq!(
+            vt_from_ref_builtin_style(&merged_config, "SDR Video"),
+            b"ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO-P3lim_1.1"
+        );
+
+        assert_eq!(
+            merged_config.view_transform_name_by_index(1),
+            b"Un-tone-mapped-2"
+        );
+        assert_eq!(merged_config.view_transform_name_by_index(2), b"Equal");
+        assert_eq!(
+            merged_config.view_transform_name_by_index(3),
+            b"Un-tone-mapped"
+        );
+        assert_eq!(
+            merged_config.view_transform("Equal").unwrap().description(),
+            b"from input"
+        );
+    }
+
+    // Test display/views with strategy=PreferInput, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(false);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ViewTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: view_transforms: SDR Video",
+                "The Input config contains a value that would override the Base config: default_view_transform: Un-tone-mapped-2",
+            ],
+        );
+
+        assert_eq!(
+            merged_config.default_view_transform_name(),
+            b"Un-tone-mapped-2"
+        );
+
+        // Validate view_transforms
+
+        assert_eq!(merged_config.num_view_transforms(), 4);
+        assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+        assert_eq!(
+            vt_from_ref_builtin_style(&merged_config, "SDR Video"),
+            b"ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO-P3lim_1.1"
+        );
+
+        assert_eq!(
+            merged_config.view_transform_name_by_index(1),
+            b"Un-tone-mapped"
+        );
+        assert_eq!(merged_config.view_transform_name_by_index(2), b"Equal");
+        assert_eq!(
+            merged_config.view_transform_name_by_index(3),
+            b"Un-tone-mapped-2"
+        );
+    }
+
+    // Test display/views with strategy = PreferBase, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(true);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ViewTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: view_transforms: SDR Video",
+                "The Input config contains a value that would override the Base config: default_view_transform: Un-tone-mapped-2",
+            ],
+        );
+
+        assert_eq!(merged_config.default_view_transform_name(), b"SDR Video");
+
+        // Validate view_transforms
+
+        assert_eq!(merged_config.num_view_transforms(), 4);
+        assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+        assert_eq!(
+            vt_from_ref_builtin_style(&merged_config, "SDR Video"),
+            b"ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO_1.0"
+        );
+
+        assert_eq!(
+            merged_config.view_transform_name_by_index(1),
+            b"Un-tone-mapped-2"
+        );
+        assert_eq!(merged_config.view_transform_name_by_index(2), b"Equal");
+        assert_eq!(
+            merged_config.view_transform_name_by_index(3),
+            b"Un-tone-mapped"
+        );
+        assert_eq!(
+            merged_config.view_transform("Equal").unwrap().description(),
+            b"from base"
+        );
+    }
+
+    // Test display/views with strategy = PreferBase, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(false);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ViewTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: view_transforms: SDR Video",
+                "The Input config contains a value that would override the Base config: default_view_transform: Un-tone-mapped-2",
+            ],
+        );
+
+        assert_eq!(merged_config.default_view_transform_name(), b"SDR Video");
+
+        // Validate view_transforms
+
+        assert_eq!(merged_config.num_view_transforms(), 4);
+        assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+        assert_eq!(
+            vt_from_ref_builtin_style(&merged_config, "SDR Video"),
+            b"ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO_1.0"
+        );
+
+        assert_eq!(
+            merged_config.view_transform_name_by_index(1),
+            b"Un-tone-mapped"
+        );
+        assert_eq!(merged_config.view_transform_name_by_index(2), b"Equal");
+        assert_eq!(
+            merged_config.view_transform_name_by_index(3),
+            b"Un-tone-mapped-2"
+        );
+    }
+
+    // Test display/views with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ViewTransformsMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.default_view_transform_name(), b"SDR Video");
+
+        // Validate view_transforms
+
+        assert_eq!(merged_config.num_view_transforms(), 3);
+        assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+        assert_eq!(
+            merged_config.view_transform_name_by_index(1),
+            b"Un-tone-mapped"
+        );
+        assert_eq!(merged_config.view_transform_name_by_index(2), b"Equal");
+    }
+
+    // Test display/views with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ViewTransformsMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(
+            merged_config.default_view_transform_name(),
+            b"Un-tone-mapped-2"
+        );
+
+        // Validate view_transforms
+
+        assert_eq!(merged_config.num_view_transforms(), 3);
+        assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+        assert_eq!(
+            vt_from_ref_builtin_style(&merged_config, "SDR Video"),
+            b"ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO-P3lim_1.1"
+        );
+
+        assert_eq!(
+            merged_config.view_transform_name_by_index(1),
+            b"Un-tone-mapped-2"
+        );
+        assert_eq!(merged_config.view_transform_name_by_index(2), b"Equal");
+    }
+
+    // Test display/views with strategy = Remove
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::Remove);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ViewTransformsMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        // Note that the "SDR Video" view transform was removed, so the "SDR Video" value
+        // of the default view transform was reset to empty (will use the first one by default).
+        assert_eq!(merged_config.default_view_transform_name(), b"");
+
+        // Validate view_transforms
+
+        assert_eq!(merged_config.num_view_transforms(), 1);
+        assert_eq!(
+            merged_config.view_transform_name_by_index(0),
+            b"Un-tone-mapped"
+        );
+    }
+
+    // Test that error_on_conflicts is processed correctly.
+    // strategy = PreferInput, InputFirst = false
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+
+        let params = ConfigMergingParameters::new().unwrap();
+        merger.add_params(Some(params.clone()));
+        merger
+            .params(0)
+            .unwrap()
+            .set_view_transforms(MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(false);
+        merger.params(0).unwrap().set_error_on_conflict(true);
+
+        const PREFIX: &str =
+            "The Input config contains a value that would override the Base config: ";
+
+        // Test that an error is thrown when the the input values are different.
+        {
+            check_for_log_or_exception(
+                LogType::Error,
+                || {
+                    merge_section!(
+                        ViewTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    )
+                },
+                &[
+                    &format!("{PREFIX}view_transforms: SDR Video"),
+                    &format!("{PREFIX}default_view_transform: Un-tone-mapped-2"),
                 ],
             );
         }

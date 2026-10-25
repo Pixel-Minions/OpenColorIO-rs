@@ -11,10 +11,10 @@
 //! duplicate search or the reference-space conversion, so that they neither raise nor change
 //! these.
 //!
-//! From 9.2e on, whole merges are compared too (the displays and views from 9.2f): with the
-//! sections not ported yet keeping the base's (whose `BaseOnly` handlers change nothing that
-//! configs without named transforms, view transforms or inactive color spaces have), the merged
-//! config's `serialize()` byte for byte, the whole log, or the exception.
+//! From 9.2e on, whole merges are compared too (the displays and views from 9.2f, the view
+//! transforms from 9.2g): with the sections not ported yet keeping the base's (whose `BaseOnly`
+//! handlers change nothing that configs without named transforms or inactive color spaces
+//! have), the merged config's `serialize()` byte for byte, the whole log, or the exception.
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -431,8 +431,12 @@ fn general_and_roles_match_the_wheel() {
 /// Base and input configs for the merges compared whole (`serialize()`): file rules of both,
 /// of one, the same but for case, with and without custom keys (in another order, or fewer), the
 /// path search rule on one side only, the strict parsing flag; looks of both and of one, with
-/// names differing in case; v1 configs (their default rules). No named transforms, view
-/// transforms or inactive color spaces, which the sections not ported yet would change.
+/// names differing in case; v1 configs (their default rules); displays and views (9.2f); view
+/// transforms of both and of one, with names differing in case, of either reference space type,
+/// that differ in a transform, a direction or the reference space type, the default view
+/// transforms, and input configs whose reference spaces the converters change or can't find
+/// (9.2g). No named transforms or inactive color spaces, which the sections not ported yet would
+/// change.
 const WHOLE_PAIRS: &[Pair] = &[
     Pair {
         label: "rules and looks",
@@ -753,58 +757,279 @@ colorspaces:
     name: lin
 "#,
     },
+    Pair {
+        label: "view transforms",
+        base: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+  aces_interchange: ACES2065-1
+  cie_xyz_d65_interchange: CIE-XYZ-D65
+
+default_view_transform: SDR Video
+
+view_transforms:
+  - !<ViewTransform>
+    name: SDR Video
+    from_scene_reference: !<BuiltinTransform> {style: ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO_1.0}
+  - !<ViewTransform>
+    name: Un-tone-mapped
+    from_scene_reference: !<BuiltinTransform> {style: UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD}
+  - !<ViewTransform>
+    name: Equal
+    description: from base
+    from_scene_reference: !<MatrixTransform> {matrix: [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1]}
+  - !<ViewTransform>
+    name: Display VT
+    from_display_reference: !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1]}
+  - !<ViewTransform>
+    name: Both
+    to_scene_reference: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}
+    from_scene_reference: !<MatrixTransform> {offset: [-0.1, 0, 0, 0]}
+  - !<ViewTransform>
+    name: Ref Type
+    from_scene_reference: !<CDLTransform> {slope: [2, 2, 2]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: ACES2065-1
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE-XYZ-D65
+"#,
+        input: r#"ocio_profile_version: 2.1
+
+roles:
+  default: raw
+  aces_interchange: ACES2065-1
+  cie_xyz_d65_interchange: CIE-XYZ-D65
+
+default_view_transform: Un-tone-mapped-2
+
+view_transforms:
+  - !<ViewTransform>
+    name: sdr video
+    from_scene_reference: !<BuiltinTransform> {style: ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO-P3lim_1.1}
+  - !<ViewTransform>
+    name: Un-tone-mapped-2
+    from_scene_reference: !<BuiltinTransform> {style: UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD}
+  - !<ViewTransform>
+    name: Equal
+    family: other
+    description: from input
+    categories: [input]
+    from_scene_reference: !<MatrixTransform> {matrix: [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1]}
+  - !<ViewTransform>
+    name: DISPLAY VT
+    from_display_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1]}
+  - !<ViewTransform>
+    name: Both
+    to_scene_reference: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}
+  - !<ViewTransform>
+    name: Ref Type
+    from_display_reference: !<CDLTransform> {slope: [2, 2, 2]}
+  - !<ViewTransform>
+    name: To Only
+    to_display_reference: !<ExponentTransform> {value: [2, 2, 2, 1]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: ACES2065-1
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE-XYZ-D65
+"#,
+    },
+    Pair {
+        label: "view transforms in other reference spaces",
+        base: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+  aces_interchange: ACES2065-1
+  cie_xyz_d65_interchange: CIE-XYZ-D65
+
+view_transforms:
+  - !<ViewTransform>
+    name: VT1
+    from_scene_reference: !<CDLTransform> {slope: [2, 2, 2]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: ACES2065-1
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE-XYZ-D65
+"#,
+        input: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+  aces_interchange: ACES2065-1
+  cie_xyz_d65_interchange: CIE-XYZ-D65
+
+default_view_transform: VT2
+
+view_transforms:
+  - !<ViewTransform>
+    name: VT1
+    from_scene_reference: !<CDLTransform> {slope: [1, 2, 1]}
+  - !<ViewTransform>
+    name: VT2
+    from_scene_reference: !<BuiltinTransform> {style: ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO_1.0}
+  - !<ViewTransform>
+    name: VT3
+    to_display_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1]}
+    from_display_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1], direction: inverse}
+  - !<ViewTransform>
+    name: VT4
+    to_scene_reference: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: lin_rec709
+  - !<ColorSpace>
+    name: ACES2065-1
+    to_scene_reference: !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: XYZ half
+  - !<ColorSpace>
+    name: CIE-XYZ-D65
+    to_display_reference: !<MatrixTransform> {matrix: [0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 1]}
+"#,
+    },
+    Pair {
+        label: "view transforms of an unknown reference space",
+        base: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+  aces_interchange: ACES2065-1
+
+default_view_transform: VT1
+
+view_transforms:
+  - !<ViewTransform>
+    name: VT1
+    from_scene_reference: !<CDLTransform> {slope: [2, 2, 2]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: ACES2065-1
+"#,
+        input: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+view_transforms:
+  - !<ViewTransform>
+    name: vt1
+    from_scene_reference: !<CDLTransform> {slope: [2, 2, 2]}
+  - !<ViewTransform>
+    name: VT2
+    from_scene_reference: !<CDLTransform> {slope: [1, 2, 1]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: weird
+    to_scene_reference: !<ExponentTransform> {value: [3, 3, 3, 1]}
+"#,
+    },
 ];
 
 /// The index in [`WHOLE_PAIRS`] of the first pair with displays: the displays and views section
 /// takes every strategy over these, the file rules and looks sections over the others.
 const FIRST_DISPLAY_PAIR: usize = 3;
 
+/// The index in [`WHOLE_PAIRS`] of the first pair with view transforms: the view transforms
+/// section takes every strategy over these, with and without the adjustment of the input's
+/// reference space.
+const FIRST_VIEW_TRANSFORMS_PAIR: usize = 6;
+
 /// The active displays and views the overrides set, when a case sets them.
 const ACTIVE_DISPLAYS_OVERRIDE: &str = "DISP_2, A";
 const ACTIVE_VIEWS_OVERRIDE: &str = "VIEW_2, v";
 
 /// The setters of the sections the whole merges keep the base's: the sections not ported yet.
-const NOT_PORTED_SECTIONS: &[&str] = &["setViewTransforms", "setColorspaces", "setNamedTransforms"];
+const NOT_PORTED_SECTIONS: &[&str] = &["setColorspaces", "setNamedTransforms"];
 
 /// One whole merge: a pair of [`WHOLE_PAIRS`], the default strategy (which the general and
-/// roles sections take), the file rules', the displays and views' and the looks' (indices into
-/// [`STRATEGIES`]), the input-first and error-on-conflict options, and whether the active
-/// displays and views are overridden.
+/// roles sections take), the file rules', the displays and views', the view transforms' and the
+/// looks' (indices into [`STRATEGIES`]), the input-first and error-on-conflict options, whether
+/// the active displays and views are overridden, and whether the input's reference space is
+/// adjusted to the base's.
 #[derive(Debug, Clone, Copy)]
 struct WholeCase {
     pair: usize,
     default: usize,
     file_rules: usize,
     display_views: usize,
+    view_transforms: usize,
     looks: usize,
     input_first: bool,
     error_on_conflict: bool,
     active_overrides: bool,
+    adjust_reference: bool,
 }
 
 /// Every pair with every default strategy but `STRATEGY_UNSPECIFIED` (none set is the default
 /// default, `PreferInput`) and both options: the pairs without displays with every file rules
-/// and looks strategy, the others with every displays and views strategy, with and without the
-/// overrides of the active lists. Unset strategies follow the default.
+/// and looks strategy, those with displays with every displays and views strategy, with and
+/// without the overrides of the active lists, and those with view transforms with every view
+/// transforms strategy, with and without the adjustment of the reference space. Unset
+/// strategies follow the default.
 fn whole_cases() -> Vec<WholeCase> {
     let mut cases = Vec::new();
     for pair in 0..WHOLE_PAIRS.len() {
         for default in 0..STRATEGIES.len() - 1 {
+            // (file rules, display views, view transforms, looks, active overrides, adjust)
             let mut sections = Vec::new();
             if pair < FIRST_DISPLAY_PAIR {
                 for file_rules in 0..STRATEGIES.len() {
                     for looks in 0..STRATEGIES.len() {
-                        sections.push((file_rules, 0, looks, false));
+                        sections.push((file_rules, 0, 0, looks, false, false));
+                    }
+                }
+            } else if pair < FIRST_VIEW_TRANSFORMS_PAIR {
+                for display_views in 0..STRATEGIES.len() {
+                    for active_overrides in [false, true] {
+                        sections.push((0, display_views, 0, 0, active_overrides, false));
                     }
                 }
             } else {
-                for display_views in 0..STRATEGIES.len() {
-                    for active_overrides in [false, true] {
-                        sections.push((0, display_views, 0, active_overrides));
+                for view_transforms in 0..STRATEGIES.len() {
+                    for adjust_reference in [false, true] {
+                        sections.push((0, 0, view_transforms, 0, false, adjust_reference));
                     }
                 }
             }
-            for (file_rules, display_views, looks, active_overrides) in sections {
+            for (file_rules, display_views, view_transforms, looks, active_overrides, adjust) in
+                sections
+            {
                 for input_first in [true, false] {
                     for error_on_conflict in [false, true] {
                         cases.push(WholeCase {
@@ -812,10 +1037,12 @@ fn whole_cases() -> Vec<WholeCase> {
                             default,
                             file_rules,
                             display_views,
+                            view_transforms,
                             looks,
                             input_first,
                             error_on_conflict,
                             active_overrides,
+                            adjust_reference: adjust,
                         });
                     }
                 }
@@ -840,7 +1067,8 @@ fn whole_calls(case: &WholeCase) -> Vec<Value> {
         json!({"call": "CreateFromStream", "on": "Config", "args": [pair.input], "as": "input"}),
         json!({"call": "Create", "on": "ConfigMergingParameters", "as": "p"}),
         json!({"call": "setAvoidDuplicates", "on": "p", "args": [false]}),
-        json!({"call": "setAdjustInputReferenceSpace", "on": "p", "args": [false]}),
+        json!({"call": "setAdjustInputReferenceSpace", "on": "p",
+               "args": [case.adjust_reference]}),
         json!({"call": "setInputFirst", "on": "p", "args": [case.input_first]}),
         json!({"call": "setErrorOnConflict", "on": "p", "args": [case.error_on_conflict]}),
     ];
@@ -858,6 +1086,7 @@ fn whole_calls(case: &WholeCase) -> Vec<Value> {
         ("setDefaultStrategy", case.default),
         ("setFileRules", case.file_rules),
         ("setDisplayViews", case.display_views),
+        ("setViewTransforms", case.view_transforms),
         ("setLooks", case.looks),
     ] {
         if let Some(name) = STRATEGIES[index].0 {
@@ -888,7 +1117,7 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
     });
     let params = ConfigMergingParameters::new().expect("Create");
     params.set_avoid_duplicates(false);
-    params.set_adjust_input_reference_space(false);
+    params.set_adjust_input_reference_space(case.adjust_reference);
     params.set_input_first(case.input_first);
     params.set_error_on_conflict(case.error_on_conflict);
     if case.active_overrides {
@@ -899,20 +1128,23 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
             .set_active_views(ACTIVE_VIEWS_OVERRIDE)
             .expect("setActiveViews");
     }
-    let not_ported: [StrategySetter; 3] = [
-        ConfigMergingParameters::set_view_transforms,
+    let not_ported: [StrategySetter; 2] = [
         ConfigMergingParameters::set_colorspaces,
         ConfigMergingParameters::set_named_transforms,
     ];
     for setter in not_ported {
         setter(&params, MergeStrategies::BaseOnly);
     }
-    let ported: [(StrategySetter, usize); 4] = [
+    let ported: [(StrategySetter, usize); 5] = [
         (ConfigMergingParameters::set_default_strategy, case.default),
         (ConfigMergingParameters::set_file_rules, case.file_rules),
         (
             ConfigMergingParameters::set_display_views,
             case.display_views,
+        ),
+        (
+            ConfigMergingParameters::set_view_transforms,
+            case.view_transforms,
         ),
         (ConfigMergingParameters::set_looks, case.looks),
     ];
@@ -933,6 +1165,7 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
         RolesMerger::new(&mut options).and_then(|mut m| m.merge())?;
         FileRulesMerger::new(&mut options).and_then(|mut m| m.merge())?;
         DisplayViewMerger::new(&mut options).and_then(|mut m| m.merge())?;
+        ViewTransformsMerger::new(&mut options).and_then(|mut m| m.merge())?;
         LooksMerger::new(&mut options).and_then(|mut m| m.merge())
     });
     (
@@ -967,6 +1200,9 @@ fn whole_merges_match_the_wheel() {
     let (mut raised, mut logged) = (0, 0);
     let mut texts = std::collections::BTreeSet::new();
     let mut display_texts = std::collections::BTreeSet::new();
+    let mut view_transform_texts = std::collections::BTreeSet::new();
+    let mut adjusted_raised = 0;
+    let mut adjusted_texts = std::collections::BTreeSet::new();
     let mut mismatches = Vec::new();
     for (case, response) in cases.iter().zip(responses) {
         let response = response.unwrap_or_else(|e| panic!("{case:?}: {e}")).result;
@@ -1002,6 +1238,9 @@ fn whole_merges_match_the_wheel() {
         match (merge.get("exception"), result) {
             (Some(e), Err(port)) => {
                 raised += 1;
+                if case.adjust_reference {
+                    adjusted_raised += 1;
+                }
                 if bytes(&e["message"]) != port.what() {
                     problems.push(format!("exception: wheel {e}, port {port}"));
                 }
@@ -1016,7 +1255,15 @@ fn whole_merges_match_the_wheel() {
                         String::from_utf8_lossy(&text)
                     ));
                 }
-                if case.pair >= FIRST_DISPLAY_PAIR {
+                if case.pair >= FIRST_VIEW_TRANSFORMS_PAIR {
+                    // (The base configs of these pairs have no group transforms: the input's
+                    // view transforms with the reference space converters do.)
+                    if case.adjust_reference && text.windows(17).any(|w| w == b"!<GroupTransform>")
+                    {
+                        adjusted_texts.insert(text.clone());
+                    }
+                    view_transform_texts.insert(text.clone());
+                } else if case.pair >= FIRST_DISPLAY_PAIR {
                     display_texts.insert(text.clone());
                 }
                 texts.insert(text);
@@ -1047,5 +1294,21 @@ fn whole_merges_match_the_wheel() {
         display_texts.len() >= 20,
         "{} different merged configs with displays",
         display_texts.len()
+    );
+    assert!(
+        view_transform_texts.len() >= 30,
+        "{} different merged configs with view transforms",
+        view_transform_texts.len()
+    );
+    // The reference space converters change the input's view transforms, and fail where the
+    // input's reference space is unknown.
+    assert!(
+        adjusted_texts.len() >= 3,
+        "{} different merged configs with adjusted view transforms",
+        adjusted_texts.len()
+    );
+    assert!(
+        adjusted_raised >= 150,
+        "{adjusted_raised} merges adjusting the reference space raised"
     );
 }

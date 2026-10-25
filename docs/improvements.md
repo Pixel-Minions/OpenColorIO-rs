@@ -4082,6 +4082,37 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p9-merge-2` (9.2f, `section_merger.rs`, `split_active_list`);
   `section_merger_oracle_tests.rs` (the "active lists" configs).
 
+### I-432. View transforms that differ in their categories merge without a conflict
+
+- **Upstream:** the view transforms section compares two view transforms of the same name by
+  their reference space type and the text of their transforms only, with a TODO "Check
+  categories." (`viewTransformsAreEqual`, `SectionMerger.cpp:1686-1749` @ v2.5.2). View
+  transforms that differ in their categories (or family and description, which upstream calls
+  not functional) are no conflict: no message, even with `error_on_conflict`, and the merge
+  keeps the one of the preferred config. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** applications that filter view transforms by category in their menus, merging
+  configs whose view transforms carry different categories.
+- **A fix:** upstream's TODO: compare the categories too.
+- **Status:** matched in `p9-merge-3` (9.2g, `apphelpers/mergeconfigs/section_merger.rs`,
+  `view_transforms_are_equal`); `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`,
+  the "view transforms" configs).
+
+### I-433. A default view transform that only one config has is reported as a conflict
+
+- **Upstream:** the view transforms section reports "The Input config contains a value that
+  would override the Base config: default_view_transform: <input's>" whenever the two configs'
+  default view transforms differ ignoring case (`SectionMerger.cpp:1834-1840, 1862-1868` @
+  v2.5.2), also when either config has none: an input without one gives the message with an
+  empty name, though the base's is kept, and a base without one gives it though nothing is
+  overridden. With `error_on_conflict` the merge stops there. Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** merges with `error_on_conflict` of a config that sets no default view
+  transform, which is optional.
+- **A fix:** report the conflict only when both configs name a default view transform.
+- **Status:** matched in `p9-merge-3` (9.2g, `section_merger.rs`, `ViewTransformsMerger`);
+  `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`, the "view transforms in
+  other reference spaces" and "view transforms of an unknown reference space" configs).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

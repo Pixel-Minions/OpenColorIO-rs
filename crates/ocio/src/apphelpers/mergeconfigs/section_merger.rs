@@ -24,7 +24,7 @@
 
 use ocio_ops::exception::{Exception, ExceptionKind, Result};
 use ocio_ops::logging::log_warning;
-use ocio_ops::open_color_types::ViewType;
+use ocio_ops::open_color_types::{ViewTransformDirection, ViewType};
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::string_utils::{StringVec, contain, join, remove, split, trim, trim_vec};
 
@@ -32,9 +32,11 @@ use crate::apphelpers::mergeconfigs::merge_configs_helpers::{
     ConfigMergingParameters, MergeStrategies,
 };
 use crate::config::Config;
+use crate::config_utils;
 use crate::custom_keys::CustomKeysContainer;
 use crate::file_rules::FileRules;
 use crate::tokens_manager::TokensManager;
+use crate::transform::Transform;
 use crate::viewing_rules::ViewingRules;
 
 /// The configs and parameters of a merge.
@@ -56,9 +58,7 @@ pub(crate) struct MergeHandlerOptions<'a> {
 
 /// The state every section merger has.
 ///
-/// Port of `SectionMerger`'s members (SectionMerger.h:30-120 @ v2.5.2). `m_inputToBaseGtScene`
-/// and `m_inputToBaseGtDisplay` belong to the view transforms and color spaces mergers (9.2g,
-/// 9.2h).
+/// Port of `SectionMerger`'s members (SectionMerger.h:30-120 @ v2.5.2).
 pub(crate) struct SectionMerger<'o, 'a> {
     /// `m_baseConfig`.
     pub(crate) base_config: &'a Config,
@@ -70,6 +70,13 @@ pub(crate) struct SectionMerger<'o, 'a> {
     pub(crate) params: &'a ConfigMergingParameters,
     /// `m_strategy`, which each merger's constructor sets.
     pub(crate) strategy: MergeStrategies,
+    /// `m_inputToBaseGtScene`: the converter from the input config's scene-referred reference
+    /// space to the base config's, which the view transforms and color spaces mergers set when
+    /// the parameters adjust the input's reference space; `None` (upstream's null pointer)
+    /// until then.
+    pub(crate) input_to_base_gt_scene: Option<Transform>,
+    /// `m_inputToBaseGtDisplay`: the same for the display-referred reference spaces.
+    pub(crate) input_to_base_gt_display: Option<Transform>,
 }
 
 impl<'o, 'a> SectionMerger<'o, 'a> {
@@ -89,7 +96,24 @@ impl<'o, 'a> SectionMerger<'o, 'a> {
             merged_config: &mut *options.merged_config,
             params,
             strategy: MergeStrategies::Unspecified,
+            input_to_base_gt_scene: None,
+            input_to_base_gt_display: None,
         })
+    }
+
+    /// Sets the converters from the input config's reference spaces to the base config's
+    /// (`ConfigUtils::initializeRefSpaceConverters`), as the constructors of the view
+    /// transforms and color spaces mergers do when the parameters adjust the input's reference
+    /// space.
+    ///
+    /// Port of the calls in `ViewTransformsMerger::ViewTransformsMerger` and
+    /// `ColorspacesMerger::ColorspacesMerger` (SectionMerger.h:260-267, 328-334 @ v2.5.2).
+    fn initialize_ref_space_converters(&mut self) -> Result<()> {
+        let (scene, display) =
+            config_utils::initialize_ref_space_converters(self.base_config, self.input_config)?;
+        self.input_to_base_gt_scene = Some(scene);
+        self.input_to_base_gt_display = Some(display);
+        Ok(())
     }
 
     /// Logs `s` as a warning, or with `must_throw` (the option to stop at a conflict), returns
@@ -1853,6 +1877,298 @@ impl<'o, 'a> Section<'o, 'a> for DisplayViewMerger<'o, 'a> {
         }
 
         merged.set_viewing_rules(&merged_rules);
+        Ok(())
+    }
+}
+
+/////////////////////////////////// ViewTransformsMerger /////////////////////////////////
+
+/// Whether `first` and `second` both have a view transform named `name`, of the same reference
+/// space type, whose transforms in each direction are both missing or print the same text
+/// (`operator<<`, which loads no file). The family, description and categories aren't
+/// compared (docs/improvements.md, I-432).
+///
+/// Port of `viewTransformsAreEqual` (SectionMerger.cpp:1686-1749 @ v2.5.2).
+fn view_transforms_are_equal(first: &Config, second: &Config, name: &[u8]) -> bool {
+    let (Some(vt1), Some(vt2)) = (first.view_transform(name), second.view_transform(name)) else {
+        return false;
+    };
+    // Both configs have a view transform by this name, now check the parts.
+    // Note: Not checking family or description since it is not a functional difference.
+
+    // TODO: Check categories.
+
+    if vt1.reference_space_type() != vt2.reference_space_type() {
+        return false;
+    }
+
+    for dir in [
+        ViewTransformDirection::ToReference,
+        ViewTransformDirection::FromReference,
+    ] {
+        match (vt1.transform(dir), vt2.transform(dir)) {
+            (None, None) => {}
+            // Compare transforms. NB: This is a fast comparison that does not load file
+            // transforms.
+            (Some(t1), Some(t2)) => {
+                if t1.to_bytes() != t2.to_bytes() {
+                    return false;
+                }
+            }
+            // One of them has a transform but the other does not.
+            _ => return false,
+        }
+    }
+
+    true
+}
+
+/// The converters of a merger's state, or upstream's error for a null one.
+///
+/// The check of `ConfigUtils::updateReferenceView` (src/OpenColorIO/ConfigUtils.cpp:1063-1068
+/// @ v2.5.2) for the null converters of a merger that didn't set them.
+fn converters<'m>(m: &'m SectionMerger<'_, '_>) -> Result<(&'m Transform, &'m Transform)> {
+    match (&m.input_to_base_gt_scene, &m.input_to_base_gt_display) {
+        (Some(scene), Some(display)) => Ok((scene, display)),
+        _ => Err(Exception::new(
+            "Could not update view transform reference spaces, converter transforms were not \
+             initialized.",
+        )),
+    }
+}
+
+/// "The Input config contains a value that would override the Base config:
+/// default_view_transform: <input's>", the conflict of the default view transforms.
+fn default_view_transform_message(input_name: &[u8]) -> Vec<u8> {
+    override_message(b"default_view_transform", input_name)
+}
+
+/// Merges the view transforms and the default view transform.
+///
+/// Port of `ViewTransformsMerger` (SectionMerger.h:245-286, SectionMerger.cpp:1751-1914 @
+/// v2.5.2).
+pub(crate) struct ViewTransformsMerger<'o, 'a>(SectionMerger<'o, 'a>);
+
+impl<'o, 'a> ViewTransformsMerger<'o, 'a> {
+    /// The merger, with the converters of the reference spaces when the parameters adjust the
+    /// input's reference space (which fails as `initializeRefSpaceConverters` does).
+    ///
+    /// Port of `ViewTransformsMerger::ViewTransformsMerger` (SectionMerger.h:248-268 @ v2.5.2).
+    pub(crate) fn new(options: &'o mut MergeHandlerOptions<'a>) -> Result<Self> {
+        let mut m = SectionMerger::new(options)?;
+        m.strategy = section_strategy(m.params.view_transforms(), m.params);
+
+        if m.params.is_adjust_input_reference_space() {
+            // TODO: This may throw, is it worth continuing without ref space conversion?
+            // Just call LogError() and continue?
+            m.initialize_ref_space_converters()?;
+        }
+        Ok(ViewTransformsMerger(m))
+    }
+
+    /// Adds the view transform `name` of `cfg` to the merged config, when `cfg` has it: with
+    /// the converters of the reference spaces (`ConfigUtils::updateReferenceView`) when it comes
+    /// from the input and the parameters adjust the input's reference space.
+    ///
+    /// Port of `ViewTransformsMerger::addViewTransform` (SectionMerger.cpp:1753-1771 @ v2.5.2).
+    fn add_view_transform(&mut self, cfg: &Config, name: &[u8], is_input: bool) -> Result<()> {
+        let m = &mut self.0;
+        let Some(vt) = cfg.view_transform(name) else {
+            return Ok(());
+        };
+
+        if !is_input || !m.params.is_adjust_input_reference_space() {
+            m.merged_config.add_view_transform(vt)
+        } else {
+            // Add the reference space adapter transforms.
+            let mut e_vt = vt.clone();
+            let (scene, display) = converters(m)?;
+            config_utils::update_reference_view(&mut e_vt, scene, display)?;
+            m.merged_config.add_view_transform(&e_vt)
+        }
+    }
+
+    /// Adds the view transforms of `cfg` whose names the merged config doesn't have.
+    ///
+    /// Port of `ViewTransformsMerger::addUniqueViewTransforms` (SectionMerger.cpp:1773-1784 @
+    /// v2.5.2).
+    fn add_unique_view_transforms(&mut self, cfg: &Config, is_input: bool) -> Result<()> {
+        for i in 0..cfg.num_view_transforms() {
+            let name = cfg.view_transform_name_by_index(i);
+            // Take the view from the config if it does not exist in merged config.
+            if self.0.merged_config.view_transform(name).is_none() {
+                self.add_view_transform(cfg, name, is_input)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The view transforms of `first`, in its order, each from `second` where it has one and
+    /// `prefer_second`, then those only `second` has; one of both that differs is a conflict.
+    ///
+    /// Port of `ViewTransformsMerger::processViewTransforms` (SectionMerger.cpp:1786-1817 @
+    /// v2.5.2).
+    fn process_view_transforms(
+        &mut self,
+        first: &Config,
+        second: &Config,
+        prefer_second: bool,
+        second_is_input: bool,
+    ) -> Result<()> {
+        for i in 0..first.num_view_transforms() {
+            let name = first.view_transform_name_by_index(i);
+            if !name.is_empty() {
+                let vt2 = second.view_transform(name);
+                if vt2.is_some() && !view_transforms_are_equal(first, second, name) {
+                    let os = override_message(b"view_transforms", name);
+                    self.0.notify(&os, self.0.params.is_error_on_conflict())?;
+                }
+
+                if vt2.is_some() && prefer_second {
+                    self.add_view_transform(second, name, second_is_input)?;
+                } else {
+                    self.add_view_transform(first, name, !second_is_input)?;
+                }
+            }
+        }
+
+        // Add the remaining unique view transforms.
+
+        self.add_unique_view_transforms(second, second_is_input)
+    }
+
+    /// The view transforms of both configs, `first` first (the input with `input_first`),
+    /// preferring `second`'s with `prefer_second`; a conflict when the default view transforms
+    /// differ (ignoring case), also when one is empty (docs/improvements.md, I-433).
+    ///
+    /// The view transforms part of `ViewTransformsMerger::handlePreferInput` and
+    /// `handlePreferBase` (SectionMerger.cpp:1819-1873 @ v2.5.2), and the check of their default
+    /// view transforms.
+    fn merge_both(&mut self, input_first: bool, prefer_second: bool) -> Result<()> {
+        let (base, input) = (self.0.base_config, self.0.input_config);
+        // Merge view_transforms.
+        self.0.merged_config.clear_view_transforms();
+        if input_first {
+            self.process_view_transforms(input, base, prefer_second, false)?;
+        } else {
+            self.process_view_transforms(base, input, prefer_second, true)?;
+        }
+
+        // Merge default_view_transform.
+        let base_name = base.default_view_transform_name();
+        let input_name = input.default_view_transform_name();
+        if strcasecmp(base_name, input_name).is_ne() {
+            self.0.notify(
+                &default_view_transform_message(input_name),
+                self.0.params.is_error_on_conflict(),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl<'o, 'a> Section<'o, 'a> for ViewTransformsMerger<'o, 'a> {
+    fn state(&self) -> &SectionMerger<'o, 'a> {
+        &self.0
+    }
+
+    /// Port of `ViewTransformsMerger::getName` (SectionMerger.h:271 @ v2.5.2).
+    fn name(&self) -> &'static str {
+        "View Transforms"
+    }
+
+    /// Both configs' view transforms, the input's where both have one; the input's default
+    /// view transform unless it is empty.
+    ///
+    /// Port of `ViewTransformsMerger::handlePreferInput` (SectionMerger.cpp:1819-1845 @ v2.5.2).
+    fn handle_prefer_input(&mut self) -> Result<()> {
+        if self.0.params.is_input_first() {
+            self.merge_both(true, false)?;
+        } else {
+            self.merge_both(false, true)?;
+        }
+
+        // If the input config does not specify a default, keep the one from the base.
+        let input_name = self.0.input_config.default_view_transform_name();
+        if !input_name.is_empty() {
+            self.0
+                .merged_config
+                .set_default_view_transform_name(input_name);
+        }
+        Ok(())
+    }
+
+    /// Both configs' view transforms, the base's where both have one; the base's default view
+    /// transform unless it is empty.
+    ///
+    /// Port of `ViewTransformsMerger::handlePreferBase` (SectionMerger.cpp:1847-1873 @ v2.5.2).
+    fn handle_prefer_base(&mut self) -> Result<()> {
+        if self.0.params.is_input_first() {
+            self.merge_both(true, true)?;
+        } else {
+            self.merge_both(false, false)?;
+        }
+
+        // Only use the input if the base is missing.
+        let base_name = self.0.base_config.default_view_transform_name();
+        if base_name.is_empty() {
+            let input_name = self.0.input_config.default_view_transform_name();
+            self.0
+                .merged_config
+                .set_default_view_transform_name(input_name);
+        }
+        Ok(())
+    }
+
+    /// The input's view transforms and default view transform.
+    ///
+    /// Port of `ViewTransformsMerger::handleInputOnly` (SectionMerger.cpp:1875-1883 @ v2.5.2).
+    fn handle_input_only(&mut self) -> Result<()> {
+        // Merge view_transforms.
+        self.0.merged_config.clear_view_transforms();
+        let input = self.0.input_config;
+        self.add_unique_view_transforms(input, true)?;
+
+        // Merge default_view_transform.
+        self.0
+            .merged_config
+            .set_default_view_transform_name(input.default_view_transform_name());
+        Ok(())
+    }
+
+    /// Port of `ViewTransformsMerger::handleBaseOnly` (SectionMerger.cpp:1885-1887 @ v2.5.2).
+    fn handle_base_only(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    /// The base's view transforms that the input doesn't have (by name); the default view
+    /// transform emptied when it names none of them.
+    ///
+    /// Port of `ViewTransformsMerger::handleRemove` (SectionMerger.cpp:1889-1910 @ v2.5.2).
+    fn handle_remove(&mut self) -> Result<()> {
+        let m = &mut self.0;
+        // Remove from view_transforms.
+        m.merged_config.clear_view_transforms();
+        // Add view transforms that are present in the base config and NOT present in the input
+        // config.
+        for i in 0..m.base_config.num_view_transforms() {
+            let name = m.base_config.view_transform_name_by_index(i);
+            if m.input_config.view_transform(name).is_none() {
+                let vt = m
+                    .base_config
+                    .view_transform(name)
+                    .expect("a view transform the config lists");
+                m.merged_config.add_view_transform(vt)?;
+            }
+        }
+
+        // Handle default_view_transform.
+        // Leave the base alone unless it identified a view transform that was removed.
+        let base_name = m.base_config.default_view_transform_name();
+        if m.merged_config.view_transform(base_name).is_none() {
+            // Set to empty string, the first view transform will be used by default.
+            m.merged_config.set_default_view_transform_name(b"");
+        }
         Ok(())
     }
 }
