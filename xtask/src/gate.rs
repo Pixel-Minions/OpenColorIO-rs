@@ -32,7 +32,8 @@ Runs, in order, stopping at the first failure:
                  module; every test function py-port/passing.txt lists must pass)
   test-release   the same in release, with --release (and test-release-py)
   rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh),
-                 started once ci (and deny) pass, beside the test steps above
+                 started once ci (and deny) pass and the debug test binaries are built
+                 (test-build), beside the test steps above
 
   --staged       gate exactly what is staged (`git add`), leaving unstaged changes and
                  untracked files out: the index as a temporary commit on HEAD, checked out
@@ -261,6 +262,15 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     // The Rocky pass runs beside this platform's tests, once the checks above have passed
     // (owner, 2026-10-24: the tests mostly wait on the wheel, and one platform after the other
     // made the full gate the longest part of a land). Its summary lines arrive as they come.
+    // This platform's debug test binaries are built first: the two platforms' builds at once ran
+    // Windows out of resources (os error 1450, 2026-10-24). The tests then overlap the Rocky
+    // pass's build and tests.
+    if opts.rocky && tests {
+        let tier = if opts.full { "full" } else { "quick" };
+        let mut build = test_command(&root, &opts.crates, false, tier);
+        build.arg("--no-run");
+        runner.step("test-build", build, Kind::Plain)?;
+    }
     let rocky = if opts.rocky {
         let cmd = rocky_command(&root, &opts, &log_dir, base_file.as_deref())?;
         let mut nested = Runner::new(log_dir.clone());
