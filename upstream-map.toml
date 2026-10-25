@@ -218,8 +218,8 @@ note = "p3-context 3.5d: EnvMapKey, EnvMap, UsedEnvs and the declarations; the C
 path = "src/OpenColorIO/CustomKeys.h"
 kind = "src"
 target = ["crates/ocio/src/custom_keys.rs"]
-status = "partial"
-note = "p3-rules 3.9e: CustomKeysContainer's getSize, getName, getValue, set, validateIndex; hasKey and getValueForKey have no caller in OCIO 2.5.2"
+status = "done"
+note = "p3-rules 3.9e: CustomKeysContainer's getSize, getName, getValue, set, validateIndex; p9-merge-2 9.2e: hasKey, getValueForKey (their callers are the merge's rule comparisons)"
 
 [[file]]
 path = "src/OpenColorIO/Display.cpp"
@@ -738,14 +738,14 @@ path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs"]
 status = "partial"
-note = "p9-merge-2 9.2d: SectionMerger (notify, merge), setMergedConfigVersion, GeneralMerger, RolesMerger; the other sections with 9.2e-9.2i"
+note = "p9-merge-2 9.2d: SectionMerger (notify, merge), setMergedConfigVersion, GeneralMerger, RolesMerger; 9.2e: fileRulesAreEqual, copyRule, FileRulesMerger, LooksMerger; the other sections with 9.2f-9.2i"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.h"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs"]
 status = "partial"
-note = "p9-merge-2 9.2d: MergeHandlerOptions, SectionMerger, GeneralMerger, RolesMerger (mergeStringVecWithoutDuplicate and inputFirstMergeStringVec are declared, never defined); the other mergers with 9.2e-9.2i"
+note = "p9-merge-2 9.2d: MergeHandlerOptions, SectionMerger, GeneralMerger, RolesMerger (mergeStringVecWithoutDuplicate and inputFirstMergeStringVec are declared, never defined); 9.2e: FileRulesMerger, LooksMerger; the other mergers with 9.2f-9.2i"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.cpp"
@@ -4662,7 +4662,7 @@ path = "tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/merge_configs_helpers_tests.rs"]
 status = "partial"
-note = "p9-merge-1 9.2c: ociom_parser, params_serialization, ociom_serialization, ociom_parser_no_overrides; p9-merge-2 9.2d: general_section, roles_section; the other section tests with 9.2e-9.2i, the merges with 9.2j"
+note = "p9-merge-1 9.2c: ociom_parser, params_serialization, ociom_serialization, ociom_parser_no_overrides; p9-merge-2 9.2d: general_section, roles_section; 9.2e: file_rules_section, looks_section; the other section tests with 9.2f-9.2i, the merges with 9.2j"
 
 [[file]]
 path = "tests/cpu/apphelpers/MixingHelpers_tests.cpp"

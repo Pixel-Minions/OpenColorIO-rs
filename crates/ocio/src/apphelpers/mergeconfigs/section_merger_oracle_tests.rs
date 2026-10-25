@@ -10,6 +10,11 @@
 //! support), in order. The other sections take the base's (`STRATEGY_BASE_ONLY`), without the
 //! duplicate search or the reference-space conversion, so that they neither raise nor change
 //! these.
+//!
+//! From 9.2e on, whole merges are compared too: with the sections not ported yet keeping the
+//! base's (whose `BaseOnly` handlers change nothing configs without named transforms, view
+//! transforms or inactive color spaces have), the merged config's `serialize()` byte for byte,
+//! the whole log, or the exception.
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -421,4 +426,411 @@ fn general_and_roles_match_the_wheel() {
     assert!(raised >= 20, "{raised} merges raised");
     assert!(logged >= 50, "{logged} merges logged");
     assert!(v2_0_from_v1 >= 20, "{v2_0_from_v1} v1 merges made v2.0");
+}
+
+/// Base and input configs for the merges compared whole (`serialize()`): file rules of both,
+/// of one, the same but for case, with and without custom keys (in another order, or fewer), the
+/// path search rule on one side only, the strict parsing flag; looks of both and of one, with
+/// names differing in case; v1 configs (their default rules). No named transforms, view
+/// transforms or inactive color spaces, which the sections not ported yet would change.
+const WHOLE_PAIRS: &[Pair] = &[
+    Pair {
+        label: "rules and looks",
+        base: r#"ocio_profile_version: 2
+
+name: base
+strictparsing: true
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: LogC, colorspace: lin, pattern: "*LogC*", extension: "*"}
+  - !<Rule> {name: TIFF, colorspace: lin, regex: ".*\\.TIF?F$"}
+  - !<Rule> {name: OpenEXR, colorspace: log, extension: "exr", pattern: "*"}
+  - !<Rule> {name: ColorSpaceNamePathSearch}
+  - !<Rule> {name: Default, colorspace: raw}
+
+looks:
+  - !<Look>
+    name: look_both
+    process_space: lin
+    transform: !<CDLTransform> {slope: [1, 2, 1]}
+  - !<Look>
+    name: look_base
+    process_space: log
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: lin
+  - !<ColorSpace>
+    name: log
+"#,
+        input: r#"ocio_profile_version: 2.1
+
+name: input
+strictparsing: false
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: LogC, colorspace: lin, pattern: "*LogC*", extension: "*"}
+  - !<Rule> {name: TIFF, colorspace: log, regex: ".*\\.TIF?F$", custom: {key1: value1, key2: value2}}
+  - !<Rule> {name: JPEG, colorspace: lin, regex: ".*\\.jpeg$"}
+  - !<Rule> {name: Png, colorspace: log, pattern: "*", extension: "png", custom: {a: b}}
+  - !<Rule> {name: ColorSpaceNamePathSearch}
+  - !<Rule> {name: Default, colorspace: lin}
+
+looks:
+  - !<Look>
+    name: look_both
+    process_space: log
+  - !<Look>
+    name: LOOK_INPUT
+    process_space: lin
+    transform: !<CDLTransform> {offset: [0.1, 0, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: lin
+  - !<ColorSpace>
+    name: log
+"#,
+    },
+    Pair {
+        label: "case and custom keys",
+        base: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: Keys, colorspace: lin, pattern: "*abc*", extension: "*", custom: {k1: V1, k2: v2}}
+  - !<Rule> {name: Only Base, colorspace: lin, pattern: "*b*", extension: "*"}
+  - !<Rule> {name: Extra Keys, colorspace: lin, pattern: "*e*", extension: "*", custom: {k1: v1, k2: v2}}
+  - !<Rule> {name: ColorSpaceNamePathSearch, custom: {ps: key}}
+  - !<Rule> {name: Default, colorspace: raw}
+
+looks:
+  - !<Look>
+    name: Look A
+    process_space: lin
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+  - !<ColorSpace>
+    name: lin
+"#,
+        input: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: KEYS, colorspace: LIN, pattern: "*ABC*", extension: "*", custom: {k2: V2, k1: v1}}
+  - !<Rule> {name: Other, colorspace: lin, pattern: "*o*", extension: "*"}
+  - !<Rule> {name: Extra Keys, colorspace: lin, pattern: "*e*", extension: "*", custom: {k1: v1}}
+  - !<Rule> {name: Default, colorspace: RAW}
+
+looks:
+  - !<Look>
+    name: look a
+    process_space: raw
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+  - !<ColorSpace>
+    name: lin
+"#,
+    },
+    Pair {
+        label: "v1 configs",
+        base: r#"ocio_profile_version: 1
+
+strictparsing: false
+
+roles:
+  default: a
+
+looks:
+  - !<Look>
+    name: l1
+    process_space: a
+
+colorspaces:
+  - !<ColorSpace>
+    name: a
+"#,
+        input: r#"ocio_profile_version: 1
+
+roles:
+  default: a
+
+looks:
+  - !<Look>
+    name: l2
+    process_space: a
+  - !<Look>
+    name: l1
+    process_space: a
+    transform: !<CDLTransform> {power: [2, 2, 2]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: a
+"#,
+    },
+];
+
+/// The setters of the sections the whole merges keep the base's: the sections not ported yet.
+const NOT_PORTED_SECTIONS: &[&str] = &[
+    "setDisplayViews",
+    "setViewTransforms",
+    "setColorspaces",
+    "setNamedTransforms",
+];
+
+/// One whole merge: a pair of [`WHOLE_PAIRS`], the default strategy (which the general and
+/// roles sections take), the file rules' and the looks' (indices into [`STRATEGIES`]), the
+/// input-first and error-on-conflict options.
+#[derive(Debug, Clone, Copy)]
+struct WholeCase {
+    pair: usize,
+    default: usize,
+    file_rules: usize,
+    looks: usize,
+    input_first: bool,
+    error_on_conflict: bool,
+}
+
+/// Every pair with every default strategy but `STRATEGY_UNSPECIFIED` (none set is the default
+/// default, `PreferInput`), every file rules and looks strategy, and both options.
+fn whole_cases() -> Vec<WholeCase> {
+    let mut cases = Vec::new();
+    for pair in 0..WHOLE_PAIRS.len() {
+        for default in 0..STRATEGIES.len() - 1 {
+            for file_rules in 0..STRATEGIES.len() {
+                for looks in 0..STRATEGIES.len() {
+                    for input_first in [true, false] {
+                        for error_on_conflict in [false, true] {
+                            cases.push(WholeCase {
+                                pair,
+                                default,
+                                file_rules,
+                                looks,
+                                input_first,
+                                error_on_conflict,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    cases
+}
+
+/// `{"enum": "ConfigMergingParameters.<name>"}`.
+fn strategy_arg(name: &str) -> Value {
+    json!({"enum": format!("ConfigMergingParameters.{name}")})
+}
+
+/// The wheel's calls of a whole merge: the configs, the parameters, `MergeConfigs`, then the
+/// merged config's `serialize()`.
+fn whole_calls(case: &WholeCase) -> Vec<Value> {
+    let pair = &WHOLE_PAIRS[case.pair];
+    let mut calls = vec![
+        json!({"call": "CreateFromStream", "on": "Config", "args": [pair.base], "as": "merged"}),
+        json!({"call": "CreateFromStream", "on": "Config", "args": [pair.base], "as": "base"}),
+        json!({"call": "CreateFromStream", "on": "Config", "args": [pair.input], "as": "input"}),
+        json!({"call": "Create", "on": "ConfigMergingParameters", "as": "p"}),
+        json!({"call": "setAvoidDuplicates", "on": "p", "args": [false]}),
+        json!({"call": "setAdjustInputReferenceSpace", "on": "p", "args": [false]}),
+        json!({"call": "setInputFirst", "on": "p", "args": [case.input_first]}),
+        json!({"call": "setErrorOnConflict", "on": "p", "args": [case.error_on_conflict]}),
+    ];
+    for setter in NOT_PORTED_SECTIONS {
+        calls
+            .push(json!({"call": setter, "on": "p", "args": [strategy_arg("STRATEGY_BASE_ONLY")]}));
+    }
+    for (setter, index) in [
+        ("setDefaultStrategy", case.default),
+        ("setFileRules", case.file_rules),
+        ("setLooks", case.looks),
+    ] {
+        if let Some(name) = STRATEGIES[index].0 {
+            calls.push(json!({"call": setter, "on": "p", "args": [strategy_arg(name)]}));
+        }
+    }
+    calls.extend([
+        json!({"call": "MergeConfigs", "on": "ConfigMergingHelpers",
+               "args": [{"ref": "p"}, {"ref": "base"}, {"ref": "input"}], "as": "merged"}),
+        json!({"call": "serialize", "on": "merged"}),
+    ]);
+    calls
+}
+
+/// A setter of a strategy of [`ConfigMergingParameters`].
+type StrategySetter = fn(&ConfigMergingParameters, MergeStrategies);
+
+/// The port's merge of a case by the ported sections, in upstream's order (`MergeConfigs`,
+/// MergeConfigsHelpers.cpp:748-758 @ v2.5.2): the merged config's `serialize()` or the
+/// exception, the log, and the log of reading the two configs.
+fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
+    let pair = &WHOLE_PAIRS[case.pair];
+    let ((base, input), load_log) = crate::test_env::capture_log(|| {
+        (
+            Config::create_from_stream(pair.base.as_bytes()).expect("the base config"),
+            Config::create_from_stream(pair.input.as_bytes()).expect("the input config"),
+        )
+    });
+    let params = ConfigMergingParameters::new().expect("Create");
+    params.set_avoid_duplicates(false);
+    params.set_adjust_input_reference_space(false);
+    params.set_input_first(case.input_first);
+    params.set_error_on_conflict(case.error_on_conflict);
+    let not_ported: [StrategySetter; 4] = [
+        ConfigMergingParameters::set_display_views,
+        ConfigMergingParameters::set_view_transforms,
+        ConfigMergingParameters::set_colorspaces,
+        ConfigMergingParameters::set_named_transforms,
+    ];
+    for setter in not_ported {
+        setter(&params, MergeStrategies::BaseOnly);
+    }
+    let ported: [(StrategySetter, usize); 3] = [
+        (ConfigMergingParameters::set_default_strategy, case.default),
+        (ConfigMergingParameters::set_file_rules, case.file_rules),
+        (ConfigMergingParameters::set_looks, case.looks),
+    ];
+    for (setter, index) in ported {
+        if STRATEGIES[index].0.is_some() {
+            setter(&params, STRATEGIES[index].1);
+        }
+    }
+    let mut merged = (*base).clone();
+    let (result, log) = crate::test_env::capture_log(|| {
+        let mut options = MergeHandlerOptions {
+            base_config: &base,
+            input_config: &input,
+            params: Some(&params),
+            merged_config: &mut merged,
+        };
+        GeneralMerger::new(&mut options).and_then(|mut m| m.merge())?;
+        RolesMerger::new(&mut options).and_then(|mut m| m.merge())?;
+        FileRulesMerger::new(&mut options).and_then(|mut m| m.merge())?;
+        LooksMerger::new(&mut options).and_then(|mut m| m.merge())
+    });
+    (
+        result.and_then(|()| merged.serialize()),
+        log.concat(),
+        load_log.concat(),
+    )
+}
+
+/// Whole merges whose other sections keep the base's, as the wheel's `MergeConfigs` makes
+/// them: the merged config's `serialize()` byte for byte, the log, or the exception, over the
+/// strategies of the general, roles, file rules and looks sections and both options.
+#[test]
+fn whole_merges_match_the_wheel() {
+    let cases = whole_cases();
+    let requests: Vec<Value> = cases
+        .iter()
+        .map(|case| json!({"calls": whole_calls(case)}))
+        .collect();
+    let batch: Vec<BatchCall<'_>> = requests
+        .iter()
+        .map(|args| BatchCall {
+            cmd: "object_calls",
+            args: args.clone(),
+            blobs: Vec::new(),
+        })
+        .collect();
+    let responses = Oracle::get().batch(&batch, true);
+    assert_eq!(responses.len(), cases.len());
+
+    let (mut raised, mut logged) = (0, 0);
+    let mut texts = std::collections::BTreeSet::new();
+    let mut mismatches = Vec::new();
+    for (case, response) in cases.iter().zip(responses) {
+        let response = response.unwrap_or_else(|e| panic!("{case:?}: {e}")).result;
+        let calls = response["calls"].as_array().expect("the calls");
+        let label = WHOLE_PAIRS[case.pair].label;
+        for call in &calls[..calls.len() - 2] {
+            assert!(call.get("result").is_some(), "{label} {case:?}: {call}");
+        }
+        let merge = &calls[calls.len() - 2];
+        let serialize = &calls[calls.len() - 1];
+        let wheel_log = log(&merge["log"]).concat();
+
+        let (result, port_log, port_load_log) = port_whole_merge(case);
+        let wheel_load_log = [log(&calls[1]["log"]), log(&calls[2]["log"])]
+            .concat()
+            .concat();
+        assert_eq!(
+            String::from_utf8_lossy(&wheel_load_log),
+            String::from_utf8_lossy(&port_load_log),
+            "{label} {case:?}: reading the configs"
+        );
+        let mut problems = Vec::new();
+        if wheel_log != port_log {
+            problems.push(format!(
+                "log: wheel {:?}, port {:?}",
+                String::from_utf8_lossy(&wheel_log),
+                String::from_utf8_lossy(&port_log)
+            ));
+        }
+        if !port_log.is_empty() {
+            logged += 1;
+        }
+        match (merge.get("exception"), result) {
+            (Some(e), Err(port)) => {
+                raised += 1;
+                if bytes(&e["message"]) != port.what() {
+                    problems.push(format!("exception: wheel {e}, port {port}"));
+                }
+            }
+            (None, Ok(text)) => {
+                let wheel_text = serialize["result"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{label} {case:?}: {serialize}"));
+                if wheel_text.as_bytes() != text {
+                    problems.push(format!(
+                        "serialize:\n--- wheel\n{wheel_text}\n--- port\n{}",
+                        String::from_utf8_lossy(&text)
+                    ));
+                }
+                texts.insert(text);
+            }
+            (wheel, port) => problems.push(format!("outcome: wheel {wheel:?}, port {port:?}")),
+        }
+        if !problems.is_empty() {
+            mismatches.push(format!("{label} {case:?}: {}", problems.join("; ")));
+        }
+    }
+    assert!(
+        mismatches.is_empty(),
+        "{} of {} cases differ:\n{}",
+        mismatches.len(),
+        cases.len(),
+        mismatches.join("\n")
+    );
+    // Every outcome is reached: conflicts as exceptions and as warnings, and many different
+    // merged configs.
+    assert!(raised >= 50, "{raised} merges raised");
+    assert!(logged >= 200, "{logged} merges logged");
+    assert!(
+        texts.len() >= 40,
+        "{} different merged configs",
+        texts.len()
+    );
 }

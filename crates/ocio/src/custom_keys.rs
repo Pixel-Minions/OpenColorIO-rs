@@ -57,6 +57,33 @@ impl CustomKeysContainer {
         Ok(())
     }
 
+    /// Whether `key` (not empty) is a key.
+    ///
+    /// Port of `CustomKeysContainer::hasKey` (CustomKeys.h:62-66 @ v2.5.2).
+    pub(crate) fn has_key(&self, key: &[u8]) -> bool {
+        let key = c_str(key);
+        if key.is_empty() {
+            return false;
+        }
+        self.custom_keys.contains_key(key)
+    }
+
+    /// The value of `key`.
+    ///
+    /// Port of `CustomKeysContainer::getValueForKey` (CustomKeys.h:68-82 @ v2.5.2).
+    pub(crate) fn value_for_key(&self, key: &[u8]) -> Result<&[u8]> {
+        let key = c_str(key);
+        if key.is_empty() {
+            return Err(Exception::new("Key has to be a non-empty string."));
+        }
+        match self.custom_keys.get(key) {
+            Some(value) => Ok(value),
+            None => Err(Exception::new(
+                [b"Key '".as_slice(), key, b"' not found."].concat(),
+            )),
+        }
+    }
+
     /// Port of `CustomKeysContainer::validateIndex` (CustomKeys.h:85-95 @ v2.5.2).
     fn validate_index(&self, key: usize) -> Result<()> {
         let num_keys = self.size();

@@ -4008,6 +4008,47 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `GeneralMerger`); `MergeConfigs/general_section` (a v1 base) and
   `section_merger_oracle_tests.rs`.
 
+### I-427. A merge takes file rules that differ only in case as the same rule
+
+- **Upstream:** the file rules section compares two rules of the same name by their color
+  space, pattern, regular expression, extension and custom key values, all ignoring case
+  (`fileRulesAreEqual`, `SectionMerger.cpp:425-472` @ v2.5.2). Rules whose regular expressions
+  (`a` and `A`), patterns or extensions differ only in case match different files, yet the merge
+  sees no conflict: it reports none, even with `error_on_conflict`, and keeps the rule of the
+  config that comes first. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** merges of configs whose rules tell files apart by case (on case-sensitive
+  file systems), or whose custom keys differ in case.
+- **A fix:** compare the patterns, expressions, extensions and custom key values exactly (the
+  color space names may stay case-insensitive, as the config's own lookups are).
+- **Status:** matched in `p9-merge-2` (9.2e, `apphelpers/mergeconfigs/section_merger.rs`,
+  `file_rules_are_equal`); `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`).
+
+### I-428. A merge drops the custom keys of the path search rule it copies
+
+- **Upstream:** when a merge copies the `ColorSpaceNamePathSearch` rule from one config into the
+  other's rules (the other has none), `copyRule` inserts a new path search rule and returns
+  before it copies the rule's custom keys (`SectionMerger.cpp:481-486` @ v2.5.2), which the other
+  rules keep. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** applications that read custom keys of the path search rule from a merged
+  config.
+- **A fix:** copy the custom keys for the path search rule too.
+- **Status:** matched in `p9-merge-2` (9.2e, `section_merger.rs`, `copy_rule`);
+  `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`).
+
+### I-429. Looks of the same name merge without a conflict
+
+- **Upstream:** the looks section replaces or keeps a look of the same name by its strategy
+  without comparing the two looks and without a message (`LooksMerger`, `SectionMerger.cpp:
+  1919-2022` @ v2.5.2), while the other sections report the input overriding the base, as a
+  warning or, with `error_on_conflict`, as an error. A merge with `error_on_conflict` set still
+  replaces a base look silently. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** whoever relies on `error_on_conflict` to stop a merge that changes the
+  base's looks.
+- **A fix:** compare looks of the same name (process space, transforms, description) and
+  report a conflict as the other sections do.
+- **Status:** matched in `p9-merge-2` (9.2e, `section_merger.rs`, `LooksMerger`);
+  `MergeConfigs/looks_section` and `section_merger_oracle_tests.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

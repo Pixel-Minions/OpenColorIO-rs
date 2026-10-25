@@ -6,8 +6,9 @@
 
 use super::*;
 use crate::apphelpers::mergeconfigs::section_merger::{
-    GeneralMerger, MergeHandlerOptions, RolesMerger, Section,
+    FileRulesMerger, GeneralMerger, LooksMerger, MergeHandlerOptions, RolesMerger, Section,
 };
+use crate::file_rules::FileRules;
 use crate::fileformats::test_utils::get_test_files_dir;
 use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::open_color_types::LoggingLevel;
@@ -886,5 +887,933 @@ fn roles_section() {
                 "The Input config contains a role 'g22_ap1_tx' that would override an alias of Base config color space 'Gamma 2.2 AP1 - Texture'.",
             ],
         );
+    }
+}
+
+/// Upstream's `setupBasics` of the file rules section's test: a merger with new parameters,
+/// whose file rules strategy is `strategy`, without the reference space adjustment or the
+/// duplicate search; the parameters.
+fn setup_file_rules_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    merger.params(0).unwrap().set_file_rules(strategy);
+    merger
+        .params(0)
+        .unwrap()
+        .set_adjust_input_reference_space(false);
+    merger.params(0).unwrap().set_avoid_duplicates(false);
+
+    params
+}
+
+/// `config->createEditableCopy()` with the file rules `rules`.
+fn with_file_rules(config: &Config, rules: &FileRules) -> Config {
+    let mut config = config.clone();
+    config.set_file_rules(rules);
+    config
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, file_rules_section)` @ v2.5.2.
+#[test]
+fn file_rules_section() {
+    let base_config = get_base_config().unwrap();
+    let input_config = get_input_config().unwrap();
+
+    let setup_basics = setup_file_rules_basics;
+
+    // Allowed strategies: All
+    // Allowed merge options: All
+
+    // Test that the default strategy is used as a fallback if the section strategy was not defined.
+    {
+        let mut merger = ConfigMerger::new();
+        // Using STRATEGY_UNSPECIFIED as this simulates that the section is missing from the OCIOM file.
+        let params = setup_basics(&mut merger, MergeStrategies::Unspecified);
+        // Simulate settings from OCIOM file.
+        merger
+            .params(0)
+            .unwrap()
+            .set_default_strategy(MergeStrategies::InputOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            FileRulesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert!(!merged_config.is_strict_parsing_enabled());
+
+        let fr = merged_config.file_rules().get();
+
+        assert_eq!(fr.num_entries(), 5);
+
+        assert_eq!(fr.name(0).unwrap(), b"LogC");
+        assert_eq!(fr.color_space(0).unwrap(), b"ACES2065-1");
+
+        assert_eq!(fr.name(1).unwrap(), b"TIFF");
+        assert_eq!(fr.color_space(1).unwrap(), b"sRGB - Texture");
+
+        assert_eq!(fr.name(2).unwrap(), b"JPEG");
+        assert_eq!(fr.color_space(2).unwrap(), b"Linear Rec.2020");
+        assert_eq!(fr.regex(2).unwrap(), br".*\.jpeg$");
+
+        assert_eq!(fr.name(3).unwrap(), b"ColorSpaceNamePathSearch");
+
+        assert_eq!(fr.name(4).unwrap(), b"Default");
+        assert_eq!(fr.color_space(4).unwrap(), b"ACEScct - SomeOtherName");
+    }
+
+    // Test FileRules section with strategy = PreferInput.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(true);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    FileRulesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: file_rules: TIFF",
+                "The Input config contains a value that would override the Base config: file_rules: Default",
+            ],
+        );
+
+        let fr = merged_config.file_rules().get();
+
+        assert_eq!(fr.num_entries(), 6);
+
+        assert_eq!(fr.name(0).unwrap(), b"LogC");
+        assert_eq!(fr.color_space(0).unwrap(), b"ACES2065-1");
+
+        assert_eq!(fr.name(1).unwrap(), b"TIFF");
+        assert_eq!(fr.color_space(1).unwrap(), b"sRGB - Texture");
+        assert_eq!(fr.regex(1).unwrap(), br".*\.TIF?F$");
+        // Verify that the custom keys are merged.
+        assert_eq!(fr.custom_key_name(1, 0).unwrap(), b"key1");
+        assert_eq!(fr.custom_key_value(1, 0).unwrap(), b"value1");
+        assert_eq!(fr.custom_key_name(1, 1).unwrap(), b"key2");
+        assert_eq!(fr.custom_key_value(1, 1).unwrap(), b"value2");
+
+        assert_eq!(fr.name(2).unwrap(), b"JPEG");
+        assert_eq!(fr.color_space(2).unwrap(), b"Linear Rec.2020");
+        assert_eq!(fr.regex(2).unwrap(), br".*\.jpeg$");
+
+        assert_eq!(fr.name(3).unwrap(), b"ColorSpaceNamePathSearch");
+
+        assert_eq!(fr.name(4).unwrap(), b"OpenEXR");
+        assert_eq!(fr.color_space(4).unwrap(), b"ACEScct");
+        assert_eq!(fr.pattern(4).unwrap(), b"*");
+        assert_eq!(fr.extension(4).unwrap(), b"exr");
+
+        assert_eq!(fr.name(5).unwrap(), b"Default");
+        assert_eq!(fr.color_space(5).unwrap(), b"ACEScct - SomeOtherName");
+    }
+
+    // Test FileRules section with strategy = PreferInput, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(false);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    FileRulesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: file_rules: TIFF",
+                "The Input config contains a value that would override the Base config: file_rules: Default",
+            ],
+        );
+
+        assert!(!merged_config.is_strict_parsing_enabled());
+
+        let fr = merged_config.file_rules().get();
+
+        assert_eq!(fr.num_entries(), 6);
+
+        assert_eq!(fr.name(0).unwrap(), b"LogC");
+        assert_eq!(fr.color_space(0).unwrap(), b"ACES2065-1");
+
+        assert_eq!(fr.name(1).unwrap(), b"TIFF");
+        assert_eq!(fr.color_space(1).unwrap(), b"sRGB - Texture");
+        // Verify that the custom keys are merged.
+        assert_eq!(fr.custom_key_name(1, 0).unwrap(), b"key1");
+        assert_eq!(fr.custom_key_value(1, 0).unwrap(), b"value1");
+        assert_eq!(fr.custom_key_name(1, 1).unwrap(), b"key2");
+        assert_eq!(fr.custom_key_value(1, 1).unwrap(), b"value2");
+
+        assert_eq!(fr.name(2).unwrap(), b"OpenEXR");
+        assert_eq!(fr.color_space(2).unwrap(), b"ACEScct");
+        assert_eq!(fr.pattern(2).unwrap(), b"*");
+        assert_eq!(fr.extension(2).unwrap(), b"exr");
+
+        assert_eq!(fr.name(3).unwrap(), b"ColorSpaceNamePathSearch");
+
+        assert_eq!(fr.name(4).unwrap(), b"JPEG");
+        assert_eq!(fr.color_space(4).unwrap(), b"Linear Rec.2020");
+        assert_eq!(fr.regex(4).unwrap(), br".*\.jpeg$");
+
+        assert_eq!(fr.name(5).unwrap(), b"Default");
+        assert_eq!(fr.color_space(5).unwrap(), b"ACEScct - SomeOtherName");
+    }
+
+    // Test FileRules section with strategy = PreferBase.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(true);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    FileRulesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: file_rules: TIFF",
+                "The Input config contains a value that would override the Base config: file_rules: Default",
+            ],
+        );
+
+        assert!(merged_config.is_strict_parsing_enabled());
+
+        let fr = merged_config.file_rules().get();
+
+        assert_eq!(fr.num_entries(), 6);
+
+        assert_eq!(fr.name(0).unwrap(), b"LogC");
+        assert_eq!(fr.color_space(0).unwrap(), b"ACES2065-1");
+
+        assert_eq!(fr.name(1).unwrap(), b"TIFF");
+        assert_eq!(fr.color_space(1).unwrap(), b"Gamma 2.2 AP1 - Texture");
+        assert_eq!(fr.num_custom_keys(1).unwrap(), 0);
+
+        assert_eq!(fr.name(2).unwrap(), b"JPEG");
+        assert_eq!(fr.color_space(2).unwrap(), b"Linear Rec.2020");
+        assert_eq!(fr.regex(2).unwrap(), br".*\.jpeg$");
+
+        assert_eq!(fr.name(3).unwrap(), b"ColorSpaceNamePathSearch");
+
+        assert_eq!(fr.name(4).unwrap(), b"OpenEXR");
+        assert_eq!(fr.color_space(4).unwrap(), b"ACEScct");
+        assert_eq!(fr.pattern(4).unwrap(), b"*");
+        assert_eq!(fr.extension(4).unwrap(), b"exr");
+
+        assert_eq!(fr.name(5).unwrap(), b"Default");
+        assert_eq!(fr.color_space(5).unwrap(), b"Raw");
+    }
+
+    // Test FileRules section with strategy = PreferBase, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(false);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    FileRulesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a value that would override the Base config: file_rules: TIFF",
+                "The Input config contains a value that would override the Base config: file_rules: Default",
+            ],
+        );
+
+        assert!(merged_config.is_strict_parsing_enabled());
+
+        let fr = merged_config.file_rules().get();
+
+        assert_eq!(fr.num_entries(), 6);
+
+        assert_eq!(fr.name(0).unwrap(), b"LogC");
+        assert_eq!(fr.color_space(0).unwrap(), b"ACES2065-1");
+
+        assert_eq!(fr.name(1).unwrap(), b"TIFF");
+        assert_eq!(fr.color_space(1).unwrap(), b"Gamma 2.2 AP1 - Texture");
+
+        assert_eq!(fr.name(2).unwrap(), b"OpenEXR");
+        assert_eq!(fr.color_space(2).unwrap(), b"ACEScct");
+        assert_eq!(fr.pattern(2).unwrap(), b"*");
+        assert_eq!(fr.extension(2).unwrap(), b"exr");
+
+        assert_eq!(fr.name(3).unwrap(), b"ColorSpaceNamePathSearch");
+
+        assert_eq!(fr.name(4).unwrap(), b"JPEG");
+        assert_eq!(fr.color_space(4).unwrap(), b"Linear Rec.2020");
+        assert_eq!(fr.regex(4).unwrap(), br".*\.jpeg$");
+
+        assert_eq!(fr.name(5).unwrap(), b"Default");
+        assert_eq!(fr.color_space(5).unwrap(), b"Raw");
+    }
+
+    // Test FileRules section with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            FileRulesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert!(!merged_config.is_strict_parsing_enabled());
+
+        let fr = merged_config.file_rules().get();
+
+        assert_eq!(fr.num_entries(), 5);
+
+        assert_eq!(fr.name(0).unwrap(), b"LogC");
+        assert_eq!(fr.color_space(0).unwrap(), b"ACES2065-1");
+
+        assert_eq!(fr.name(1).unwrap(), b"TIFF");
+        assert_eq!(fr.color_space(1).unwrap(), b"sRGB - Texture");
+
+        assert_eq!(fr.name(2).unwrap(), b"JPEG");
+        assert_eq!(fr.color_space(2).unwrap(), b"Linear Rec.2020");
+        assert_eq!(fr.regex(2).unwrap(), br".*\.jpeg$");
+
+        assert_eq!(fr.name(3).unwrap(), b"ColorSpaceNamePathSearch");
+
+        assert_eq!(fr.name(4).unwrap(), b"Default");
+        assert_eq!(fr.color_space(4).unwrap(), b"ACEScct - SomeOtherName");
+    }
+
+    // Test FileRules section with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            FileRulesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert!(merged_config.is_strict_parsing_enabled());
+
+        let fr = merged_config.file_rules().get();
+
+        assert_eq!(fr.name(0).unwrap(), b"LogC");
+        assert_eq!(fr.color_space(0).unwrap(), b"ACES2065-1");
+
+        assert_eq!(fr.name(1).unwrap(), b"TIFF");
+        assert_eq!(fr.color_space(1).unwrap(), b"Gamma 2.2 AP1 - Texture");
+
+        assert_eq!(fr.name(2).unwrap(), b"OpenEXR");
+        assert_eq!(fr.color_space(2).unwrap(), b"ACEScct");
+        assert_eq!(fr.pattern(2).unwrap(), b"*");
+        assert_eq!(fr.extension(2).unwrap(), b"exr");
+
+        assert_eq!(fr.name(3).unwrap(), b"ColorSpaceNamePathSearch");
+
+        assert_eq!(fr.name(4).unwrap(), b"Default");
+        assert_eq!(fr.color_space(4).unwrap(), b"Raw");
+    }
+
+    // Test FileRules section with strategy = Remove.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::Remove);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            FileRulesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert!(merged_config.is_strict_parsing_enabled());
+
+        let fr = merged_config.file_rules().get();
+
+        assert_eq!(fr.num_entries(), 2);
+
+        assert_eq!(fr.name(0).unwrap(), b"OpenEXR");
+        assert_eq!(fr.color_space(0).unwrap(), b"ACEScct");
+        assert_eq!(fr.pattern(0).unwrap(), b"*");
+        assert_eq!(fr.extension(0).unwrap(), b"exr");
+
+        assert_eq!(fr.name(1).unwrap(), b"Default");
+        assert_eq!(fr.color_space(1).unwrap(), b"Raw");
+    }
+
+    // Test FileRules section with strategy = PreferInput and copying ColorSpaceNamePathSearch.
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+
+        let params = ConfigMergingParameters::new().unwrap();
+        merger.add_params(Some(params.clone()));
+        merger
+            .params(0)
+            .unwrap()
+            .set_file_rules(MergeStrategies::PreferInput);
+
+        {
+            let mut input_fr = (*input_config.file_rules().get()).clone();
+            // Delete ColorSpaceNamePathSearch, so it is only in the base and must be copied over.
+            input_fr.remove_rule(3).unwrap();
+            let editable_input_config = with_file_rules(&input_config, &input_fr);
+
+            check_for_log_or_exception(
+                LogType::Warning,
+                || {
+                    merge_section!(
+                        FileRulesMerger,
+                        &base_config,
+                        &editable_input_config,
+                        &params,
+                        &mut merged_config
+                    )
+                },
+                &[
+                    "The Input config contains a value that would override the Base config: file_rules: TIFF",
+                    "The Input config contains a value that would override the Base config: file_rules: Default",
+                ],
+            );
+
+            let fr = merged_config.file_rules().get();
+
+            assert_eq!(fr.num_entries(), 6);
+
+            assert_eq!(fr.name(0).unwrap(), b"LogC");
+            assert_eq!(fr.color_space(0).unwrap(), b"ACES2065-1");
+
+            assert_eq!(fr.name(1).unwrap(), b"TIFF");
+            assert_eq!(fr.color_space(1).unwrap(), b"sRGB - Texture");
+            assert_eq!(fr.regex(1).unwrap(), br".*\.TIF?F$");
+            // Verify that the custom keys are merged.
+            assert_eq!(fr.custom_key_name(1, 0).unwrap(), b"key1");
+            assert_eq!(fr.custom_key_value(1, 0).unwrap(), b"value1");
+            assert_eq!(fr.custom_key_name(1, 1).unwrap(), b"key2");
+            assert_eq!(fr.custom_key_value(1, 1).unwrap(), b"value2");
+
+            assert_eq!(fr.name(2).unwrap(), b"JPEG");
+            assert_eq!(fr.color_space(2).unwrap(), b"Linear Rec.2020");
+            assert_eq!(fr.regex(2).unwrap(), br".*\.jpeg$");
+
+            assert_eq!(fr.name(3).unwrap(), b"OpenEXR");
+            assert_eq!(fr.color_space(3).unwrap(), b"ACEScct");
+            assert_eq!(fr.pattern(3).unwrap(), b"*");
+            assert_eq!(fr.extension(3).unwrap(), b"exr");
+
+            assert_eq!(fr.name(4).unwrap(), b"ColorSpaceNamePathSearch");
+
+            assert_eq!(fr.name(5).unwrap(), b"Default");
+            assert_eq!(fr.color_space(5).unwrap(), b"ACEScct - SomeOtherName");
+        }
+    }
+
+    const PREFIX: &str = "The Input config contains a value that would override the Base config: ";
+
+    // Test that error_on_conflicts is processed correctly.
+    // strategy = PreferInput, InputFirst = true
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+
+        let params = ConfigMergingParameters::new().unwrap();
+        merger.add_params(Some(params.clone()));
+        merger
+            .params(0)
+            .unwrap()
+            .set_file_rules(MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_error_on_conflict(true);
+        merger
+            .params(0)
+            .unwrap()
+            .set_default_strategy(MergeStrategies::PreferInput);
+
+        // Test that an error is thrown when the input config's COLORSPACE is different.
+        {
+            let mut base_fr = FileRules::new();
+            base_fr
+                .insert_rule(0, "ruleTestColorspace", "colorspace1", "*abc*", "*")
+                .unwrap();
+            let editable_base_config = with_file_rules(&base_config, &base_fr);
+
+            let mut input_fr = FileRules::new();
+            input_fr
+                .insert_rule(0, "ruleTestColorspace", "colorspace2", "*abc*", "*")
+                .unwrap();
+            let editable_input_config = with_file_rules(&input_config, &input_fr);
+
+            check_for_log_or_exception(
+                LogType::Error,
+                || {
+                    merge_section!(
+                        FileRulesMerger,
+                        &editable_base_config,
+                        &editable_input_config,
+                        &params,
+                        &mut merged_config
+                    )
+                },
+                &[&format!("{PREFIX}file_rules: ruleTestColorspace")],
+            );
+        }
+
+        // Test that an error is thrown when the input config's REGEX is different.
+        {
+            let mut base_fr = FileRules::new();
+            base_fr
+                .insert_regex_rule(0, "ruleTestColorspace", "colorspace1", r".*\.TIF?F$")
+                .unwrap();
+            let editable_base_config = with_file_rules(&base_config, &base_fr);
+
+            let mut input_fr = FileRules::new();
+            input_fr
+                .insert_regex_rule(0, "ruleTestColorspace", "colorspace1", r".*\.TIF?F")
+                .unwrap();
+            let editable_input_config = with_file_rules(&input_config, &input_fr);
+
+            check_for_log_or_exception(
+                LogType::Error,
+                || {
+                    merge_section!(
+                        FileRulesMerger,
+                        &editable_base_config,
+                        &editable_input_config,
+                        &params,
+                        &mut merged_config
+                    )
+                },
+                &[&format!("{PREFIX}file_rules: ruleTestColorspace")],
+            );
+        }
+
+        // Test that an error is thrown when the input config's PATTERN is different.
+        {
+            let mut base_fr = FileRules::new();
+            base_fr
+                .insert_rule(0, "ruleTestPattern", "colorspace1", "*abc*", "*")
+                .unwrap();
+            let editable_base_config = with_file_rules(&base_config, &base_fr);
+
+            let mut input_fr = FileRules::new();
+            input_fr
+                .insert_rule(0, "ruleTestPattern", "colorspace1", "*abcd*", "*")
+                .unwrap();
+            let editable_input_config = with_file_rules(&input_config, &input_fr);
+
+            check_for_log_or_exception(
+                LogType::Error,
+                || {
+                    merge_section!(
+                        FileRulesMerger,
+                        &editable_base_config,
+                        &editable_input_config,
+                        &params,
+                        &mut merged_config
+                    )
+                },
+                &[&format!("{PREFIX}file_rules: ruleTestPattern")],
+            );
+        }
+
+        // Test that an error is thrown when the input config's EXTENSION is different.
+        {
+            let mut base_fr = FileRules::new();
+            base_fr
+                .insert_rule(0, "ruleTestExtension", "colorspace1", "*abc*", "*")
+                .unwrap();
+            let editable_base_config = with_file_rules(&base_config, &base_fr);
+
+            let mut input_fr = FileRules::new();
+            input_fr
+                .insert_rule(0, "ruleTestExtension", "colorspace1", "*abc*", "*a")
+                .unwrap();
+            let editable_input_config = with_file_rules(&input_config, &input_fr);
+
+            check_for_log_or_exception(
+                LogType::Error,
+                || {
+                    merge_section!(
+                        FileRulesMerger,
+                        &editable_base_config,
+                        &editable_input_config,
+                        &params,
+                        &mut merged_config
+                    )
+                },
+                &[&format!("{PREFIX}file_rules: ruleTestExtension")],
+            );
+        }
+
+        // Test that an error is thrown when the input config's CUSTOM KEYS are different.
+        {
+            let mut base_fr = FileRules::new();
+            base_fr
+                .insert_rule(0, "ruleTestCustomKeys", "colorspace1", "*abc*", "*")
+                .unwrap();
+            base_fr.set_custom_key(0, "key1", "value1").unwrap();
+            base_fr.set_custom_key(0, "key2", "value2").unwrap();
+            let editable_base_config = with_file_rules(&base_config, &base_fr);
+
+            let mut input_fr = FileRules::new();
+            input_fr
+                .insert_rule(0, "ruleTestCustomKeys", "colorspace1", "*abc*", "*")
+                .unwrap();
+            input_fr.set_custom_key(0, "key1", "value1").unwrap();
+            input_fr.set_custom_key(0, "key2", "value22").unwrap();
+            let editable_input_config = with_file_rules(&input_config, &input_fr);
+
+            check_for_log_or_exception(
+                LogType::Error,
+                || {
+                    merge_section!(
+                        FileRulesMerger,
+                        &editable_base_config,
+                        &editable_input_config,
+                        &params,
+                        &mut merged_config
+                    )
+                },
+                &[&format!("{PREFIX}file_rules: ruleTestCustomKeys")],
+            );
+        }
+
+        // Test that no error is thrown when the input config's CUSTOM KEYS are the same.
+        {
+            let mut base_fr = FileRules::new();
+            base_fr
+                .insert_rule(0, "ruleTestCustomKeys", "colorspace1", "*abc*", "*")
+                .unwrap();
+            base_fr.set_custom_key(0, "key1", "value1").unwrap();
+            base_fr.set_custom_key(0, "key2", "value2").unwrap();
+            let editable_base_config = with_file_rules(&base_config, &base_fr);
+
+            let mut input_fr = FileRules::new();
+            input_fr
+                .insert_rule(0, "ruleTestCustomKeys", "colorspace1", "*abc*", "*")
+                .unwrap();
+            input_fr.set_custom_key(0, "key2", "value2").unwrap();
+            input_fr.set_custom_key(0, "key1", "value1").unwrap(); // must be equal even in a different order
+            let editable_input_config = with_file_rules(&input_config, &input_fr);
+
+            merge_section!(
+                FileRulesMerger,
+                &editable_base_config,
+                &editable_input_config,
+                &params,
+                &mut merged_config
+            )
+            .unwrap();
+        }
+    }
+}
+
+/// Upstream's `setupLooks` of the looks section's test: a merger with new parameters, whose
+/// looks strategy is `strategy` and family prefixes `Input/` and `Base/`, changed by `cb`, then
+/// the looks merged into `merged_config`.
+fn setup_looks(
+    base_config: &Config,
+    input_config: &Config,
+    merger: &mut ConfigMerger,
+    merged_config: &mut Config,
+    strategy: MergeStrategies,
+    cb: Option<&dyn Fn(&mut ConfigMerger)>,
+) {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    merger.params(0).unwrap().set_looks(strategy);
+
+    merger.params(0).unwrap().set_input_family_prefix("Input/");
+    merger.params(0).unwrap().set_base_family_prefix("Base/");
+
+    if let Some(cb) = cb {
+        cb(merger);
+    }
+
+    merge_section!(
+        LooksMerger,
+        base_config,
+        input_config,
+        &params,
+        merged_config
+    )
+    .unwrap();
+}
+
+/// The process space of the merged config's look at `index`.
+fn look_process_space(config: &Config, index: i32) -> &[u8] {
+    config
+        .look(config.look_name_by_index(index))
+        .unwrap()
+        .process_space()
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, looks_section)` @ v2.5.2.
+#[test]
+fn looks_section() {
+    let base_config = get_base_config().unwrap();
+    let input_config = get_input_config().unwrap();
+
+    // Test that the default strategy is used as a fallback if the section strategy was not defined.
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+        setup_looks(
+            &base_config,
+            &input_config,
+            &mut merger,
+            &mut merged_config,
+            // Using STRATEGY_UNSPECIFIED as this simulate that the section
+            // is missing from the OCIOM file.
+            MergeStrategies::Unspecified,
+            Some(&|merger: &mut ConfigMerger| {
+                // Simulate settings from OCIOM file.
+                merger
+                    .params(0)
+                    .unwrap()
+                    .set_default_strategy(MergeStrategies::InputOnly);
+            }),
+        );
+
+        assert_eq!(merged_config.num_looks(), 2);
+        assert_eq!(merged_config.look_name_by_index(0), b"look_both");
+        assert_eq!(merged_config.look_name_by_index(1), b"look_input");
+
+        assert_eq!(
+            look_process_space(&merged_config, 0),
+            b"ACEScct - SomeOtherName"
+        );
+        assert_eq!(look_process_space(&merged_config, 1), b"log_3");
+    }
+
+    // Test Looks with strategy = PreferInput, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+
+        setup_looks(
+            &base_config,
+            &input_config,
+            &mut merger,
+            &mut merged_config,
+            MergeStrategies::PreferInput,
+            Some(&|merger: &mut ConfigMerger| {
+                merger
+                    .params(0)
+                    .unwrap()
+                    .set_adjust_input_reference_space(false);
+            }),
+        );
+
+        assert_eq!(merged_config.num_looks(), 3);
+        assert_eq!(merged_config.look_name_by_index(0), b"look_both");
+        assert_eq!(merged_config.look_name_by_index(1), b"look_input");
+        assert_eq!(merged_config.look_name_by_index(2), b"look_base");
+
+        assert_eq!(
+            look_process_space(&merged_config, 0),
+            b"ACEScct - SomeOtherName"
+        );
+        assert_eq!(look_process_space(&merged_config, 1), b"log_3");
+        assert_eq!(look_process_space(&merged_config, 2), b"log_1");
+    }
+
+    // Test Looks with strategy=PreferInput, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+
+        setup_looks(
+            &base_config,
+            &input_config,
+            &mut merger,
+            &mut merged_config,
+            MergeStrategies::PreferInput,
+            Some(&|merger: &mut ConfigMerger| {
+                merger.params(0).unwrap().set_input_first(false);
+                merger
+                    .params(0)
+                    .unwrap()
+                    .set_adjust_input_reference_space(false);
+            }),
+        );
+
+        assert_eq!(merged_config.num_looks(), 3);
+        assert_eq!(merged_config.look_name_by_index(0), b"look_both");
+        assert_eq!(merged_config.look_name_by_index(1), b"look_base");
+        assert_eq!(merged_config.look_name_by_index(2), b"look_input");
+
+        assert_eq!(
+            look_process_space(&merged_config, 0),
+            b"ACEScct - SomeOtherName"
+        );
+        assert_eq!(look_process_space(&merged_config, 1), b"log_1");
+        assert_eq!(look_process_space(&merged_config, 2), b"log_3");
+    }
+
+    // Test Looks with strategy = PreferBase, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+        setup_looks(
+            &base_config,
+            &input_config,
+            &mut merger,
+            &mut merged_config,
+            MergeStrategies::PreferBase,
+            Some(&|merger: &mut ConfigMerger| {
+                merger.params(0).unwrap().set_input_first(true);
+                merger
+                    .params(0)
+                    .unwrap()
+                    .set_adjust_input_reference_space(false);
+            }),
+        );
+
+        assert_eq!(merged_config.num_looks(), 3);
+        assert_eq!(merged_config.look_name_by_index(0), b"look_both");
+        assert_eq!(merged_config.look_name_by_index(1), b"look_input");
+        assert_eq!(merged_config.look_name_by_index(2), b"look_base");
+
+        assert_eq!(look_process_space(&merged_config, 0), b"ACES2065-1");
+        assert_eq!(look_process_space(&merged_config, 1), b"log_3");
+        assert_eq!(look_process_space(&merged_config, 2), b"log_1");
+    }
+
+    // Test Looks with strategy = PreferBase, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+        setup_looks(
+            &base_config,
+            &input_config,
+            &mut merger,
+            &mut merged_config,
+            MergeStrategies::PreferBase,
+            Some(&|merger: &mut ConfigMerger| {
+                merger.params(0).unwrap().set_input_first(false);
+                merger
+                    .params(0)
+                    .unwrap()
+                    .set_adjust_input_reference_space(false);
+            }),
+        );
+
+        assert_eq!(merged_config.num_looks(), 3);
+        assert_eq!(merged_config.look_name_by_index(0), b"look_both");
+        assert_eq!(merged_config.look_name_by_index(1), b"look_base");
+        assert_eq!(merged_config.look_name_by_index(2), b"look_input");
+
+        assert_eq!(look_process_space(&merged_config, 0), b"ACES2065-1");
+        assert_eq!(look_process_space(&merged_config, 1), b"log_1");
+        assert_eq!(look_process_space(&merged_config, 2), b"log_3");
+    }
+
+    // Test Looks with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+        setup_looks(
+            &base_config,
+            &input_config,
+            &mut merger,
+            &mut merged_config,
+            MergeStrategies::BaseOnly,
+            None,
+        );
+
+        assert_eq!(merged_config.num_looks(), 2);
+        assert_eq!(merged_config.look_name_by_index(0), b"look_both");
+        assert_eq!(merged_config.look_name_by_index(1), b"look_base");
+
+        assert_eq!(look_process_space(&merged_config, 0), b"ACES2065-1");
+        assert_eq!(look_process_space(&merged_config, 1), b"log_1");
+    }
+
+    // Test Looks with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+        setup_looks(
+            &base_config,
+            &input_config,
+            &mut merger,
+            &mut merged_config,
+            MergeStrategies::InputOnly,
+            None,
+        );
+
+        assert_eq!(merged_config.num_looks(), 2);
+        assert_eq!(merged_config.look_name_by_index(0), b"look_both");
+        assert_eq!(merged_config.look_name_by_index(1), b"look_input");
+
+        assert_eq!(
+            look_process_space(&merged_config, 0),
+            b"ACEScct - SomeOtherName"
+        );
+        assert_eq!(look_process_space(&merged_config, 1), b"log_3");
+    }
+
+    // Test Looks with strategy = Remove
+    {
+        let mut merger = ConfigMerger::new();
+        let mut merged_config = (*base_config).clone();
+        setup_looks(
+            &base_config,
+            &input_config,
+            &mut merger,
+            &mut merged_config,
+            MergeStrategies::Remove,
+            None,
+        );
+
+        assert_eq!(merged_config.num_looks(), 1);
+        assert_eq!(merged_config.look_name_by_index(0), b"look_base");
+        assert_eq!(look_process_space(&merged_config, 0), b"log_1");
     }
 }
