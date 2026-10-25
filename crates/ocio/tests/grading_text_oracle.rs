@@ -85,13 +85,13 @@ fn read_cases(class: &str) -> (Vec<Case>, Vec<Value>) {
 
 /// What the port built from a case's spec.
 enum Port {
-    Transform(Transform),
+    Transform(Box<Transform>),
     Object(Box<Object>),
 }
 
 fn build(case: &Case) -> ocio::Result<Port> {
     if case.transform {
-        grading_specs::transform(&case.spec).map(Port::Transform)
+        grading_specs::transform(&case.spec).map(|t| Port::Transform(Box::new(t)))
     } else {
         grading_specs::object(&case.spec).map(|o| Port::Object(Box::new(o)))
     }
@@ -206,7 +206,7 @@ fn check_class(class: &str) -> (Counts, Vec<String>) {
                     _ => failures.push(format!("{label}: CTF\n  wheel {wheel}\n  port  {port:?}")),
                 }
             }
-            built.push(t);
+            built.push(*t);
         }
     }
     if class != "values" {
