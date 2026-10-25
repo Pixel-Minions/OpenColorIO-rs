@@ -8,7 +8,7 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: under development, about 78% done.** Milestones M0 (the op engine and the analytic
+> **Status: under development, about 80% done.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker) and M3 (dynamic properties,
 > grading and app helpers) are complete: all of it is merged and matches the official library on
@@ -86,8 +86,8 @@ one.
 
 ## Progress
 
-Status as of 2026-10-25 (evening): **milestones M0, M1, M2 and M3 are complete**, about 78% of the
-planned work (1,158 of 1,191 upstream C++ tests ported; 318 of 384 upstream Python tests pass
+Status as of 2026-10-25 (evening): **milestones M0, M1, M2 and M3 are complete**, about 80% of the
+planned work (1,158 of 1,191 upstream C++ tests ported; 375 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
 test configs): the grading values (GradingPrimary, GradingTone,
@@ -102,7 +102,7 @@ pybind11's dispatcher, casters, classes and enums as the wheel shows them, every
 and string conversion), every transform class, and the objects the config holds (context,
 file and viewing rules, color spaces and sets, looks, view and named transforms, format
 metadata), NumPy buffers with the CPU processor's apply, `Config`, the grading classes, dynamic
-properties and the app helpers. Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
+properties, the app helpers, processors (CPU and GPU, shader descriptions) and the baker. Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
 Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pandora, Nuke
@@ -110,7 +110,7 @@ Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pa
 files, and the CLF/CTF writer; the baker, in every format the official library bakes, CLF and
 CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
 4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
-ops in M3. Next: the rest of Phase 6 (M4: processors, the baker and the remaining Python
+ops in M3. Next: the rest of Phase 6 (M4: the config-merging and ConfigUtils bindings and the remaining Python
 tests) and Phase 9 (the rest of config merging and the remaining library surface).
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
@@ -245,7 +245,7 @@ Each milestone is a complete section of OCIO, byte-exact on CPU and GPU:
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
-| **M4** | The `PyOpenColorIO`-compatible Python module | In progress: the module's foundation, every transform class, the config's objects, NumPy buffers, `Config`, the grading classes and the app helpers are merged (318 of 384 upstream Python tests pass); processors and the baker are next | `0.5.0` |
+| **M4** | The `PyOpenColorIO`-compatible Python module | In progress: the module's foundation, every transform class, the config's objects, NumPy buffers, `Config`, the grading classes, the app helpers, processors and the baker are merged (375 of 384 upstream Python tests pass); config merging and the remaining ConfigUtils bindings are next | `0.5.0` |
 | **M5** | Full OCIO 2.5.2 parity | Not started | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
