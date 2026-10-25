@@ -311,6 +311,33 @@ impl Baker {
     ///
     /// Port of `Baker::bake` (Baker.cpp:237-414 @ v2.5.2).
     pub fn bake(&self, os: &mut impl std::io::Write) -> Result<()> {
+        self.bake_impl(os)
+    }
+
+    /// [`Baker::bake`] with `config` itself as the baker's config, in place of the baker's own:
+    /// the processors come from `config`'s processor cache, which keeps them, as upstream's
+    /// baker bakes with the config it holds (`m_config`, whose cache survives between bakes and
+    /// a change through an object held from the config). `config` is the same config after,
+    /// lent to the baker for the bake (an unwinding panic of the bake leaves a blank config).
+    ///
+    /// For the Python module, whose configs hold their library config by value.
+    #[doc(hidden)]
+    pub fn bake_with_config(
+        &self,
+        config: &mut Config,
+        os: &mut impl std::io::Write,
+    ) -> Result<()> {
+        let mut baker = self.clone();
+        baker.config = Some(Arc::new(std::mem::replace(config, Config::blank())));
+        let result = baker.bake_impl(os);
+        let lent = baker.config.take().expect("the config lent above");
+        drop(baker);
+        // Nothing the bake made holds the config: the lent config itself comes back.
+        *config = Arc::try_unwrap(lent).unwrap_or_else(|c| c.clone_as_is());
+        result
+    }
+
+    fn bake_impl(&self, os: &mut impl std::io::Write) -> Result<()> {
         let registry = FormatRegistry::instance();
         let Some(fmt) = registry.file_format_by_name(&self.format_name) else {
             let mut err = OStringStream::new(Crt::NATIVE);

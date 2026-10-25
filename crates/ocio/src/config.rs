@@ -736,7 +736,7 @@ pub fn set_current_config(config: &Config) {
 
 impl Config {
     /// The state `Config::Impl::Impl` gives a config before it reads the environment.
-    fn blank() -> Config {
+    pub(crate) fn blank() -> Config {
         let context = Arc::new(Context::new());
         let config = Config {
             major_version: LAST_SUPPORTED_MAJOR_VERSION,

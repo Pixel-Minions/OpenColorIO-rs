@@ -10,7 +10,8 @@
 //!
 //! - **The config.** `setConfig` stores a copy of the config (`createEditableCopy`), which
 //!   `getConfig` returns and Python can change; `__deepcopy__` shares it (`Baker::Impl::
-//!   operator=` copies the pointer). `bake` bakes with the config as it is then.
+//!   operator=` copies the pointer). `bake` bakes with that config itself, through its processor
+//!   cache, which keeps the processors between bakes (`Baker::bake_with_config`).
 //! - **The metadata.** `getFormatMetadata` is a reference into the baker's metadata
 //!   ([`crate::py_format_metadata`]), which the formats write: a change through it shows in what
 //!   the baker bakes.
@@ -24,7 +25,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
 
 use crate::dispatch::{CharPtr, Function, Overload, Param, StdString};
-use crate::py_config::{CONFIG, ConfigNode, ConfigRc, config_arc, config_arg, with_config};
+use crate::py_config::{CONFIG, ConfigNode, ConfigRc, config_arg, with_config};
 use crate::py_format_metadata::{MetadataHeap, baker_metadata_out};
 use crate::py_open_color_io::py_result;
 use crate::py_transform::{FORMAT_METADATA, INT, Out, class, def, default, none, ok, string_out};
@@ -89,21 +90,25 @@ fn set_format(py: Python<'_>, node: &mut BakerNode, name: CharPtr, what: &str) -
 }
 
 /// `self->bake(os)` (Baker.cpp:237-414 @ v2.5.2) into bytes: what the format wrote, and the
-/// library's error. The baker bakes with its config as it is now: the library's copy of it
-/// (`set_config`'s copy resets the context's environment mode, I-111, which a bake never reads:
-/// only `loadEnvironment` and the context's cache ID do, Context.cpp:179, 279-300).
+/// library's error. The baker bakes with its config itself (`m_config`), its objects written
+/// back first, as the config's own calls do ([`with_config`]): the processors come from the
+/// config's processor cache and stay in it, shared with `getConfig()`'s object and the
+/// baker's copies, so a change through an object held from the config, which upstream's cache
+/// doesn't see, bakes the processor made before it, as the wheel's does. A Python logging
+/// function that calls the config during the bake gets D-9's error, as during `getProcessor`.
 fn bake(py: Python<'_>, rc: &BakerRc) -> PyResult<(Vec<u8>, PyResult<()>)> {
-    let (mut baker, config) = {
+    let (baker, config) = {
         let node = rc.lock();
         (node.baker.clone(), node.config.clone())
     };
-    if let Some(config) = config {
-        let config = config_arc(&config)?;
-        baker.set_config(&config);
-    }
     let mut text = Vec::new();
-    let result = py_result(py, baker.bake(&mut text));
-    Ok((text, result))
+    let result = match config {
+        Some(config) => with_config(&config, |n| {
+            Ok(baker.bake_with_config(&mut n.config, &mut text))
+        })?,
+        None => baker.bake(&mut text),
+    };
+    Ok((text, py_result(py, result)))
 }
 
 const fn empty_string(name: &'static str) -> Param {

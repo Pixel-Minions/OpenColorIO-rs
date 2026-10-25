@@ -395,8 +395,9 @@ fn identity_script() -> Script {
     sc.call(n("operator.eq"), vec![r(c1), r(c2)]);
     sc.call(ra(b, "setInputSpace"), vec![s("lnh")]);
     sc.call(ra(b, "setTargetSpace"), vec![s("test")]);
-    sc.call(ra(b, "setFormat"), vec![s("spi3d")]);
+    sc.call(ra(b, "setFormat"), vec![s("cinespace")]);
     sc.call(ra(b, "setCubeSize"), vec![i(2)]);
+    sc.call(ra(b, "setShaperSize"), vec![i(4)]);
     let md = sc.call(ra(b, "getFormatMetadata"), vec![]);
     let md2 = sc.call(ra(b, "getFormatMetadata"), vec![]);
     sc.call(n("operator.is_"), vec![r(md), r(md2)]);
@@ -422,8 +423,8 @@ fn identity_script() -> Script {
     sc.call(ra(copy2, "getFormat"), vec![]);
     sc.call(ra(b, "bake"), vec![]);
     sc.call(ra(copy, "bake"), vec![]);
-    // A change through the baker's config shows in both bakers; one through the config given
-    // doesn't.
+    // A change through an object held from the baker's config: both bakers bake the processor
+    // the config's cache kept; one through the config given changes nothing of the baker's.
     let cs = sc.call(ra(c1, "getColorSpace"), vec![s("test")]);
     let e = sc.call(
         n("OCIO.ExponentTransform"),
@@ -472,6 +473,76 @@ fn identity_script() -> Script {
     sc.call(ra(b, "setConfig"), vec![r(c3)]);
     let c4 = sc.call(ra(b, "getConfig"), vec![]);
     sc.call(ra(c4, "getEnvironmentMode"), vec![]);
+    sc
+}
+
+/// The baker bakes with its config itself, whose processor cache keeps the processors between
+/// bakes and shares them with the config's object and the baker's copies: a change through an
+/// object held from the config (a color space's or a look's transform) bakes the processor made
+/// before it (verifier 1, Config.cpp:4830-4880 @ v2.5.2); a change of the config itself, or the
+/// cache turned off, bakes the new one. With the debug log, whose messages tell the processors
+/// made from those found.
+fn cache_script() -> Script {
+    let mut sc = Script::new();
+    let level = sc.call(n("OCIO.GetLoggingLevel"), vec![]);
+    sc.call(
+        n("OCIO.SetLoggingLevel"),
+        vec![n("OCIO.LOGGING_LEVEL_DEBUG")],
+    );
+    let cfg = config(&mut sc);
+    let b = sc.call_kw(
+        n("OCIO.Baker"),
+        vec![r(cfg), s("cinespace"), s("lnh"), s("test")],
+        vec![("cubeSize", i(2)), ("shaperSize", i(4))],
+        Expect::Value,
+    );
+    let c = sc.call(ra(b, "getConfig"), vec![]);
+    sc.call(ra(b, "bake"), vec![]);
+    let cs = sc.call(ra(c, "getColorSpace"), vec![s("test")]);
+    let e = sc.call(
+        n("OCIO.ExponentTransform"),
+        vec![common::script::fl(&[1.8, 1.8, 1.8, 1.0])],
+    );
+    sc.call(
+        ra(cs, "setTransform"),
+        vec![r(e), n("OCIO.COLORSPACE_DIR_TO_REFERENCE")],
+    );
+    sc.call(ra(b, "bake"), vec![]);
+    // A copy shares the config and its cache.
+    let copy = sc.call(n("copy.deepcopy"), vec![r(b)]);
+    sc.call(ra(copy, "bake"), vec![]);
+    // The config's own processors come from the same cache.
+    let p = sc.call(ra(c, "getProcessor"), vec![s("lnh"), s("test")]);
+    sc.call(ra(p, "getCacheID"), vec![]);
+    sc.call(ra(b, "setFormat"), vec![s("spi1d")]);
+    sc.call(ra(b, "bake"), vec![]);
+    // The color space added again: a change of the config.
+    sc.call(ra(c, "addColorSpace"), vec![r(cs)]);
+    sc.call(ra(b, "bake"), vec![]);
+    sc.call(ra(copy, "bake"), vec![]);
+    // A look's transform.
+    sc.call(ra(b, "setFormat"), vec![s("cinespace")]);
+    sc.call(ra(b, "setLooks"), vec![s("warm")]);
+    sc.call(ra(b, "bake"), vec![]);
+    let look = sc.call(ra(c, "getLook"), vec![s("warm")]);
+    let cdl = sc.call_kw(
+        n("OCIO.CDLTransform"),
+        vec![],
+        vec![("slope", common::script::fl(&[2.0, 1.0, 1.0]))],
+        Expect::Value,
+    );
+    sc.call(ra(look, "setTransform"), vec![r(cdl)]);
+    sc.call(ra(b, "bake"), vec![]);
+    sc.call(ra(copy, "setLooks"), vec![s("warm")]);
+    sc.call(ra(copy, "bake"), vec![]);
+    // The cache turned off.
+    sc.call(
+        ra(c, "setProcessorCacheFlags"),
+        vec![n("OCIO.PROCESSOR_CACHE_OFF")],
+    );
+    sc.call(ra(b, "bake"), vec![]);
+    sc.call(ra(copy, "bake"), vec![]);
+    sc.call(n("OCIO.SetLoggingLevel"), vec![r(level)]);
     sc
 }
 
@@ -571,6 +642,7 @@ fn the_class_behaves_as_the_wheels() {
         errors_script(),
         bake_script(),
         identity_script(),
+        cache_script(),
         constructor_script(),
     ]);
 }
