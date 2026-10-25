@@ -17,6 +17,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, MAX_3D_LUT_LENGTH};
 use ocio_ops::{Exception, Result};
 
@@ -114,6 +115,10 @@ impl fmt::Debug for UniformData {
 /// Port of `GPUShaderImpl::PrivateImpl::Uniform` (GpuShader.cpp:127-186 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct Uniform {
+    /// Not upstream's: the address ([`property_address`]) of the dynamic property the
+    /// description held last when the uniform was added, the one whose values its getters
+    /// read (each op adds its property, then the uniforms over it).
+    source: Option<usize>,
     /// `m_name`.
     name: Vec<u8>,
     /// `m_data`, less its buffer offset.
@@ -125,11 +130,17 @@ pub struct Uniform {
 impl Uniform {
     /// Port of `Uniform::Uniform` (GpuShader.cpp:129-174, 178-185 @ v2.5.2): an empty name is
     /// refused.
-    fn new(name: Vec<u8>, data: UniformData, buffer_offset: usize) -> Result<Uniform> {
+    fn new(
+        name: Vec<u8>,
+        data: UniformData,
+        buffer_offset: usize,
+        source: Option<usize>,
+    ) -> Result<Uniform> {
         if name.is_empty() {
             return Err(Exception::new("The dynamic property name is invalid."));
         }
         Ok(Uniform {
+            source,
             name,
             data,
             buffer_offset,
@@ -150,6 +161,21 @@ impl Uniform {
     pub fn buffer_offset(&self) -> usize {
         self.buffer_offset
     }
+
+    /// The address ([`property_address`]) of the dynamic property whose values the getters
+    /// read: upstream's getters read it through a raw pointer, valid while something else holds
+    /// the property (the description, a caller); the port's hold it. The Python binding tells
+    /// its own uniforms' reads after that apart by it.
+    #[doc(hidden)]
+    pub fn source_property(&self) -> Option<usize> {
+        self.source
+    }
+}
+
+/// The address a dynamic property is told apart by, while it lives.
+#[doc(hidden)]
+pub fn property_address(prop: &DynamicPropertyRcPtr) -> usize {
+    std::ptr::from_ref(prop.base()) as *const u8 as usize
 }
 
 /// A texture: a 1D LUT's, in a 1D or 2D texture, or a 3D LUT's.
@@ -585,6 +611,7 @@ impl GenericImpl {
         data: UniformData,
         alignment: usize,
         size: usize,
+        source: Option<usize>,
     ) -> Result<bool> {
         let name = c_string(name);
         if self.uniform_name_used(name) {
@@ -592,7 +619,7 @@ impl GenericImpl {
             return Ok(false);
         }
         self.uniform_buffer_size = align_offset(self.uniform_buffer_size, alignment);
-        let uniform = Uniform::new(name.to_vec(), data, self.uniform_buffer_size)?;
+        let uniform = Uniform::new(name.to_vec(), data, self.uniform_buffer_size, source)?;
         self.uniforms.push(uniform);
         self.uniform_buffer_size += size;
         Ok(true)

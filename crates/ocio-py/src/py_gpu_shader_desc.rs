@@ -8,9 +8,12 @@
 //!
 //! **Values.** `UniformData`, `Texture` and `Texture3D` are C++ values that pybind11 moves into
 //! each new instance: indexing an iterator twice gives two objects. A `UniformData` holds the
-//! uniform's getters, which read the processor's dynamic properties when called (a change of the
-//! property shows in what they return); its `type` and `bufferOffset` are its own, which Python
-//! may set (the getters don't follow). A `Texture` holds the description and its index, and
+//! uniform's getters, which read the description's dynamic properties when called (a change of
+//! the property shows in what they return); its `type` and `bufferOffset` are its own, which
+//! Python may set (the getters don't follow). The wheel's getters read the property through a
+//! raw pointer: once nothing holds the property (its description is gone, and no
+//! `DynamicProperty` object of it lives; a clone of the description holds none), a call reads
+//! freed memory, where the port raises its own error (docs/improvements.md, U-196). A `Texture` holds the description and its index, and
 //! reads the values from the description when asked (`getValues`).
 
 use numpy::PyArray1;
@@ -32,7 +35,7 @@ use crate::py_transform::{
 use crate::py_utils::{
     BUFFER, BufferArg, check_buffer_size, check_buffer_type, dtype, new_iterator,
 };
-use crate::shared::{Shared, construct, holder, out};
+use crate::shared::{Shared, WeakShared, construct, holder, out};
 use crate::{arg, enum_param, method_def, q, static_def, this_desc, this_iter};
 
 pub(crate) const GPU_SHADER_DESC: &str = q!("GpuShaderDesc");
@@ -67,6 +70,9 @@ pub(crate) struct UniformValue {
     ty: i64,
     buffer_offset: u64,
     data: Option<UniformData>,
+    /// What keeps the property the getters read alive in the wheel: the description they came
+    /// from, and the property's address, which Python's `DynamicProperty` objects may hold.
+    holders: Option<(WeakShared<GpuShaderDesc>, Option<usize>)>,
 }
 
 impl Default for UniformValue {
@@ -76,7 +82,26 @@ impl Default for UniformValue {
             ty: UniformDataType::Unknown as i64,
             buffer_offset: 0,
             data: None,
+            holders: None,
         }
+    }
+}
+
+impl UniformValue {
+    /// The getters, while the property they read lives as the wheel's would: else the port's
+    /// error, where the wheel reads freed memory (U-196). `getter` names the call.
+    fn getters(&self, getter: &str) -> PyResult<Option<UniformData>> {
+        if let Some((desc, property)) = &self.holders
+            && !desc.alive()
+            && !property.is_some_and(crate::py_dynamic_property::held_by_python)
+        {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "GpuShaderDesc.UniformData.{getter}(): the dynamic property it reads is gone \
+                 with its GpuShaderDesc, memory the wheel reads after it is freed \
+                 (docs/improvements.md, U-196)"
+            )));
+        }
+        Ok(self.data.clone())
     }
 }
 
@@ -542,7 +567,7 @@ fn bad_function_call() -> PyErr {
 // self.m_getDouble(); }) (PyGpuShaderDesc.cpp:196-199 @ v2.5.2).
 static UD_GET_DOUBLE: Function = method_def!("getDouble", [UD_SELF], "float", |py, o, a, _| {
     let rc = this_value!(o, a, UniformValue);
-    let data = rc.lock().data.clone();
+    let data = rc.lock().getters("getDouble")?;
     match data {
         Some(UniformData::Double(get)) => ok(py, get()),
         _ => Err(bad_function_call()),
@@ -553,7 +578,7 @@ static UD_GET_DOUBLE: Function = method_def!("getDouble", [UD_SELF], "float", |p
 // (PyGpuShaderDesc.cpp:200-203 @ v2.5.2).
 static UD_GET_BOOL: Function = method_def!("getBool", [UD_SELF], "bool", |py, o, a, _| {
     let rc = this_value!(o, a, UniformValue);
-    let data = rc.lock().data.clone();
+    let data = rc.lock().getters("getBool")?;
     match data {
         Some(UniformData::Bool(get)) => ok(py, get()),
         _ => Err(bad_function_call()),
@@ -568,7 +593,7 @@ static UD_GET_FLOAT3: Function = method_def!(
     crate::float_array_out!("3"),
     |py, o, a, _| {
         let rc = this_value!(o, a, UniformValue);
-        let data = rc.lock().data.clone();
+        let data = rc.lock().getters("getFloat3")?;
         match data {
             Some(UniformData::Float3(get)) => ok(py, get().map(f64::from).to_vec()),
             _ => Err(bad_function_call()),
@@ -598,7 +623,7 @@ static UD_GET_VECTOR_FLOAT: Function = method_def!(
     "numpy.ndarray",
     |py, o, a, _| {
         let rc = this_value!(o, a, UniformValue);
-        let data = rc.lock().data.clone();
+        let data = rc.lock().getters("getVectorFloat")?;
         match data {
             Some(UniformData::VectorFloat { size, values }) => {
                 let values = values();
@@ -618,7 +643,7 @@ static UD_GET_VECTOR_FLOAT: Function = method_def!(
 static UD_GET_VECTOR_INT: Function =
     method_def!("getVectorInt", [UD_SELF], "numpy.ndarray", |py, o, a, _| {
         let rc = this_value!(o, a, UniformValue);
-        let data = rc.lock().data.clone();
+        let data = rc.lock().getters("getVectorInt")?;
         match data {
             Some(UniformData::VectorInt { size, values }) => {
                 let values = values();
@@ -653,6 +678,7 @@ fn uniform_item(py: Python<'_>, rc: &DescRc, i: i32) -> Out {
             ty: u.data().data_type() as i64,
             buffer_offset: u.buffer_offset() as u64,
             data: Some(u.data().clone()),
+            holders: Some((rc.downgrade(), u.source_property())),
         };
         (u.name().to_vec(), value)
     };

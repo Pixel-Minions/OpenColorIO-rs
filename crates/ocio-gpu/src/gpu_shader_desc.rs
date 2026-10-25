@@ -25,7 +25,7 @@ use ocio_ops::{Exception, Result};
 
 use crate::gpu_shader::{
     GenericImpl, Getter, Texture, Texture3D, TextureDimensions, TextureType, Uniform, UniformData,
-    c_string, uniform_layout,
+    c_string, property_address, uniform_layout,
 };
 use crate::gpu_shader_class_wrapper::GpuShaderClassWrapper;
 use crate::open_color_types::{GpuLanguage, gpu_language_to_string};
@@ -656,7 +656,9 @@ impl GpuShaderDesc {
     /// Port of the five `GenericGpuShaderDesc::addUniform` (GpuShader.cpp:512-541 @ v2.5.2).
     fn add_uniform(&mut self, name: &[u8], data: UniformData, max_size: u32) -> Result<bool> {
         let (alignment, size) = uniform_layout(&data, max_size);
-        self.generic.add_uniform(name, data, alignment, size)
+        let source = self.dynamic_properties.last().map(property_address);
+        self.generic
+            .add_uniform(name, data, alignment, size, source)
     }
 
     /// A double uniform (a float in the buffer). See `add_uniform`.

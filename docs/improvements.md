@@ -6150,3 +6150,31 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   a null GpuShaderDesc, through which the wheel calls (docs/improvements.md, U-195)", in
   `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_processor.rs`); `processor_oracle.rs`,
   `extracting_into_none_is_the_ports_error`.
+
+### U-196. A shader's uniform read after its dynamic property is gone
+
+- **Upstream:** the getters of a uniform over a dynamic property are `std::bind`s of the
+  property's member functions to a raw pointer to the description's own copy of the property
+  (`AddUniform`, ExposureContrastOpGPU.cpp:24-29, 52-60; `GradingPrimaryOpGPU.cpp:104-135`, and
+  the other grading ops' GPU code @ v2.5.2), the grading ones also to references into its
+  value; pybind11's `GpuShaderDesc.UniformData` holds copies of those `std::function`s. The
+  property lives while the description (`m_dynamicProperties`) or a `DynamicProperty` object of
+  it holds it, and `clone()` copies no property (`GpuShaderCreator::Impl::operator=`,
+  GpuShaderDesc.cpp:64-91). Once the description is gone and no `DynamicProperty` object of the
+  property lives, `getDouble`, `getBool`, `getFloat3`, `getVectorFloat` and `getVectorInt` of a
+  `UniformData` (or of its copy) read freed memory: on Windows a later description's property,
+  or garbage (probed 2026-10-25).
+- **Who notices:** Python code that keeps a uniform's data after its description is gone.
+- **A fix:** bind the getters to the property's `shared_ptr`.
+- **Status:** the port raises RuntimeError "GpuShaderDesc.UniformData.getDouble(): the dynamic
+  property it reads is gone with its GpuShaderDesc, memory the wheel reads after it is freed
+  (docs/improvements.md, U-196)" (each getter its own name), while the description lives (or its
+  iterators, textures, which hold it) or a `DynamicProperty` object of the property does, the
+  reads are the wheel's; in `p6-processors` (6.3h, verifier 1:
+  `crates/ocio-py/src/py_gpu_shader_desc.rs`, `UniformValue::getters`; the property a uniform
+  reads, `Uniform::source_property` of `crates/ocio-gpu/src/gpu_shader.rs`; Python's objects of
+  a property, `held_by_python` of `crates/ocio-py/src/py_dynamic_property.rs`);
+  `gpu_shader_desc_oracle.rs`, `a_uniform_whose_property_is_gone_is_u196` (the wheel's reads
+  with every object alive, its clone's empty properties; the port's after the description is
+  gone, kept by a `DynamicProperty` object, by its uniform iterator, by a clone, by nothing,
+  by an object since deleted; of an exposure and a contrast, only the contrast's object kept).

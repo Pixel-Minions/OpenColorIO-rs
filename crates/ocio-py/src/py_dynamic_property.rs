@@ -41,6 +41,47 @@ const SELF: Param = Param::new("self", DYNAMIC_PROPERTY);
 #[derive(Debug)]
 pub(crate) struct DynamicPropertyHolder(pub(crate) DynamicPropertyRcPtr);
 
+/// How many [`DynamicPropertyHolder`]s live, by their property's address
+/// ([`ocio_gpu::gpu_shader::property_address`]): Python's `shared_ptr`s of each property, which
+/// keep it alive in the wheel (`PyDynamicProperty::m_prop`).
+static HOLDERS: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
+
+fn holders() -> std::sync::MutexGuard<'static, Vec<(usize, usize)>> {
+    HOLDERS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+impl DynamicPropertyHolder {
+    fn new(prop: DynamicPropertyRcPtr) -> DynamicPropertyHolder {
+        let address = ocio_gpu::gpu_shader::property_address(&prop);
+        let mut list = holders();
+        match list.iter_mut().find(|(a, _)| *a == address) {
+            Some((_, count)) => *count += 1,
+            None => list.push((address, 1)),
+        }
+        DynamicPropertyHolder(prop)
+    }
+}
+
+impl Drop for DynamicPropertyHolder {
+    fn drop(&mut self) {
+        let address = ocio_gpu::gpu_shader::property_address(&self.0);
+        let mut list = holders();
+        if let Some(k) = list.iter().position(|(a, _)| *a == address) {
+            list[k].1 -= 1;
+            if list[k].1 == 0 {
+                list.swap_remove(k);
+            }
+        }
+    }
+}
+
+/// Whether a Python object holds the dynamic property at `address`.
+pub(crate) fn held_by_python(address: usize) -> bool {
+    holders().iter().any(|(a, _)| *a == address)
+}
+
 /// A returned `PyDynamicProperty` (a value, which pybind11 moves into a new instance).
 pub(crate) fn dynamic_property_out(py: Python<'_>, prop: DynamicPropertyRcPtr) -> Out {
     let cls = class(py, DYNAMIC_PROPERTY)?;
@@ -48,7 +89,7 @@ pub(crate) fn dynamic_property_out(py: Python<'_>, prop: DynamicPropertyRcPtr) -
     pybind11::set_value(
         &obj,
         DYNAMIC_PROPERTY,
-        Bound::new(py, DynamicPropertyHolder(prop))?.into_any(),
+        Bound::new(py, DynamicPropertyHolder::new(prop))?.into_any(),
     )?;
     Ok(Some(obj.unbind()))
 }

@@ -21,7 +21,8 @@
 
 mod common;
 
-use common::script::{Expect, Script, b, by, compare, i, l, n, none, r, ra, s};
+use common::script::{Expect, Script, b, by, compare, f, i, l, n, none, r, ra, s};
+use pyo3::prelude::*;
 use serde_json::{Value, json};
 
 /// Each class has the wheel's surface, member for member, its nested classes' included.
@@ -768,5 +769,218 @@ assert list(d.getTextures()[0].getValues()) == [0, 1, 2, 3, 4, 5]
         )
         .unwrap();
         py.run(&code, None, None).unwrap_or_else(|e| panic!("{e}"));
+    });
+}
+
+// ---------------------------------------------------------------------------------------------
+// A UniformData whose property is gone (verifier 6.3h, H3; docs/improvements.md, U-196)
+
+/// The wheel's steps, every object alive: a description of a dynamic exposure, its dynamic
+/// properties and its clone's (none: `clone` copies no property), its uniform's `getDouble`
+/// (the exposure), through a copy of the `UniformData` too, then after the description's
+/// property is set through a `DynamicProperty` object of it.
+fn uniform_lifetime_script() -> Script {
+    let mut sc = Script::new();
+    let cfg = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    let ec = sc.call_kw(
+        n("OCIO.ExposureContrastTransform"),
+        vec![],
+        vec![("exposure", f(0.75)), ("dynamicExposure", b(true))],
+        Expect::Value,
+    );
+    let p = sc.call(ra(cfg, "getProcessor"), vec![r(ec)]);
+    let gpu = sc.call(ra(p, "getDefaultGPUProcessor"), vec![]);
+    let d = sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![]);
+    sc.call(ra(gpu, "extractGpuShaderInfo"), vec![r(d)]);
+    let dps = sc.call(ra(d, "getDynamicProperties"), vec![]);
+    sc.call(n("len"), vec![r(dps)]);
+    let c = sc.call(ra(d, "clone"), vec![]);
+    let cdps = sc.call(ra(c, "getDynamicProperties"), vec![]);
+    sc.call(n("len"), vec![r(cdps)]);
+    let cu = sc.call(ra(c, "getUniforms"), vec![]);
+    sc.call(n("len"), vec![r(cu)]);
+    let u = sc.call(ra(d, "getUniforms"), vec![]);
+    sc.call(n("len"), vec![r(u)]);
+    let item = sc.call(ra(u, "__getitem__"), vec![i(0)]);
+    let second = sc.call(n("operator.itemgetter"), vec![i(1)]);
+    let data = sc.call(r(second), vec![r(item)]);
+    let copy = sc.call(n("OCIO.GpuShaderDesc.UniformData"), vec![r(data)]);
+    sc.call(ra(data, "getDouble"), vec![]);
+    sc.call(ra(copy, "getDouble"), vec![]);
+    let w = sc.call(
+        ra(d, "getDynamicProperty"),
+        vec![n("OCIO.DYNAMIC_PROPERTY_EXPOSURE")],
+    );
+    sc.call(ra(w, "setDouble"), vec![f(2.5)]);
+    sc.call(ra(data, "getDouble"), vec![]);
+    sc.call(ra(copy, "getDouble"), vec![]);
+    // A dynamic exposure and a dynamic contrast: the second uniform reads the contrast.
+    let ec2 = sc.call_kw(
+        n("OCIO.ExposureContrastTransform"),
+        vec![],
+        vec![
+            ("exposure", f(0.75)),
+            ("contrast", f(1.25)),
+            ("dynamicExposure", b(true)),
+            ("dynamicContrast", b(true)),
+        ],
+        Expect::Value,
+    );
+    let p2 = sc.call(ra(cfg, "getProcessor"), vec![r(ec2)]);
+    let gpu2 = sc.call(ra(p2, "getDefaultGPUProcessor"), vec![]);
+    let d2 = sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![]);
+    sc.call(ra(gpu2, "extractGpuShaderInfo"), vec![r(d2)]);
+    let u2 = sc.call(ra(d2, "getUniforms"), vec![]);
+    let item2 = sc.call(ra(u2, "__getitem__"), vec![i(1)]);
+    let data2 = sc.call(r(second), vec![r(item2)]);
+    sc.call(ra(data2, "getDouble"), vec![]);
+    sc
+}
+
+/// The port's Python of the same steps, with the description gone before the reads, and kept
+/// (or not) by what keeps its property in the wheel: a `DynamicProperty` object of it, the
+/// uniform iterator (which holds the description); or by what doesn't: its clone, nothing.
+/// Each read's outcome: `('ok', value)` or the exception's type and text.
+const UNIFORM_LIFETIME: &std::ffi::CStr = c"
+import gc
+import PyOpenColorIO as OCIO
+
+def outcome(f):
+    try:
+        return ('ok', f())
+    except Exception as e:
+        return (type(e).__name__, str(e))
+
+def uniform_after(keep):
+    t = OCIO.ExposureContrastTransform(exposure=0.75, dynamicExposure=True)
+    gpu = OCIO.Config.CreateRaw().getProcessor(t).getDefaultGPUProcessor()
+    d = OCIO.GpuShaderDesc.CreateShaderDesc()
+    gpu.extractGpuShaderInfo(d)
+    data = d.getUniforms()[0][1]
+    copy = OCIO.GpuShaderDesc.UniformData(data)
+    kept = {'wrapper': lambda: d.getDynamicProperty(OCIO.DYNAMIC_PROPERTY_EXPOSURE),
+            'iterator': d.getUniforms, 'clone': d.clone, 'nothing': lambda: None,
+            'wrapper gone': lambda: d.getDynamicProperty(OCIO.DYNAMIC_PROPERTY_EXPOSURE)}[keep]()
+    if keep == 'wrapper gone':
+        kept = None
+    del d
+    gc.collect()
+    reads = [outcome(data.getDouble), outcome(copy.getDouble)]
+    if keep == 'wrapper':
+        kept.setDouble(2.5)
+        reads += [outcome(data.getDouble), outcome(copy.getDouble)]
+    return reads, data.type == OCIO.UNIFORM_DOUBLE, outcome(OCIO.GpuShaderDesc.UniformData().getDouble)[0]
+
+def contrast_after():
+    t = OCIO.ExposureContrastTransform(exposure=0.75, contrast=1.25, dynamicExposure=True,
+                                       dynamicContrast=True)
+    gpu = OCIO.Config.CreateRaw().getProcessor(t).getDefaultGPUProcessor()
+    d = OCIO.GpuShaderDesc.CreateShaderDesc()
+    gpu.extractGpuShaderInfo(d)
+    exposure, contrast = d.getUniforms()[0][1], d.getUniforms()[1][1]
+    kept = d.getDynamicProperty(OCIO.DYNAMIC_PROPERTY_CONTRAST)
+    del d
+    gc.collect()
+    return outcome(contrast.getDouble), outcome(exposure.getDouble)[0]
+";
+
+/// A `UniformData` reads its description's dynamic property, which the wheel's getters reach
+/// through a raw pointer (`std::bind(&DynamicPropertyDouble::getValue, prop.get())`,
+/// ExposureContrastOpGPU.cpp:24-29 @ v2.5.2): defined while something holds the property, the
+/// description (its iterator holds it) or a `DynamicProperty` object, and then the port's
+/// reads are the wheel's (its steps, every object alive, give the values; a value set through
+/// the `DynamicProperty` object shows). Once nothing does (the description's clone holds no
+/// property: the wheel's own report), the wheel reads freed memory (U-196), and the port
+/// raises its error, from the copy too; the value's own `type` stays.
+#[test]
+fn a_uniform_whose_property_is_gone_is_u196() {
+    common::start_python();
+    let sc = uniform_lifetime_script();
+    let theirs = common::wheel(&[sc.json()]);
+    common::script::compare_with(std::slice::from_ref(&sc), &theirs);
+    let steps = theirs[0]["steps"].as_array().unwrap();
+    let int = |k: usize| {
+        steps[k]["value"]["int"]
+            .as_str()
+            .unwrap()
+            .parse::<i64>()
+            .unwrap()
+    };
+    let float = |k: usize| {
+        let bits = steps[k]["value"]["float"].as_str().unwrap();
+        f64::from_bits(u64::from_str_radix(bits.trim_start_matches("0x"), 16).unwrap())
+    };
+    // The description holds a property, its clone none; the uniform's reads.
+    let n_steps = steps.len();
+    assert_eq!(n_steps, 34);
+    assert!(int(7) > 0, "the description's properties");
+    assert_eq!(int(10), 0, "the clone's properties");
+    assert_eq!(int(12), 0, "the clone's uniforms");
+    assert!(int(14) > 0, "the description's uniforms");
+    let (before, after) = (float(19), float(23));
+    assert_eq!(float(20).to_bits(), before.to_bits(), "the copy's read");
+    assert_eq!(
+        float(24).to_bits(),
+        after.to_bits(),
+        "the copy's read after the set"
+    );
+    assert_ne!(before.to_bits(), after.to_bits());
+    let _turn = common::turn();
+    Python::attach(|py| {
+        let globals = pyo3::types::PyDict::new(py);
+        py.run(UNIFORM_LIFETIME, Some(&globals), None)
+            .unwrap_or_else(|e| panic!("{e}"));
+        // Only the contrast's object is kept: the contrast's uniform reads it, the exposure's
+        // reads freed memory in the wheel.
+        let got = py
+            .eval(c"contrast_after()", Some(&globals), None)
+            .unwrap_or_else(|e| panic!("{e}"));
+        let ((kind, value), exposure): ((String, f64), String) = got.extract().unwrap();
+        assert_eq!(kind, "ok");
+        assert_eq!(
+            value.to_bits(),
+            float(33).to_bits(),
+            "the contrast's uniform"
+        );
+        assert_eq!(exposure, "RuntimeError", "the exposure's uniform");
+        for keep in ["wrapper", "iterator", "clone", "nothing", "wrapper gone"] {
+            let code = std::ffi::CString::new(format!("uniform_after('{keep}')")).unwrap();
+            let got = py
+                .eval(&code, Some(&globals), None)
+                .unwrap_or_else(|e| panic!("{keep}: {e}"));
+            let (reads, double, default): (Vec<(String, Bound<'_, PyAny>)>, bool, String) =
+                got.extract().unwrap();
+            assert!(double, "{keep}: the value's own type");
+            assert_eq!(default, "RuntimeError", "{keep}: a default UniformData");
+            match keep {
+                "wrapper" | "iterator" => {
+                    let values: Vec<f64> = reads
+                        .iter()
+                        .map(|(kind, v)| {
+                            assert_eq!(kind, "ok", "{keep}");
+                            v.extract().unwrap()
+                        })
+                        .collect();
+                    let expected: &[f64] = if keep == "wrapper" {
+                        &[before, before, after, after]
+                    } else {
+                        &[before, before]
+                    };
+                    assert_eq!(values.len(), expected.len(), "{keep}");
+                    for (v, e) in values.iter().zip(expected) {
+                        assert_eq!(v.to_bits(), e.to_bits(), "{keep}: {values:?}");
+                    }
+                }
+                _ => {
+                    assert_eq!(reads.len(), 2, "{keep}");
+                    for (kind, message) in &reads {
+                        assert_eq!(kind, "RuntimeError", "{keep}");
+                        let message: String = message.extract().unwrap();
+                        assert!(message.contains("U-196"), "{keep}: {message}");
+                        assert!(message.starts_with("GpuShaderDesc.UniformData.getDouble()"));
+                    }
+                }
+            }
+        }
     });
 }

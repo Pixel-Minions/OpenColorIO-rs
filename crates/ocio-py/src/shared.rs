@@ -64,6 +64,11 @@ impl<T> Shared<T> {
         Arc::as_ptr(&self.0) as *const u8 as usize
     }
 
+    /// A handle that tells whether the value still lives (some handle holds it).
+    pub(crate) fn downgrade(&self) -> WeakShared<T> {
+        WeakShared(Arc::downgrade(&self.0))
+    }
+
     /// Whether both are the same value.
     pub(crate) fn same(&self, other: &Shared<T>) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
@@ -73,6 +78,23 @@ impl<T> Shared<T> {
     /// call that only reads ([`changes_count`]).
     pub(crate) fn version(&self) -> u64 {
         self.0.version.load(Ordering::SeqCst)
+    }
+}
+
+/// [`Shared::downgrade`]'s handle.
+#[derive(Debug)]
+pub(crate) struct WeakShared<T>(std::sync::Weak<SharedCell<T>>);
+
+impl<T> Clone for WeakShared<T> {
+    fn clone(&self) -> Self {
+        WeakShared(self.0.clone())
+    }
+}
+
+impl<T> WeakShared<T> {
+    /// Whether a [`Shared`] handle of the value lives.
+    pub(crate) fn alive(&self) -> bool {
+        self.0.strong_count() > 0
     }
 }
 
