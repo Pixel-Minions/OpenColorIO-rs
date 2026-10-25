@@ -205,7 +205,8 @@ fn fingerprint(oracle_dir: &Path, analyzer: &str) -> Result<Fingerprint, String>
             .to_string_lossy()
             .replace('\\', "/");
         // A file Python can't read isn't a module (the analysis lists files it can read): it is
-        // hashed by its link's target with every other file.
+        // hashed with every other file, by its link's target, or its length and modification
+        // time (`OracleFile::Unreadable`).
         match (
             crate::oracle::read_oracle_file(oracle_dir, &file)?,
             rel.strip_prefix("ocio_oracle/"),

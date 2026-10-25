@@ -773,9 +773,10 @@ pub(crate) enum OracleFile {
     /// Its bytes.
     Bytes(Vec<u8>),
     /// A file that can't be read: a dangling symbolic link (an editor's lock file, `.#x.py`), a
-    /// link to a directory listed already (a loop), or one this user can't read. Python can't
-    /// read it either, so it changes nothing the oracle does until it can be read; it is hashed
-    /// by its link's target (empty for no link), so that every key changes when it changes.
+    /// link to a directory listed already (a loop), or one this user can't read (a permission,
+    /// another process's exclusive lock). Python can't read it either, so it changes nothing the
+    /// oracle does until it can be read; it is hashed by what [`unreadable`] gives, so that
+    /// every key changes when it changes.
     Unreadable(String),
 }
 
@@ -791,11 +792,25 @@ pub(crate) fn read_oracle_file(oracle_dir: &Path, file: &Path) -> Result<OracleF
         {
             Err(format!("{}: {e}", file.display()))
         }
-        Err(_) => Ok(OracleFile::Unreadable(
-            std::fs::read_link(file)
-                .map(|target| target.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default(),
-        )),
+        Err(_) => Ok(OracleFile::Unreadable(unreadable(file))),
+    }
+}
+
+/// What [`OracleFile::Unreadable`] holds of `file`: a link's target; for a file that isn't a
+/// link, its length and modification time, as `symlink_metadata` gives them, after a NUL (no
+/// link's target holds one), so that two contents of a file no one can read don't share a key
+/// (verifier 4); empty when neither can be read.
+fn unreadable(file: &Path) -> String {
+    if let Ok(target) = std::fs::read_link(file) {
+        return target.to_string_lossy().replace('\\', "/");
+    }
+    match std::fs::symlink_metadata(file) {
+        Ok(meta) => format!(
+            "\0{} bytes, modified {:?}",
+            meta.len(),
+            meta.modified().ok()
+        ),
+        Err(_) => String::new(),
     }
 }
 
@@ -2016,6 +2031,79 @@ pub(crate) mod tests {
             identity(&dir.0).is_err(),
             "a dangling uv.lock gave an identity"
         );
+    }
+
+    /// A file that isn't a link and can't be read is hashed by its length and modification
+    /// time, so that two contents of it don't share a key (verifier 4): a directory where a file
+    /// is read (no platform reads one as a file), and, on Windows, a file another handle holds
+    /// exclusively.
+    #[test]
+    fn an_unreadable_file_is_hashed_by_its_metadata() {
+        let dir = TestDir(
+            paths::target_dir().join(format!("testkit-unreadable-meta-{}", std::process::id())),
+        );
+        let _ = std::fs::remove_dir_all(&dir.0);
+        std::fs::create_dir_all(&dir.0).unwrap();
+        let unreadable = |file: &Path| match read_oracle_file(&dir.0, file) {
+            Ok(OracleFile::Unreadable(what)) => what,
+            other => panic!("{}: {other:?}", file.display()),
+        };
+
+        let sub = dir.0.join("d");
+        std::fs::create_dir(&sub).unwrap();
+        let set_modified = |seconds: u64| {
+            #[cfg(windows)]
+            let handle = {
+                use std::os::windows::fs::OpenOptionsExt;
+                // FILE_WRITE_ATTRIBUTES, and FILE_FLAG_BACKUP_SEMANTICS to open a directory.
+                std::fs::OpenOptions::new()
+                    .access_mode(0x100)
+                    .custom_flags(0x0200_0000)
+                    .open(&sub)
+            };
+            #[cfg(not(windows))]
+            let handle = std::fs::File::open(&sub);
+            handle
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(seconds))
+                .unwrap();
+        };
+        set_modified(1_000_000_000);
+        let first = unreadable(&sub);
+        set_modified(1_000_000_001);
+        let second = unreadable(&sub);
+        assert!(first.starts_with('\0'), "{first:?}");
+        assert_ne!(
+            first, second,
+            "a new modification time didn't change the hash"
+        );
+
+        // A file that another handle holds without sharing it: its length changes the hash.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let file = dir.0.join("locked.py");
+            let mut seen = Vec::new();
+            for text in ["a", "abc"] {
+                std::fs::write(&file, text).unwrap();
+                // The same modification time for both contents.
+                std::fs::File::options()
+                    .write(true)
+                    .open(&file)
+                    .unwrap()
+                    .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000))
+                    .unwrap();
+                let lock = std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(&file)
+                    .unwrap();
+                seen.push(unreadable(&file));
+                drop(lock);
+            }
+            assert!(seen[0].starts_with('\0'), "{seen:?}");
+            assert_ne!(seen[0], seen[1], "a new length didn't change the hash");
+        }
     }
 
     /// The directory the cache identity hashes is upstream's tests directory: it holds the
