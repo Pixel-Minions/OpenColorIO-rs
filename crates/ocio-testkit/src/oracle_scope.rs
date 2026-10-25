@@ -6,13 +6,16 @@
 //! A cached response is keyed by the request and by every oracle source that can change the
 //! command's answer, so that changing one oracle module asks the wheel again only for the
 //! commands that can reach it. A stale answer would let a wrong port pass, so whatever can't
-//! be resolved statically gets the key of the whole oracle ([`Scopes::key`]).
+//! be proved harmless statically gets the key of the whole oracle ([`Scopes::key`]).
 //!
-//! `oracle_scope.py`, run in the oracle's Python, reads the package with `ast` (it imports
-//! none of it) and reports, per top-level module: the modules it reaches statically, the
-//! commands it defines, those that run other commands by name, why it can't be resolved
-//! statically ("fallback"), and why its top level may act on every command's process
-//! ("global"). Its module docstring lists the rules. From those facts, the key of a request
+//! `oracle_scope.py`, run in the oracle's Python, reads the package with `ast`, then imports
+//! every module of it (a module that fails to import fails every process of the oracle, and
+//! the analysis with it). It reports, per top-level module: the modules it reaches
+//! statically, the commands it defines, those that run other commands by name, why its code
+//! can't be resolved statically ("fallback"), which of those reasons can act when it is
+//! imported ("import_fallback"), and why its top level may act on every command's process
+//! ("global"); and the syntax-tree pins of the functions the keys rely on. It is an
+//! allowlist, and its module docstring lists the rules. From those facts, the key of a request
 //! covers:
 //!
 //! - the command's own module and every module it reaches, transitively;
@@ -21,21 +24,23 @@
 //!   every module whose top level does more than define names (`commands.py` imports every
 //!   module of the package in every process), and every module those reach;
 //! - for `batch` and `with_files`, which run other commands named in their arguments, the
-//!   modules of every command they run, at any depth ([`nested`]);
+//!   modules of every command they run, at any depth up to [`MAX_DEPTH`] ([`nested`]);
 //! - as the whole oracle's key does: `pyproject.toml`, `uv.lock` and `.python-version`, every
 //!   file of the package that isn't a top-level module (data a module could read), upstream's
 //!   test data, the allowed variables and this machine (`environment` in `oracle.rs`), and
 //!   `oracle_scope.py` itself.
 //!
-//! The analysis is cached under the hash of what it reads. The package is read again after
-//! it ran: an analysis of sources that changed meanwhile is refused (and never kept), and a
-//! cached analysis that gives no scopes is made again.
-//!
-//! The whole oracle's key is the fallback: for a command the analysis doesn't know (or that two
-//! modules define), for a command that can reach a module with a fallback reason, for a command
-//! that runs other commands by name but isn't one of [`nested`]'s, for a `batch` or
-//! `with_files` whose arguments don't name their commands, and for every command when the
-//! analysis fails or reports modules other than the package's.
+//! The whole oracle's key is the fallback:
+//! - for a command the analysis doesn't know (or that two modules define);
+//! - for a command whose own module, or a module it reaches, has a fallback reason or an edge
+//!   to a module the package doesn't have;
+//! - for every command, when a shared module has an import fallback reason (or such an edge);
+//! - for a command that runs other commands by name, unless it is `batch` in `commands.py` or
+//!   `with_files` in `files_api.py` with the pin [`NESTED`] names (whose arguments [`nested`]
+//!   reads), and for a `batch` or `with_files` whose arguments don't name their commands;
+//! - for every command, when the analysis fails, reports modules other than the package's,
+//!   or reports pins of `commands.py`'s `command` and `_import_package_modules` other than
+//!   [`REGISTRY_PIN`] and [`LOADER_PIN`] (the code the analysis's rules were written for).
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -56,6 +61,38 @@ pub(crate) const ENVIRONMENT_FILES: [&str; 3] = ["pyproject.toml", "uv.lock", ".
 
 /// How deep [`nested`] commands are followed before the request gets the whole oracle's key.
 const MAX_DEPTH: usize = 4;
+
+/// The pin (`oracle_scope.py`'s `pin`: the SHA-256 of the function's syntax tree, without its
+/// docstring) of `commands.py`'s `command`, which registers every command by its function's
+/// name and runs nothing else. Another pin fails the analysis.
+pub(crate) const REGISTRY_PIN: (&str, &str) = (
+    "commands.py:command",
+    "d86f843013fb3dd2a36c9178a9dd870352ff091761a3e9fc73c627e15101596a",
+);
+
+/// The pin of `commands.py`'s `_import_package_modules`, the one function the analysis's rules
+/// exempt: it imports every module of the package, which the "global" reasons model.
+pub(crate) const LOADER_PIN: (&str, &str) = (
+    "commands.py:_import_package_modules",
+    "f9c28888ffe28999a665abc3782e5245453a8b261d77865428a15309261b84fe",
+);
+
+/// The commands [`nested`] follows: each with its module and the pin of the function whose
+/// arguments [`nested`] reads. Another pin (`batch` running something more than its
+/// `calls`) gives the command the whole oracle's key until [`nested`] is reviewed and the pin
+/// updated.
+pub(crate) const NESTED: [(&str, &str, &str); 2] = [
+    (
+        "batch",
+        "commands.py",
+        "4781aa74d77f910df863b6d5db567028822478f90893897261e33a23dad45c07",
+    ),
+    (
+        "with_files",
+        "files_api.py",
+        "b3fa2e798f91a600c651a2958ad5713ea0d45e7a9712bf75a3463e7b22457b26",
+    ),
+];
 
 /// The commands that run other commands named in their arguments, and those commands with
 /// their arguments: `batch`'s `calls[i].cmd` and `.args`, and `with_files`' `command` and
@@ -104,6 +141,8 @@ struct Scope {
     fallback: bool,
     /// Whether the analysis found the command may run other commands by name.
     dispatcher: bool,
+    /// Whether [`nested`] may follow the commands it runs: one of [`NESTED`], with its pin.
+    followed: bool,
 }
 
 /// The cache keys of the oracle's commands.
@@ -135,7 +174,7 @@ fn fingerprint(oracle_dir: &Path, analyzer: &str) -> Result<Fingerprint, String>
 
     let mut modules = Vec::new();
     let mut base = Xxh3::new();
-    base.update(b"oracle scope v1");
+    base.update(b"oracle scope v2");
     hash_named(&mut base, "oracle_scope.py", analyzer.as_bytes());
     for name in ENVIRONMENT_FILES {
         match std::fs::read(oracle_dir.join(name)) {
@@ -216,7 +255,7 @@ impl Scopes {
         {
             return Ok(scopes);
         }
-        let bytes = analyze(analyzer, python, &oracle_dir.join("ocio_oracle"))?;
+        let bytes = analyze(analyzer, python, oracle_dir)?;
         // The analysis read the files again: they must be the bytes hashed above, or the
         // analysis would be kept under the wrong name.
         if fingerprint(oracle_dir, analyzer)?.sources != read.sources {
@@ -238,13 +277,27 @@ impl Scopes {
         modules: Vec<(String, u128)>,
         manifest: &Value,
     ) -> Result<Scopes, String> {
-        if manifest.get("format") != Some(&Value::from(1)) {
+        if manifest.get("format") != Some(&Value::from(2)) {
             return Err(format!("analysis format {:?}", manifest.get("format")));
         }
         let reported = manifest
             .get("modules")
             .and_then(Value::as_object)
             .ok_or("analysis without modules")?;
+        let pins = manifest
+            .get("pins")
+            .and_then(Value::as_object)
+            .ok_or("analysis without pins")?;
+        let pin = |name: &str| pins.get(name).and_then(Value::as_str);
+        for (name, expected) in [REGISTRY_PIN, LOADER_PIN] {
+            if pin(name) != Some(expected) {
+                return Err(format!(
+                    "{name} changed (pin {:?}, oracle_scope.rs expects {expected}): review the \
+                     analysis's rules in oracle_scope.py, then the pin",
+                    pin(name)
+                ));
+            }
+        }
         let index: HashMap<&str, usize> = modules
             .iter()
             .enumerate()
@@ -271,18 +324,22 @@ impl Scopes {
         };
         let n = modules.len();
         let mut edges = vec![Vec::new(); n];
+        // Whether a module's code, or the code it runs when imported, can't be resolved.
         let mut unresolved = vec![false; n];
+        let mut unresolved_at_import = vec![false; n];
         let mut global = vec![false; n];
         let mut defined: HashMap<String, Vec<(usize, bool)>> = HashMap::new();
         for (name, module) in reported {
             let i = index[name.as_str()];
+            let mut missing = false;
             for edge in strings(module, "edges")? {
                 match index.get(edge.as_str()) {
                     Some(&j) => edges[i].push(j),
-                    None => unresolved[i] = true,
+                    None => missing = true,
                 }
             }
-            unresolved[i] |= !strings(module, "fallback")?.is_empty();
+            unresolved[i] = missing || !strings(module, "fallback")?.is_empty();
+            unresolved_at_import[i] = missing || !strings(module, "import_fallback")?.is_empty();
             global[i] = !strings(module, "global")?.is_empty();
             let dispatchers = strings(module, "dispatchers")?;
             for command in strings(module, "commands")? {
@@ -297,20 +354,25 @@ impl Scopes {
             .chain((0..n).filter(|&i| global[i]))
             .collect();
         let shared = closure(&edges, &roots);
+        // Every process imports the shared modules: what they run then can't be resolved.
+        let poisoned = (0..n).any(|i| shared[i] && unresolved_at_import[i]);
         let mut commands = HashMap::new();
         for (command, definitions) in defined {
             let scope = match definitions.as_slice() {
                 [(module, dispatcher)] => {
-                    let mut reach = closure(&edges, &[*module]);
-                    for (i, s) in shared.iter().enumerate() {
-                        reach[i] |= s;
-                    }
+                    let own = closure(&edges, &[*module]);
+                    let followed = NESTED.iter().any(|&(name, file, expected)| {
+                        name == command
+                            && modules[*module].0 == file
+                            && pin(&format!("{file}:{name}")) == Some(expected)
+                    });
                     Scope {
                         #[cfg(test)]
                         module: Some(*module),
-                        fallback: (0..n).any(|i| reach[i] && unresolved[i]),
-                        modules: (0..n).filter(|&i| reach[i]).collect(),
+                        fallback: poisoned || (0..n).any(|i| own[i] && unresolved[i]),
+                        modules: (0..n).filter(|&i| own[i] || shared[i]).collect(),
                         dispatcher: *dispatcher,
+                        followed,
                     }
                 }
                 // The registry refuses a name defined twice.
@@ -320,6 +382,7 @@ impl Scopes {
                     modules: Vec::new(),
                     fallback: true,
                     dispatcher: true,
+                    followed: false,
                 },
             };
             commands.insert(command, scope);
@@ -339,13 +402,11 @@ impl Scopes {
             return self.full;
         }
         let mut h = Xxh3::new();
-        h.update(b"oracle scoped key v1");
+        h.update(b"oracle scoped key v2");
         h.update(&self.base.to_le_bytes());
         for (i, (name, hash)) in self.modules.iter().enumerate() {
             if reach[i] {
-                h.update(&(name.len() as u64).to_le_bytes());
-                h.update(name.as_bytes());
-                h.update(&hash.to_le_bytes());
+                hash_named(&mut h, name, &hash.to_le_bytes());
             }
         }
         h.digest128()
@@ -365,6 +426,7 @@ impl Scopes {
         }
         match nested(cmd, args) {
             None => !scope.dispatcher,
+            Some(_) if !scope.followed => false,
             Some(Err(())) => false,
             Some(Ok(calls)) => calls
                 .into_iter()
@@ -377,7 +439,7 @@ impl Scopes {
     #[cfg(test)]
     pub(crate) fn modules_of(&self, cmd: &str) -> Option<Vec<&str>> {
         let scope = self.commands.get(cmd)?;
-        (!scope.fallback && !scope.dispatcher).then(|| {
+        (!scope.fallback && (!scope.dispatcher || scope.followed)).then(|| {
             scope
                 .modules
                 .iter()
@@ -422,14 +484,16 @@ fn closure(edges: &[Vec<usize>], from: &[usize]) -> Vec<bool> {
     reach
 }
 
-/// Runs `analyzer` on `package` with `python`, isolated as the oracle is, and returns what it
-/// prints.
-fn analyze(analyzer: &str, python: &Path, package: &Path) -> Result<Vec<u8>, String> {
+/// Runs `analyzer` on the package in `oracle_dir` with `python`, from that directory and
+/// isolated as the oracle is, and returns what it prints.
+fn analyze(analyzer: &str, python: &Path, oracle_dir: &Path) -> Result<Vec<u8>, String> {
+    let package = oracle_dir.join("ocio_oracle");
     let mut command = Command::new(python);
     crate::oracle::isolate(&mut command);
     command
+        .current_dir(oracle_dir)
         .args(["-I", "-X", "utf8", "-"])
-        .arg(package)
+        .arg(&package)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
