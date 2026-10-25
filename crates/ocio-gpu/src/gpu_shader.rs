@@ -17,6 +17,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, MAX_3D_LUT_LENGTH};
 use ocio_ops::{Exception, Result};
 
@@ -114,6 +115,10 @@ impl fmt::Debug for UniformData {
 /// Port of `GPUShaderImpl::PrivateImpl::Uniform` (GpuShader.cpp:127-186 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct Uniform {
+    /// Not upstream's: the address ([`property_address`]) of the dynamic property the
+    /// description held last when the uniform was added, the one whose values its getters
+    /// read (each op adds its property, then the uniforms over it).
+    source: Option<usize>,
     /// `m_name`.
     name: Vec<u8>,
     /// `m_data`, less its buffer offset.
@@ -125,11 +130,17 @@ pub struct Uniform {
 impl Uniform {
     /// Port of `Uniform::Uniform` (GpuShader.cpp:129-174, 178-185 @ v2.5.2): an empty name is
     /// refused.
-    fn new(name: Vec<u8>, data: UniformData, buffer_offset: usize) -> Result<Uniform> {
+    fn new(
+        name: Vec<u8>,
+        data: UniformData,
+        buffer_offset: usize,
+        source: Option<usize>,
+    ) -> Result<Uniform> {
         if name.is_empty() {
             return Err(Exception::new("The dynamic property name is invalid."));
         }
         Ok(Uniform {
+            source,
             name,
             data,
             buffer_offset,
@@ -150,6 +161,21 @@ impl Uniform {
     pub fn buffer_offset(&self) -> usize {
         self.buffer_offset
     }
+
+    /// The address ([`property_address`]) of the dynamic property whose values the getters
+    /// read: upstream's getters read it through a raw pointer, valid while something else holds
+    /// the property (the description, a caller); the port's hold it. The Python binding tells
+    /// its own uniforms' reads after that apart by it.
+    #[doc(hidden)]
+    pub fn source_property(&self) -> Option<usize> {
+        self.source
+    }
+}
+
+/// The address a dynamic property is told apart by, while it lives.
+#[doc(hidden)]
+pub fn property_address(prop: &DynamicPropertyRcPtr) -> usize {
+    std::ptr::from_ref(prop.base()) as *const u8 as usize
 }
 
 /// A texture: a 1D LUT's, in a 1D or 2D texture, or a 3D LUT's.
@@ -169,14 +195,27 @@ struct TextureData {
     depth: u32,
     /// `m_type`.
     channel: TextureType,
-    /// `m_dimensions`: 1, 2 or 3.
+    /// `m_dimensions`: 1, 2 or 3 (any 8-bit value through [`GpuShaderDesc::add_texture_raw`]).
+    ///
+    /// [`GpuShaderDesc::add_texture_raw`]: crate::gpu_shader_desc::GpuShaderDesc::add_texture_raw
     dimensions: u32,
-    /// `m_interp`.
-    interpolation: Interpolation,
+    /// `m_interp`: an `Interpolation`, an enum without a fixed type whose values are 0 to 255
+    /// ([dcl.enum]: the smallest bit-field that holds its enumerators, 0 to 4, 254 and 255).
+    interpolation: u8,
     /// `m_textureShaderBindingIndex`, before the description's binding start is added.
     binding_index: u32,
-    /// `m_values`.
-    values: Vec<f32>,
+    /// `m_values`. Never changed once the texture is added (upstream gives no way to), so a
+    /// reader may keep it ([`Texture::shared_values`]).
+    values: Arc<[f32]>,
+}
+
+/// The enumerator of an interpolation's value, `Unknown` for a value that is none.
+fn interpolation_of(value: u8) -> Interpolation {
+    use Interpolation::*;
+    [Unknown, Nearest, Linear, Tetrahedral, Cubic, Default, Best]
+        .into_iter()
+        .find(|i| *i as u8 == value)
+        .unwrap_or(Unknown)
 }
 
 /// `std::string(s)` for a `const char *`: the bytes up to the first NUL.
@@ -199,7 +238,7 @@ impl TextureData {
         d: u32,
         channel: TextureType,
         dimensions: u32,
-        interpolation: Interpolation,
+        interpolation: u8,
         binding_index: u32,
         values: &[f32],
     ) -> Result<TextureData> {
@@ -248,7 +287,7 @@ impl TextureData {
             dimensions,
             interpolation,
             binding_index,
-            values: values[..size].to_vec(),
+            values: Arc::from(&values[..size]),
         })
     }
 }
@@ -291,7 +330,11 @@ impl Texture {
     }
 
     /// 1D or 2D. Upstream's `getTexture` throws "1D LUT cannot have more than two dimensions"
-    /// for more; `addTexture` takes a [`TextureDimensions`], so that can't happen.
+    /// for more; `addTexture` takes a [`TextureDimensions`], so that can't happen. (A texture
+    /// of other dimensions, which only [`GpuShaderDesc::add_texture_raw`] adds, reads as 2D
+    /// here; [`Texture::raw_dimensions`] gives them.)
+    ///
+    /// [`GpuShaderDesc::add_texture_raw`]: crate::gpu_shader_desc::GpuShaderDesc::add_texture_raw
     pub fn dimensions(&self) -> TextureDimensions {
         match self.0.dimensions {
             1 => TextureDimensions::D1,
@@ -299,14 +342,45 @@ impl Texture {
         }
     }
 
-    /// The interpolation.
+    /// The dimensions as stored, or upstream's error for more than two.
+    ///
+    /// Port of the check of `PrivateImpl::getTexture` (GpuShader.cpp:247-253 @ v2.5.2).
+    #[doc(hidden)]
+    pub fn raw_dimensions(&self) -> Result<u32> {
+        if self.0.dimensions > 2 {
+            return Err(Exception::new(format!(
+                "1D LUT cannot have more than two dimensions: {} > 2",
+                self.0.dimensions
+            )));
+        }
+        Ok(self.0.dimensions)
+    }
+
+    /// The interpolation. (One that isn't an enumerator, which only
+    /// [`GpuShaderDesc::add_texture_raw`] adds, reads as `Unknown` here;
+    /// [`Texture::raw_interpolation`] gives it.)
+    ///
+    /// [`GpuShaderDesc::add_texture_raw`]: crate::gpu_shader_desc::GpuShaderDesc::add_texture_raw
     pub fn interpolation(&self) -> Interpolation {
+        interpolation_of(self.0.interpolation)
+    }
+
+    /// The interpolation's value as stored.
+    #[doc(hidden)]
+    pub fn raw_interpolation(&self) -> u8 {
         self.0.interpolation
     }
 
     /// The values, `width * height` texels of 1 or 3 floats.
     pub fn values(&self) -> &[f32] {
         &self.0.values
+    }
+
+    /// The values, shared: what upstream's `getTextureValues` points to, which stays as it is
+    /// while the description lives (the textures are only ever added to).
+    #[doc(hidden)]
+    pub fn shared_values(&self) -> Arc<[f32]> {
+        self.0.values.clone()
     }
 }
 
@@ -337,14 +411,32 @@ impl Texture3D {
         self.0.width
     }
 
-    /// The interpolation.
+    /// The interpolation. (One that isn't an enumerator, which only
+    /// [`GpuShaderDesc::add_3d_texture_raw`] adds, reads as `Unknown` here;
+    /// [`Texture3D::raw_interpolation`] gives it.)
+    ///
+    /// [`GpuShaderDesc::add_3d_texture_raw`]:
+    ///     crate::gpu_shader_desc::GpuShaderDesc::add_3d_texture_raw
     pub fn interpolation(&self) -> Interpolation {
+        interpolation_of(self.0.interpolation)
+    }
+
+    /// The interpolation's value as stored.
+    #[doc(hidden)]
+    pub fn raw_interpolation(&self) -> u8 {
         self.0.interpolation
     }
 
     /// The values, `edge_len^3` RGB texels.
     pub fn values(&self) -> &[f32] {
         &self.0.values
+    }
+
+    /// The values, shared: what upstream's `get3DTextureValues` points to, which stays as it is
+    /// while the description lives (the textures are only ever added to).
+    #[doc(hidden)]
+    pub fn shared_values(&self) -> Arc<[f32]> {
+        self.0.values.clone()
     }
 }
 
@@ -448,8 +540,8 @@ impl GenericImpl {
         width: u32,
         height: u32,
         channel: TextureType,
-        dimensions: TextureDimensions,
-        interpolation: Interpolation,
+        dimensions: u8,
+        interpolation: u8,
         values: &[f32],
     ) -> Result<u32> {
         if width > self.texture_max_width() {
@@ -466,7 +558,7 @@ impl GenericImpl {
             height,
             1,
             channel,
-            dimensions as u32,
+            u32::from(dimensions),
             interpolation,
             binding_index,
             values,
@@ -507,7 +599,7 @@ impl GenericImpl {
         texture_name: &[u8],
         sampler_name: &[u8],
         edgelen: u32,
-        interpolation: Interpolation,
+        interpolation: u8,
         values: &[f32],
     ) -> Result<u32> {
         if edgelen > MAX_3D_LUT_LENGTH {
@@ -585,6 +677,7 @@ impl GenericImpl {
         data: UniformData,
         alignment: usize,
         size: usize,
+        source: Option<usize>,
     ) -> Result<bool> {
         let name = c_string(name);
         if self.uniform_name_used(name) {
@@ -592,7 +685,7 @@ impl GenericImpl {
             return Ok(false);
         }
         self.uniform_buffer_size = align_offset(self.uniform_buffer_size, alignment);
-        let uniform = Uniform::new(name.to_vec(), data, self.uniform_buffer_size)?;
+        let uniform = Uniform::new(name.to_vec(), data, self.uniform_buffer_size, source)?;
         self.uniforms.push(uniform);
         self.uniform_buffer_size += size;
         Ok(true)

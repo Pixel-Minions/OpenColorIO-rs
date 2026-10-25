@@ -11,17 +11,13 @@
 //! object; its later changes seen by `repr` and the processors), the transforms a pipeline
 //! holds (its own copies, changed in place through its getters), the manager's slider (the
 //! same object), the encoding iterator's `__next__` (I-396), and the processors made (their
-//! cache IDs; until the port binds `Processor.getCacheID`, chunk 6.3h, the port's interpreter
-//! gets a stand-in reading the library's processor through the embedding API).
+//! cache IDs).
 #![cfg(feature = "python")]
 
 mod common;
 
-use std::sync::Once;
-
 use common::script::{Expect, Script, b, by, compare, d, f, i, l, n, none, r, ra, s, t};
 use pyo3::prelude::*;
-use pyo3::types::PyCFunction;
 use serde_json::Value;
 
 /// upstream's tests/python/UnitTestUtils.py `SAMPLE_CONFIG`, the config of their tests.
@@ -45,31 +41,9 @@ fn config(sc: &mut Script, tag: &str) -> usize {
     c
 }
 
-static STAND_IN: Once = Once::new();
-
-/// Starts the interpreter, with `Processor.getCacheID` a stand-in while the module lacks it.
+/// Starts the interpreter.
 fn start() {
     common::start_python();
-    STAND_IN.call_once(|| {
-        Python::attach(|py| {
-            let ocio = py.import("PyOpenColorIO").unwrap();
-            let processor = ocio.getattr("Processor").unwrap();
-            if !processor.hasattr("getCacheID").unwrap() {
-                let f = PyCFunction::new_closure(py, Some(c"getCacheID"), None, |args, _| {
-                    let p = ocio_py::embed::processor_from_python(&args.get_item(0)?)?;
-                    p.cache_id()
-                        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
-                })
-                .unwrap();
-                let method = py
-                    .eval(c"lambda f: lambda self: f(self)", None, None)
-                    .unwrap()
-                    .call1((f,))
-                    .unwrap();
-                processor.setattr("getCacheID", method).unwrap();
-            }
-        });
-    });
 }
 
 fn run(scripts: &[Script]) {

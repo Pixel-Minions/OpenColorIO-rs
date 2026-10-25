@@ -91,7 +91,7 @@ macro_rules! this_cpu {
 
 /// The library's `DynamicPropertyType` of the C++ value `v`, if it is an enumerator. No
 /// renderer has a property of another value (each compares the types).
-fn dynamic_property_type(v: i64) -> Option<DynamicPropertyType> {
+pub(crate) fn dynamic_property_type(v: i64) -> Option<DynamicPropertyType> {
     use DynamicPropertyType::*;
     [
         Exposure,

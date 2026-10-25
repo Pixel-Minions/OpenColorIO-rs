@@ -16,7 +16,7 @@ use crate::py_utils::{check_index, new_iterator};
 use crate::shared::{Shared, construct};
 use crate::{method_def, q, this_iter, this_shared};
 
-const PROCESSOR_METADATA: &str = q!("ProcessorMetadata");
+pub(crate) const PROCESSOR_METADATA: &str = q!("ProcessorMetadata");
 const FILE_ITERATOR: &str = q!("ProcessorMetadata.FileIterator");
 const LOOK_ITERATOR: &str = q!("ProcessorMetadata.LookIterator");
 const SELF: Param = Param::new("self", PROCESSOR_METADATA);

@@ -766,6 +766,18 @@ pub(crate) fn def_readwrite(
     cls.setattr(name, prop)
 }
 
+/// `cls.def_readonly(name, ...)`: a property whose getter pybind11 makes as a method of the
+/// class, without a name, and no setter (`def_property_readonly`, `fset` None).
+pub(crate) fn def_readonly(
+    cls: &Bound<'_, PyType>,
+    name: &str,
+    get: &'static Function,
+) -> PyResult<()> {
+    let py = cls.py();
+    let prop = property(pybind11::method(py, get)?, py.None().into_bound(py))?;
+    cls.setattr(name, prop)
+}
+
 /// `cls.def_property(name, getter, setter)` of two lambdas: a property over two functions
 /// pybind11 makes before it knows their class (no scope: `__module__` None, not methods), each
 /// without a name.
@@ -1215,6 +1227,17 @@ pub(crate) fn outside_enumerators(qualified: &str, v: i64) -> PyErr {
     pyo3::exceptions::PyValueError::new_err(format!(
         "{qualified}({v}): the wheel stores an enum value outside its enumerators, which the \
          port's library can't hold (docs/improvements.md, U-112)"
+    ))
+}
+
+/// The port's error for a value inside an enum's values ([dcl.enum]: an enum without a fixed
+/// type holds the values of the smallest bit-field that holds its enumerators) that isn't an
+/// enumerator, which the wheel stores and the port's library enum can't hold: `GpuLanguage` 10
+/// to 15, `BitDepth` 9 to 15 (docs/deviations.md, D-15).
+pub(crate) fn not_an_enumerator(qualified: &str, v: i64) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(format!(
+        "{qualified}({v}): a value of the enum that is none of its enumerators, which the wheel \
+         stores and the port's library can't hold (docs/deviations.md, D-15)"
     ))
 }
 

@@ -2150,7 +2150,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p6-buffers` (6.5a, 6.5b: `crates/ocio-py/src/py_image_desc.rs`,
   `read_items`; `transforms/py_lut1d_transform.rs`, `py_lut3d_transform.rs`, `SET_DATA`);
   `image_desc_oracle.rs`, `lut_transforms_oracle.rs`, against the wheel. Values that this
-  reads past the buffer's items are U-148.
+  reads past the buffer's items are U-148. Also `GpuShaderDesc.addTexture` and
+  `add3DTexture`, which hand the library the buffer's data pointer, from which it copies the
+  texture's floats one after another (PyGpuShaderDesc.cpp:116-183 @ v2.5.2), in
+  `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_shader_desc.rs`, `add_with_values`);
+  `gpu_shader_desc_oracle.rs`, a view of every other value, against the wheel.
 
 ### I-366. A curve's size beyond memory fails with the C++ runtime's texts
 
@@ -5351,6 +5355,34 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`a_display_view_direction_outside_the_enumerators_is_the_ports_error`);
   and the direction of `MixingColorSpaceManager.getProcessor`, with which the wheel makes a
   processor (`a_mixing_direction_outside_the_enumerators_is_the_ports_error`).
+  Also the GPU shader description's language outside the enum's values (`GpuLanguage` has
+  no fixed type and its enumerators are 0 to 9, so its values are 0 to 15, [dcl.enum]):
+  `GpuShaderCreator.setLanguage(OCIO.GpuLanguage(99))` and
+  `GpuShaderDesc.CreateShaderDesc(language=...)`, which the wheel stores (its `getCacheID`
+  then kills the wheel's process, probed on Windows 2026-10-25); and an interpolation outside
+  its enum's values (`Interpolation`, 0 to 255: `OCIO.Interpolation(256)`) given to
+  `addTexture` or `add3DTexture`, which the wheel stores; the port raises after the binding's
+  checks of the channel and the buffer, before the library's own checks; in `p6-processors`
+  (6.3h, `crates/ocio-py/src/py_gpu_shader_creator.rs`, `gpu_language`;
+  `py_gpu_shader_desc.rs`, `interpolation`); `gpu_shader_desc_oracle.rs`,
+  `an_enum_value_outside_the_enumerators_is_the_ports_error`. Inside the enums' values the
+  behaviour is defined: a texture's dimensions (`TextureDimensions : uint8_t`, 0 to 255, the
+  only values pybind11 takes) and interpolation (0 to 255) that aren't enumerators are stored
+  and read back as the wheel's (`???` values; more than two dimensions, the library's error
+  "1D LUT cannot have more than two dimensions: 3 > 2" when `getTextures` gives the texture,
+  GpuShader.cpp:247-253), matched in `p6-processors` (6.3h, verifier 1: the library's
+  `add_texture_raw`, `add_3d_texture_raw`, `Texture::raw_dimensions`); `gpu_shader_desc_oracle.rs`,
+  `texture_values_inside_the_enums_are_the_wheels`. A language from 10 to 15, inside
+  `GpuLanguage`'s values, is D-15 (docs/deviations.md), not this entry.
+  Also the bit depths of `Processor.getOptimizedProcessor` and `getOptimizedCPUProcessor`
+  outside the enum's values (`BitDepth`, enumerators 0 to 8, values 0 to 15: `OCIO.BitDepth(42)`),
+  which the wheel hands the library: its cache key writes the number, and the processor is
+  made unless a bit depth's value is needed (`OptimizeSeparablePrefix`, a CPU processor's
+  bit-depth ops), where it raises "Bit depth is not supported: unknown." (probed on Windows,
+  2026-10-25); the port raises before the library runs, in both cases; in `p6-processors`
+  (6.3h, `crates/ocio-py/src/py_processor.rs`, `bit_depth`); `processor_oracle.rs`,
+  `a_bit_depth_outside_the_enumerators_is_the_ports_error`. A bit depth from 9 to 15, inside
+  the enum's values, is D-15 (docs/deviations.md), not this entry.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -5692,7 +5724,11 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   to the binding, so the port refuses every read outside the span, those the wheel answers
   included (sound, not the wheel's answer). An image layout that reaches outside its buffer,
   which the wheel's binding doesn't check (only the entry count), is refused when the
-  description is made (D-2).
+  description is made (D-2). Also `GpuShaderDesc.addTexture` and `add3DTexture` (I-328), in
+  `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_shader_desc.rs`, `add_with_values`):
+  the library's own checks (the width limit, the names, a size of 0) come first, as the
+  wheel's do before it reads the values; `gpu_shader_desc_oracle.rs`,
+  `textures_past_the_buffer_are_the_ports_error`.
 
 ### U-149. The alpha plane of a planar image without one
 
@@ -6097,3 +6133,81 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `a_lut_loader_that_changes_the_config_of_the_processor_is_u184` (the four changes that
   lock, through the four ways to make a processor: the wheel's crash report on Windows, the
   port's errors) and `a_lut_loader_that_changes_the_config_without_the_cache_lock_is_as_the_wheels`.
+
+### U-194. A texture's values copied past its floats
+
+- **Upstream:** `GpuShaderDesc.Texture.getValues` copies `m_height * m_width * numChannels`
+  floats from the texture's values (PyGpuShaderDesc.cpp:259-285 @ v2.5.2): the first product
+  is in `unsigned`, which wraps, and the channels multiply it in `py::ssize_t`; the texture
+  holds `width * height * depth * channels` floats, all in `unsigned`
+  (`Texture::Texture`, GpuShader.cpp:67-108). For an RGB texture of `width * height` from
+  2^32 / 3 up to 2^32, the copy reads past the texture's floats. It takes a buffer of more than
+  2^32 floats (16 GiB) to make such a texture.
+- **Who notices:** no one in practice.
+- **A fix:** compute the count in `py::ssize_t` from the start, or ask the texture for it.
+- **Status:** the port raises RuntimeError "GpuShaderDesc.Texture.getValues:
+  height*width*channels exceeds 32 bits, and the wheel copies more floats than the texture
+  holds (docs/improvements.md, U-194)" where the count exceeds the texture's floats, in
+  `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_shader_desc.rs`, `TX_GET_VALUES`); not
+  tested (the buffer it takes).
+
+### U-195. A GPU processor's shader information extracted into `None`
+
+- **Upstream:** `GPUProcessor.extractGpuShaderInfo` takes a `GpuShaderDescRcPtr &`, and
+  pybind11's holder caster passes `None` (with conversions, the only overload's call) as an
+  empty pointer (PyGPUProcessor.cpp:20-24 @ v2.5.2), which `GPUProcessor::Impl::
+  extractGpuShaderInfo` calls through (GPUProcessor.cpp): the wheel's process dies.
+- **Who notices:** Python code that passes `None` as the description.
+- **A fix:** refuse `None` (`"shaderDesc"_a.none(false)`).
+- **Status:** the port raises ValueError "GPUProcessor.extractGpuShaderInfo(shaderDesc): None,
+  a null GpuShaderDesc, through which the wheel calls (docs/improvements.md, U-195)", in
+  `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_processor.rs`); `processor_oracle.rs`,
+  `extracting_into_none_is_the_ports_error`.
+
+### U-196. A shader's uniform read after its dynamic property is gone
+
+- **Upstream:** the getters of a uniform over a dynamic property are `std::bind`s of the
+  property's member functions to a raw pointer to the description's own copy of the property
+  (`AddUniform`, ExposureContrastOpGPU.cpp:24-29, 52-60; `GradingPrimaryOpGPU.cpp:104-135`, and
+  the other grading ops' GPU code @ v2.5.2), the grading ones also to references into its
+  value; pybind11's `GpuShaderDesc.UniformData` holds copies of those `std::function`s. The
+  property lives while the description (`m_dynamicProperties`) or a `DynamicProperty` object of
+  it holds it, and `clone()` copies no property (`GpuShaderCreator::Impl::operator=`,
+  GpuShaderDesc.cpp:64-91). Once the description is gone and no `DynamicProperty` object of the
+  property lives, `getDouble`, `getBool`, `getFloat3`, `getVectorFloat` and `getVectorInt` of a
+  `UniformData` (or of its copy) read freed memory: on Windows a later description's property,
+  or garbage (probed 2026-10-25).
+- **Who notices:** Python code that keeps a uniform's data after its description is gone.
+- **A fix:** bind the getters to the property's `shared_ptr`.
+- **Status:** the port raises RuntimeError "GpuShaderDesc.UniformData.getDouble(): the dynamic
+  property it reads is gone with its GpuShaderDesc, memory the wheel reads after it is freed
+  (docs/improvements.md, U-196)" (each getter its own name), while the description lives (or its
+  iterators, textures, which hold it) or a `DynamicProperty` object of the property does, the
+  reads are the wheel's; in `p6-processors` (6.3h, verifier 1:
+  `crates/ocio-py/src/py_gpu_shader_desc.rs`, `UniformValue::getters`; the property a uniform
+  reads, `Uniform::source_property` of `crates/ocio-gpu/src/gpu_shader.rs`; Python's objects of
+  a property, `held_by_python` of `crates/ocio-py/src/py_dynamic_property.rs`);
+  `gpu_shader_desc_oracle.rs`, `a_uniform_whose_property_is_gone_is_u196` (the wheel's reads
+  with every object alive, its clone's empty properties; the port's after the description is
+  gone, kept by a `DynamicProperty` object, by its uniform iterator, by a clone, by nothing,
+  by an object since deleted; of an exposure and a contrast, only the contrast's object kept).
+
+### U-201. `None` for a baker's config or format name
+
+- **Upstream:** `Baker.setConfig` and the `Baker` constructor take a `ConstConfigRcPtr` through
+  pybind11's holder caster, which passes `None` as a null pointer, and `Baker::setConfig` copies
+  it unchecked (`config->createEditableCopy()`, Baker.cpp:93-96 @ v2.5.2; the constructor's
+  factory calls it first, PyBaker.cpp:43-64); `Baker.setFormat` passes `None` as a null
+  `const char *` to `Baker::setFormat`, which makes the `std::string` of
+  `FormatRegistry::getFileFormatByName` of it (Baker.cpp:118-139). The Windows wheel's process
+  dies for each (probed 2026-10-25); libstdc++ may throw `std::logic_error` for the null string
+  instead.
+- **Who notices:** Python code that passes `None` there.
+- **A fix:** check both pointers, as `setDisplayView` checks its own ("Both display and view
+  must be set.").
+- **Status:** the port raises ValueError "Baker.setConfig(config): None, a null pointer the
+  wheel dereferences (its process dies; docs/improvements.md, U-201)" (and
+  "Baker(config)", "Baker.setFormat(formatName)"), the baker unchanged; in `p6-baker` (6.3i,
+  `crates/ocio-py/src/py_baker.rs`, `null_argument`); `baker_oracle.rs`,
+  `where_the_wheels_process_dies_the_port_raises` (the wheel's process dies, its steps before
+  run; the port's error).

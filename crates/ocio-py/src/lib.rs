@@ -29,6 +29,8 @@ pub mod embed;
 #[cfg(feature = "python")]
 pub mod enums;
 #[cfg(feature = "python")]
+pub(crate) mod py_baker;
+#[cfg(feature = "python")]
 pub(crate) mod py_builtin_config_registry;
 #[cfg(feature = "python")]
 pub(crate) mod py_builtin_transform_registry;
@@ -51,7 +53,11 @@ pub(crate) mod py_file_rules;
 #[cfg(feature = "python")]
 pub(crate) mod py_format_metadata;
 #[cfg(feature = "python")]
+pub(crate) mod py_gpu_processor;
+#[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
+#[cfg(feature = "python")]
+pub(crate) mod py_gpu_shader_desc;
 #[cfg(feature = "python")]
 pub(crate) mod py_grading_data;
 #[cfg(feature = "python")]

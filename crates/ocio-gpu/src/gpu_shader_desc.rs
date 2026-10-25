@@ -11,12 +11,13 @@
 //! `const char *`, so a name or a piece of code ends at its first NUL byte. The port takes
 //! bytes, and ends them there too.
 
+use std::fmt;
 use std::str::Utf8Error;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
 use ocio_ops::hash_utils::cache_id_hash;
-use ocio_ops::logging::{is_debug_logging_enabled, log_debug};
+use ocio_ops::logging::{is_debug_logging_enabled, log_debug, log_warning};
 use ocio_ops::open_color_types::DynamicPropertyType;
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::utils::string_utils::replace_in_place;
@@ -24,10 +25,35 @@ use ocio_ops::{Exception, Result};
 
 use crate::gpu_shader::{
     GenericImpl, Getter, Texture, Texture3D, TextureDimensions, TextureType, Uniform, UniformData,
-    c_string, uniform_layout,
+    c_string, property_address, uniform_layout,
 };
 use crate::gpu_shader_class_wrapper::GpuShaderClassWrapper;
 use crate::open_color_types::{GpuLanguage, gpu_language_to_string};
+
+/// What a description's own log messages go through, when set: it is given the description and
+/// a function that logs the message, which it calls once.
+///
+/// Upstream's logging function runs while the extraction writes into the description, and may
+/// read it (a Python logging function that reads the description it is called during). An
+/// embedding that holds the description behind its own lock sets a hook that publishes the
+/// description, as it is at that moment, around the call (the Python binding's
+/// `GPUProcessor.extractGpuShaderInfo` and `GpuShaderCreator.finalize`).
+#[doc(hidden)]
+pub type LogHook = Arc<dyn Fn(&mut GpuShaderDesc, &mut dyn FnMut()) + Send + Sync>;
+
+/// The description's [`LogHook`], if any.
+#[derive(Default)]
+struct LogHookSlot(Option<LogHook>);
+
+impl fmt::Debug for LogHookSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "Some(LogHook)"
+        } else {
+            "None"
+        })
+    }
+}
 
 /// A name as the setters keep it: a C string with every `__` made `_` ("Remove potentially
 /// problematic double underscores from GLSL resource names").
@@ -89,6 +115,8 @@ pub struct GpuShaderDesc {
     texture_binding_start: u32,
     /// `GenericGpuShaderDesc::m_implGeneric`: the uniforms, textures and texture limits.
     generic: GenericImpl,
+    /// Not upstream's: what its log messages go through ([`LogHook`]).
+    log_hook: LogHookSlot,
 }
 
 impl Default for GpuShaderDesc {
@@ -120,6 +148,7 @@ impl Default for GpuShaderDesc {
             descriptor_set_index: 0,
             texture_binding_start: 1,
             generic: GenericImpl::default(),
+            log_hook: LogHookSlot::default(),
         }
     }
 }
@@ -137,6 +166,38 @@ impl GpuShaderDesc {
         self.cache_id
             .get_mut()
             .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Sets the hook the description's log messages go through, and returns the one it had.
+    /// [`GpuShaderDesc::clone_desc`] doesn't copy it.
+    #[doc(hidden)]
+    pub fn replace_log_hook(&mut self, hook: Option<LogHook>) -> Option<LogHook> {
+        std::mem::replace(&mut self.log_hook.0, hook)
+    }
+
+    /// Runs `log`, which logs a message, through the hook if one is set.
+    fn log_through_hook(&mut self, log: impl FnOnce()) {
+        match self.log_hook.0.clone() {
+            Some(hook) => {
+                let mut log = Some(log);
+                hook(self, &mut || {
+                    if let Some(log) = log.take() {
+                        log();
+                    }
+                });
+            }
+            None => log(),
+        }
+    }
+
+    /// `LogWarning(text)` while writing into the description: through its hook, if set.
+    pub(crate) fn log_warning(&mut self, text: impl AsRef<[u8]>) {
+        self.log_through_hook(|| log_warning(text));
+    }
+
+    /// `LogDebug(text)` while writing into the description: through its hook, if set.
+    fn log_debug(&mut self, text: impl AsRef<[u8]>) {
+        self.log_through_hook(|| log_debug(text));
     }
 
     /// A copy as upstream's `clone()` makes it: a new description whose creator state is
@@ -527,7 +588,7 @@ impl GpuShaderDesc {
             let mut oss = b"\n**\nGPU Fragment Shader program\n".to_vec();
             oss.extend_from_slice(&self.shader_code);
             oss.push(b'\n');
-            log_debug(oss);
+            self.log_debug(oss);
         }
         Ok(())
     }
@@ -595,7 +656,9 @@ impl GpuShaderDesc {
     /// Port of the five `GenericGpuShaderDesc::addUniform` (GpuShader.cpp:512-541 @ v2.5.2).
     fn add_uniform(&mut self, name: &[u8], data: UniformData, max_size: u32) -> Result<bool> {
         let (alignment, size) = uniform_layout(&data, max_size);
-        self.generic.add_uniform(name, data, alignment, size)
+        let source = self.dynamic_properties.last().map(property_address);
+        self.generic
+            .add_uniform(name, data, alignment, size, source)
     }
 
     /// A double uniform (a float in the buffer). See `add_uniform`.
@@ -678,6 +741,34 @@ impl GpuShaderDesc {
         interpolation: Interpolation,
         values: &[f32],
     ) -> Result<u32> {
+        self.add_texture_raw(
+            texture_name,
+            sampler_name,
+            width,
+            height,
+            channel,
+            dimensions as u8,
+            interpolation as u8,
+            values,
+        )
+    }
+
+    /// [`GpuShaderDesc::add_texture`] of dimensions and an interpolation as upstream's enums hold
+    /// them: any 8-bit value (`TextureDimensions : uint8_t`; `Interpolation`, whose values are 0
+    /// to 255), which a caller such as the Python binding can give.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_texture_raw(
+        &mut self,
+        texture_name: impl AsRef<[u8]>,
+        sampler_name: impl AsRef<[u8]>,
+        width: u32,
+        height: u32,
+        channel: TextureType,
+        dimensions: u8,
+        interpolation: u8,
+        values: &[f32],
+    ) -> Result<u32> {
         let index = self.generic.add_texture(
             texture_name.as_ref(),
             sampler_name.as_ref(),
@@ -727,6 +818,26 @@ impl GpuShaderDesc {
         sampler_name: impl AsRef<[u8]>,
         edgelen: u32,
         interpolation: Interpolation,
+        values: &[f32],
+    ) -> Result<u32> {
+        self.add_3d_texture_raw(
+            texture_name,
+            sampler_name,
+            edgelen,
+            interpolation as u8,
+            values,
+        )
+    }
+
+    /// [`GpuShaderDesc::add_3d_texture`] of an interpolation as upstream's enum holds it: any
+    /// 8-bit value (see [`GpuShaderDesc::add_texture_raw`]).
+    #[doc(hidden)]
+    pub fn add_3d_texture_raw(
+        &mut self,
+        texture_name: impl AsRef<[u8]>,
+        sampler_name: impl AsRef<[u8]>,
+        edgelen: u32,
+        interpolation: u8,
         values: &[f32],
     ) -> Result<u32> {
         let index = self.generic.add_3d_texture(

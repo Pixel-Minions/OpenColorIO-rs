@@ -18,94 +18,19 @@
 //!   destination that partly overlap, and planes some of which share memory (U-150).
 //!
 //! The processors come from `Config.CreateRaw().getProcessor(t)` and its
-//! `getDefaultCPUProcessor()` or `getOptimizedCPUProcessor(in, out, flags)`. Until the port binds
-//! those (cards p6-config and p6-processors), this test's interpreter gets stand-ins for them,
-//! which make the same processor with the Rust API and hand it to Python through the embedding
-//! API (`ocio_py::embed::cpu_processor_to_python`); the transform comes from the script, as the
-//! wheel's. The steps that make the config and the processor aren't compared, only the CPU
-//! processor they give.
+//! `getDefaultCPUProcessor()` or `getOptimizedCPUProcessor(in, out, flags)`, each step compared
+//! with the wheel's.
 #![cfg(feature = "python")]
 
 mod common;
 
-use std::ffi::c_ulong;
-use std::sync::Once;
-
 use common::script::{Expect, Script, compare, f, fl, i, l, n, none, r, ra, s};
-use ocio_ops::open_color_types::{BitDepth, OptimizationFlags};
 use pyo3::prelude::*;
-use pyo3::types::{PyCFunction, PyDict, PyTuple};
 use serde_json::{Value, json};
 
-/// The Rust side of the stand-in: `_make(transform, inBitDepth, outBitDepth, flags)`, the CPU
-/// processor `Config::create_raw()` makes of `transform`, as a Python `CPUProcessor`.
-fn make_cpu(args: &Bound<'_, PyTuple>) -> PyResult<Py<PyAny>> {
-    let py = args.py();
-    let error = |e: ocio::Exception| pyo3::exceptions::PyRuntimeError::new_err(format!("{e:?}"));
-    let transform = ocio_py::embed::transform_from_python(&args.get_item(0)?)?;
-    let depth = |k: usize| -> PyResult<BitDepth> {
-        let v: i64 = args.get_item(k)?.extract()?;
-        use BitDepth::*;
-        [
-            Unknown, Uint8, Uint10, Uint12, Uint14, Uint16, Uint32, F16, F32,
-        ]
-        .into_iter()
-        .find(|b| *b as i64 == v)
-        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("a bit depth"))
-    };
-    let flags: c_ulong = args.get_item(3)?.extract()?;
-    let config = ocio::Config::create_raw().map_err(error)?;
-    let processor = config.processor(&transform).map_err(error)?;
-    let cpu = processor
-        .optimized_cpu_processor_with_bit_depths(depth(1)?, depth(2)?, OptimizationFlags(flags))
-        .map_err(error)?;
-    ocio_py::embed::cpu_processor_to_python(py, &cpu)
-}
-
-/// The stand-ins' Python side, installed while the module lacks
-/// `Processor.getDefaultCPUProcessor`.
-const STAND_IN: &str = r#"
-import PyOpenColorIO as OCIO
-
-class _Processor:
-    def __init__(self, transform):
-        self.transform = transform
-
-    def getDefaultCPUProcessor(self):
-        return _make(self.transform, int(OCIO.BIT_DEPTH_F32), int(OCIO.BIT_DEPTH_F32),
-                     int(OCIO.OPTIMIZATION_DEFAULT))
-
-    def getOptimizedCPUProcessor(self, inBitDepth, outBitDepth, oFlags):
-        return _make(self.transform, int(inBitDepth), int(outBitDepth), int(oFlags))
-
-class Config:
-    @staticmethod
-    def CreateRaw():
-        return Config()
-
-    def getProcessor(self, transform):
-        return _Processor(transform)
-
-if not hasattr(getattr(OCIO, "Processor", None), "getDefaultCPUProcessor"):
-    OCIO.Config = Config
-"#;
-
-static STAND_IN_ONCE: Once = Once::new();
-
-/// Starts the interpreter with the stand-ins, if the module needs them.
+/// Starts the interpreter.
 fn start() {
     common::start_python();
-    STAND_IN_ONCE.call_once(|| {
-        Python::attach(|py| {
-            let make = PyCFunction::new_closure(py, Some(c"_make"), None, |args, _| make_cpu(args))
-                .unwrap();
-            let globals = PyDict::new(py);
-            globals.set_item("_make", make).unwrap();
-            let code = std::ffi::CString::new(STAND_IN).unwrap();
-            py.run(&code, Some(&globals), None)
-                .unwrap_or_else(|e| panic!("{e}"));
-        });
-    });
 }
 
 /// A NumPy array of `dtype` (NumPy's `str`, `<f4`), `shape` and `bytes` (C order).
@@ -156,9 +81,7 @@ const U8S: [u8; 12] = [0, 1, 2, 3, 63, 64, 127, 128, 129, 200, 254, 255];
 /// `getOptimizedCPUProcessor(in, out, OPTIMIZATION_DEFAULT)` of the bit depths named.
 fn cpu(sc: &mut Script, t: usize, depths: Option<(&str, &str)>) -> usize {
     let config = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
-    sc.uncompare(config);
     let processor = sc.call(ra(config, "getProcessor"), vec![r(t)]);
-    sc.uncompare(processor);
     match depths {
         None => sc.call(ra(processor, "getDefaultCPUProcessor"), vec![]),
         Some((i, o)) => sc.call(

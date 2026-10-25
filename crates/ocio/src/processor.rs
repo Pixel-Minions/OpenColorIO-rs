@@ -332,6 +332,14 @@ impl Processor {
         &self.metadata
     }
 
+    /// The metadata as the processors made from this one share it (`m_metadata`, a
+    /// `ProcessorMetadataRcPtr`): the Python binding keeps one object per shared metadata, for
+    /// as long as the library's lives.
+    #[doc(hidden)]
+    pub fn processor_metadata_rc(&self) -> &Arc<ProcessorMetadata> {
+        &self.metadata
+    }
+
     /// The metadata of the processor's ops (the first group's).
     ///
     /// Port of `Processor::Impl::getFormatMetadata` (Processor.cpp:280-283 @ v2.5.2).

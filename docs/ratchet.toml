@@ -1,4 +1,4 @@
 # Ported upstream tests may only go up (PLAN.md §7). `cargo xtask land` raises this with `cargo xtask ratchet --update`.
 ported_cpu = 1158
 ported_gpu = 0
-passing_python = 318
+passing_python = 375

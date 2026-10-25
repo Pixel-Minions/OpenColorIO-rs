@@ -13,8 +13,8 @@
 //!   bases and MRO, and the members a declaration gives them: `_pybind11_conduit_v1_`, and
 //!   `__init__`, the slot wrapper that raises "No constructor defined!" (the wheel's, for a
 //!   class that never gets a constructor; until its card binds one, for the others), and then
-//!   the members bound so far (GpuShaderCreator's enums and their values), as the wheel's and
-//!   in its order.
+//!   the members bound so far (none now: the last such class, GpuShaderCreator, is complete),
+//!   as the wheel's and in its order.
 
 #![cfg(feature = "python")]
 
@@ -26,7 +26,8 @@ use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
 /// for entry (transforms_oracle.rs checks them in detail).
-const COMPLETE: [&str; 54] = [
+const COMPLETE: [&str; 59] = [
+    "Baker",
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -56,6 +57,10 @@ const COMPLETE: [&str; 54] = [
     "PackedImageDesc",
     "PlanarImageDesc",
     "CPUProcessor",
+    "GpuShaderCreator",
+    "GpuShaderDesc",
+    "Processor",
+    "GPUProcessor",
     "Lut1DTransform",
     "Lut3DTransform",
     "ColorSpaceTransform",
@@ -211,8 +216,8 @@ fn the_module_members_report_as_the_wheels() {
             our["members"].as_array().unwrap(),
             their["members"].as_array().unwrap(),
         );
-        // The declaration's members first, then those bound so far (GpuShaderCreator's
-        // enums and their values), each the wheel's, in the wheel's order.
+        // The declaration's members first, then those bound so far, each the wheel's, in the
+        // wheel's order.
         assert!(our_members.len() >= 2, "{n}");
         assert_eq!(entry_name(&our_members[0]), "__init__", "{n}");
         assert_eq!(entry_name(&their_members[0]), "__init__", "{n}");
@@ -237,8 +242,8 @@ fn the_module_members_report_as_the_wheels() {
     // The constants, the exported values and the functions of bindPyTypes and
     // PyOpenColorIO.cpp.
     assert!(others >= 34 + 31 + 32, "{others}");
-    // GpuShaderCreator's enums and their values.
-    assert_eq!(bound, 6);
+    // No declared class is bound in part: each card binds its classes completely.
+    assert_eq!(bound, 0);
 }
 
 /// A class without a constructor refuses to be constructed, as the wheel's does.
