@@ -195,14 +195,26 @@ struct TextureData {
     depth: u32,
     /// `m_type`.
     channel: TextureType,
-    /// `m_dimensions`: 1, 2 or 3.
+    /// `m_dimensions`: 1, 2 or 3 (any 8-bit value through [`GpuShaderDesc::add_texture_raw`]).
+    ///
+    /// [`GpuShaderDesc::add_texture_raw`]: crate::gpu_shader_desc::GpuShaderDesc::add_texture_raw
     dimensions: u32,
-    /// `m_interp`.
-    interpolation: Interpolation,
+    /// `m_interp`: an `Interpolation`, an enum without a fixed type whose values are 0 to 255
+    /// ([dcl.enum]: the smallest bit-field that holds its enumerators, 0 to 4, 254 and 255).
+    interpolation: u8,
     /// `m_textureShaderBindingIndex`, before the description's binding start is added.
     binding_index: u32,
     /// `m_values`.
     values: Vec<f32>,
+}
+
+/// The enumerator of an interpolation's value, `Unknown` for a value that is none.
+fn interpolation_of(value: u8) -> Interpolation {
+    use Interpolation::*;
+    [Unknown, Nearest, Linear, Tetrahedral, Cubic, Default, Best]
+        .into_iter()
+        .find(|i| *i as u8 == value)
+        .unwrap_or(Unknown)
 }
 
 /// `std::string(s)` for a `const char *`: the bytes up to the first NUL.
@@ -225,7 +237,7 @@ impl TextureData {
         d: u32,
         channel: TextureType,
         dimensions: u32,
-        interpolation: Interpolation,
+        interpolation: u8,
         binding_index: u32,
         values: &[f32],
     ) -> Result<TextureData> {
@@ -317,7 +329,11 @@ impl Texture {
     }
 
     /// 1D or 2D. Upstream's `getTexture` throws "1D LUT cannot have more than two dimensions"
-    /// for more; `addTexture` takes a [`TextureDimensions`], so that can't happen.
+    /// for more; `addTexture` takes a [`TextureDimensions`], so that can't happen. (A texture
+    /// of other dimensions, which only [`GpuShaderDesc::add_texture_raw`] adds, reads as 2D
+    /// here; [`Texture::raw_dimensions`] gives them.)
+    ///
+    /// [`GpuShaderDesc::add_texture_raw`]: crate::gpu_shader_desc::GpuShaderDesc::add_texture_raw
     pub fn dimensions(&self) -> TextureDimensions {
         match self.0.dimensions {
             1 => TextureDimensions::D1,
@@ -325,8 +341,32 @@ impl Texture {
         }
     }
 
-    /// The interpolation.
+    /// The dimensions as stored, or upstream's error for more than two.
+    ///
+    /// Port of the check of `PrivateImpl::getTexture` (GpuShader.cpp:247-253 @ v2.5.2).
+    #[doc(hidden)]
+    pub fn raw_dimensions(&self) -> Result<u32> {
+        if self.0.dimensions > 2 {
+            return Err(Exception::new(format!(
+                "1D LUT cannot have more than two dimensions: {} > 2",
+                self.0.dimensions
+            )));
+        }
+        Ok(self.0.dimensions)
+    }
+
+    /// The interpolation. (One that isn't an enumerator, which only
+    /// [`GpuShaderDesc::add_texture_raw`] adds, reads as `Unknown` here;
+    /// [`Texture::raw_interpolation`] gives it.)
+    ///
+    /// [`GpuShaderDesc::add_texture_raw`]: crate::gpu_shader_desc::GpuShaderDesc::add_texture_raw
     pub fn interpolation(&self) -> Interpolation {
+        interpolation_of(self.0.interpolation)
+    }
+
+    /// The interpolation's value as stored.
+    #[doc(hidden)]
+    pub fn raw_interpolation(&self) -> u8 {
         self.0.interpolation
     }
 
@@ -363,8 +403,19 @@ impl Texture3D {
         self.0.width
     }
 
-    /// The interpolation.
+    /// The interpolation. (One that isn't an enumerator, which only
+    /// [`GpuShaderDesc::add_3d_texture_raw`] adds, reads as `Unknown` here;
+    /// [`Texture3D::raw_interpolation`] gives it.)
+    ///
+    /// [`GpuShaderDesc::add_3d_texture_raw`]:
+    ///     crate::gpu_shader_desc::GpuShaderDesc::add_3d_texture_raw
     pub fn interpolation(&self) -> Interpolation {
+        interpolation_of(self.0.interpolation)
+    }
+
+    /// The interpolation's value as stored.
+    #[doc(hidden)]
+    pub fn raw_interpolation(&self) -> u8 {
         self.0.interpolation
     }
 
@@ -474,8 +525,8 @@ impl GenericImpl {
         width: u32,
         height: u32,
         channel: TextureType,
-        dimensions: TextureDimensions,
-        interpolation: Interpolation,
+        dimensions: u8,
+        interpolation: u8,
         values: &[f32],
     ) -> Result<u32> {
         if width > self.texture_max_width() {
@@ -492,7 +543,7 @@ impl GenericImpl {
             height,
             1,
             channel,
-            dimensions as u32,
+            u32::from(dimensions),
             interpolation,
             binding_index,
             values,
@@ -533,7 +584,7 @@ impl GenericImpl {
         texture_name: &[u8],
         sampler_name: &[u8],
         edgelen: u32,
-        interpolation: Interpolation,
+        interpolation: u8,
         values: &[f32],
     ) -> Result<u32> {
         if edgelen > MAX_3D_LUT_LENGTH {

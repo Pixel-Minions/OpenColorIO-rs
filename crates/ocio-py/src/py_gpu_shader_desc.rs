@@ -17,10 +17,9 @@
 //! reads the values from the description when asked (`getValues`).
 
 use numpy::PyArray1;
-use ocio_gpu::gpu_shader::{TextureDimensions, TextureType, UniformData};
+use ocio_gpu::gpu_shader::{TextureType, UniformData};
 use ocio_gpu::open_color_types::UniformDataType;
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
-use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
@@ -141,21 +140,19 @@ macro_rules! this_value {
     };
 }
 
-/// The library's `TextureDimensions` of the C++ value `v`: the port's error outside its
-/// enumerators, which the wheel stores (docs/improvements.md, U-112).
-fn texture_dimensions(v: i64) -> PyResult<TextureDimensions> {
-    match v {
-        1 => Ok(TextureDimensions::D1),
-        2 => Ok(TextureDimensions::D2),
-        _ => Err(outside_enumerators(TEXTURE_DIMENSIONS, v)),
-    }
+/// The C++ value `v` of a `TextureDimensions : uint8_t`, whose values are 0 to 255 (pybind11's
+/// enum takes no other), as the library stores it: the wheel stores any (and `getTexture`
+/// refuses more than two, the library's error).
+fn texture_dimensions(v: i64) -> PyResult<u8> {
+    u8::try_from(v).map_err(|_| outside_enumerators(TEXTURE_DIMENSIONS, v))
 }
 
-/// The library's `Interpolation` of the C++ value `v`: the port's error outside its
-/// enumerators, which the wheel stores (docs/improvements.md, U-112).
-fn interpolation(v: i64) -> PyResult<Interpolation> {
-    crate::transforms::py_file_transform::interpolation(v)
-        .ok_or_else(|| outside_enumerators(INTERPOLATION, v))
+/// The C++ value `v` of an `Interpolation`, an enum without a fixed type whose values are 0 to
+/// 255 ([dcl.enum]: the smallest bit-field that holds 0 to 4, 254 and 255), as the library
+/// stores it: the wheel stores any. pybind11's enum takes other ints too, a value C++17 leaves
+/// undefined: the port's error (docs/improvements.md, U-112).
+fn interpolation(v: i64) -> PyResult<u8> {
+    u8::try_from(v).map_err(|_| outside_enumerators(INTERPOLATION, v))
 }
 
 /// The number of floats of a texel of the texture type `channel`, or upstream's error
@@ -390,7 +387,7 @@ static ADD_TEXTURE: Function = method_def!(
         // `width * height * 1 * channels`, in `unsigned` (GpuShader.cpp:67-108 @ v2.5.2).
         let count = width.wrapping_mul(height).wrapping_mul(num_channels as u32) as usize;
         let index = add_with_values(py, &buffer, count, "GpuShaderDesc.addTexture", |values| {
-            rc.lock().add_texture(
+            rc.lock().add_texture_raw(
                 &texture_name,
                 &sampler_name,
                 width,
@@ -453,7 +450,7 @@ static ADD_3D_TEXTURE: Function = method_def!(
             "GpuShaderDesc.add3DTexture",
             |values| {
                 rc.lock()
-                    .add_3d_texture(&texture_name, &sampler_name, edgelen, interp, values)
+                    .add_3d_texture_raw(&texture_name, &sampler_name, edgelen, interp, values)
             },
         )?;
         ok(py, index)
@@ -726,6 +723,7 @@ fn texture_item(py: Python<'_>, rc: &DescRc, i: i32) -> Out {
     let value = {
         let desc = rc.lock();
         let t = py_result(py, desc.texture(i as u32))?;
+        let dimensions = py_result(py, t.raw_dimensions())?;
         let binding_index = py_result(py, desc.texture_shader_binding_index(i as u32))?;
         TextureValue {
             texture_name: t.texture_name().to_vec(),
@@ -733,8 +731,8 @@ fn texture_item(py: Python<'_>, rc: &DescRc, i: i32) -> Out {
             width: t.width(),
             height: t.height(),
             channel: t.channel() as i64,
-            dimensions: t.dimensions() as i64,
-            interpolation: t.interpolation() as i64,
+            dimensions: i64::from(dimensions),
+            interpolation: i64::from(t.raw_interpolation()),
             binding_index,
             desc: rc.clone(),
             index: i,
@@ -786,7 +784,7 @@ fn texture_3d_item(py: Python<'_>, rc: &DescRc, i: i32) -> Out {
             texture_name: t.texture_name().to_vec(),
             sampler_name: t.sampler_name().to_vec(),
             edge_len: t.edge_len(),
-            interpolation: t.interpolation() as i64,
+            interpolation: i64::from(t.raw_interpolation()),
             binding_index,
             desc: rc.clone(),
             index: i,

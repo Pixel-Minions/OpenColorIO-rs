@@ -664,9 +664,11 @@ fn the_classes_behave_as_the_wheels() {
     compare(&[creator_script(), textures_script(), uniform_data_script()]);
 }
 
-/// A language, a texture dimension or an interpolation outside its enumerators, which the
-/// wheel stores (and, for the language, reads through its `switch`es later: `getCacheID` kills
-/// its process), is the port's error (U-112). The wheel runs the same steps without one.
+/// A language or an interpolation outside its enum's values (`GpuLanguage`, 0 to 15;
+/// `Interpolation`, 0 to 255), which the wheel stores (and, for the language, reads through
+/// its `switch`es later: `getCacheID` kills its process), is the port's error (U-112). The
+/// wheel runs the same steps without one. (Inside the values, see
+/// [`texture_values_inside_the_enums_are_the_wheels`].)
 #[test]
 fn an_enum_value_outside_the_enumerators_is_the_ports_error() {
     let mut sc = Script::new();
@@ -676,21 +678,7 @@ fn an_enum_value_outside_the_enumerators_is_the_ports_error() {
     refused.push(sc.call(ra(d, "setLanguage"), vec![r(lang)]));
     refused.push(sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![r(lang)]));
     let buf = sc.eval(arr("<f4", &[6], &floats(6, 0)), &[]);
-    let dims = sc.call(n("OCIO.GpuShaderDesc.TextureDimensions"), vec![i(7)]);
-    let interp = sc.call(n("OCIO.Interpolation"), vec![i(42)]);
-    refused.push(sc.call(
-        ra(d, "addTexture"),
-        vec![
-            s("t"),
-            s("s"),
-            i(6),
-            i(1),
-            n("OCIO.GpuShaderDesc.TEXTURE_RED_CHANNEL"),
-            r(dims),
-            n("OCIO.INTERP_LINEAR"),
-            r(buf),
-        ],
-    ));
+    let interp = sc.call(n("OCIO.Interpolation"), vec![i(256)]);
     refused.push(sc.call(
         ra(d, "addTexture"),
         vec![
@@ -716,7 +704,7 @@ fn an_enum_value_outside_the_enumerators_is_the_ports_error() {
     let ours = ours["steps"].as_array().unwrap();
     assert_eq!(theirs.len(), sc.steps.len());
     assert_eq!(ours.len(), sc.steps.len());
-    assert_eq!(refused.len(), 5);
+    assert_eq!(refused.len(), 4);
     for (k, (step, wheel_step)) in ours.iter().zip(theirs).enumerate() {
         assert!(wheel_step.get("value").is_some(), "step {k}: {wheel_step}");
         if refused.contains(&k) {
@@ -983,4 +971,100 @@ fn a_uniform_whose_property_is_gone_is_u196() {
             }
         }
     });
+}
+
+// ---------------------------------------------------------------------------------------------
+// The enums' values that aren't enumerators but are defined (verifier 6.3h, M1)
+
+/// A texture's dimensions and interpolation outside the enumerators but inside the enums'
+/// values (`TextureDimensions : uint8_t`, 0 to 255; `Interpolation`, without a fixed type, 0 to
+/// 255): the wheel stores them, `getTextures` gives the interpolation as `???`, the dimensions
+/// 0 too, and refuses more than two with the library's error ("1D LUT cannot have more than two
+/// dimensions"), as does the port. A texture type outside its enumerators fails first, with the
+/// binding's error, whatever the buffer (a float64 one here).
+#[test]
+fn texture_values_inside_the_enums_are_the_wheels() {
+    let mut sc = Script::new();
+    let buf = sc.eval(arr("<f4", &[4], &floats(4, 0)), &[]);
+    let cube = sc.eval(arr("<f4", &[24], &floats(24, 1)), &[]);
+    let getters = ["textureName", "width", "dimensions", "interpolation"];
+    for dim in [0, 3, 255] {
+        let d = sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![]);
+        let dims = sc.call(n("OCIO.GpuShaderDesc.TextureDimensions"), vec![i(dim)]);
+        sc.call(
+            ra(d, "addTexture"),
+            vec![
+                s("t"),
+                s("s"),
+                i(4),
+                i(1),
+                n("OCIO.GpuShaderDesc.TEXTURE_RED_CHANNEL"),
+                r(dims),
+                n("OCIO.INTERP_LINEAR"),
+                r(buf),
+            ],
+        );
+        let it = sc.call(ra(d, "getTextures"), vec![]);
+        sc.call(n("len"), vec![r(it)]);
+        if dim > 2 {
+            sc.raises(ra(it, "__getitem__"), vec![i(0)]);
+            sc.raises(ra(it, "__next__"), vec![]);
+        } else {
+            let t = sc.call(ra(it, "__getitem__"), vec![i(0)]);
+            sc.eval(r(t), &getters);
+        }
+        sc.call(ra(d, "getCacheID"), vec![]);
+    }
+    for interp in [5, 100, 253] {
+        let d = sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![]);
+        let value = sc.call(n("OCIO.Interpolation"), vec![i(interp)]);
+        sc.call(
+            ra(d, "addTexture"),
+            vec![
+                s("t"),
+                s("s"),
+                i(4),
+                i(1),
+                n("OCIO.GpuShaderDesc.TEXTURE_RED_CHANNEL"),
+                n("OCIO.GpuShaderDesc.TEXTURE_2D"),
+                r(value),
+                r(buf),
+            ],
+        );
+        sc.call(
+            ra(d, "add3DTexture"),
+            vec![s("t3"), s("s3"), i(2), r(value), r(cube)],
+        );
+        let it = sc.call(ra(d, "getTextures"), vec![]);
+        let t = sc.call(ra(it, "__getitem__"), vec![i(0)]);
+        sc.eval(r(t), &getters);
+        let it = sc.call(ra(d, "get3DTextures"), vec![]);
+        let t = sc.call(ra(it, "__getitem__"), vec![i(0)]);
+        sc.eval(r(t), &["textureName", "edgeLen", "interpolation"]);
+    }
+    // A texture type outside the enumerators, with a float64 buffer: the binding's error.
+    let d = sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![]);
+    let ty = sc.call(n("OCIO.GpuShaderDesc.TextureType"), vec![i(2)]);
+    let doubles = sc.eval(arr("<f8", &[4], &[0u8; 32]), &[]);
+    sc.raises(
+        ra(d, "addTexture"),
+        vec![
+            s("t"),
+            s("s"),
+            i(4),
+            i(1),
+            r(ty),
+            n("OCIO.GpuShaderDesc.TEXTURE_1D"),
+            n("OCIO.INTERP_LINEAR"),
+            r(doubles),
+        ],
+    );
+    let refused = sc.steps.len() - 1;
+    let theirs = common::wheel(&[sc.json()]);
+    let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
+        &theirs[0]["steps"][refused]["raised"]["message"],
+    ))
+    .unwrap();
+    assert_eq!(message, "Error: Unsupported texture type");
+    common::script::compare_with(std::slice::from_ref(&sc), &theirs);
 }

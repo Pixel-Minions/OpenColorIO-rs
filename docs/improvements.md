@@ -5355,21 +5355,39 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`a_display_view_direction_outside_the_enumerators_is_the_ports_error`);
   and the direction of `MixingColorSpaceManager.getProcessor`, with which the wheel makes a
   processor (`a_mixing_direction_outside_the_enumerators_is_the_ports_error`).
-  Also the GPU shader description's language (`GpuShaderCreator.setLanguage` and
-  `GpuShaderDesc.CreateShaderDesc(language=...)`, which the wheel stores; its `getCacheID`
-  then kills the wheel's process, probed on Windows 2026-10-25), and a texture's dimensions
-  (`addTexture`) and interpolation (`addTexture`, `add3DTexture`), which the wheel stores
-  and returns as `???`; the port raises after the binding's checks of the channel and the
-  buffer, before the library's own checks; in `p6-processors` (6.3h,
-  `crates/ocio-py/src/py_gpu_shader_creator.rs`, `gpu_language`; `py_gpu_shader_desc.rs`);
-  `gpu_shader_desc_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error`.
-  Also the bit depths of `Processor.getOptimizedProcessor` and `getOptimizedCPUProcessor`,
+  Also the GPU shader description's language outside the enum's values (`GpuLanguage` has
+  no fixed type and its enumerators are 0 to 9, so its values are 0 to 15, [dcl.enum]):
+  `GpuShaderCreator.setLanguage(OCIO.GpuLanguage(99))` and
+  `GpuShaderDesc.CreateShaderDesc(language=...)`, which the wheel stores (its `getCacheID`
+  then kills the wheel's process, probed on Windows 2026-10-25); and an interpolation outside
+  its enum's values (`Interpolation`, 0 to 255: `OCIO.Interpolation(256)`) given to
+  `addTexture` or `add3DTexture`, which the wheel stores; the port raises after the binding's
+  checks of the channel and the buffer, before the library's own checks; in `p6-processors`
+  (6.3h, `crates/ocio-py/src/py_gpu_shader_creator.rs`, `gpu_language`;
+  `py_gpu_shader_desc.rs`, `interpolation`); `gpu_shader_desc_oracle.rs`,
+  `an_enum_value_outside_the_enumerators_is_the_ports_error`. Inside the enums' values the
+  behaviour is defined: a texture's dimensions (`TextureDimensions : uint8_t`, 0 to 255, the
+  only values pybind11 takes) and interpolation (0 to 255) that aren't enumerators are stored
+  and read back as the wheel's (`???` values; more than two dimensions, the library's error
+  "1D LUT cannot have more than two dimensions: 3 > 2" when `getTextures` gives the texture,
+  GpuShader.cpp:247-253), matched in `p6-processors` (6.3h, verifier 1: the library's
+  `add_texture_raw`, `add_3d_texture_raw`, `Texture::raw_dimensions`); `gpu_shader_desc_oracle.rs`,
+  `texture_values_inside_the_enums_are_the_wheels`. A language from 10 to 15 is inside
+  `GpuLanguage`'s values too (the wheel stores it and gives it back as `???`, extraction raises
+  "Unknown GPU shader language." after the ops before it wrote their code, `getCacheID` ends
+  its process); the port still raises this entry's error there, pending the owner's decision
+  (reported 2026-10-25: the library's `GpuLanguage` can't hold it).
+  Also the bit depths of `Processor.getOptimizedProcessor` and `getOptimizedCPUProcessor`
+  outside the enum's values (`BitDepth`, enumerators 0 to 8, values 0 to 15: `OCIO.BitDepth(42)`),
   which the wheel hands the library: its cache key writes the number, and the processor is
   made unless a bit depth's value is needed (`OptimizeSeparablePrefix`, a CPU processor's
   bit-depth ops), where it raises "Bit depth is not supported: unknown." (probed on Windows,
   2026-10-25); the port raises before the library runs, in both cases; in `p6-processors`
   (6.3h, `crates/ocio-py/src/py_processor.rs`, `bit_depth`); `processor_oracle.rs`,
-  `a_bit_depth_outside_the_enumerators_is_the_ports_error`.
+  `a_bit_depth_outside_the_enumerators_is_the_ports_error`. A bit depth from 9 to 15 is
+  inside the enum's values (the wheel's processors behave as for `BIT_DEPTH_UNKNOWN`, cached
+  under the number); the port still raises this entry's error there, pending the owner's
+  decision (reported 2026-10-25: the library's `BitDepth` can't hold it).
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 

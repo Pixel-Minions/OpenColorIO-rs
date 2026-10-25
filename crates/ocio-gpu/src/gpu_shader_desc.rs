@@ -741,6 +741,34 @@ impl GpuShaderDesc {
         interpolation: Interpolation,
         values: &[f32],
     ) -> Result<u32> {
+        self.add_texture_raw(
+            texture_name,
+            sampler_name,
+            width,
+            height,
+            channel,
+            dimensions as u8,
+            interpolation as u8,
+            values,
+        )
+    }
+
+    /// [`GpuShaderDesc::add_texture`] of dimensions and an interpolation as upstream's enums hold
+    /// them: any 8-bit value (`TextureDimensions : uint8_t`; `Interpolation`, whose values are 0
+    /// to 255), which a caller such as the Python binding can give.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_texture_raw(
+        &mut self,
+        texture_name: impl AsRef<[u8]>,
+        sampler_name: impl AsRef<[u8]>,
+        width: u32,
+        height: u32,
+        channel: TextureType,
+        dimensions: u8,
+        interpolation: u8,
+        values: &[f32],
+    ) -> Result<u32> {
         let index = self.generic.add_texture(
             texture_name.as_ref(),
             sampler_name.as_ref(),
@@ -790,6 +818,26 @@ impl GpuShaderDesc {
         sampler_name: impl AsRef<[u8]>,
         edgelen: u32,
         interpolation: Interpolation,
+        values: &[f32],
+    ) -> Result<u32> {
+        self.add_3d_texture_raw(
+            texture_name,
+            sampler_name,
+            edgelen,
+            interpolation as u8,
+            values,
+        )
+    }
+
+    /// [`GpuShaderDesc::add_3d_texture`] of an interpolation as upstream's enum holds it: any
+    /// 8-bit value (see [`GpuShaderDesc::add_texture_raw`]).
+    #[doc(hidden)]
+    pub fn add_3d_texture_raw(
+        &mut self,
+        texture_name: impl AsRef<[u8]>,
+        sampler_name: impl AsRef<[u8]>,
+        edgelen: u32,
+        interpolation: u8,
         values: &[f32],
     ) -> Result<u32> {
         let index = self.generic.add_3d_texture(
