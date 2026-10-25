@@ -45,36 +45,50 @@ Global: a module's top level may hold only
   may call what the class defines while it makes the class (``enum.Enum`` makes its members
   by calling the class), its body holds no ``def`` and no class, and assigns only DATA;
 - assignments of inert values to names (``X = ...``, ``X: T = ...``, ``A, B = ...``, which
-  unpacks DATA or a tuple or list display);
+  unpacks DATA, an iterator made there, or a tuple or list display);
 - ``if __name__ == "__main__":`` without ``else``.
 An inert value runs no code of the package and calls nothing outside an allowlist. It is DATA
 (using it runs no code of the package and changes nothing that other code shares), CODE (it
 is, or holds, a function, a class or a lambda of the package) or HELD (it is, or holds, a
 one-shot iterator that other code may share).
 - DATA: constants; builtin types and exceptions, ``__file__`` and ``__name__``; a module
-  outside the package and its attributes but STREAMS, which are OUTSIDE, a kind of DATA, under
-  any name; operators, comparisons, tests, subscripts, slices and f-strings of DATA; sets, dict
-  keys, comprehensions (over names, iterating DATA) and ``*`` items of DATA; the non-mutating
-  methods INERT_METHODS of DATA but OUTSIDE (an object of a module outside the package isn't
-  builtin data: ``os.environ.copy()``, or ``E.copy()`` after ``E = os.environ``); the calls
-  PURE_CALLS (builtins) and PURE_EXTERNAL_CALLS, with DATA arguments and no ``key=`` (a
-  function the call calls: ``sorted(x, key=os.chdir)``, or a method that changes data,
-  ``sorted([0], key=QUEUE.pop)``); and an iterator made where it is used (what ITERATOR_CALLS
-  and ITERATOR_EXTERNAL_CALLS return, ``zip``, ``enumerate``, ``reversed`` and
-  ``itertools.count``, with DATA arguments, and a generator expression), which shares nothing
-  with other code until it is held (``dict(zip(KEYS, VALUES))``).
+  outside the package and its attributes, under any name (OUTSIDE, a kind of DATA), but the
+  process's streams; operators, comparisons, tests, subscripts, slices and f-strings of DATA;
+  sets, dict keys, comprehensions (over names, iterating DATA) and ``*`` items of DATA; the
+  non-mutating methods INERT_METHODS of DATA but OUTSIDE (an object of a module outside the
+  package isn't builtin data: ``os.environ.copy()``, or ``E.copy()`` after ``E =
+  os.environ``); the calls PURE_CALLS (builtins) and PURE_EXTERNAL_CALLS, with DATA arguments
+  and no ``key=`` (a function the call calls: ``sorted(x, key=os.chdir)``, or a method that
+  changes data, ``sorted([0], key=QUEUE.pop)``).
+- FRESH: an iterator made where it is used, which shares nothing with other code until it is
+  held: what ITERATOR_CALLS and ITERATOR_EXTERNAL_CALLS return (``zip``, ``enumerate``,
+  ``reversed`` and ``itertools.count``) with DATA arguments, and a generator expression whose
+  items are DATA. It is DATA only where it is consumed on the spot: the iterable of a consuming
+  call (CONSUMING_CALLS: ``list``, ``tuple``, ``set``, ``frozenset``, ``dict``, ``sorted``,
+  ``sum``'s first argument; CONSUMING_ONE: ``min`` or ``max``'s only one), an argument of
+  ITERATOR_CALLS, ITERATOR_EXTERNAL_CALLS or CONSUMING_METHODS (``", ".join(...)``), a
+  comprehension's iterable, a ``*`` item, and the value of an unpacking assignment
+  (``dict(zip(KEYS, VALUES))``). Anywhere else it is HELD: an operand of ``and``, ``or`` or a
+  conditional expression (``zip(a, b) or ()``), a set's item or a dict's key, a keyword's
+  value (``dict(pairs=zip(a, b))``, ``max((), default=zip(a, b))``), ``sum``'s start, another
+  method's argument (``{}.get("k", zip(a, b))``), an attribute's object, and what a name, a
+  display or a dict's value holds.
 - CODE: a function of the package, an earlier class of the module (as above), a lambda (its
-  body isn't evaluated, its defaults are), an attribute of CODE, and a display that holds
-  CODE.
-- HELD: an iterator held (by a name, a display, ...), the STREAMS of ``sys`` and their
-  attributes, and a display that holds HELD.
+  body isn't evaluated, its defaults are), an attribute of CODE, a display that holds CODE,
+  and a generator expression whose items are CODE.
+- HELD: an iterator held (by a name, a display, ...), the process's streams (STREAM_NAMES:
+  ``sys`` itself under any name, as ``S = sys; S.stdin``; an attribute named ``sys``, as
+  ``os.sys``; and an attribute named as a stream, as ``sys.stdin``, ``sys.__stdin__`` or
+  ``sys.stdin.buffer``) and their attributes, an attribute of HELD, a display that holds HELD,
+  and a generator expression whose items are HELD.
 A name bound once to an inert value, here or in the sibling it is imported from, and
-``<sibling>.<name>`` of one, is of its value's kind. CODE and HELD may only be held (by a
-name, a display's item, a dict's value, a default or an annotation): an operator, a hash, an
-iteration, an unpacking, a format, a call it is passed to or a method of it can run the
-package's code (``sorted(x, key=f)``, ``K[0]`` and ``__class_getitem__``, ``{E.A: 1}`` and
-``__hash__``), or consume an iterator that other code shares (``dict(zip(KEYS,
-ids.COUNTER))``, ``list(pairs.PAIRS)``). Anything else is a global reason.
+``<sibling>.<name>`` of one, is of its value's kind (HELD for FRESH). CODE and HELD may only
+be held (by a name, a display's item, a dict's value, a default or an annotation): an
+operator, a hash, an iteration, an unpacking, a format, a call it is passed to or a method of
+it can run the package's code (``sorted(x, key=f)``, ``K[0]`` and ``__class_getitem__``,
+``{E.A: 1}`` and ``__hash__``, ``dict(E.A for _ in R)`` and ``__iter__``), or consume an
+iterator that other code shares (``dict(zip(KEYS, ids.COUNTER))``, ``list(pairs.PAIRS)``,
+``list(zip(R, S.stdin))``). Anything else is a global reason.
 
 Edges:
 - imports of a sibling, at any depth: ``from . import x``, ``from .x import y``, ``import
@@ -172,7 +186,7 @@ What the analysis doesn't follow, by design: values. A module name or a path ass
 time from fragments none of which names the package or a ``.py`` file, or attributes walked by
 names a request gives (``getattr`` of a library object), aren't followed; nor is the state of
 an object of a module outside the package that its operators, conversions or iteration may
-change, but the process's streams (STREAMS). The request itself is part of every key.
+change, but the process's streams (STREAM_NAMES). The request itself is part of every key.
 """
 
 import ast
@@ -274,8 +288,16 @@ PURE_EXTERNAL_CALLS = frozenset({
 # functions of modules outside the package.
 ITERATOR_CALLS = frozenset({"zip", "enumerate", "reversed"})
 ITERATOR_EXTERNAL_CALLS = frozenset({"itertools.count"})
-# The objects of modules outside the package that are iterators: the process's streams.
-STREAMS = frozenset({"sys.stdin", "sys.stdout", "sys.stderr"})
+# The builtins that consume the iterable they are given as their first argument (`min` and
+# `max` only when it is their only one: they compare several), and the methods of builtin data
+# that consume every argument they are given (`", ".join(...)`, `set.union(...)`).
+CONSUMING_CALLS = frozenset({"list", "tuple", "set", "frozenset", "dict", "sorted", "sum"})
+CONSUMING_ONE = frozenset({"min", "max"})
+CONSUMING_METHODS = frozenset({"join", "union", "intersection", "difference"})
+# The objects of modules outside the package that are iterators, the process's streams, under
+# any name: the module `sys` itself (`S = sys; S.stdin`), an attribute named `sys` (`os.sys`),
+# and an attribute named as a stream (`sys.stdin`, `sys.__stdin__`, `sys.stdin.buffer`).
+STREAM_NAMES = frozenset({"stdin", "stdout", "stderr", "__stdin__", "__stdout__", "__stderr__"})
 INERT_METHODS = frozenset({
     "items", "keys", "values", "get", "copy", "union", "intersection", "difference",
     "format", "join", "split", "strip", "lower", "upper", "startswith", "endswith", "count",
@@ -1225,19 +1247,25 @@ def targets_of(modules, scope, nodes, skip=frozenset()):
 # attributes, under any name: INERT_METHODS are builtin data's, not its. CODE is, or may hold,
 # the package's code: a function, a class, a lambda, and what holds one. HELD is, or may hold,
 # a one-shot iterator that other code may share. CODE and HELD may only be held (by a name, a
-# display or a dict's value). FRESH is DATA: an iterator made of DATA where it is used, which
-# shares nothing with other code until it is held, and is HELD then.
+# display or a dict's value). FRESH is an iterator made of DATA where it is used, which shares
+# nothing with other code until it is held: it is DATA where it is consumed on the spot (a
+# consuming call's iterable, an iterator call's argument, a comprehension's iterable, a `*`
+# item, an unpacking assignment's value), and HELD anywhere else.
 DATA = "data"
 OUTSIDE = "outside"
 FRESH = "fresh"
 CODE = "code"
 HELD = "held"
-PLAIN = (DATA, OUTSIDE, FRESH)
+PLAIN = (DATA, OUTSIDE)
 
 
 def outside(path):
-    """The kind of the module outside the package, or the attribute of one, `path`."""
-    return HELD if any(path == s or path.startswith(s + ".") for s in STREAMS) else OUTSIDE
+    """The kind of the module outside the package, or the attribute of one, `path`: HELD for
+    the process's streams (STREAM_NAMES)."""
+    parts = path.split(".")
+    if parts == ["sys"] or "sys" in parts[1:] or STREAM_NAMES.intersection(parts):
+        return HELD
+    return OUTSIDE
 
 
 def class_hooks(node):
@@ -1319,13 +1347,36 @@ class Purity:
         of the package and calls nothing outside the allowlists."""
         return self.kind(node, local) is not None
 
-    def plain(self, node, local):
-        """Whether `node` is inert and DATA: code outside the package may use its value."""
-        return self.kind(node, local) in PLAIN
+    def plain(self, node, local, consume=False):
+        """Whether `node` is inert and DATA: code outside the package may use its value. An
+        iterator made where it is used (FRESH) is DATA only where it is consumed on the spot
+        (`consume`); anywhere else (an operand, a test, a set's item, a dict's key, a keyword's
+        value, `sum`'s start, a method's argument) it is held."""
+        kind = self.kind(node, local)
+        return kind in PLAIN or consume and kind == FRESH
 
-    def all_plain(self, nodes, local):
+    def all_plain(self, nodes, local, consume=False):
         """DATA when the values of `nodes` are, used to make a value; else None."""
-        return DATA if all(self.plain(n, local) for n in nodes) else None
+        return DATA if all(self.plain(n, local, consume) for n in nodes) else None
+
+    def consumed(self, node):
+        """The indexes of the positional arguments that call `node` consumes on the spot: the
+        iterable of CONSUMING_CALLS and CONSUMING_ONE, the arguments of ITERATOR_CALLS and
+        ITERATOR_EXTERNAL_CALLS (the iterator they make consumes them), and those of
+        CONSUMING_METHODS."""
+        func = node.func
+        every = range(len(node.args))
+        if isinstance(func, ast.Name) and self.unbound(func.id):
+            if func.id in ITERATOR_CALLS:
+                return set(every)
+            if func.id in CONSUMING_CALLS or func.id in CONSUMING_ONE and len(node.args) == 1:
+                return {0}
+            return set()
+        if external_path(self.scope, func) in ITERATOR_EXTERNAL_CALLS:
+            return set(every)
+        if isinstance(func, ast.Attribute) and func.attr in CONSUMING_METHODS:
+            return set(every)
+        return set()
 
     def held(self, nodes, local):
         """The kind of what holds the values of `nodes`, or None."""
@@ -1346,7 +1397,8 @@ class Purity:
         if isinstance(node, (ast.Tuple, ast.List)):
             return self.held(node.elts, local)
         if isinstance(node, ast.Starred):
-            return self.all_plain([node.value], local)
+            # A `*` item is iterated on the spot.
+            return self.all_plain([node.value], local, consume=True)
         if isinstance(node, ast.Set):
             return self.all_plain(node.elts, local)
         if isinstance(node, ast.Dict):
@@ -1369,11 +1421,13 @@ class Purity:
                 binding = self.scope.binding_at(node.value.id, None)
                 if binding[0] == "module":
                     return self.definition(binding[1], node.attr)
-            # An attribute of OUTSIDE is OUTSIDE (`S.ascii_letters` after `S = string`). One of
-            # DATA may be a method that changes the data when it is called (`QUEUE.pop`): no
-            # call of the allowlists calls an argument but with `key=`, and a decorator takes
-            # constants only.
-            return self.kind(node.value, local)
+            # An attribute of OUTSIDE is OUTSIDE (`S.ascii_letters` after `S = string`), and one
+            # of HELD is HELD (`S.stdin` after `S = sys`). One of DATA may be a method that
+            # changes the data when it is called (`QUEUE.pop`): no call of the allowlists calls
+            # an argument but with `key=`, and a decorator takes constants only. One of FRESH
+            # holds the iterator (`zip(a, b).__next__`).
+            kind = self.kind(node.value, local)
+            return HELD if kind == FRESH else kind
         if isinstance(node, ast.BinOp):
             return self.all_plain([node.left, node.right], local)
         if isinstance(node, ast.UnaryOp):
@@ -1398,7 +1452,7 @@ class Purity:
         if isinstance(node, COMPREHENSIONS):
             inner = set(local)
             for generator in node.generators:
-                if generator.is_async or not self.plain(generator.iter, inner):
+                if generator.is_async or not self.plain(generator.iter, inner, consume=True):
                     return None
                 targets = generator.target.elts if isinstance(
                     generator.target, ast.Tuple) else [generator.target]
@@ -1412,14 +1466,21 @@ class Purity:
             if isinstance(node, ast.SetComp):
                 return self.all_plain([node.elt], inner)
             elt = self.held([node.elt], inner)
-            # A generator is a one-shot iterator, of DATA where it is made.
-            return FRESH if isinstance(node, ast.GeneratorExp) and elt is not None else elt
+            # A generator is a one-shot iterator: of DATA where it is made (FRESH) when its
+            # items are DATA; else of its items' kind, which may only be held (`dict(E.A for _
+            # in R)` iterates an enum's member, `dict(ids.PAIRS for _ in R)` a held iterator).
+            if isinstance(node, ast.GeneratorExp):
+                return FRESH if elt == DATA else elt
+            return elt
         if isinstance(node, ast.Call):
             # The arguments go to code outside the package (`sorted(x, key=f)` calls `f`), which
-            # consumes an iterator it is given (`dict(zip(KEYS, ids.COUNTER))`).
-            if not all(self.plain(a, local) for a in node.args) or \
-                    not all(k.arg not in (None, "key") and self.plain(k.value, local)
-                            for k in node.keywords):
+            # consumes an iterator it is given (`dict(zip(KEYS, ids.COUNTER))`). An iterator
+            # made where it is used may be consumed there, not held (`dict(pairs=zip(...))`,
+            # `{}.get("k", zip(...))`, `sum((), zip(...))`, `max((), default=zip(...))`).
+            consumed = self.consumed(node)
+            if not all(self.plain(a, local, i in consumed) for i, a in enumerate(node.args)) \
+                    or not all(k.arg not in (None, "key") and self.plain(k.value, local)
+                               for k in node.keywords):
                 return None
             func = node.func
             if isinstance(func, ast.Name) and self.unbound(func.id):
@@ -1522,17 +1583,22 @@ class Purity:
 
     def pure_assign(self, node, plain=False):
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        unpacked = False
         for target in targets:
             unpacks = isinstance(target, (ast.Tuple, ast.List))
             names = target.elts if unpacks else [target]
             if not all(isinstance(n, ast.Name) for n in names):
                 return False
-            # Unpacking iterates the value: DATA, or a display, whose items are only held.
-            if unpacks and not isinstance(node.value, (ast.Tuple, ast.List)) \
-                    and not self.plain(node.value, set()):
-                return False
+            # Unpacking iterates the value: DATA (an iterator made there is consumed there), or
+            # a display, whose items are only held.
+            if unpacks and not isinstance(node.value, (ast.Tuple, ast.List)):
+                if not self.plain(node.value, set(), consume=True):
+                    return False
+                unpacked = True
         check = self.plain if plain else self.inert
-        return check(node.value, set()) and check(getattr(node, "annotation", None), set())
+        # An iterator made where it is unpacked, and held by no target, is consumed there.
+        value = unpacked and len(targets) == 1 or check(node.value, set())
+        return value and check(getattr(node, "annotation", None), set())
 
     def pure_import(self, node):
         if isinstance(node, ast.ImportFrom):

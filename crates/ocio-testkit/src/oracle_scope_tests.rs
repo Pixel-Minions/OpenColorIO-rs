@@ -482,6 +482,7 @@ fn a_module_whose_top_level_runs_code_is_shared() {
         "pairs.py",
         "PAIRS = zip([\"a\", \"b\", \"c\"], [1, 2, 3])\n",
     );
+    const TWO: (&str, &str) = ("two.py", "PAIRS = zip(\"ab\", \"cd\")\n");
     const ROWS: (&str, &str) = (
         "rows.py",
         "ROWS = enumerate([\"a\", \"b\", \"c\", \"d\"])\n",
@@ -764,6 +765,45 @@ fn a_module_whose_top_level_runs_code_is_shared() {
         ),
         ("from . import envs\n\nX = envs.E.copy()\n", &[ENVS]),
         ("from .envs import E\n\nX = E.get(\"A\")\n", &[ENVS]),
+        // A generator expression of what may only be held is of its kind, not made of data
+        // where it is used: of an iterator another module holds, consumed by a call, a
+        // comprehension or a `*` item; of an enum's member whose class iterates with the
+        // package's code (verifier 4).
+        (
+            "from . import two\n\nT = dict(two.PAIRS for _ in range(1))\n",
+            &[TWO],
+        ),
+        (
+            "from . import two\n\nT = [a for a, b in (two.PAIRS for _ in range(1))]\n",
+            &[TWO],
+        ),
+        (
+            "from . import two\n\nT = dict([*(two.PAIRS for _ in range(1))])\n",
+            &[TWO],
+        ),
+        (
+            "import enum\n\n\nclass Mixin:\n    def __iter__(self):\n        \
+             return iter((1, 2))\n\n\nclass E(Mixin, enum.Enum):\n    A = 1\n\n\n\
+             T = dict(E.A for _ in range(1))\n",
+            &[],
+        ),
+        // An iterator made where it is used is only consumed there: anywhere else it is held,
+        // and what holds it may not be used (verifier 4).
+        ("X = zip([1], [2]) or ()\n", &[]),
+        ("X = reversed([1, 2]) or ()\n", &[]),
+        ("X = (r for r in [1, 2]) or None\n", &[]),
+        ("X = list(zip([1], [2]) if 1 else ())\n", &[]),
+        ("D = dict(pairs=zip([1], [2]))\n", &[]),
+        ("X = sum((), zip([1], [2]))\n", &[]),
+        ("X = {}.get(\"k\", zip([1], [2]))\n", &[]),
+        ("X = max((), default=zip([1], [2]))\n", &[]),
+        ("S = {zip([1], [2])}\n", &[]),
+        ("D = {zip([1], [2]): 1}\n", &[]),
+        // An enum's member that holds the iterator its other members are unpacked from.
+        (
+            "import enum\n\n\nclass E(enum.Enum):\n    X = A, B = zip([1, 2])\n",
+            &[],
+        ),
     ];
     let private: &[(&str, Files)] = &[
         ("import re\n\nPATTERN = re.compile(\"x\")\n", &[]),
@@ -862,6 +902,25 @@ fn a_module_whose_top_level_runs_code_is_shared() {
         ),
         (
             "import struct\n\nS = struct.Struct(\"<f\")\nSIZES = {\"f\": S.size}\n",
+            &[],
+        ),
+        // Iterators made of data, consumed where they are made: by `min` or `max` alone, a
+        // method that consumes its argument, an unpacking, a `*` item and an iterator call; or
+        // held by a name (verifier 4). And `sys`'s other attributes, used.
+        (
+            "M = max(x for x in [1, 2])\nN = min(zip([1], [2]))\nS = set().union(zip([1], [2]))\n\
+             J = \", \".join(str(x) for x in [1])\nA, B = (x for x in [1, 2])\nC = [*zip([1], [2])]\n\
+             T = tuple(enumerate(reversed([1])))\nP = zip([1], [2]) if 1 else ()\n\
+             Z = [i for i, _ in enumerate([1])]\nW = sum(x for x in [1, 2])\n",
+            &[],
+        ),
+        // An enum's members unpacked from an iterator made there, which no name holds.
+        (
+            "import enum\n\n\nclass E(enum.Enum):\n    A, B = zip([1, 2])\n",
+            &[],
+        ),
+        (
+            "import sys\n\nIS_WINDOWS = sys.platform == \"win32\"\n",
             &[],
         ),
     ];
@@ -989,6 +1048,35 @@ fn what_runs_at_import_must_be_resolved() {
             &[],
             true,
         ),
+        // The process's streams under another name, read when every process starts: the
+        // statement runs code, and the use of `sys` it reaches isn't resolved (verifier 4).
+        (
+            "import sys\n\nS = sys\nX = list(zip(range(0), S.stdin))\n",
+            &[],
+            true,
+        ),
+        (
+            "import sys\n\nX = list(zip(range(0), sys.__stdin__))\n",
+            &[],
+            true,
+        ),
+        (
+            "import sys\n\nX = list(zip(range(0), (sys,)[0].stdin))\n",
+            &[],
+            true,
+        ),
+        (
+            "import os\n\nX = list(zip(range(0), os.sys.stdin))\n",
+            &[],
+            true,
+        ),
+        (
+            "import os\n\nS = os.sys\nX = list(zip(range(0), S.stdin))\n",
+            &[],
+            true,
+        ),
+        // Held, they read nothing.
+        ("import sys\n\nS = sys\nIN = S.stdin\n", &[], false),
     ];
     let dir = package("import-time");
     for (source, files, full) in cases {
