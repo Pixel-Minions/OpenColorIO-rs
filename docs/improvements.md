@@ -3992,6 +3992,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p9-merge-1` (9.2c, `ociom_yaml.rs`, `load`);
   `ociom_yaml_oracle_tests.rs`.
 
+### I-426. A merged config's name and description can be empty while the other config has them
+
+- **Upstream:** the general section of a merge takes the name and the description of the
+  overrides, else of one config only, by the default strategy: the input's for `PreferInput`
+  and `InputOnly`, the base's for `PreferBase` and `BaseOnly` (`SectionMerger.cpp:114-276` @
+  v2.5.2, with upstream's TODOs "If empty, take it from the other config?"). When that config
+  has none, the merged config has none either, though the other config has one. The luma
+  coefficients come from the same config.
+- **Who notices:** whoever merges into a base config without a name or description and
+  prefers the base (a v1 base, which has none).
+- **A fix:** upstream's TODO: take the other config's name and description when the preferred
+  one's are empty.
+- **Status:** matched in `p9-merge-2` (9.2d, `apphelpers/mergeconfigs/section_merger.rs`,
+  `GeneralMerger`); `MergeConfigs/general_section` (a v1 base) and
+  `section_merger_oracle_tests.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

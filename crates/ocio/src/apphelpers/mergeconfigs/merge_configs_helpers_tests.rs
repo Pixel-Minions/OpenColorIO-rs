@@ -2,11 +2,18 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp` @ v2.5.2: the OCIOM tests
-//! (9.2c). The section tests come with their mergers (9.2d-9.2i), the merges with 9.2j.
+//! (9.2c) and the section tests, each with its merger (9.2d-9.2i). The merges come with 9.2j.
 
 use super::*;
+use crate::apphelpers::mergeconfigs::section_merger::{
+    GeneralMerger, MergeHandlerOptions, RolesMerger, Section,
+};
 use crate::fileformats::test_utils::get_test_files_dir;
+use ocio_ops::logging::{get_logging_level, set_logging_level};
+use ocio_ops::open_color_types::LoggingLevel;
+use ocio_ops::std_regex::{Regex, regex_replace};
 use ocio_ops::utils::pystring::os_path;
+use ocio_testkit::upstream::check_close;
 
 /// `pystring::os::path::normpath(pystring::os::path::join(paths))` of the test files'
 /// directory, `configs`, `mergeconfigs` and `file`.
@@ -21,6 +28,133 @@ fn merge_test_file(file: &str) -> Vec<u8> {
         .iter()
         .fold(paths[0].clone(), |acc, p| os_path::join(&acc, p));
     os_path::normpath(&joined)
+}
+
+/// Port of `getBaseConfig` (tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp:18-28 @
+/// v2.5.2).
+fn get_base_config() -> Result<Arc<Config>> {
+    Config::create_from_file(merge_test_file("base_config.yaml"))
+}
+
+/// Port of `getInputConfig` (MergeConfigsHelpers_tests.cpp:30-40 @ v2.5.2).
+fn get_input_config() -> Result<Arc<Config>> {
+    Config::create_from_file(merge_test_file("input_config.yaml"))
+}
+
+/// Port of `LogType` (MergeConfigsHelpers_tests.cpp:107-112 @ v2.5.2), without
+/// `LOG_TYPE_INFO`, which no test uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogType {
+    Warning,
+    Error,
+}
+
+/// Removes from `output` every match of the expression `pattern` (as the wheel's C++ library,
+/// `std::regex`, reads it), searching again from the start after each removal; whether it found
+/// one.
+///
+/// Port of `LogGuard::findAllAndRemove` (tests/cpu/UnitTestLogUtils.cpp:88-101 @ v2.5.2). Each
+/// round removes every match `regex_replace` finds, left to right, and the rounds repeat until
+/// none is left: the same text as upstream's one match per round.
+fn find_all_and_remove(output: &mut Vec<u8>, pattern: &[u8]) -> bool {
+    let re = Regex::new(pattern, crate::file_rules::LIBRARY).unwrap();
+    let mut found = false;
+    loop {
+        let removed = regex_replace(output, &re, b"").unwrap();
+        if removed == *output {
+            return found;
+        }
+        found = true;
+        *output = removed;
+    }
+}
+
+/// Port of `checkAndMuteWarning` (tests/cpu/UnitTestLogUtils.cpp:162-166 @ v2.5.2): `s` is
+/// part of the expression, unescaped.
+fn check_and_mute_warning(output: &mut Vec<u8>, s: &str) -> bool {
+    let pattern = [
+        br"\[OpenColorIO Warning\]: ".as_slice(),
+        s.as_bytes(),
+        br"[\.\r\n]+",
+    ]
+    .concat();
+    find_all_and_remove(output, &pattern)
+}
+
+/// Port of `checkAndMuteError` (tests/cpu/UnitTestLogUtils.cpp:168-172 @ v2.5.2).
+fn check_and_mute_error(output: &mut Vec<u8>, s: &str) -> bool {
+    let pattern = [
+        br"\[OpenColorIO Error\]: ".as_slice(),
+        s.as_bytes(),
+        br"[\r\n]+",
+    ]
+    .concat();
+    find_all_and_remove(output, &pattern)
+}
+
+/// Runs `setup` with the logging level at `Info`, the messages it logs kept. When it succeeds,
+/// each of `strings` must be a message of `log_type` it logged, and no other message may be
+/// left; when it fails, its error must be the first of `strings`.
+///
+/// Port of `checkForLogOrException` (MergeConfigsHelpers_tests.cpp:114-163 @ v2.5.2).
+#[track_caller]
+fn check_for_log_or_exception(
+    log_type: LogType,
+    setup: impl FnOnce() -> Result<()>,
+    strings: &[&str],
+) {
+    // Use INFO rather than DEBUG for the guard to avoid a lot of OpOptimizers.cpp output.
+    let (result, log) = crate::test_env::capture_log(|| {
+        struct Level(LoggingLevel);
+        impl Drop for Level {
+            fn drop(&mut self) {
+                set_logging_level(self.0);
+            }
+        }
+        let _level = Level(get_logging_level());
+        set_logging_level(LoggingLevel::Info);
+        setup()
+    });
+    let mut log = log.concat();
+    match result {
+        Ok(()) => {
+            for s in strings {
+                if log_type == LogType::Error {
+                    let error_found = check_and_mute_error(&mut log, s);
+                    assert!(error_found, "This error was not found: {s}");
+                } else if log_type == LogType::Warning {
+                    let warning_found = check_and_mute_warning(&mut log, s);
+                    assert!(warning_found, "This warning was not found: {s}");
+                }
+            }
+
+            // If all messages have not been removed from the log at this point, it's
+            // unexpected.
+            assert!(
+                log.is_empty(),
+                "The following unexpected messages were encountered:\n{}",
+                String::from_utf8_lossy(&log)
+            );
+        }
+        Err(e) => {
+            // Only checking the first string because only the first Exception gets out.
+            assert_eq!(e.message(), strings[0]);
+        }
+    }
+}
+
+/// Upstream's `setupBasics` of the general section's test: a merger with new parameters, whose
+/// default strategy is `strategy`; the parameters.
+fn setup_general_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    // The general strategy is determined by the default strategy.
+    // However, note that the name and description may be set in the override options, tested above.
+    merger.params(0).unwrap().set_default_strategy(strategy);
+    params
 }
 
 /// Port of `OCIO_ADD_TEST(MergeConfigs, ociom_parser)` @ v2.5.2.
@@ -218,4 +352,539 @@ fn ociom_parser_no_overrides() {
     assert_eq!(p.looks(), MergeStrategies::BaseOnly);
     assert_eq!(p.colorspaces(), MergeStrategies::Remove);
     assert_eq!(p.named_transforms(), MergeStrategies::PreferBase);
+}
+
+/// Upstream's `OCIO::MergeHandlerOptions options = { baseConfig, inputConfig, params,
+/// mergedConfig };` then `OCIO::Merger(options).merge();`: the merger's result.
+macro_rules! merge_section {
+    ($merger:ident, $base:expr, $input:expr, $params:expr, $merged:expr) => {{
+        let mut options = MergeHandlerOptions {
+            base_config: $base,
+            input_config: $input,
+            params: Some($params),
+            merged_config: $merged,
+        };
+        $merger::new(&mut options).and_then(|mut m| m.merge())
+    }};
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, general_section)` @ v2.5.2.
+#[test]
+fn general_section() {
+    let mut base_config = get_base_config().unwrap();
+    let mut input_config = get_input_config().unwrap();
+
+    let setup_basics = setup_general_basics;
+
+    // Test that the default strategy is used as a fallback if the section strategy was not defined.
+    {
+        let mut merger = ConfigMerger::new();
+        // Using STRATEGY_UNSPECIFIED as this simulates that the section
+        // is missing from the OCIOM file.
+        let params = setup_basics(&mut merger, MergeStrategies::Unspecified);
+        // Simulate settings from OCIOM file.
+        merger
+            .params(0)
+            .unwrap()
+            .set_default_strategy(MergeStrategies::InputOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            GeneralMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.name(), b"input0");
+        assert_eq!(merged_config.description(), b"My description 2");
+        assert_eq!(merged_config.major_version(), 2);
+        assert_eq!(merged_config.minor_version(), 1);
+        let rgb = merged_config.default_luma_coefs();
+        check_close(rgb[1], 0.677998, 1e-4);
+    }
+
+    // Test General section with strategy = PreferInput.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            GeneralMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.name(), b"input0");
+        assert_eq!(merged_config.description(), b"My description 2");
+
+        assert_eq!(merged_config.major_version(), 2);
+        assert_eq!(merged_config.minor_version(), 1);
+
+        let rgb = merged_config.default_luma_coefs();
+        check_close(rgb[1], 0.677998, 1e-4);
+    }
+
+    // Test General section with strategy = PreferBase.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            GeneralMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.name(), b"base0");
+        assert_eq!(merged_config.description(), b"My description 1");
+
+        assert_eq!(merged_config.major_version(), 2);
+        // Config version is always highest of both configs, regardless of strategy.
+        assert_eq!(merged_config.minor_version(), 1);
+
+        let rgb = merged_config.default_luma_coefs();
+        check_close(rgb[1], 0.7152, 1e-4);
+    }
+
+    // Test General section with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            GeneralMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.name(), b"input0");
+        assert_eq!(merged_config.description(), b"My description 2");
+
+        assert_eq!(merged_config.major_version(), 2);
+        assert_eq!(merged_config.minor_version(), 1);
+
+        let rgb = merged_config.default_luma_coefs();
+        check_close(rgb[1], 0.677998, 1e-4);
+    }
+
+    // Test General section with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            GeneralMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.name(), b"base0");
+        assert_eq!(merged_config.description(), b"My description 1");
+
+        assert_eq!(merged_config.major_version(), 2);
+        // Config version is always highest of both configs, regardless of strategy.
+        assert_eq!(merged_config.minor_version(), 1);
+
+        let rgb = merged_config.default_luma_coefs();
+        check_close(rgb[1], 0.7152, 1e-4);
+    }
+
+    {
+        const BASE: &str = r#"ocio_profile_version: 1
+
+roles:
+  default: colorspace_a
+colorspaces:
+- !<ColorSpace>
+    name: colorspace_a
+"#;
+
+        const INPUT: &str = r#"ocio_profile_version: 2.1
+
+luma: [0.262700, 0.677998, 0.059301]
+name: input0
+description: |
+  My description 2
+
+roles:
+  default: colorspace_b
+colorspaces:
+- !<ColorSpace>
+    name: colorspace_b
+"#;
+
+        base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+        input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+        // Test General section with strategy = PreferInput.
+        {
+            let mut merger = ConfigMerger::new();
+            let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+            let mut merged_config = (*base_config).clone();
+            merge_section!(
+                GeneralMerger,
+                &base_config,
+                &input_config,
+                &params,
+                &mut merged_config
+            )
+            .unwrap();
+
+            assert_eq!(merged_config.name(), b"input0");
+            assert_eq!(merged_config.description(), b"My description 2");
+
+            assert_eq!(merged_config.major_version(), 2);
+            assert_eq!(merged_config.minor_version(), 1);
+
+            let rgb = merged_config.default_luma_coefs();
+            check_close(rgb[1], 0.677998, 1e-4);
+        }
+
+        // Test General section with strategy = PreferBase.
+        {
+            let mut merger = ConfigMerger::new();
+            let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+            let mut merged_config = (*base_config).clone();
+            merge_section!(
+                GeneralMerger,
+                &base_config,
+                &input_config,
+                &params,
+                &mut merged_config
+            )
+            .unwrap();
+
+            assert_eq!(merged_config.name(), b"");
+            assert_eq!(merged_config.description(), b"");
+
+            assert_eq!(merged_config.major_version(), 2);
+            // Config version is always highest of both configs, regardless of strategy.
+            assert_eq!(merged_config.minor_version(), 1);
+
+            let rgb = merged_config.default_luma_coefs();
+            check_close(rgb[1], 0.7152, 1e-4);
+        }
+
+        // Test General section with strategy = InputOnly.
+        {
+            let mut merger = ConfigMerger::new();
+            let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+            let mut merged_config = (*base_config).clone();
+            merge_section!(
+                GeneralMerger,
+                &base_config,
+                &input_config,
+                &params,
+                &mut merged_config
+            )
+            .unwrap();
+
+            assert_eq!(merged_config.name(), b"input0");
+            assert_eq!(merged_config.description(), b"My description 2");
+
+            assert_eq!(merged_config.major_version(), 2);
+            assert_eq!(merged_config.minor_version(), 1);
+
+            let rgb = merged_config.default_luma_coefs();
+            check_close(rgb[1], 0.677998, 1e-4);
+        }
+
+        // Test General section with strategy = BaseOnly.
+        {
+            let mut merger = ConfigMerger::new();
+            let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+            let mut merged_config = (*base_config).clone();
+            merge_section!(
+                GeneralMerger,
+                &base_config,
+                &input_config,
+                &params,
+                &mut merged_config
+            )
+            .unwrap();
+
+            assert_eq!(merged_config.name(), b"");
+            assert_eq!(merged_config.description(), b"");
+
+            assert_eq!(merged_config.major_version(), 2);
+            // Config version is always highest of both configs, regardless of strategy.
+            assert_eq!(merged_config.minor_version(), 1);
+
+            let rgb = merged_config.default_luma_coefs();
+            check_close(rgb[1], 0.7152, 1e-4);
+        }
+    }
+}
+
+/// Upstream's `setupBasics` of the roles section's test: a merger with new parameters, whose
+/// roles and default strategies are `strategy`; the parameters.
+fn setup_roles_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    merger.params(0).unwrap().set_roles(strategy);
+    merger.params(0).unwrap().set_default_strategy(strategy);
+    params
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, roles_section)` @ v2.5.2.
+#[test]
+fn roles_section() {
+    // Allowed strategies: PreferInput, PreferBase, InputOnly, BaseOnly, Remove
+    // Allowed merge options: ErrorOnConflict.
+
+    let base_config = get_base_config().unwrap();
+    let input_config = get_input_config().unwrap();
+
+    let setup_basics = setup_roles_basics;
+
+    // Test that the default strategy is used as a fallback if the section strategy was not defined.
+    {
+        let mut merger = ConfigMerger::new();
+        // Using STRATEGY_UNSPECIFIED as this simulates that the section
+        // is missing from the OCIOM file.
+        let params = setup_basics(&mut merger, MergeStrategies::Unspecified);
+        // Simulate settings from OCIOM file.
+        merger
+            .params(0)
+            .unwrap()
+            .set_default_strategy(MergeStrategies::InputOnly);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a role 'g22_ap1_tx' that would override an alias of Base config color space 'Gamma 2.2 AP1 - Texture'",
+                "The Input config contains a role 'nt_base' that would override Base config named transform: 'nt_base'",
+            ],
+        );
+
+        assert_eq!(merged_config.num_roles(), 3);
+        assert_eq!(
+            merged_config.role_color_space("aces_interchange"),
+            b"ACES2065-1"
+        );
+        assert_eq!(
+            merged_config.role_color_space("texture_paint"),
+            b"ACEScct - SomeOtherName"
+        );
+        assert_eq!(
+            merged_config.role_color_space("matte_paint"),
+            b"sRGB - Texture"
+        );
+    }
+
+    // Test Roles section with strategy = PreferInput
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a role 'g22_ap1_tx' that would override an alias of Base config color space 'Gamma 2.2 AP1 - Texture'",
+                "The Input config contains a role that would override Base config role 'texture_paint'.",
+                "The Input config contains a role 'nt_base' that would override Base config named transform: 'nt_base'",
+            ],
+        );
+
+        assert_eq!(merged_config.num_roles(), 4);
+
+        // Following three roles were overwritten by input config.
+        assert_eq!(
+            merged_config.role_color_space("aces_interchange"),
+            b"ACES2065-1"
+        );
+        assert_eq!(
+            merged_config.role_color_space("texture_paint"),
+            b"ACEScct - SomeOtherName"
+        );
+        assert_eq!(
+            merged_config.role_color_space("matte_paint"),
+            b"sRGB - Texture"
+        );
+
+        // Following role come from base config.
+        assert_eq!(merged_config.role_color_space("data"), b"Raw");
+    }
+
+    // Test Roles section with strategy = PreferBase
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a role 'g22_ap1_tx' that would override an alias of Base config color space 'Gamma 2.2 AP1 - Texture'",
+                "The Input config contains a role that would override Base config role 'texture_paint'.",
+                "The Input config contains a role 'nt_base' that would override Base config named transform: 'nt_base'",
+            ],
+        );
+
+        assert_eq!(merged_config.num_roles(), 4);
+
+        // Following three roles comes form the base config.
+        assert_eq!(
+            merged_config.role_color_space("aces_interchange"),
+            b"ACES2065-1"
+        );
+        assert_eq!(merged_config.role_color_space("texture_paint"), b"ACEScct");
+        assert_eq!(merged_config.role_color_space("data"), b"Raw");
+
+        // Following role come from input config.
+        assert_eq!(
+            merged_config.role_color_space("matte_paint"),
+            b"sRGB - Texture"
+        );
+    }
+
+    // Test Roles section with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a role 'g22_ap1_tx' that would override an alias of Base config color space 'Gamma 2.2 AP1 - Texture'",
+                "The Input config contains a role 'nt_base' that would override Base config named transform: 'nt_base'",
+            ],
+        );
+
+        assert_eq!(merged_config.num_roles(), 3);
+
+        // Following three roles comes form the input config.
+        assert_eq!(
+            merged_config.role_color_space("aces_interchange"),
+            b"ACES2065-1"
+        );
+        assert_eq!(
+            merged_config.role_color_space("texture_paint"),
+            b"ACEScct - SomeOtherName"
+        );
+        assert_eq!(
+            merged_config.role_color_space("matte_paint"),
+            b"sRGB - Texture"
+        );
+    }
+
+    // Test Roles section with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            RolesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.num_roles(), 3);
+
+        // Following three roles comes form the base config.
+        assert_eq!(
+            merged_config.role_color_space("aces_interchange"),
+            b"ACES2065-1"
+        );
+        assert_eq!(merged_config.role_color_space("texture_paint"), b"ACEScct");
+        assert_eq!(merged_config.role_color_space("data"), b"Raw");
+    }
+
+    // Test Roles section with strategy = Remove
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::Remove);
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            RolesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.num_roles(), 1);
+
+        // This is the only role in base that is not in input.
+        assert_eq!(merged_config.role_color_space("data"), b"Raw");
+    }
+
+    // Test Roles section with strategy = PreferInput and option ErrorOnConflict = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_error_on_conflict(true);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Error,
+            || {
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "The Input config contains a role 'g22_ap1_tx' that would override an alias of Base config color space 'Gamma 2.2 AP1 - Texture'.",
+            ],
+        );
+    }
 }

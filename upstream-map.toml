@@ -737,13 +737,15 @@ note = "p9-merge-1 9.2c"
 path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs"]
-status = "todo"
+status = "partial"
+note = "p9-merge-2 9.2d: SectionMerger (notify, merge), setMergedConfigVersion, GeneralMerger, RolesMerger; the other sections with 9.2e-9.2i"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.h"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs"]
-status = "todo"
+status = "partial"
+note = "p9-merge-2 9.2d: MergeHandlerOptions, SectionMerger, GeneralMerger, RolesMerger (mergeStringVecWithoutDuplicate and inputFirstMergeStringVec are declared, never defined); the other mergers with 9.2e-9.2i"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.cpp"
@@ -4660,7 +4662,7 @@ path = "tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/merge_configs_helpers_tests.rs"]
 status = "partial"
-note = "p9-merge-1 9.2c: ociom_parser, params_serialization, ociom_serialization, ociom_parser_no_overrides; the section tests with 9.2d-9.2i, the merges with 9.2j"
+note = "p9-merge-1 9.2c: ociom_parser, params_serialization, ociom_serialization, ociom_parser_no_overrides; p9-merge-2 9.2d: general_section, roles_section; the other section tests with 9.2e-9.2i, the merges with 9.2j"
 
 [[file]]
 path = "tests/cpu/apphelpers/MixingHelpers_tests.cpp"
