@@ -1,6 +1,6 @@
 # Phase 7 cards: the legacy GPU path and GPU execution
 
-**Status: planned, 2026-10-25. Owner decisions P7-1 to P7-8 are open.** Phases 1–5 already
+**Status: planned, 2026-10-25. Owner decisions P7-1 to P7-8 taken 2026-10-25: every recommendation, (a) where there are options.** Phases 1–5 already
 give every op family its GPU writer in all 10 languages, checked against the wheel byte for
 byte (shader text, uniforms, textures, cache IDs). Phase 7 adds what is left of OCIO's GPU
 side and runs the shaders.
@@ -262,7 +262,7 @@ when the Rocky image is rebuilt. Licences are all in `deny.toml`'s list.
 
 ## Owner decisions
 
-| # | Decision | Recommendation |
+| # | Decision | Recommendation (the owner took each, 2026-10-25) |
 |---|---|---|
 | P7-1 | **The oracle for the legacy GPU processor** (`dependency`: a native helper in the oracle). The binding doesn't expose it, so the oracle can't call it from Python | **(a) A native helper:** `oracle/native/legacy_gpu.cpp` (~200 lines), built against the wheel's own library with upstream's v2.5.2 public headers: on Windows by MSVC (VS 2022 is on this workstation and GitHub's images; an import library generated from the DLL's exports with `dumpbin` and `lib /def`, the `/MD` release runtime), on Linux by the image's GCC (linking the wheel's `.so`, with the libstdc++ ABI the wheel's symbols show). `legacy_gpu.py` runs it and reports like `gpu_shader`. The oracle's cache key covers its source. Without it, the legacy path's text and texture parity (PLAN.md §3) has no oracle. **(b)** `ctypes` into the wheel's library, calling the mangled C++ member through pybind11's holder pointers: fragile, per-platform ABI code in Python. **(c)** Rebuild the result from public calls (the optimized GPU processor of the pre ops, a `Lut3DTransform` baked from a CPU processor at `OPTIMIZATION_NONE` on an identity lattice, the post ops): it encodes our reading of `PartitionGPUOps` into the expected value, so it proves nothing about it. **(d)** No parity check: only the GPU suite's 30 legacy tests and the 3 C++ tests |
 | P7-2 | **The execution backend** (`dependency`, `unsafe`, layout). Upstream's harness is OpenGL with GLSL 1.2 and the fixed-function pipeline (`gl_TexCoord`, `gl_FragColor`, `glBegin(GL_QUADS)`, `oglapp.cpp:126-148, 206-215`) | **(a) OpenGL, as upstream: `glow` and `khronos-egl` on Mesa's llvmpipe.** A port of `oglapp.cpp` (its `HeadlessApp`) and `glsl.cpp` runs the suite in upstream's own language, GL state, texture formats and filtering. glow's calls are `unsafe`: the harness's two GL files join the `unsafe` allowlist (as P9-3's FFI file did). Everything lives in a new test-only crate, `crates/ocio-gpu-exec` (`publish = false`), so the library's dependencies don't change. PLAN.md §8 and §9 then say OpenGL and llvmpipe instead of wgpu and naga. **(b) wgpu 30 (PLAN.md's pick):** naga's GLSL front end reads only GLSL 4.40+ core, so the suite would run another language (Vulkan GLSL 4.6, or the HLSL output on DX12) through naga's translation, a different test from upstream's, with a translator between the wheel's text and the device. Its gain: WARP on Windows, built into Windows and GitHub's images (P7-3 (c)). **(c) Both:** (a) now, (b) later for Windows |
