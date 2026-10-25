@@ -39,8 +39,11 @@
 //!   `with_files` in `files_api.py` with the pin [`NESTED`] names (whose arguments [`nested`]
 //!   reads), and for a `batch` or `with_files` whose arguments don't name their commands;
 //! - for every command, when the analysis fails, reports modules other than the package's,
-//!   or reports pins of `commands.py`'s `command` and `_import_package_modules` other than
-//!   [`REGISTRY_PIN`] and [`LOADER_PIN`] (the code the analysis's rules were written for).
+//!   or reports pins of `commands.py`'s `command`, `_import_package_modules` and `COMMANDS`
+//!   binding, and of `__main__.py`, other than [`REGISTRY_PIN`], [`LOADER_PIN`],
+//!   [`COMMANDS_PIN`] and [`MAIN_PIN`] (the code the analysis's rules were written for: the
+//!   registry, the loader, and the framed dispatcher, which runs the one command a request
+//!   names).
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -77,10 +80,27 @@ pub(crate) const LOADER_PIN: (&str, &str) = (
     "f9c28888ffe28999a665abc3782e5245453a8b261d77865428a15309261b84fe",
 );
 
+/// The pin of `__main__.py`, the framed dispatcher, which runs the one command a request names
+/// (`oracle_scope.py`'s `module_pin`: the SHA-256 of the module's syntax tree, without its
+/// docstrings). Another pin fails the analysis.
+pub(crate) const MAIN_PIN: (&str, &str) = (
+    "__main__.py",
+    "082fb6ec1e391ec4ef44270f12d4dfec8d1bf955a0ef7157e0880b5a8654a817",
+);
+
+/// The pin of the registry's binding in `commands.py`, `COMMANDS = {}` (the SHA-256 of the
+/// statement's syntax tree), which every dispatcher looks commands up in. Another pin fails
+/// the analysis.
+pub(crate) const COMMANDS_PIN: (&str, &str) = (
+    "commands.py:COMMANDS",
+    "ec24684e4dfd361e32674c19ab6c3d3469da06941d3f70cc71bc9c95cb680b1c",
+);
+
 /// The commands [`nested`] follows: each with its module and the pin of the function whose
 /// arguments [`nested`] reads. Another pin (`batch` running something more than its
-/// `calls`) gives the command the whole oracle's key until [`nested`] is reviewed and the pin
-/// updated.
+/// `calls`, or reaching a definition that may run a command by name, which the analysis
+/// reports in place of the pin) gives the command the whole oracle's key until [`nested`] is
+/// reviewed and the pin updated.
 pub(crate) const NESTED: [(&str, &str, &str); 2] = [
     (
         "batch",
@@ -277,7 +297,7 @@ impl Scopes {
         modules: Vec<(String, u128)>,
         manifest: &Value,
     ) -> Result<Scopes, String> {
-        if manifest.get("format") != Some(&Value::from(2)) {
+        if manifest.get("format") != Some(&Value::from(3)) {
             return Err(format!("analysis format {:?}", manifest.get("format")));
         }
         let reported = manifest
@@ -289,7 +309,7 @@ impl Scopes {
             .and_then(Value::as_object)
             .ok_or("analysis without pins")?;
         let pin = |name: &str| pins.get(name).and_then(Value::as_str);
-        for (name, expected) in [REGISTRY_PIN, LOADER_PIN] {
+        for (name, expected) in [REGISTRY_PIN, LOADER_PIN, MAIN_PIN, COMMANDS_PIN] {
             if pin(name) != Some(expected) {
                 return Err(format!(
                     "{name} changed (pin {:?}, oracle_scope.rs expects {expected}): review the \

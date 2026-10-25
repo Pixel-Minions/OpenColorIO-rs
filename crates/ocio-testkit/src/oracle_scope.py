@@ -9,7 +9,7 @@ imports every module of the package but ``__main__``: a module that fails to imp
 every process of the oracle, so the analysis fails, and every key is the whole oracle's. It
 prints one JSON object:
 
-    {"format": 2,
+    {"format": 3,
      "modules": {"<name>.py": {
         "edges": [the modules this one reaches statically, as "<name>.py"],
         "commands": [the @command functions it defines],
@@ -20,7 +20,11 @@ prints one JSON object:
         "global": [why its top level may act on every command's process]}},
      "pins": {"<name>.py:<function>": the SHA-256 of the function's syntax tree, without its
               docstring, for commands.py's `command` and `_import_package_modules`, and for
-              every dispatcher}}
+              every dispatcher (for one that reaches another definition that may run a
+              command by name: "dispatches through <name>.py:<definition>, ..."),
+              "commands.py:COMMANDS": the SHA-256 of the statement that binds the registry,
+              "__main__.py": the SHA-256 of the module's syntax tree, without its
+              docstrings}}
 
 It reports facts; ``oracle_scope.rs`` decides the keys. It is an allowlist: what it can't
 prove harmless is a "fallback" reason (a command that can reach the module gets the whole
@@ -31,21 +35,31 @@ Global: a module's top level may hold only
 - constants (a docstring), ``pass``, and imports of a sibling or of a module of IMPORTABLE;
 - ``def``, whose decorators are the innermost ``@command`` and those of PURE_DECORATORS, and
   whose defaults and annotations are inert (below);
-- ``class`` without keywords or decorators, whose bases are builtin exceptions, ``object``, a
-  class of a module outside the package, or an earlier class of the module that defines none
-  of CLASS_HOOKS; whose body holds constants, ``pass``, ``def`` (decorated as above, or with
-  ``staticmethod``, ``classmethod``, ``property`` or a property's ``setter``), assignments of
-  inert values to names, and classes of the same kind;
+- ``class`` without keywords or decorators, whose bases are builtin types, ``object``, a
+  class of a module outside the package, or an earlier class of the module that defines (or
+  assigns) none of CLASS_HOOKS; whose body holds constants, ``pass``, ``def`` (decorated as
+  above, or with ``staticmethod``, ``classmethod``, ``property`` or a property's ``setter``),
+  assignments of inert values to names, and classes of the same kind. When a base other than
+  ``object`` and the builtin exceptions (PLAIN_BASES) is among its ancestors, whose metaclass
+  may call what the class defines while it makes the class (``enum.Enum`` makes its members
+  by calling the class), its body holds no ``def`` and no class, and assigns only DATA;
 - assignments of inert values to names (``X = ...``, ``X: T = ...``, ``A, B = ...``);
 - ``if __name__ == "__main__":`` without ``else``.
-An inert value runs no code of the package and calls nothing outside an allowlist: constants;
-displays, comprehensions (over names), operators, subscripts, f-strings and lambdas of inert
-values (a lambda's body isn't evaluated, its defaults are); builtin types and exceptions,
-``__file__`` and ``__name__``; a module outside the package and its attributes; a function of
-the package; an earlier class of the module (as above); a name bound once to an inert value,
-here or in the sibling it is imported from, and ``<sibling>.<name>`` of one; the non-mutating
-methods INERT_METHODS of an inert value; the calls PURE_CALLS (builtins) and
-PURE_EXTERNAL_CALLS, with inert arguments. Anything else is a global reason.
+An inert value runs no code of the package and calls nothing outside an allowlist. It is DATA
+(it runs no code of the package when it is used) or CODE (it is, or holds, a function, a
+class or a lambda of the package). DATA: constants; builtin types and exceptions,
+``__file__`` and ``__name__``; a module outside the package and its attributes; operators,
+comparisons, tests, subscripts, slices and f-strings of DATA; sets, dict keys, comprehensions
+(over names, iterating DATA) and ``*`` items of DATA; the non-mutating methods INERT_METHODS of
+DATA, and the calls PURE_CALLS (builtins) and PURE_EXTERNAL_CALLS, with DATA arguments. CODE:
+a function of the package, an earlier class of the module (as above), a lambda (its body
+isn't evaluated, its defaults are), an attribute of CODE, and a display that holds CODE. A
+name bound once to an inert value, here or in the sibling it is imported from, and
+``<sibling>.<name>`` of one, is of its value's kind. CODE may only be held (by a name, a
+display's item, a dict's value, a default or an annotation): an operator, a hash, an
+iteration, a format, a call it is passed to or a method of it can run the package's code
+(``sorted(x, key=f)``, ``K[0]`` and ``__class_getitem__``, ``{E.A: 1}`` and ``__hash__``).
+Anything else is a global reason.
 
 Edges:
 - imports of a sibling, at any depth: ``from . import x``, ``from .x import y``, ``import
@@ -53,7 +67,8 @@ Edges:
   ``import x`` and ``from x import y`` of a sibling's name (a script run from the package's
   directory, or a child whose path holds it, imports its siblings so);
 - a string naming a sibling's file, ``"x.py"`` (a script the module starts), or a module,
-  ``"ocio_oracle.x"`` or ``"ocio_oracle/x"`` (``"ocio_oracle"`` alone names ``__init__.py``);
+  ``"ocio_oracle.x"`` or ``"ocio_oracle/x"`` (``ocio_oracle`` followed by another character
+  than a separator, as in an import, names ``__init__.py``);
 - the imports of Python code in a string (a child process's source).
 
 Names are resolved where they are used: a function's parameters and the names it binds are
@@ -73,35 +88,43 @@ Fallback reasons:
   ``vars(commands)``, ``commands.__file__``, ``commands.importlib``);
 - ``sys``, ``os``, ``nt``, ``posix`` and ``subprocess`` used other than as ``<module>.<name>``;
   the attributes of ``sys`` outside SYS_ATTRIBUTES (``sys.modules``, ``sys.path``,
-  ``sys._getframe``, ...; a child's source may call ``sys.path.insert``); an attribute, of
-  anything, named as a function of ``os`` that starts a process (PROCESS_ATTRIBUTES), as one
-  of those modules or as one outside USABLE (``OCIO.os``), and those names as constant
-  strings in a call or a subscript (``vars(OCIO)["os"]``); a use of ``subprocess`` that
-  isn't a call of ``run``, ``Popen``, ``call``, ``check_call`` or ``check_output`` with a list
-  display of
+  ``sys._getframe``, ...; a child's source may call ``sys.path.insert``); ``sys.argv`` but in
+  ``__main__.py`` (the oracle's arguments: the first is ``__main__.py``'s path, in the
+  package's directory); an attribute, of anything, named as a function of ``os`` that starts
+  a process (PROCESS_ATTRIBUTES), as one of those modules or as one outside USABLE
+  (``OCIO.os``); a use of ``subprocess`` that isn't a call of ``run``, ``Popen``, ``call``,
+  ``check_call`` or ``check_output``, without ``executable=``, with a list display of
   arguments that, when it starts with ``sys.executable``, holds options (``"-I"``, ``"-X"
-  "utf8"``, ...), then either ``"-c"`` and a string, or a name bound only once, at the top
-  level, to a string, which is analysed as a child's source (it must parse), or a script: the
+  "utf8"``, ...; none joined with ``c`` or ``m``, as ``"-Ic"`` or ``"-cimport x"``, and no
+  ``"-"``), then either ``"-c"`` and a string, or a name bound only once, at the top level,
+  to a string, which is analysed as a child's source (it must parse), or a script: the
   package's directory joined with a sibling's ``"x.py"``, directly or through a name bound
   only once, at the top level, to it;
-- ``sys.executable`` other than first in such a list; ``"-m"`` anywhere; ``"-c"`` in a list of
-  arguments that doesn't start with ``sys.executable``;
+- ``sys.executable`` other than first in such a list; ``"-m"`` anywhere; an option holding
+  ``c`` (``"-c"``, ``"-Ic"``, ``"-cimport x"``) in a list of arguments that doesn't start with
+  ``sys.executable``;
 - attributes whose names start and end with two underscores, outside DUNDER_ATTRIBUTES
   (``__globals__``, ``__subclasses__``, ``__self__``, ``__code__``, ...; ``__file__`` only of
   a module outside the package; never ``__dict__`` of one, its namespace: ``os.__dict__``),
-  the attributes of frames and of the import system
-  DENIED_ATTRIBUTES, and those names as constant strings in a call, a subscript or
-  ``getattr``;
+  the attributes of frames and of the import system DENIED_ATTRIBUTES, and those names as
+  constant strings in ``getattr`` or ``operator.attrgetter``;
+- a constant string naming such an attribute, or one of MODULE_ATTRIBUTES or
+  PROCESS_ATTRIBUTES (``"__globals__"``, ``"modules"``, ``"os"``), other than compared or in a
+  table (a tuple, list or set display, or a dict display's key): bound to a name, returned, a
+  default, an argument or an index;
 - ``__file__`` other than as the package's directory joined with a sibling's ``"x.py"``, or
   as the oracle's directory assigned to a name whose every use is a value of a dict display,
   an item of a subprocess call's list of arguments, an argument of ``os.path.samefile``, or an
   argument of a function of the module whose parameter is used so in turn;
 - a string that names a module or a file of the package in a way it can't resolve: a constant
   naming ``ocio_oracle.<x>`` or ``ocio_oracle/<x>`` that isn't a sibling, or built into a
-  longer string (an operand, a method's object, a path join's argument); ``".py"`` built into
-  a file name; an f-string or a bytes constant naming either; and a string that looks like
-  code with an import but doesn't parse (a ``%`` or ``.format`` template). In a child's
-  source, any string naming either;
+  longer string (an operand, a method's object, a path join's argument); a string that ends
+  with ``ocio_oracle``, the package's directory (the oracle runs from the oracle's
+  directory: ``os.listdir("ocio_oracle")``); ``".py"`` built into a file name; an f-string
+  part ending with ``ocio_oracle``, and an f-string or a bytes constant naming either; and a
+  string that looks like code with an import but doesn't parse (a ``%`` or ``.format``
+  template, or ``"-cfrom x import y"``). In a child's source, any string naming either;
+- ``__cached__`` (the path of the module's bytecode, in the package's directory);
 - the ``command`` decorator used other than as the innermost decorator of a top-level
   function (the registry keys commands by the decorated function's ``__name__``);
 - a script, or a child's source, that may run a command by name (below);
@@ -115,14 +138,20 @@ process: those of a top-level statement that isn't inert (a global reason), outs
 bodies of the functions it defines; and those of the top-level statements that define a name
 that code reaches, through the names it uses, at any depth and across modules. An inert
 statement calls nothing of the package and nothing outside the allowlists, so what it binds
-can only act when other code uses it.
+can only act when other code uses it. And a module whose code run at import reaches a
+definition that may run a command by name, or the registry (``__main__.py``'s own
+definitions and the registry they dispatch through aside: the module is pinned whole): a
+command run when every process starts.
 
 Dispatchers: a top-level definition may run a command by name when it uses ``COMMANDS``
 (through any binding, or the name or string ``"COMMANDS"``; ``commands.py``'s ``command``,
 which registers into it, aside), or uses a definition that may, through its own module's
 names, the names it imports, or ``<module>.<name>`` of a module it imports; to a fixpoint
 across modules. A module-level assignment counts as a definition of the names it binds. A
-command that may is a dispatcher; every command of a module whose top level may is one.
+command that may is a dispatcher; every command of a module whose top level may is one. A
+dispatcher's pin covers its own syntax tree; when another definition it reaches (the
+registry aside) may run a command by name, its pin says so instead, and ``oracle_scope.rs``
+doesn't follow it.
 
 What the analysis doesn't follow, by design: values. A module name or a path assembled at run
 time from fragments none of which names the package or a ``.py`` file, or attributes walked by
@@ -131,6 +160,7 @@ is part of every key.
 """
 
 import ast
+import builtins
 import copy
 import hashlib
 import json
@@ -164,7 +194,7 @@ MODULE_ATTRIBUTES = frozenset({"sys", "os", "nt", "posix", "subprocess"}) | (
 # External modules whose names may only be used as `<module>.<name>`, with the checks below.
 STRICT = frozenset({"sys", "os", "nt", "posix", "subprocess"})
 SYS_ATTRIBUTES = frozenset({
-    "argv", "byteorder", "exc_info", "executable", "exit", "flags", "float_info",
+    "byteorder", "exc_info", "executable", "exit", "flags", "float_info",
     "getdefaultencoding", "getfilesystemencoding", "getrecursionlimit", "getsizeof",
     "getwindowsversion", "hexversion", "implementation", "maxsize", "maxunicode", "platform",
     "setrecursionlimit", "stderr", "stdin", "stdout", "version", "version_info",
@@ -183,6 +213,7 @@ VALUE_OPTIONS = frozenset({"-X", "-W"})
 DENIED_NAMES = frozenset({
     "__import__", "exec", "eval", "compile", "__builtins__", "breakpoint", "globals",
     "locals", "help", "__loader__", "__spec__", "__path__", "__package__", "__build_class__",
+    "__cached__",
 })
 DUNDER_ATTRIBUTES = frozenset({
     "__name__", "__qualname__", "__module__", "__doc__", "__members__", "__version__",
@@ -233,17 +264,32 @@ PURE_DECORATORS = frozenset({"contextlib.contextmanager", "functools.cache",
 CLASS_DECORATORS = frozenset({"staticmethod", "classmethod", "property"})
 CLASS_HOOKS = frozenset({"__init_subclass__", "__class_getitem__", "__mro_entries__",
                          "__set_name__", "__prepare__"})
+# The bases whose metaclass is `type` and that look up none of the class's own methods when a
+# class is made: `object` and the builtin exceptions. Any other base (a builtin type, or a class
+# of a module outside the package: `enum.Enum`, whose metaclass makes members by calling the
+# class) may run the class's methods when the class is made.
+PLAIN_BASES = frozenset({"object"} | {
+    name for name in SAFE_BUILTINS
+    if isinstance(getattr(builtins, name, None), type)
+    and issubclass(getattr(builtins, name), BaseException)})
+# Names of attributes the rules deny, as strings: a string naming one is a fallback reason
+# unless it is compared, or held in a tuple, list or set display or as a dict display's key.
+DENIED_STRINGS = DENIED_ATTRIBUTES | MODULE_ATTRIBUTES | PROCESS_ATTRIBUTES
 
 # The functions of the package exempt from the rules, or that they rely on; both pinned.
 EXEMPT = ("commands", "_import_package_modules")
 REGISTRY = ("commands", "command")
 COMMANDS = ("commands", "COMMANDS")
+# The framed dispatcher, which runs the command a request names: pinned whole.
+MAIN = "__main__"
 
 RUNS_PACKAGE = re.compile(r"-m\s*" + PACKAGE + r"(?![A-Za-z0-9_])")
 MENTION = re.compile(r"(?<![A-Za-z0-9_])" + PACKAGE + r"(?![A-Za-z0-9_])([./\\]([A-Za-z_]\w*)?)?")
 PY_FILE = re.compile(r"(\w*)\.py(?![A-Za-z0-9_])")
 LOOKS_LIKE_IMPORT = re.compile(
     r"(?:^|[\n;])[ \t]*(?:import[ \t]+[A-Za-z_]|from[ \t]+[A-Za-z_.][\w.]*[ \t]+import\b)")
+# `from x import y` anywhere, as in a "-c" option joined with its code ("-cfrom x import y").
+FROM_IMPORT = re.compile(r"from[ \t]+[A-Za-z_.][\w.]*[ \t]+import\b")
 
 FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
@@ -327,6 +373,17 @@ def pin(node):
     if node.body and is_docstring(node.body[0]):
         node.body = node.body[1:] or [ast.Pass()]
     return hashlib.sha256(ast.dump(node).encode("utf-8")).hexdigest()
+
+
+def module_pin(tree):
+    """The SHA-256 of a module's syntax tree, without the docstrings of the module, its
+    classes and its functions."""
+    tree = copy.deepcopy(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) \
+                and node.body and is_docstring(node.body[0]):
+            node.body = node.body[1:] or [ast.Pass()]
+    return hashlib.sha256(ast.dump(tree).encode("utf-8")).hexdigest()
 
 
 class Module:
@@ -653,6 +710,11 @@ def check_external(scope, node, path):
             if not argv_head(scope, node):
                 scope.fail(node, "uses sys.executable other than first in the arguments of "
                                  "a subprocess call")
+        elif attr == "argv":
+            # The oracle's own arguments: the first is `__main__.py`'s path, in the package's
+            # directory. Only `__main__.py`, pinned whole, reads them.
+            if scope.child or scope.module.name != MAIN:
+                scope.fail(node, "uses sys.argv")
         elif attr not in SYS_ATTRIBUTES:
             scope.fail(node, f"uses sys.{attr}")
     elif top in ("os", "nt", "posix"):
@@ -706,6 +768,8 @@ def check_argv(scope, call):
             scope.fail(call, "a subprocess call through the shell")
         elif keyword.arg is None:
             scope.fail(call, "a subprocess call with ** arguments")
+        elif keyword.arg == "executable":
+            scope.fail(call, "a subprocess call with executable=")
     if not isinstance(argv, ast.List) or not argv.elts:
         scope.fail(call, "a subprocess call whose arguments aren't a list display")
         return
@@ -715,7 +779,9 @@ def check_argv(scope, call):
     elts = argv.elts
     strings = [e.value for e in elts if isinstance(e, ast.Constant)]
     if external_path(scope, elts[0]) != "sys.executable":
-        if "-c" in strings:
+        # "-c", alone or joined with other options or with the code ("-Ic", "-cimport x").
+        if any(isinstance(s, str) and s[:1] == "-" and s[1:2] != "-" and "c" in s
+               for s in strings):
             scope.fail(call, "a subprocess call runs Python code other than with "
                              "sys.executable")
         return
@@ -729,6 +795,9 @@ def check_argv(scope, call):
                 return
             i += 2
             continue
+        if isinstance(value, str) and joined_code_option(value):
+            scope.fail(call, f"the option {value!r} runs code the analysis can't read")
+            return
         if value == "-c":
             source = child_source(scope, elts[i + 1] if i + 1 < len(elts) else None)
             if source is None:
@@ -748,6 +817,22 @@ def check_argv(scope, call):
             module.scripts.setdefault(script, call)
         return
     scope.fail(call, "a subprocess call of sys.executable without code")
+
+
+def joined_code_option(value):
+    """Whether the interpreter's option `value` (one argument) reads its program from stdin
+    ("-"), or joins -c or -m with other options or with the code ("-Ic", "-cimport x"), as
+    Python reads it: the letters after "-" up to an -X or -W, whose value is the rest."""
+    if value == "-":
+        return True
+    if value[:1] != "-" or value[1:2] == "-" or value in ("-c", "-m"):
+        return False
+    for letter in value[1:]:
+        if letter in "XW":
+            return False
+        if letter in "cm":
+            return True
+    return False
 
 
 def top_level_value(scope, name):
@@ -1004,13 +1089,12 @@ def check_string(scope, node, parent):
         return
     if not isinstance(value, str) or isinstance(parent, ast.JoinedStr):
         return
-    if len(value) > 4 and value.startswith("__") and value.endswith("__") \
-            and value not in DUNDER_ATTRIBUTES \
-            and isinstance(parent, (ast.Call, ast.Subscript, ast.keyword)):
-        scope.fail(node, f"the string {value!r} as an argument or an index")
-    if (value in MODULE_ATTRIBUTES or value in PROCESS_ATTRIBUTES) \
-            and isinstance(parent, (ast.Call, ast.Subscript, ast.keyword)):
-        scope.fail(node, f"the string {value!r} as an argument or an index")
+    denied = value in DENIED_STRINGS or len(value) > 4 and value.startswith("__") \
+        and value.endswith("__") and value not in DUNDER_ATTRIBUTES
+    # Compared, or in a table: a tuple, list or set display, or a dict display's key.
+    if denied and not (isinstance(parent, (ast.Compare, ast.Tuple, ast.List, ast.Set))
+                       or isinstance(parent, ast.Dict) and any(k is node for k in parent.keys)):
+        scope.fail(node, f"the string {value!r} other than compared or in a table")
     if value == "-m" or RUNS_PACKAGE.search(value):
         scope.fail(node, "runs a module by name (-m)")
     if scope.child and (MENTION.search(value) or PY_FILE.search(value)):
@@ -1023,7 +1107,7 @@ def check_string(scope, node, parent):
     if code is not None and any(isinstance(n, (ast.Import, ast.ImportFrom))
                                 for n in ast.walk(code)):
         analyze_child(module, value, node, scope)
-    elif code is None and LOOKS_LIKE_IMPORT.search(value):
+    elif code is None and (LOOKS_LIKE_IMPORT.search(value) or FROM_IMPORT.search(value)):
         scope.fail(node, "a string looks like code with an import but doesn't parse")
     building = isinstance(parent, (ast.BinOp, ast.Attribute)) or (
         isinstance(parent, ast.Call) and any(a is node for a in parent.args)
@@ -1032,7 +1116,11 @@ def check_string(scope, node, parent):
     for match in MENTION.finditer(value):
         separator, name = match.group(1), match.group(2)
         if separator is None:
-            if building:
+            # At the end of the string, the package's name is its directory's (the oracle
+            # runs from the oracle's directory): `os.listdir("ocio_oracle")`.
+            if match.end() == len(value):
+                scope.fail(node, f"the string names {PACKAGE}'s directory")
+            elif building:
                 scope.fail(node, f"builds a name from {PACKAGE}")
             module.edges.add("__init__")
         elif name in module.siblings and not building:
@@ -1051,8 +1139,8 @@ def check_fstring(scope, node):
     for part in node.values:
         if isinstance(part, ast.Constant) and isinstance(part.value, str):
             text = part.value
-            if LOOKS_LIKE_IMPORT.search(text) or mentions(text) or RUNS_PACKAGE.search(text) \
-                    or text.endswith(PACKAGE) and part is not node.values[-1]:
+            if LOOKS_LIKE_IMPORT.search(text) or FROM_IMPORT.search(text) or mentions(text) \
+                    or RUNS_PACKAGE.search(text) or text.endswith(PACKAGE):
                 scope.fail(node, f"an f-string names {PACKAGE}, a .py file, or an import")
 
 
@@ -1109,6 +1197,26 @@ def targets_of(modules, scope, nodes, skip=frozenset()):
 # --- Top-level purity ---------------------------------------------------------------------
 
 
+# The kinds of an inert value. DATA runs no code of the package when it is used: builtin data,
+# a module outside the package and its attributes, what PURE_CALLS, PURE_EXTERNAL_CALLS and
+# INERT_METHODS return. CODE is, or may hold, the package's code: a function, a class, a
+# lambda, and what holds one; it may only be held (by a name, a display or a dict's value).
+DATA = "data"
+CODE = "code"
+
+
+def class_hooks(node):
+    """Whether class `node` defines, or assigns, one of CLASS_HOOKS."""
+    names = set()
+    for item in node.body:
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(item.name)
+        elif isinstance(item, (ast.Assign, ast.AnnAssign)):
+            targets = item.targets if isinstance(item, ast.Assign) else [item.target]
+            names.update(n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name))
+    return bool(names & CLASS_HOOKS)
+
+
 class Purity:
     """Whether a module's top level only defines names (see the module's docstring)."""
 
@@ -1116,131 +1224,173 @@ class Purity:
         self.modules = modules
         self.module = module
         self.scope = module.scope
+        # The module's classes so far: name -> (whether it defines one of CLASS_HOOKS, whether
+        # a base outside PLAIN_BASES is among its ancestors).
         self.classes = {}
         self.resolving = set() if resolving is None else resolving
 
     def unbound(self, name):
         return self.scope.bound.get(name, 0) == 0
 
-    def inert_name(self, node, local):
+    def name_kind(self, node, local):
         name = node.id
         if name in local or name in SAFE_BUILTINS and self.unbound(name):
-            return True
+            return DATA
         binding = self.scope.binding_at(name, None)
         if binding[0] in ("external", "forbidden"):
-            return True
+            return DATA
         if binding[0] == "name":
-            return self.inert_definition(binding[1], binding[2])
+            return self.definition(binding[1], binding[2])
         if binding[0] != "":
-            return False
-        return self.inert_definition(self.module.name, name)
+            return None
+        return self.definition(self.module.name, name)
 
-    def inert_definition(self, sibling, name):
-        """Whether `name` of module `sibling` is an inert value."""
+    def definition(self, sibling, name):
+        """The kind of the inert value that `name` of module `sibling` is bound to, or None."""
         key = (sibling, name)
         module = self.modules.get(sibling)
         if key in self.resolving or module is None or module.scope is None:
-            return False
+            return None
         self.resolving.add(key)
         try:
             defs = module.defs.get(name)
             if defs is not None:
                 if len(defs) != 1 or module.scope.bound.get(name, 0) != 1:
-                    return False
+                    return None
                 node = defs[0]
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    return True
+                    return CODE
                 if isinstance(node, ast.ClassDef):
-                    return sibling == self.module.name and name in self.classes
+                    return CODE if sibling == self.module.name and name in self.classes \
+                        else None
                 if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                         and isinstance(node.targets[0], ast.Name):
-                    return Purity(self.modules, module, self.resolving).inert(node.value,
-                                                                              set())
-                return False
+                    purity = self if module is self.module \
+                        else Purity(self.modules, module, self.resolving)
+                    return purity.kind(node.value, set())
+                return None
             binding = module.scope.binding_at(name, None)
             if binding[0] in ("external", "forbidden"):
-                return True
+                return DATA
             if binding[0] == "name":
-                return self.inert_definition(binding[1], binding[2])
-            return False
+                return self.definition(binding[1], binding[2])
+            return None
         finally:
             self.resolving.discard(key)
 
     def inert(self, node, local):
-        """Whether evaluating `node` (with the inert names `local`) runs no code of the
-        package and calls nothing outside the allowlists."""
+        """Whether evaluating `node` (with the comprehension variables `local`) runs no code
+        of the package and calls nothing outside the allowlists."""
+        return self.kind(node, local) is not None
+
+    def plain(self, node, local):
+        """Whether `node` is inert and DATA: code outside the package may use its value."""
+        return self.kind(node, local) == DATA
+
+    def all_plain(self, nodes, local):
+        return DATA if all(self.plain(n, local) for n in nodes) else None
+
+    def held(self, nodes, local):
+        """The kind of what holds the values of `nodes`, or None."""
+        kinds = [self.kind(n, local) for n in nodes]
+        if None in kinds:
+            return None
+        return CODE if CODE in kinds else DATA
+
+    def kind(self, node, local):
+        """The kind of the value of `node` when evaluating it runs no code of the package and
+        calls nothing outside the allowlists (with the comprehension variables `local`, which
+        are DATA); else None. A value that is used (an operand, a subscript's value or index,
+        an iterable, a set's item or a dict's key, a formatted value, a test, a call's argument
+        or a method's object) must be DATA: the package's classes and functions run no code
+        only while they are held."""
         if node is None or isinstance(node, ast.Constant):
-            return True
-        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
-            return all(self.inert(e, local) for e in node.elts)
+            return DATA
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return self.held(node.elts, local)
         if isinstance(node, ast.Starred):
-            return self.inert(node.value, local)
+            return self.all_plain([node.value], local)
+        if isinstance(node, ast.Set):
+            return self.all_plain(node.elts, local)
         if isinstance(node, ast.Dict):
-            return all(self.inert(k, local) for k in node.keys) and \
-                all(self.inert(v, local) for v in node.values)
+            # A key is hashed and compared, and `**x` is iterated; a value is held.
+            if not all(self.plain(v if k is None else k, local)
+                       for k, v in zip(node.keys, node.values)):
+                return None
+            return self.held([v for k, v in zip(node.keys, node.values) if k is not None],
+                             local)
         if isinstance(node, ast.Name):
-            return isinstance(node.ctx, ast.Load) and self.inert_name(node, local)
+            return self.name_kind(node, local) if isinstance(node.ctx, ast.Load) else None
         if isinstance(node, ast.Attribute):
+            # Reading an attribute of a class of the package runs no code of the package: none
+            # has a metaclass, and none of their instances is made at import but the members
+            # of an enum, whose class has no methods (pure_class).
             if external_path(self.scope, node) is not None:
-                return True
+                return DATA
             if isinstance(node.value, ast.Name):
                 binding = self.scope.binding_at(node.value.id, None)
                 if binding[0] == "module":
-                    return self.inert_definition(binding[1], node.attr)
-            return self.inert(node.value, local)
+                    return self.definition(binding[1], node.attr)
+            return self.kind(node.value, local)
         if isinstance(node, ast.BinOp):
-            return self.inert(node.left, local) and self.inert(node.right, local)
+            return self.all_plain([node.left, node.right], local)
         if isinstance(node, ast.UnaryOp):
-            return self.inert(node.operand, local)
+            return self.all_plain([node.operand], local)
         if isinstance(node, ast.BoolOp):
-            return all(self.inert(v, local) for v in node.values)
+            return self.all_plain(node.values, local)
         if isinstance(node, ast.Compare):
-            return self.inert(node.left, local) and \
-                all(self.inert(c, local) for c in node.comparators)
+            return self.all_plain([node.left] + node.comparators, local)
         if isinstance(node, ast.IfExp):
-            return all(self.inert(n, local) for n in (node.test, node.body, node.orelse))
+            return self.held([node.body, node.orelse], local) \
+                if self.plain(node.test, local) else None
         if isinstance(node, ast.Subscript):
-            return self.inert(node.value, local) and self.inert(node.slice, local)
+            return self.all_plain([node.value, node.slice], local)
         if isinstance(node, ast.Slice):
-            return all(self.inert(n, local) for n in (node.lower, node.upper, node.step))
+            return self.all_plain([node.lower, node.upper, node.step], local)
         if isinstance(node, ast.JoinedStr):
-            return all(self.inert(v, local) for v in node.values)
+            return self.all_plain(node.values, local)
         if isinstance(node, ast.FormattedValue):
-            return self.inert(node.value, local) and self.inert(node.format_spec, local)
+            return self.all_plain([node.value, node.format_spec], local)
         if isinstance(node, ast.Lambda):
-            return self.inert_arguments(node.args, local)
+            return CODE if self.arguments(node.args, local) else None
         if isinstance(node, COMPREHENSIONS):
             inner = set(local)
             for generator in node.generators:
-                if generator.is_async or not self.inert(generator.iter, inner):
-                    return False
+                if generator.is_async or not self.plain(generator.iter, inner):
+                    return None
                 targets = generator.target.elts if isinstance(
                     generator.target, ast.Tuple) else [generator.target]
                 if not all(isinstance(t, ast.Name) for t in targets):
-                    return False
+                    return None
                 inner |= {t.id for t in targets}
-                if not all(self.inert(c, inner) for c in generator.ifs):
-                    return False
+                if not all(self.plain(c, inner) for c in generator.ifs):
+                    return None
             if isinstance(node, ast.DictComp):
-                return self.inert(node.key, inner) and self.inert(node.value, inner)
-            return self.inert(node.elt, inner)
+                return self.kind(node.value, inner) if self.plain(node.key, inner) else None
+            if isinstance(node, ast.SetComp):
+                return self.all_plain([node.elt], inner)
+            return self.kind(node.elt, inner)
         if isinstance(node, ast.Call):
-            if not all(self.inert(a, local) for a in node.args) or \
-                    not all(k.arg is not None and self.inert(k.value, local)
+            # The arguments go to code outside the package (`sorted(x, key=f)` calls `f`).
+            if not all(self.plain(a, local) for a in node.args) or \
+                    not all(k.arg is not None and self.plain(k.value, local)
                             for k in node.keywords):
-                return False
+                return None
             func = node.func
             if isinstance(func, ast.Name) and func.id in PURE_CALLS and self.unbound(func.id):
-                return func.id not in ("type", "vars") or len(node.args) == 1
+                return DATA if func.id not in ("type", "vars") or len(node.args) == 1 else None
             if external_path(self.scope, func) in PURE_EXTERNAL_CALLS:
-                return True
+                return DATA
             if isinstance(func, ast.Attribute) and func.attr in INERT_METHODS \
-                    and external_path(self.scope, func) is None:
-                return self.inert(func.value, local)
-            return False
-        return False
+                    and external_path(self.scope, func) is None \
+                    and self.plain(func.value, local):
+                return DATA
+            return None
+        return None
 
-    def inert_arguments(self, args, local):
+    def arguments(self, args, local):
+        """Whether a function's defaults and annotations, evaluated where it is defined and
+        then only held, are inert."""
         values = list(args.defaults) + [d for d in args.kw_defaults if d is not None]
         values += [a.annotation for a in args.posonlyargs + args.args + args.kwonlyargs]
         values += [args.vararg and args.vararg.annotation,
@@ -1253,8 +1403,8 @@ class Purity:
             return True
         target = node.func if isinstance(node, ast.Call) else node
         if isinstance(node, ast.Call) and not (
-                all(self.inert(a, set()) for a in node.args)
-                and all(k.arg is not None and self.inert(k.value, set())
+                all(self.plain(a, set()) for a in node.args)
+                and all(k.arg is not None and self.plain(k.value, set())
                         for k in node.keywords)):
             return False
         path = external_path(self.scope, target)
@@ -1272,50 +1422,58 @@ class Purity:
     def pure_function(self, node, in_class=False, properties=()):
         if not all(self.pure_decorator(d, in_class, properties) for d in node.decorator_list):
             return False
-        return self.inert_arguments(node.args, set()) and self.inert(node.returns, set())
+        return self.arguments(node.args, set()) and self.inert(node.returns, set())
 
     def pure_class(self, node):
+        """Whether making class `node` runs no code of the package: if so, whether a base
+        outside PLAIN_BASES is among its ancestors; if not, None."""
         if node.keywords or node.decorator_list:
-            return False
+            return None
+        external = False
         for base in node.bases:
             if isinstance(base, ast.Name) and base.id in SAFE_BUILTINS \
                     and self.unbound(base.id):
-                continue
-            if external_path(self.scope, base) is not None:
-                continue
-            if isinstance(base, ast.Name) and base.id in self.classes \
-                    and self.scope.bound.get(base.id, 0) == 1 and not self.classes[base.id]:
-                continue
-            return False
+                external = external or base.id not in PLAIN_BASES
+            elif external_path(self.scope, base) is not None:
+                external = True
+            elif isinstance(base, ast.Name) and base.id in self.classes \
+                    and self.scope.bound.get(base.id, 0) == 1 \
+                    and not self.classes[base.id][0]:
+                external = external or self.classes[base.id][1]
+            else:
+                return None
         properties = set()
         for item in node.body:
             if isinstance(item, ast.Pass) or isinstance(item, ast.Expr) \
                     and isinstance(item.value, ast.Constant):
                 continue
             if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if not self.pure_function(item, True, properties):
-                    return False
+                # Another base's metaclass may call the class's methods while it makes the
+                # class: `enum.Enum`'s makes each member so.
+                if external or not self.pure_function(item, True, properties):
+                    return None
                 if any(isinstance(d, ast.Name) and d.id == "property"
                        for d in item.decorator_list):
                     properties.add(item.name)
             elif isinstance(item, (ast.Assign, ast.AnnAssign)):
-                if not self.pure_assign(item):
-                    return False
+                # Such a metaclass may also call what the class holds.
+                if not self.pure_assign(item, external):
+                    return None
             elif isinstance(item, ast.ClassDef):
-                if not self.pure_class(item):
-                    return False
+                if external or self.pure_class(item) is None:
+                    return None
             else:
-                return False
-        return True
+                return None
+        return external
 
-    def pure_assign(self, node):
+    def pure_assign(self, node, plain=False):
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         for target in targets:
             names = target.elts if isinstance(target, (ast.Tuple, ast.List)) else [target]
             if not all(isinstance(n, ast.Name) for n in names):
                 return False
-        return self.inert(node.value, set()) and \
-            self.inert(getattr(node, "annotation", None), set())
+        check = self.plain if plain else self.inert
+        return check(node.value, set()) and check(getattr(node, "annotation", None), set())
 
     def pure_import(self, node):
         if isinstance(node, ast.ImportFrom):
@@ -1340,12 +1498,11 @@ class Purity:
                 if not self.pure_function(node):
                     module.impure(node, f"the definition of {node.name} runs code")
             elif isinstance(node, ast.ClassDef):
-                if self.pure_class(node):
-                    self.classes[node.name] = any(
-                        isinstance(i, (ast.FunctionDef, ast.AsyncFunctionDef))
-                        and i.name in CLASS_HOOKS for i in node.body)
-                else:
+                external = self.pure_class(node)
+                if external is None:
                     module.impure(node, f"the class {node.name} runs code")
+                else:
+                    self.classes[node.name] = (class_hooks(node), external)
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 if not self.pure_assign(node):
                     module.impure(node, "a top-level assignment runs code")
@@ -1461,10 +1618,11 @@ def dispatching(modules):
         found |= more
 
 
-def import_time(modules):
-    """The (module, name) of the top-level definitions that code run at import may reach."""
+def reach(modules, start):
+    """The (module, name) of the top-level definitions that the targets `start` reach, through
+    the names they use, at any depth and across modules (`start` included)."""
     reached = set()
-    stack = [t for m in modules.values() for t in m.import_refs]
+    stack = list(start)
     while stack:
         target = stack.pop()
         if target in reached or target[0] not in modules:
@@ -1472,6 +1630,39 @@ def import_time(modules):
         reached.add(target)
         stack.extend(modules[target[0]].refs.get(target[1], ()))
     return reached
+
+
+def import_time(modules):
+    """The (module, name) of the top-level definitions that code run at import may reach."""
+    return reach(modules, [t for m in modules.values() for t in m.import_refs])
+
+
+def dispatching_at_import(modules, module, found):
+    """The definitions that may run a command by name, or use the registry, that the code
+    `module` runs when it is imported reaches; for `__main__`, pinned whole, those but its own
+    and the registry it dispatches through."""
+    reached = reach(modules, module.import_refs) & found
+    if module.name == MAIN:
+        reached = {t for t in reached if t[0] != MAIN and t != COMMANDS}
+    return sorted(reached)
+
+
+def dispatcher_pin(modules, module, node, found):
+    """The pin of the dispatcher `node`: its own; or, when a definition it reaches but itself
+    and the registry may run a command by name, what reaches them (it isn't followed then)."""
+    others = reach(modules, module.refs.get(node.name, ())) - {(module.name, node.name), COMMANDS}
+    through = sorted(f"{m}.py:{n}" for m, n in others & found)
+    return f"dispatches through {', '.join(through)}" if through else pin(node)
+
+
+def registry_pin(module):
+    """The pin of the registry's binding, `COMMANDS = {}` in `commands.py`: the SHA-256 of the
+    one top-level statement that binds it, or why there isn't one."""
+    statements = module.defs.get(COMMANDS[1], [])
+    if len(statements) != 1 or module.scope.bound.get(COMMANDS[1], 0) != 1 \
+            or isinstance(statements[0], ast.ClassDef):
+        return f"{COMMANDS[1]} isn't bound once, by one top-level statement"
+    return hashlib.sha256(ast.dump(statements[0]).encode("utf-8")).hexdigest()
 
 
 def owner(module, node):
@@ -1516,6 +1707,10 @@ def main(package_dir):
             any((module.name, n) in found for n in module.refs) or module.top_refs & found)
 
     for module in modules.values():
+        if module.tree is not None:
+            for target in dispatching_at_import(modules, module, found):
+                module.fail(None, f"may run a command by name when it is imported, through "
+                                  f"{target[0]}.py:{target[1]}")
         for child in module.child_scopes:
             if targets_of(modules, child, [child.tree]) & found:
                 module.fail(None, "a child's source may run a command by name", child.anchor)
@@ -1551,10 +1746,16 @@ def main(package_dir):
         if module.tree is None:
             continue
         for node in module.tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
-                    (name, node.name) in (EXEMPT, REGISTRY) or node.name in dispatchers):
-                pins[f"{name}.py:{node.name}"] = pin(node)
-    report = json.dumps({"format": 2, "modules": out, "pins": pins}, sort_keys=True)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if (name, node.name) in (EXEMPT, REGISTRY):
+                    pins[f"{name}.py:{node.name}"] = pin(node)
+                elif node.name in dispatchers:
+                    pins[f"{name}.py:{node.name}"] = dispatcher_pin(modules, module, node, found)
+        if name == MAIN:
+            pins[f"{name}.py"] = module_pin(module.tree)
+        if name == COMMANDS[0]:
+            pins[f"{name}.py:{COMMANDS[1]}"] = registry_pin(module)
+    report = json.dumps({"format": 3, "modules": out, "pins": pins}, sort_keys=True)
 
     # Every module's top level runs in every process: one that raises breaks them all.
     stdout = os.dup(1)

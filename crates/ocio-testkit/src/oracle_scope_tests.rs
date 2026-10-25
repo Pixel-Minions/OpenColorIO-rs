@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use super::{ANALYZER, LOADER_PIN, NESTED, REGISTRY_PIN, Scopes};
+use super::{ANALYZER, COMMANDS_PIN, LOADER_PIN, MAIN_PIN, NESTED, REGISTRY_PIN, Scopes};
 use crate::Oracle;
 use crate::paths;
 
@@ -60,16 +60,20 @@ fn files_api_py() -> String {
     )
 }
 
-/// The modules of the test package besides `commands.py` and `files_api.py`: a dispatcher,
-/// a helper the registry imports, a chain `c` -> `b` -> `a`, and an unrelated `d`.
+/// The test package's `__main__.py`: the oracle's, so that its pin is the oracle's.
+fn main_py() -> String {
+    std::fs::read_to_string(paths::oracle_dir().join("ocio_oracle").join("__main__.py")).unwrap()
+}
+
+/// The modules of the test package besides `__main__.py`, `commands.py` and `files_api.py`:
+/// the `regen` the oracle's `__main__.py` runs, a helper the registry imports, a chain
+/// `c` -> `b` -> `a`, and an unrelated `d`.
 const PACKAGE: &[(&str, &str)] = &[
     ("__init__.py", "\"\"\"The package.\"\"\"\n"),
     (
-        "__main__.py",
-        "import sys\n\nfrom . import commands, regen\n\n\ndef serve_one():\n    \
-         return commands.COMMANDS.get(sys.argv[1])\n\n\ndef main():\n    return serve_one()\n",
+        "regen.py",
+        "GROUPS = {}\n\n\ndef run(name, out_dir):\n    return [name, out_dir]\n",
     ),
-    ("regen.py", "GROUPS = {}\n"),
     ("spec.py", "def version():\n    return 1\n"),
     (
         "a.py",
@@ -131,6 +135,7 @@ fn package(test: &str) -> Package {
     for (name, text) in PACKAGE {
         write(&dir, name, text);
     }
+    write(&dir, "__main__.py", &main_py());
     write(&dir, "commands.py", &commands_py());
     write(&dir, "files_api.py", &files_api_py());
     Package(dir)
@@ -224,7 +229,7 @@ fn a_module_changes_the_keys_of_the_commands_that_reach_it() {
 
 /// An analysis of the test package's modules, for [`Scopes::from_manifest`].
 fn manifest(modules: Value) -> Value {
-    let pins: serde_json::Map<String, Value> = [REGISTRY_PIN, LOADER_PIN]
+    let pins: serde_json::Map<String, Value> = [REGISTRY_PIN, LOADER_PIN, MAIN_PIN, COMMANDS_PIN]
         .into_iter()
         .map(|(name, pin)| (name.to_string(), json!(pin)))
         .chain(
@@ -233,7 +238,7 @@ fn manifest(modules: Value) -> Value {
                 .map(|(name, file, pin)| (format!("{file}:{name}"), json!(pin))),
         )
         .collect();
-    json!({"format": 2, "modules": modules, "pins": pins})
+    json!({"format": 3, "modules": modules, "pins": pins})
 }
 
 fn module(edges: &[&str], commands: &[&str]) -> Value {
@@ -274,15 +279,36 @@ fn the_roots_are_shared_and_unknown_modules_unresolved() {
     assert_eq!(scopes.key("y_cmd", &json!({})), FULL);
     assert!(Scopes::from_manifest(FULL, ENV, modules(&names[..4]), &analysis).is_err());
     let mut format = analysis.clone();
-    format["format"] = json!(1);
+    format["format"] = json!(2);
     assert!(Scopes::from_manifest(FULL, ENV, modules(&names), &format).is_err());
-    for (pin, _) in [REGISTRY_PIN, LOADER_PIN] {
+    for (pin, _) in [REGISTRY_PIN, LOADER_PIN, MAIN_PIN, COMMANDS_PIN] {
         let mut other = analysis.clone();
         other["pins"][pin] = json!("0");
         assert!(
             Scopes::from_manifest(FULL, ENV, modules(&names), &other).is_err(),
             "{pin}"
         );
+    }
+
+    // A shared module with an edge to a module the package doesn't have: what it imports
+    // when every process starts can't be resolved.
+    let mut missing = analysis.clone();
+    missing["modules"]["commands.py"]["edges"] = json!(["missing.py"]);
+    let scopes = Scopes::from_manifest(FULL, ENV, modules(&names), &missing).unwrap();
+    assert_eq!(scopes.key("x_cmd", &json!({})), FULL);
+
+    // `batch` is followed only in `commands.py`, `with_files` only in `files_api.py`: the
+    // module a pin names.
+    let mut elsewhere = analysis.clone();
+    elsewhere["modules"]["x.py"]["commands"] = json!(["x_cmd", "batch", "with_files"]);
+    elsewhere["modules"]["x.py"]["dispatchers"] = json!(["batch", "with_files"]);
+    let scopes = Scopes::from_manifest(FULL, ENV, modules(&names), &elsewhere).unwrap();
+    assert_ne!(scopes.key("x_cmd", &json!({})), FULL);
+    for (cmd, args) in [
+        ("batch", json!({"calls": [{"cmd": "x_cmd"}]})),
+        ("with_files", json!({"command": "x_cmd"})),
+    ] {
+        assert_eq!(scopes.key(cmd, &args), FULL, "{cmd}");
     }
 }
 
@@ -470,6 +496,130 @@ fn a_module_whose_top_level_runs_code_is_shared() {
             "from . import reg\n\n\nclass P:\n    base = reg.Base\n",
             &[REGISTRY],
         ),
+        // The package's code handed to code outside it, which calls it.
+        (
+            "def hook(x):\n    return print(x)\n\n\nY = sorted([0], key=hook)\n",
+            &[],
+        ),
+        (
+            "def hook(x):\n    return print(x)\n\n\nT = [hook]\nY = max([0], key=T[0])\n",
+            &[],
+        ),
+        ("def hook():\n    return 1\n\n\nN = len([hook])\n", &[]),
+        // A method of a class of the package, even one named as a builtin's method.
+        (
+            "class K:\n    @classmethod\n    def get(cls, x):\n        return print(x)\n\n\n\
+             Y = K.get(1)\n",
+            &[],
+        ),
+        (
+            "class K:\n    @staticmethod\n    def copy():\n        return print(1)\n\n\n\
+             def f(x=K.copy()):\n    return x\n",
+            &[],
+        ),
+        (
+            "class K:\n    @staticmethod\n    def count():\n        return print(1)\n\n\n\
+             Z: K.count() = 0\n",
+            &[],
+        ),
+        (
+            "import functools\n\n\nclass K:\n    @staticmethod\n    def index():\n        \
+             return 4\n\n\n@functools.lru_cache(K.index())\ndef f():\n    return 1\n",
+            &[],
+        ),
+        // Operations on a class of the package, or an object of one.
+        (
+            "class K:\n    def __class_getitem__(cls, item):\n        return print(item)\n\n\n\
+             Y = K[0]\n",
+            &[],
+        ),
+        ("class K:\n    pass\n\n\nY = {K: 1}\n", &[]),
+        ("class K:\n    pass\n\n\nY = f\"{K}\"\n", &[]),
+        (
+            "import enum\n\n\nclass E(enum.Enum):\n    A = 1\n\n\nY = [m for m in E]\n",
+            &[],
+        ),
+        ("class K:\n    pass\n\n\nY = K or 1\n", &[]),
+        ("class K:\n    pass\n\n\nY = K == 1\n", &[]),
+        ("class K:\n    pass\n\n\nY = 1 if K else 2\n", &[]),
+        (
+            "import enum\n\n\nclass E(enum.Enum):\n    A = 1\n\n\nY = [*E]\n",
+            &[],
+        ),
+        ("def f():\n    pass\n\n\nY = {f}\n", &[]),
+        ("def hook():\n    return 1\n\n\nY = [hook] * 2\n", &[]),
+        (
+            "class K:\n    @staticmethod\n    def m(x):\n        return print(x)\n\n\n\
+             Y = sorted([0], key=K.m)\n",
+            &[],
+        ),
+        (
+            "import functools\n\n\ndef hook(fn):\n    return print(fn)\n\n\n\
+             @functools.lru_cache(hook)\ndef f():\n    return 1\n",
+            &[],
+        ),
+        // A class whose base's metaclass (or a builtin type) may call what it defines, or
+        // holds, while it makes the class: an enum makes its members by calling the class.
+        (
+            "import enum\n\n\nclass E(enum.Enum):\n    A = 1\n\n    def __init__(self, v):\n        \
+             print(v)\n",
+            &[],
+        ),
+        (
+            "import enum\n\n\ndef hook(self, v):\n    print(v)\n\n\nclass E(enum.Enum):\n    \
+             A = 1\n    __init__ = hook\n",
+            &[],
+        ),
+        (
+            "import enum\n\n\nclass E(enum.Enum):\n    A = 1\n    __init__ = lambda self, v: \
+             print(v)\n",
+            &[],
+        ),
+        (
+            "import enum\n\n\nclass E(enum.Enum):\n    A = 1\n\n    class Inner:\n        pass\n",
+            &[],
+        ),
+        (
+            "import enum\n\n\nclass Base(enum.Enum):\n    pass\n\n\nclass E(Base):\n    A = 1\n\n    \
+             def __init__(self, v):\n        print(v)\n",
+            &[],
+        ),
+        (
+            "class D(dict):\n    def __init_subclass__(cls):\n        print(cls)\n",
+            &[],
+        ),
+        (
+            "class B:\n    __init_subclass__ = lambda cls: print(cls)\n\n\nclass P(B):\n    pass\n",
+            &[],
+        ),
+        // A decorator named `command` that isn't the registry's.
+        (
+            "class R:\n    @staticmethod\n    def command(fn):\n        return print(fn)\n\n\n\
+             @R.command\ndef f():\n    return 1\n",
+            &[],
+        ),
+        // A name bound more than once: which value it holds isn't known.
+        (
+            "X = 1\n\n\ndef f():\n    global X\n    X = print(1)\n\n\nY = X + 1\n",
+            &[],
+        ),
+        // A subscript's index, and `**` arguments.
+        ("def hook():\n    return 0\n\n\nX = [1][hook()]\n", &[]),
+        ("X = dict(**{\"a\": 1})\n", &[]),
+        // A decorator's `setter` that isn't a property's.
+        (
+            "class B:\n    @staticmethod\n    def setter(fn):\n        return print(fn)\n\n\n\
+             class C:\n    p = B\n\n    @p.setter\n    def q(self):\n        pass\n",
+            &[],
+        ),
+        // A test of `__name__` that isn't the main guard.
+        ("if __name__ == \"ocio_oracle.g\":\n    print(1)\n", &[]),
+        // A builtin's name bound in the module, as a base.
+        (
+            "class object:\n    def __init_subclass__(cls):\n        print(cls)\n\n\n\
+             class C(object):\n    pass\n",
+            &[],
+        ),
     ];
     let private: &[(&str, Files)] = &[
         ("import re\n\nPATTERN = re.compile(\"x\")\n", &[]),
@@ -520,6 +670,28 @@ fn a_module_whose_top_level_runs_code_is_shared() {
             &[],
         ),
         ("def f(x: int = 1) -> str:\n    return str(x)\n", &[]),
+        // The package's classes and functions, only held.
+        (
+            "def hook():\n    return 1\n\n\nclass K:\n    X = 1\n\n\nA = K\nB = (K, hook, 1)\n\
+             C = {\"k\": K, \"f\": hook, \"g\": lambda x: x}\nD = K.X\n",
+            &[],
+        ),
+        (
+            "class K:\n    pass\n\n\ndef f(x: K = None, y=K) -> K:\n    return x\n",
+            &[],
+        ),
+        // An enum without methods, and a builtin type's subclass that only holds data.
+        (
+            "import enum\n\n\nclass E(enum.Enum):\n    A = 1\n    B = \"b\"\n\n\nX = E.A\n",
+            &[],
+        ),
+        ("class D(dict):\n    X = 1\n", &[]),
+        // Data used.
+        (
+            "X = [1, 2]\nY = sorted(X, reverse=True)\nZ = \", \".join(str(x) for x in X)\n\
+             W = {**{\"a\": 1}, \"b\": [*X]}\n",
+            &[],
+        ),
     ];
     let dir = package("top-level");
     for (cases, is_shared) in [(shared, true), (private, false)] {
@@ -589,6 +761,36 @@ fn what_runs_at_import_must_be_resolved() {
         ),
         ("import xml.dom\n", &[], true),
         ("from xml import dom\n", &[], true),
+        // A decorator runs when the module is imported.
+        (
+            "from . import h\n\n\n@h.deco\ndef f():\n    return 1\n",
+            &[(
+                "h.py",
+                "def deco(fn):\n    __import__(\"json\")\n    return fn\n",
+            )],
+            true,
+        ),
+        // A command run when every process starts, directly or through a function.
+        (
+            "from .commands import COMMANDS\n\nX = COMMANDS[\"d_cmd\"]({}, [])\n",
+            &[],
+            true,
+        ),
+        (
+            "from . import h\n\nX = h.run()\n",
+            &[(
+                "h.py",
+                "from .commands import COMMANDS\n\n\ndef run():\n    \
+                 return COMMANDS[\"d_cmd\"]({}, [])\n",
+            )],
+            true,
+        ),
+        // The registry changed when every process starts.
+        (
+            "from . import commands\n\ncommands.COMMANDS.pop(\"d_cmd\")\n",
+            &[],
+            true,
+        ),
     ];
     let dir = package("import-time");
     for (source, files, full) in cases {
@@ -735,6 +937,55 @@ const UNRESOLVED: &[&str] = &[
      return subprocess.run([sys.executable, SCRIPT])\n",
     "CHILD = \"from ocio_oracle import commands\\ncommands.COMMANDS['x']({}, [])\\n\"\n",
     "CHILD = \"from ocio_oracle.commands import batch\\nbatch({}, [])\\n\"\n",
+    // Imports the rules can't resolve: from above the package, and a child's relative one.
+    "def f():\n    from ..a import helper\n    return helper\n",
+    "CHILD = \"from .a import helper\\n\"\n",
+    // A `global` declaration: the name is the module's, not the function's.
+    "import importlib\n\n\ndef f(n):\n    global importlib\n    importlib = n\n    return importlib.reload\n",
+    // Subprocess calls the analysis can't follow.
+    "import subprocess\nimport sys\n\n\ndef f(kw):\n    return subprocess.run([sys.executable, \
+     \"-I\", \"-c\", \"import json\"], **kw)\n",
+    "import subprocess\nimport sys\n\n\ndef f(opt):\n    return subprocess.run([sys.executable, \
+     \"-X\", opt, \"-c\", \"import json\"])\n",
+    "import subprocess\nimport sys\n\n\ndef f():\n    return subprocess.run([sys.executable, \
+     \"-c\", \"x = (\"])\n",
+    "import subprocess\nimport sys\n\n\ndef f():\n    return subprocess.run([sys.executable, \
+     \"-Ic\", \"import json\"])\n",
+    "import subprocess\nimport sys\n\n\ndef f():\n    return subprocess.run([sys.executable, \
+     \"-cimport json\"])\n",
+    "import subprocess\nimport sys\n\n\ndef f():\n    return subprocess.run([sys.executable, \
+     \"-Im\", \"json.tool\"])\n",
+    "import os\nimport subprocess\nimport sys\n\nSCRIPT = os.path.join(os.path.dirname(\
+     os.path.abspath(__file__)), \"d.py\")\n\n\ndef f(code):\n    \
+     return subprocess.run([sys.executable, \"-\", SCRIPT], input=code)\n",
+    "import subprocess\n\n\ndef f(python):\n    return subprocess.run([python, \"-Ic\", \"x = 1\"])\n",
+    "import subprocess\n\n\ndef f(args):\n    return subprocess.run([\"tool\", *args])\n",
+    "import os\nimport subprocess\nimport sys\n\nSCRIPT = os.path.join(os.path.dirname(\
+     os.path.abspath(__file__)), \"d.py\")\n\n\ndef f():\n    \
+     return subprocess.run([sys.executable, \"-Im\", SCRIPT])\n",
+    "import subprocess\n\n\ndef f(python):\n    return subprocess.run([\"x\", \"-I\"], \
+     executable=python)\n",
+    "CODE = \"-cfrom json import dumps\"\n",
+    // The oracle's directory stored twice.
+    "import os\n\n\ndef f(m):\n    oracle = os.path.dirname(os.path.dirname(os.path.abspath(\
+     __file__)))\n    oracle += m\n    return {\"oracle_path\": oracle}\n",
+    // The package's directory without `__file__`, and strings that name it.
+    "import os\n\n\ndef f():\n    return os.listdir(os.path.dirname(__cached__))\n",
+    "import os\nimport sys\n\n\ndef f():\n    return os.listdir(os.path.dirname(sys.argv[0]))\n",
+    "CHILD = \"import sys\\nsys.path.insert(0, sys.argv[1])\\nfrom ocio_oracle import d\\n\"\n",
+    "import os\n\n\ndef f():\n    return os.listdir(\"ocio_oracle\")\n",
+    "def f(x):\n    return f\"{x}ocio_oracle\"\n",
+    "def f(x):\n    return f\"ocio_oracle{x}\"\n",
+    "def f(n):\n    return \"ocio_oracle-\" + n\n",
+    "SUFFIX = \".py\"\n",
+    // Attribute names the rules deny, through `getattr`, or as strings held other than in a
+    // comparison or a table.
+    "import json\n\n\ndef f():\n    return getattr(json, \"__dict__\")\n",
+    "GLOBALS = \"__globals__\"\n",
+    "def f():\n    return \"modules\"\n",
+    "def f(x=\"os\"):\n    return x\n",
+    "def f(d):\n    return d[\"f_globals\"]\n",
+    "TABLE = {\"k\": \"sys\"}\n",
 ];
 
 /// Code the analysis resolves, near what it can't: the command keeps a key of its own.
@@ -757,13 +1008,20 @@ const RESOLVED: &[&str] = &[
     "def f(name):\n    return f\"ocio_oracle regen {name}\"\n",
     "PREFIX = \"ocio_oracle_blobs_\"\n",
     "import subprocess\nimport sys\n\nCHILD = \"import json\\nimport sys\\nsys.path.insert(0, \
-     sys.argv[1])\\nfrom ocio_oracle import a\\nprint(a.helper())\\n\"\n\n\ndef f():\n    \
+     sys.stdin.readline())\\nfrom ocio_oracle import a\\nprint(a.helper())\\n\"\n\n\ndef f():\n    \
      return subprocess.run([sys.executable, \"-I\", \"-c\", CHILD, \"x\"])\n",
     "import os\nimport subprocess\nimport sys\n\nTOOL = os.path.join(os.path.dirname(\
      os.path.abspath(__file__)), \"tool.py\")\n\n\ndef f():\n    \
      return subprocess.run([sys.executable, \"-I\", \"-X\", \"utf8\", TOOL])\n",
     "import subprocess\n\n\ndef f(exe):\n    return subprocess.run([exe], check=True)\n",
     "def f(d):\n    return d[\"__name__\"], getattr(d, \"__doc__\")\n",
+    "import os\nimport subprocess\nimport sys\n\nTOOL = os.path.join(os.path.dirname(\
+     os.path.abspath(__file__)), \"tool.py\")\n\n\ndef f():\n    \
+     return subprocess.run([sys.executable, \"-I\", \"-Xfrozen_modules=off\", TOOL])\n",
+    // Attribute names as strings, compared or in a table.
+    "def f(n):\n    return n in (\"__globals__\", \"os\") or n == \"sys\"\n",
+    "NAMES = (\"__builtins__\", \"sys\")\nSKIP = {\"__weakref__\"}\nORDER = [\"modules\"]\n\
+     KEYS = {\"builtins\": 1}\n",
 ];
 
 /// Each of [`UNRESOLVED`] gets the whole oracle's key, and so does its importer; each of
@@ -887,6 +1145,14 @@ fn the_dispatchers_are_keyed_by_the_commands_they_run() {
         "alias.py",
         "from .commands import batch\n\nrun = batch\n",
     );
+    // The registry's name as a string or as an attribute of anything.
+    write(
+        &dir,
+        "v.py",
+        "from .commands import command\n\n\n@command\ndef by_string(args, blobs):\n    \
+         return {\"COMMANDS\": 1}, []\n\n\n@command\ndef by_attribute(args, blobs):\n    \
+         return args.get(\"x\") and args[\"x\"].COMMANDS, []\n",
+    );
     // `serve_one` and `main` dispatch in `__main__.py`, not here; a local `COMMANDS`-free
     // table shadows nothing.
     write(
@@ -952,6 +1218,8 @@ fn the_dispatchers_are_keyed_by_the_commands_they_run() {
         ("via_batch", json!({"calls": [call("a_cmd")]})),
         ("via_alias", json!({"calls": [call("a_cmd")]})),
         ("via_module", json!({"calls": [call("a_cmd")]})),
+        ("by_string", json!({})),
+        ("by_attribute", json!({})),
     ] {
         assert_eq!(scopes.key(cmd, &args), FULL, "{cmd} {args}");
     }
@@ -978,7 +1246,7 @@ fn the_functions_the_keys_rely_on_are_pinned() {
         &super::analyze(ANALYZER, oracle.python(), &paths::oracle_dir()).unwrap(),
     )
     .unwrap();
-    for (name, pin) in [REGISTRY_PIN, LOADER_PIN] {
+    for (name, pin) in [REGISTRY_PIN, LOADER_PIN, MAIN_PIN, COMMANDS_PIN] {
         assert_eq!(analysis["pins"][name], json!(pin), "{name}");
     }
     for (command, file, pin) in NESTED {
@@ -1012,6 +1280,92 @@ fn the_functions_the_keys_rely_on_are_pinned() {
     assert_eq!(scopes(&dir).key("with_files", &request), FULL);
     write(&dir, "files_api.py", &files);
     assert_ne!(scopes(&dir).key("with_files", &request), FULL);
+
+    // A dispatcher whose pin is the same, but that reaches a definition that may run a
+    // command by name: here, in another module, or through a module-level name.
+    let helper = "def _substitute(value, root):\n    return value\n";
+    for (replacement, extra) in [
+        (
+            "def _substitute(value, root):\n    return COMMANDS[\"d_cmd\"]({}, [])\n",
+            None,
+        ),
+        (
+            "def _substitute(value, root):\n    return h.run()\n",
+            Some((
+                "h.py",
+                "from .commands import batch\n\n\ndef run():\n    return batch({\"calls\": []}, [])\n",
+            )),
+        ),
+        (
+            "def _substitute(value, root):\n    return RUN({}, [])\n\n\nRUN = COMMANDS.get\n",
+            None,
+        ),
+    ] {
+        let mut hooked = files.replace(helper, replacement);
+        if let Some((name, text)) = extra {
+            hooked = hooked.replace(
+                "import contextlib\n",
+                "import contextlib\n\nfrom . import h\n",
+            );
+            write(&dir, name, text);
+        }
+        assert_ne!(hooked, files, "{replacement}");
+        write(&dir, "files_api.py", &hooked);
+        let scopes = scopes(&dir);
+        assert_eq!(scopes.key("with_files", &request), FULL, "{replacement}");
+        assert_ne!(scopes.key("d_cmd", &json!({})), FULL, "{replacement}");
+        if let Some((name, _)) = extra {
+            remove(&dir, name);
+        }
+    }
+    write(&dir, "files_api.py", &files);
+    assert_ne!(scopes(&dir).key("with_files", &request), FULL);
+
+    // The framed dispatcher, and the registry's binding: another one fails the analysis.
+    let main = main_py();
+    for (old, new) in [
+        (
+            "        result, out_blobs = handler(header.get(\"args\") or {}, blobs)\n",
+            "        result, out_blobs = handler(header.get(\"args\") or {}, blobs)\n        \
+             if \"then\" in header:\n            commands.COMMANDS[header[\"then\"]]({}, [])\n",
+        ),
+        ("PIPE_PIECE = 64 * 1024\n", "PIPE_PIECE = 64 * 1023\n"),
+    ] {
+        let changed = main.replace(old, new);
+        assert_ne!(changed, main, "{old}");
+        write(&dir, "__main__.py", &changed);
+        assert!(try_scopes(&dir).is_err(), "{new}");
+    }
+    write(&dir, "__main__.py", &main);
+    // What the framed dispatcher reaches in another module may run a command by name.
+    let regen = dir.join("ocio_oracle").join("regen.py");
+    let groups = std::fs::read_to_string(&regen).unwrap();
+    write(
+        &dir,
+        "regen.py",
+        "from .commands import COMMANDS\n\nGROUPS = {}\n\n\ndef run(name, out_dir):\n    \
+         return COMMANDS[name]({}, [])\n",
+    );
+    let dispatching = scopes(&dir);
+    for command in COMMANDS {
+        assert_eq!(dispatching.key(command, &json!({})), FULL, "{command}");
+    }
+    write(&dir, "regen.py", &groups);
+    for (old, new) in [
+        ("COMMANDS = {}\n", "COMMANDS = dict()\n"),
+        ("COMMANDS = {}\n", "COMMANDS = {}\nCOMMANDS = {}\n"),
+        (
+            "COMMANDS = {}\n",
+            "COMMANDS = {}\n\n\ndef _reset():\n    global COMMANDS\n    COMMANDS = {}\n",
+        ),
+    ] {
+        let changed = commands.replace(old, new);
+        assert_ne!(changed, commands, "{new}");
+        write(&dir, "commands.py", &changed);
+        assert!(try_scopes(&dir).is_err(), "{new}");
+    }
+    write(&dir, "commands.py", &commands);
+    assert!(try_scopes(&dir).is_ok());
 
     for (old, new) in [
         (
@@ -1057,7 +1411,7 @@ fn strings_that_name_a_module_are_edges() {
         &dir,
         "t.py",
         "import subprocess\nimport sys\n\nfrom .commands import command\n\n\
-         CHILD = \"import sys\\nsys.path.insert(0, sys.argv[1])\\nfrom ocio_oracle import d\\n\"\n\n\n\
+         CHILD = \"import sys\\nsys.path.insert(0, sys.stdin.readline())\\nfrom ocio_oracle import d\\n\"\n\n\n\
          @command\ndef t_cmd(args, blobs):\n    \
          return subprocess.run([sys.executable, \"-c\", CHILD, \".\"]).returncode, []\n",
     );
