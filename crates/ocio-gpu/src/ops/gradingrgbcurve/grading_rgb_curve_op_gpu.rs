@@ -21,7 +21,6 @@ use ocio_ops::dynamic_property::{
     DynamicPropertyGradingRgbCurveImpl, DynamicPropertyGradingRgbCurveImplRcPtr,
     DynamicPropertyRcPtr,
 };
-use ocio_ops::logging::log_warning;
 use ocio_ops::open_color_types::{
     GradingStyle, TransformDirection, grading_style_to_string, transform_direction_to_string,
 };
@@ -599,7 +598,7 @@ pub fn get_grading_rgb_curve_gpu_shader_program(
     }
 
     if gc_data.is_dynamic() && shader_creator.language() == GpuLanguage::Osl1 {
-        log_warning(format!(
+        shader_creator.log_warning(format!(
             "The dynamic properties are not yet supported by the 'Open Shading language (OSL)' \
              translation: The '{OP_PREFIX}' dynamic property is replaced by a local variable."
         ));

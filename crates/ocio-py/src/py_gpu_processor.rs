@@ -101,7 +101,10 @@ static EXTRACT_GPU_SHADER_INFO: Function = method_def!(
             return Ok(None);
         };
         let desc = desc.ok_or_else(null_desc)?;
-        py_result(py, p.extract_gpu_shader_info(&mut desc.lock()))?;
+        let done = crate::py_gpu_shader_creator::with_desc_unlocked(&desc, |desc| {
+            p.extract_gpu_shader_info(desc)
+        });
+        py_result(py, done)?;
         none(py)
     }
 );

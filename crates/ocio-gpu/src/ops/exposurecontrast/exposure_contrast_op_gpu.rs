@@ -15,7 +15,6 @@ use std::sync::Arc;
 
 use ocio_ops::Result;
 use ocio_ops::dynamic_property::{DynamicPropertyDoubleImplRcPtr, DynamicPropertyRcPtr};
-use ocio_ops::logging::log_warning;
 use ocio_ops::math_utils::{std_max, std_pow};
 use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::{
     ExposureContrastOpData, ExposureContrastOpStyle, ec,
@@ -91,7 +90,7 @@ fn add_property(
                  variable."
             );
 
-            log_warning(msg);
+            shader_creator.log_warning(msg);
         }
     }
 

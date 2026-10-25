@@ -856,3 +856,288 @@ fn the_embedding_api_shares_processors() {
         assert!(ocio_py::embed::gpu_processor_from_python(obj.bind(py)).is_err());
     });
 }
+
+// ---------------------------------------------------------------------------------------------
+// A logging function that works on the description being filled (verifier 6.3h, H1)
+
+/// A class the logging function can be: calling it with a message calls `method` (a bound
+/// method of one argument) with the message, as its `__init__`.
+fn on_message(sc: &mut Script, method: Value) -> usize {
+    sc.call(
+        n("type"),
+        vec![
+            s("OnMessage"),
+            common::script::t(vec![n("list")]),
+            common::script::d(vec![(s("__module__"), s("probe")), (s("__init__"), method)]),
+        ],
+    )
+}
+
+/// The description's getters after a call.
+const DESC_STATE: [&str; 8] = [
+    "getShaderText",
+    "getCacheID",
+    "getUniqueID",
+    "getFunctionName",
+    "getResourcePrefix",
+    "getLanguage",
+    "getUniformBufferSize",
+    "getNextResourceIndex",
+];
+
+/// The GPU processor of a matrix, a dynamic exposure, a dynamic grading primary (of a
+/// saturation) and a dynamic contrast: in OSL each dynamic op logs a warning while the
+/// extraction writes its code.
+fn logging_gpu(sc: &mut Script) -> usize {
+    let cfg = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    let m = sc.call_kw(
+        n("OCIO.MatrixTransform"),
+        vec![],
+        vec![("offset", common::script::fl(&[0.1, 0.0, 0.0, 0.0]))],
+        Expect::Value,
+    );
+    let ec = sc.call_kw(
+        n("OCIO.ExposureContrastTransform"),
+        vec![],
+        vec![("exposure", f(0.5)), ("dynamicExposure", b(true))],
+        Expect::Value,
+    );
+    let gp = sc.call_kw(
+        n("OCIO.GradingPrimaryTransform"),
+        vec![n("OCIO.GRADING_LOG")],
+        vec![("dynamic", b(true))],
+        Expect::Value,
+    );
+    // Values that change something: else in OSL the op writes nothing, nor warns.
+    let v = sc.call(ra(gp, "getValue"), vec![]);
+    sc.step(
+        json!({ "setattr": r(v), "name": "saturation", "value": f(1.5) }),
+        Expect::Value,
+    );
+    sc.call(ra(gp, "setValue"), vec![r(v)]);
+    let ec2 = sc.call_kw(
+        n("OCIO.ExposureContrastTransform"),
+        vec![],
+        vec![("contrast", f(1.5)), ("dynamicContrast", b(true))],
+        Expect::Value,
+    );
+    let g = sc.call(
+        n("OCIO.GroupTransform"),
+        vec![common::script::l(vec![r(m), r(ec), r(gp), r(ec2)])],
+    );
+    let p = sc.call(ra(cfg, "getProcessor"), vec![r(g)]);
+    sc.call(ra(p, "getDefaultGPUProcessor"), vec![])
+}
+
+/// A description in `language`, whose logging function calls its method `method` with each
+/// message; then the extraction, and its state after (and after a second `finalize`).
+fn extract_with_logger(sc: &mut Script, gpu: usize, language: &str, method: &str) {
+    let desc = sc.call_kw(
+        n("OCIO.GpuShaderDesc.CreateShaderDesc"),
+        vec![],
+        vec![("language", n(language)), ("uid", s("u1"))],
+        Expect::Value,
+    );
+    let logger = on_message(sc, ra(desc, method));
+    sc.call(n("OCIO.SetLoggingFunction"), vec![r(logger)]);
+    sc.call(ra(gpu, "extractGpuShaderInfo"), vec![r(desc)]);
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    sc.eval(r(desc), &DESC_STATE);
+    let u = sc.call(ra(desc, "getUniforms"), vec![]);
+    sc.call(n("len"), vec![r(u)]);
+    sc.call(n("OCIO.SetLoggingFunction"), vec![r(logger)]);
+    sc.call(ra(desc, "finalize"), vec![]);
+    sc.call(n("OCIO.ResetToDefaultLoggingFunction"), vec![]);
+    sc.eval(r(desc), &DESC_STATE);
+}
+
+/// The wheel's logging function runs while the extraction (and `finalize`) writes into the
+/// description, which takes no lock: what it changes in the description lands where the call
+/// has got to, and the call goes on with it. In OSL (a warning per dynamic op, before the
+/// header and the footer are written) a logger that adds its message to the function's code,
+/// sets the function name or the resource prefix; at the DEBUG level also during `finalize`'s
+/// messages (the shader text, line by line), in GLSL and OSL. The port held the description's
+/// lock there, and the logger's first call into the description waited for it forever.
+#[test]
+fn a_logging_function_changes_the_description_being_filled() {
+    common::start_python();
+    let mut warning = Script::new();
+    let gpu = logging_gpu(&mut warning);
+    for method in [
+        "addToFunctionShaderCode",
+        "setFunctionName",
+        "setResourcePrefix",
+    ] {
+        extract_with_logger(&mut warning, gpu, "OCIO.LANGUAGE_OSL_1", method);
+    }
+    let mut debug = Script::new();
+    let level = debug.call(n("OCIO.GetLoggingLevel"), vec![]);
+    debug.call(
+        n("OCIO.SetLoggingLevel"),
+        vec![n("OCIO.LOGGING_LEVEL_DEBUG")],
+    );
+    let gpu = logging_gpu(&mut debug);
+    for language in ["OCIO.GPU_LANGUAGE_GLSL_4_0", "OCIO.LANGUAGE_OSL_1"] {
+        extract_with_logger(&mut debug, gpu, language, "addToFunctionShaderCode");
+    }
+    debug.call(n("OCIO.SetLoggingLevel"), vec![r(level)]);
+    let mut once = Script::new();
+    let gpu = logging_gpu(&mut once);
+    // The same extraction without a logger that changes anything: the changes above show.
+    let desc = once.call_kw(
+        n("OCIO.GpuShaderDesc.CreateShaderDesc"),
+        vec![],
+        vec![("language", n("OCIO.LANGUAGE_OSL_1")), ("uid", s("u1"))],
+        Expect::Value,
+    );
+    once.call(ra(gpu, "extractGpuShaderInfo"), vec![r(desc)]);
+    once.eval(r(desc), &DESC_STATE);
+    compare_logging_scripts(&[warning, debug, once]);
+}
+
+/// [`compare`], after checking that the wheel's loggers changed the shader texts: those of the
+/// first script's first two extractions (the logger adds to the code, sets the function name)
+/// differ from the plain one's. (The resource prefix names no OSL variable: its logger shows in
+/// the getters.)
+fn compare_logging_scripts(scripts: &[Script]) {
+    let json: Vec<Value> = scripts.iter().map(Script::json).collect();
+    let theirs = common::wheel(&json);
+    let texts: Vec<Vec<u8>> = [&theirs[0], &theirs[2]]
+        .iter()
+        .flat_map(|report| report["steps"].as_array().unwrap().iter())
+        .filter_map(|step| {
+            let getters = step["getters"].as_array()?;
+            let text = getters.iter().find(|g| g[0] == "getShaderText")?;
+            Some(bytes(&text[1]["value"]["str"]))
+        })
+        .collect();
+    // Two states per extraction of the first script (after it, after `finalize`), one of the
+    // plain extraction.
+    assert_eq!(texts.len(), 7, "{texts:?}");
+    let plain = String::from_utf8_lossy(&texts[6]);
+    assert!(plain.contains("OCIOMain"), "{plain}");
+    for k in [0, 2] {
+        let changed = String::from_utf8_lossy(&texts[k]);
+        assert_ne!(
+            changed, plain,
+            "extraction {k}: the logger changed nothing in the wheel"
+        );
+    }
+    common::script::compare_with(scripts, &theirs);
+}
+
+/// The port's logging function reads the description being filled, as the verifier's
+/// reproduction: an exposure made dynamic warns in OSL, and at the DEBUG level the extraction's
+/// `finalize` logs the shader text in GLSL; then `finalize` called from Python logs it again.
+/// Each read returns (the port waited for the description's lock forever), in the test's turn
+/// ([`common::turn`]; the logging function and level are the interpreter's), within a time
+/// limit.
+#[test]
+fn a_logging_function_reads_the_description_being_filled() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(|| {
+            let _turn = common::turn();
+            Python::attach(|py| {
+                let globals = pyo3::types::PyDict::new(py);
+                py.run(LOGGER_READS, Some(&globals), None)
+                    .unwrap_or_else(|e| panic!("{e}"));
+                for (call, extract_logs, finalize_logs) in [
+                    (
+                        c"reads(OCIO.LANGUAGE_OSL_1, OCIO.LOGGING_LEVEL_WARNING)",
+                        true,
+                        false,
+                    ),
+                    (
+                        c"reads(OCIO.GPU_LANGUAGE_GLSL_4_0, OCIO.LOGGING_LEVEL_DEBUG)",
+                        true,
+                        true,
+                    ),
+                ] {
+                    let got = py
+                        .eval(call, Some(&globals), None)
+                        .unwrap_or_else(|e| panic!("{call:?}: {e}"));
+                    let (extracted, finalized, uids, errors): (usize, usize, Vec<String>, usize) =
+                        got.extract().unwrap();
+                    assert_eq!(extracted > 0, extract_logs, "{call:?}");
+                    assert_eq!(finalized > 0, finalize_logs, "{call:?}");
+                    assert_eq!(uids, ["read by the logger"], "{call:?}");
+                    assert_eq!(errors, 0, "{call:?}");
+                }
+                // An extraction nested in the logging function, into the same description:
+                // the outer extraction's later messages still see the description. (Port only:
+                // the wheel calls the logging function under its logging lock, which the
+                // nested `finalize` locks again, D-3.)
+                let got = py
+                    .eval(c"nested_reads()", Some(&globals), None)
+                    .unwrap_or_else(|e| panic!("{e}"));
+                let uids: Vec<String> = got.extract().unwrap();
+                assert!(uids.len() > 1, "{uids:?}");
+                assert!(uids.iter().all(|u| u == "read by the logger"), "{uids:?}");
+            });
+        });
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(120)) {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(_) => panic!("no end within 120 s: the logging function waits for the description"),
+    }
+}
+
+/// [`a_logging_function_reads_the_description_being_filled`]'s Python: `reads` returns how many
+/// messages the extraction and the later `finalize` logged, the unique IDs the logger read, and
+/// how many of its reads raised; `nested_reads`, the unique IDs a logger read that extracts a
+/// matrix into the description at the first message (three dynamic ops warn in OSL).
+const LOGGER_READS: &std::ffi::CStr = c"
+import PyOpenColorIO as OCIO
+
+def reads(language, level):
+    old = OCIO.GetLoggingLevel()
+    OCIO.SetLoggingLevel(level)
+    try:
+        t = OCIO.ExposureContrastTransform(exposure=0.5, dynamicExposure=True)
+        p = OCIO.Config.CreateRaw().getProcessor(t)
+        d = OCIO.GpuShaderDesc.CreateShaderDesc(language=language)
+        d.setUniqueID('read by the logger')
+        seen, errors = [], []
+        def logger(message):
+            try:
+                seen.append((d.getUniqueID(), len(d.getUniforms()), d.getShaderText(),
+                             d.getCacheID(), d.getLanguage(), len(d.getDynamicProperties())))
+            except Exception as e:
+                errors.append(e)
+        OCIO.SetLoggingFunction(logger)
+        p.getDefaultGPUProcessor().extractGpuShaderInfo(d)
+        extracted = len(seen)
+        d.finalize()
+        return extracted, len(seen) - extracted, sorted(set(s[0] for s in seen)), len(errors)
+    finally:
+        OCIO.ResetToDefaultLoggingFunction()
+        OCIO.SetLoggingLevel(old)
+
+def nested_reads():
+    cfg = OCIO.Config.CreateRaw()
+    g = OCIO.GroupTransform([
+        OCIO.ExposureContrastTransform(exposure=0.5, dynamicExposure=True),
+        OCIO.GradingPrimaryTransform(OCIO.GRADING_LOG, dynamic=True),
+        OCIO.ExposureContrastTransform(contrast=1.5, dynamicContrast=True)])
+    v = g[1].getValue()
+    v.saturation = 1.5
+    g[1].setValue(v)
+    gpu = cfg.getProcessor(g).getDefaultGPUProcessor()
+    other = cfg.getProcessor(OCIO.MatrixTransform(offset=[0.1, 0, 0, 0])).getDefaultGPUProcessor()
+    d = OCIO.GpuShaderDesc.CreateShaderDesc(language=OCIO.LANGUAGE_OSL_1)
+    d.setUniqueID('read by the logger')
+    seen = []
+    def logger(message):
+        if not seen:
+            other.extractGpuShaderInfo(d)
+        seen.append(d.getUniqueID())
+    OCIO.SetLoggingFunction(logger)
+    try:
+        gpu.extractGpuShaderInfo(d)
+    finally:
+        OCIO.ResetToDefaultLoggingFunction()
+    return seen
+";

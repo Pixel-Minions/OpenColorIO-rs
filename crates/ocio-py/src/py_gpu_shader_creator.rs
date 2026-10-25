@@ -38,6 +38,34 @@ const IT_SELF: Param = Param::new("self", DYNAMIC_PROPERTY_ITERATOR);
 /// A description as `GpuShaderDescRcPtr` holds it: cloning the handle shares it.
 pub(crate) type DescRc = Shared<GpuShaderDesc>;
 
+/// `f` of the description `rc` holds, called without holding its lock, for the library's calls
+/// that log while they write into it (`extractGpuShaderInfo`, `finalize`).
+///
+/// Upstream takes no lock: a logging function that reads the description sees it as the call
+/// has filled it so far, and what it changes is what the call goes on with. Here the
+/// description is moved out of its lock for the call (the lock holds a default description
+/// meanwhile, which only another thread could read, where upstream's read is a data race), and
+/// its log hook ([`ocio_gpu::gpu_shader_desc::LogHook`]) moves it back in around each log
+/// message, then out again with whatever the logging function changed. Holding the lock across
+/// the call deadlocked the logging function's first read of the description (verifier 6.3h,
+/// H1).
+pub(crate) fn with_desc_unlocked<R>(rc: &DescRc, f: impl FnOnce(&mut GpuShaderDesc) -> R) -> R {
+    let mut work = std::mem::take(&mut *rc.lock());
+    let shared = rc.clone();
+    let hook: ocio_gpu::gpu_shader_desc::LogHook =
+        std::sync::Arc::new(move |desc: &mut GpuShaderDesc, log: &mut dyn FnMut()| {
+            std::mem::swap(&mut *shared.lock(), desc);
+            log();
+            std::mem::swap(&mut *shared.lock(), desc);
+        });
+    // A call nested in a logging function finds the outer call's hook: it is put back after.
+    let outer = work.replace_log_hook(Some(hook));
+    let result = f(&mut work);
+    work.replace_log_hook(outer);
+    *rc.lock() = work;
+    result
+}
+
 /// `GpuShaderCreator::TextureType` (include/OpenColorIO/OpenColorIO.h:3485-3489 @ v2.5.2),
 /// with the values PyGpuShaderCreator.cpp:128-131 gives it.
 const TEXTURE_TYPE: EnumDef = EnumDef {
@@ -438,7 +466,7 @@ static CREATE_SHADER_TEXT: Function = method_def!(
 // .def("finalize", &GpuShaderCreator::finalize) (PyGpuShaderCreator.cpp:141-142 @ v2.5.2).
 static FINALIZE: Function = method_def!("finalize", [SELF], "None", |py, o, a, _| {
     let rc = this_desc!(o, a);
-    py_result(py, rc.lock().finalize())?;
+    py_result(py, with_desc_unlocked(&rc, GpuShaderDesc::finalize))?;
     none(py)
 });
 
