@@ -4140,6 +4140,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p9-merge-3` (9.2h, `section_merger.rs`, `ColorspacesMerger`);
   `section_merger_oracle_tests.rs` (the "color spaces" configs).
 
+### I-436. Named transforms get their family prefixes by the color spaces' strategy
+
+- **Upstream:** the named transforms section prefixes the families of the merged named
+  transforms, and changes their family separators, by the color spaces' strategy
+  (`m_params->getColorspaces()` in `NamedTransformsMerger::updateFamily`,
+  `SectionMerger.cpp:3078-3121` @ v2.5.2, a copy of the color spaces section's function), not
+  by the named transforms' own. With `PreferInput` named transforms and `BaseOnly` color
+  spaces, they get no prefix; with `PreferBase` color spaces, a base named transform gets the
+  base prefix though the named transforms prefer the input. Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** merges with family prefixes whose color spaces and named transforms use
+  different strategies.
+- **A fix:** read `getNamedTransforms()` in `NamedTransformsMerger::updateFamily`.
+- **Status:** matched in `p9-merge-3` (9.2i, `apphelpers/mergeconfigs/section_merger.rs`,
+  `NamedTransformsMerger::update_family`); `section_merger_oracle_tests.rs`
+  (`whole_merges_match_the_wheel`, the "named transforms" configs).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

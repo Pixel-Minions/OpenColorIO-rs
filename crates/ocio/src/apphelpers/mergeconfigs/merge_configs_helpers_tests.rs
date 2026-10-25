@@ -7,21 +7,22 @@
 use super::*;
 use crate::apphelpers::mergeconfigs::section_merger::{
     ColorspacesMerger, DisplayViewMerger, FileRulesMerger, GeneralMerger, LooksMerger,
-    MergeHandlerOptions, RolesMerger, Section, ViewTransformsMerger,
+    MergeHandlerOptions, NamedTransformsMerger, RolesMerger, Section, ViewTransformsMerger,
 };
 use crate::color_space::ColorSpace;
 use crate::file_rules::FileRules;
 use crate::fileformats::test_utils::get_test_files_dir;
+use crate::named_transform::NamedTransform;
 use crate::transform::{Transform, TransformType};
 use crate::viewing_rules::ViewingRules;
 use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::open_color_types::{
-    ColorSpaceDirection, ColorSpaceVisibility, LoggingLevel, SearchReferenceSpaceType,
-    ViewTransformDirection, ViewType,
+    ColorSpaceDirection, ColorSpaceVisibility, LoggingLevel, NamedTransformVisibility,
+    SearchReferenceSpaceType, ViewTransformDirection, ViewType,
 };
 use ocio_ops::std_regex::{Regex, regex_replace};
 use ocio_ops::utils::pystring::os_path;
-use ocio_testkit::upstream::check_close;
+use ocio_testkit::upstream::{check_close, check_throw_what};
 
 /// `pystring::os::path::normpath(pystring::os::path::join(paths))` of the test files'
 /// directory, `configs`, `mergeconfigs` and `file`.
@@ -4561,4 +4562,3737 @@ fn colorspaces_section_common_reference_and_duplicates() {
     }
 
     // Nothing special to test for Input only and Base only.
+}
+
+/// Upstream's `setupBasics` of the color spaces section errors' test: a merger with new
+/// parameters, whose roles, color spaces, named transforms and default strategies are `strategy`,
+/// with family prefixes, without the reference space adjustment and the duplicate search.
+fn setup_colorspaces_errors_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    let p = merger.params(0).unwrap();
+    // Note that these tests run several of the mergers.
+    p.set_roles(strategy);
+    p.set_colorspaces(strategy);
+    p.set_named_transforms(strategy);
+    p.set_default_strategy(strategy);
+
+    p.set_input_family_prefix("Input/");
+    p.set_base_family_prefix("Base/");
+
+    p.set_adjust_input_reference_space(false);
+    p.set_avoid_duplicates(false);
+
+    params
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, colorspaces_section_errors)` @ v2.5.2.
+#[test]
+fn colorspaces_section_errors() {
+    let setup_basics = setup_colorspaces_errors_basics;
+
+    // Test ADD_CS_ERROR_NAME_IDENTICAL_TO_A_ROLE_NAME
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+roles:
+    b: colorspace_a
+
+colorspaces:
+- !<ColorSpace>
+    name: colorspace_a
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+colorspaces:
+- !<ColorSpace>
+    name: B
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+            // The role takes priority over the inbound colorspace.
+            // The conflicting color space should not be added to the merged config (skipped).
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &["Color space 'B' was not merged as it's identical to a role name"],
+                );
+
+                assert_eq!(merged_config.num_roles(), 1);
+                assert_eq!(merged_config.role_name(0), b"b");
+
+                // Colorspace A should not be added to the merged config (skipped)
+                assert_eq!(num_all_color_spaces(&merged_config), 1);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"colorspace_a");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &["Color space 'B' was not merged as it's identical to a role name"],
+                );
+
+                assert_eq!(merged_config.num_roles(), 1);
+                assert_eq!(merged_config.role_name(0), b"b");
+
+                // Colorspace A should not be added to the merged config (skipped)
+                assert_eq!(num_all_color_spaces(&merged_config), 1);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"colorspace_a");
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        ColorspacesMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Color space 'B' was not merged as it's identical to a role name",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+colorspaces:
+- !<ColorSpace>
+    name: A
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+roles:
+    A: colorspace_b
+
+colorspaces:
+- !<ColorSpace>
+    name: colorspace_b
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            RolesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The Input config contains a role 'a' that would override Base config color space 'A'",
+                    ],
+                );
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+
+                assert_eq!(merged_config.num_roles(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"colorspace_b");
+                assert_eq!(merged_config.color_space_name_by_index(1), b"A");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            RolesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The Input config contains a role 'a' that would override Base config color space 'A'",
+                    ],
+                );
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+
+                assert_eq!(merged_config.num_roles(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"colorspace_b");
+                assert_eq!(merged_config.color_space_name_by_index(1), b"A");
+            }
+        }
+    }
+
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+- !<Rule> {name: Default, colorspace: cs_base}
+
+named_transforms:
+- !<NamedTransform>
+    name: nt_base
+    encoding: log
+    inverse_transform: !<MatrixTransform> {name: inverse, offset: [-0.2, -0.1, -0.1, 0]}
+- !<NamedTransform>
+    name: nt_base_extra
+    aliases: [nt_base2]
+    encoding: log
+    inverse_transform: !<MatrixTransform> {name: inverse, offset: [-0.2, -0.1, -0.1, 0]}
+
+colorspaces:
+- !<ColorSpace>
+    name: cs_base
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+- !<Rule> {name: Default, colorspace: nt_base}
+
+colorspaces:
+- !<ColorSpace>
+    name: nt_base
+- !<ColorSpace>
+    name: nt_base2
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let mut merged_config = (*base_config).clone();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'nt_base' was not merged as there's a color space with that name",
+                        "Merged Base named transform 'nt_base_extra' has an alias 'nt_base2' that conflicts with color space 'nt_base2'",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                let nt = check_named_transform(&merged_config, "nt_base_extra", 0);
+                assert_eq!(nt.num_aliases(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 3);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"cs_base");
+                assert_eq!(merged_config.color_space_name_by_index(1), b"nt_base");
+                assert_eq!(merged_config.color_space_name_by_index(2), b"nt_base2");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let mut merged_config = (*base_config).clone();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'nt_base' was not merged as there's a color space with that name",
+                        "Merged Base named transform 'nt_base_extra' has an alias 'nt_base2' that conflicts with color space 'nt_base2'",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                let nt = check_named_transform(&merged_config, "nt_base_extra", 0);
+                assert_eq!(nt.num_aliases(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 3);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"cs_base");
+                assert_eq!(merged_config.color_space_name_by_index(1), b"nt_base");
+                assert_eq!(merged_config.color_space_name_by_index(2), b"nt_base2");
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let mut merged_config = (*base_config).clone();
+
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        NamedTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Named transform 'nt_base' was not merged as there's a color space with that name",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: nt_input}
+
+colorspaces:
+- !<ColorSpace>
+    name: nt_input
+- !<ColorSpace>
+    name: nt_input2
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: cs_input}
+
+named_transforms:
+  - !<NamedTransform>
+    name: nt_input
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+
+  - !<NamedTransform>
+    name: nt_input_extra
+    aliases: [nt_input2]
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+
+colorspaces:
+- !<ColorSpace>
+    name: cs_input
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let mut merged_config = (*base_config).clone();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(true);
+
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'nt_input' was not merged as there's a color space with that name",
+                        "Merged Input named transform 'nt_input_extra' has an alias 'nt_input2' that conflicts with color space 'nt_input2'",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                let nt = check_named_transform(&merged_config, "nt_input_extra", 0);
+                assert_eq!(nt.num_aliases(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 3);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"cs_input");
+                assert_eq!(merged_config.color_space_name_by_index(1), b"nt_input");
+                assert_eq!(merged_config.color_space_name_by_index(2), b"nt_input2");
+            }
+
+            {
+                let mut merger = ConfigMerger::new();
+                let mut merged_config = (*base_config).clone();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'nt_input' was not merged as there's a color space with that name",
+                        "Merged Input named transform 'nt_input_extra' has an alias 'nt_input2' that conflicts with color space 'nt_input2'",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                let nt = check_named_transform(&merged_config, "nt_input_extra", 0);
+                assert_eq!(nt.num_aliases(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 3);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"nt_input");
+                assert_eq!(merged_config.color_space_name_by_index(1), b"nt_input2");
+                assert_eq!(merged_config.color_space_name_by_index(2), b"cs_input");
+            }
+        }
+    }
+
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csBase}
+
+roles:
+    role_base: csBase
+
+colorspaces:
+- !<ColorSpace>
+    name: csBase
+
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csInput}
+
+colorspaces:
+- !<ColorSpace>
+    name: csInput
+    aliases: [role_base]
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'csInput' has an alias 'role_base' that conflicts with a role",
+                    ],
+                );
+
+                assert_eq!(merged_config.num_roles(), 1);
+                assert_eq!(merged_config.role_name(0), b"role_base");
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"csBase");
+                let name = merged_config.color_space_name_by_index(1);
+                assert_eq!(name, b"csInput");
+                assert_eq!(merged_config.color_space(name).unwrap().num_aliases(), 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'csInput' has an alias 'role_base' that conflicts with a role",
+                    ],
+                );
+
+                assert_eq!(merged_config.num_roles(), 1);
+                assert_eq!(merged_config.role_name(0), b"role_base");
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"csBase");
+                let name = merged_config.color_space_name_by_index(1);
+                assert_eq!(name, b"csInput");
+                assert_eq!(merged_config.color_space(name).unwrap().num_aliases(), 0);
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        ColorspacesMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Merged color space 'csInput' has an alias 'role_base' that conflicts with a role",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csBase}
+
+colorspaces:
+- !<ColorSpace>
+    name: csBase
+    aliases: [role_input]
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csInput}
+
+roles:
+    role_input: csInput
+
+colorspaces:
+- !<ColorSpace>
+    name: csInput
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            RolesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The Input config contains a role 'role_input' that would override an alias of Base config color space 'csBase'",
+                    ],
+                );
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+
+                assert_eq!(merged_config.num_roles(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"csInput");
+                let name = merged_config.color_space_name_by_index(1);
+                assert_eq!(name, b"csBase");
+                assert_eq!(merged_config.color_space(name).unwrap().num_aliases(), 1);
+                assert_eq!(
+                    merged_config.color_space(name).unwrap().alias(0),
+                    b"role_input"
+                );
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            RolesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The Input config contains a role 'role_input' that would override an alias of Base config color space 'csBase'",
+                    ],
+                );
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+
+                assert_eq!(merged_config.num_roles(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+                assert_eq!(merged_config.color_space_name_by_index(0), b"csInput");
+                let name = merged_config.color_space_name_by_index(1);
+                assert_eq!(name, b"csBase");
+                assert_eq!(merged_config.color_space(name).unwrap().num_aliases(), 1);
+                assert_eq!(
+                    merged_config.color_space(name).unwrap().alias(0),
+                    b"role_input"
+                );
+            }
+        }
+    }
+
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+named_transforms:
+  - !<NamedTransform>
+    name: nt_base
+    encoding: log
+    inverse_transform: !<MatrixTransform> {name: inverse, offset: [-0.2, -0.1, -0.1, 0]}
+
+  - !<NamedTransform>
+    name: nt_base_extra
+    aliases: [nt_base2]
+    encoding: log
+    inverse_transform: !<MatrixTransform> {name: inverse, offset: [-0.2, -0.1, -0.1, 0]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: cs_input}
+
+colorspaces:
+- !<ColorSpace>
+    name: cs_input
+    aliases: [nt_base]
+- !<ColorSpace>
+    name: cs_input2
+    aliases: [nt_base2]
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'nt_base' was not merged as there's a color space alias with that name",
+                        "Merged Base named transform 'nt_base_extra' has a conflict with alias 'nt_base2' in color space 'cs_input2'",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                let nt = check_named_transform(&merged_config, "nt_base_extra", 0);
+                assert_eq!(nt.num_aliases(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "cs_input", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"nt_base");
+
+                let cs = check_color_space(&merged_config, "cs_input2", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"nt_base2");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'nt_base' was not merged as there's a color space alias with that name",
+                        "Merged Base named transform 'nt_base_extra' has a conflict with alias 'nt_base2' in color space 'cs_input2'",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                let nt = check_named_transform(&merged_config, "nt_base_extra", 0);
+                assert_eq!(nt.num_aliases(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+                let cs = check_color_space(&merged_config, "cs_input", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"nt_base");
+
+                let cs = check_color_space(&merged_config, "cs_input2", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"nt_base2");
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        NamedTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Named transform 'nt_base' was not merged as there's a color space alias with that name",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: cs_base}
+
+colorspaces:
+- !<ColorSpace>
+    name: cs_base
+    aliases: [nt_input]
+- !<ColorSpace>
+    name: cs_base2
+    aliases: [nt_input2]
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+named_transforms:
+  - !<NamedTransform>
+    name: nt_input
+    encoding: log
+    inverse_transform: !<MatrixTransform> {name: inverse, offset: [-0.2, -0.1, -0.1, 0]}
+  - !<NamedTransform>
+    name: nt_input_extra
+    aliases: [nt_input2]
+    encoding: log
+    inverse_transform: !<MatrixTransform> {name: inverse, offset: [-0.2, -0.1, -0.1, 0]}
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'nt_input' was not merged as there's a color space alias with that name",
+                        "Merged Input named transform 'nt_input_extra' has a conflict with alias 'nt_input2' in color space 'cs_base2'",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                let nt = check_named_transform(&merged_config, "nt_input_extra", 0);
+                assert_eq!(nt.num_aliases(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "cs_base", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"nt_input");
+
+                let cs = check_color_space(&merged_config, "cs_base2", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"nt_input2");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'nt_input' was not merged as there's a color space alias with that name",
+                        "Merged Input named transform 'nt_input_extra' has a conflict with alias 'nt_input2' in color space 'cs_base2'",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                let nt = check_named_transform(&merged_config, "nt_input_extra", 0);
+                assert_eq!(nt.num_aliases(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "cs_base", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"nt_input");
+
+                let cs = check_color_space(&merged_config, "cs_base2", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"nt_input2");
+            }
+        }
+    }
+
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: cs_base}
+
+colorspaces:
+- !<ColorSpace>
+    name: cs_base
+    aliases: [my_colorspace]
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: cs_input}
+
+colorspaces:
+- !<ColorSpace>
+    name: cs_input
+    aliases: [my_colorspace]
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'cs_input' has a conflict with alias 'my_colorspace' in color space 'cs_base'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "cs_base", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+
+                let cs = check_color_space(&merged_config, "cs_input", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"my_colorspace");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'cs_input' has a conflict with alias 'my_colorspace' in color space 'cs_base'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "cs_base", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"my_colorspace");
+
+                let cs = check_color_space(&merged_config, "cs_input", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'cs_input' has a conflict with alias 'my_colorspace' in color space 'cs_base'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "cs_input", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"my_colorspace");
+
+                let cs = check_color_space(&merged_config, "cs_base", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'cs_input' has a conflict with alias 'my_colorspace' in color space 'cs_base'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "cs_input", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+
+                let cs = check_color_space(&merged_config, "cs_base", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"my_colorspace");
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                check_throw_what(
+                    merge_section!(
+                        ColorspacesMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Merged color space 'cs_input' has a conflict with alias 'my_colorspace' in color space 'cs_base'",
+                );
+            }
+        }
+    }
+
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+colorspaces:
+- !<ColorSpace>
+    name: A
+    aliases: [B]
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+colorspaces:
+- !<ColorSpace>
+    name: B
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The name of merged color space 'B' has a conflict with an alias in color space 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "A", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+
+                let cs = check_color_space(&merged_config, "B", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Color space 'B' was not merged as it conflicts with an alias in color space 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 1);
+
+                let cs = check_color_space(&merged_config, "A", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"B");
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                check_throw_what(
+                    merge_section!(
+                        ColorspacesMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "The name of merged color space 'B' has a conflict with an alias in color space 'A'",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+colorspaces:
+- !<ColorSpace>
+    name: A
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+colorspaces:
+- !<ColorSpace>
+    name: B
+    aliases: [A]
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'B' has an alias 'A' that conflicts with color space 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 1);
+
+                let cs = check_color_space(&merged_config, "B", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"A");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'B' has an alias 'A' that conflicts with color space 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 1);
+
+                let cs = check_color_space(&merged_config, "B", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"A");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'B' has an alias 'A' that conflicts with color space 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "B", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+
+                let cs = check_color_space(&merged_config, "A", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            ColorspacesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged color space 'B' has an alias 'A' that conflicts with color space 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                let cs = check_color_space(&merged_config, "A", 0, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+
+                let cs = check_color_space(&merged_config, "B", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 0);
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                check_throw_what(
+                    merge_section!(
+                        ColorspacesMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Merged color space 'B' has an alias 'A' that conflicts with color space 'A'",
+                );
+            }
+        }
+    }
+}
+
+/// Port of `checkNamedTransform` (MergeConfigsHelpers_tests.cpp:83-93 @ v2.5.2).
+#[track_caller]
+fn check_named_transform<'c>(
+    merged_config: &'c Config,
+    ref_name: &str,
+    index: i32,
+) -> &'c NamedTransform {
+    let name =
+        merged_config.named_transform_name_by_index_with(NamedTransformVisibility::All, index);
+    assert_eq!(name, ref_name.as_bytes());
+    merged_config
+        .named_transform(ref_name)
+        .unwrap_or_else(|| panic!("no named transform {ref_name}"))
+}
+
+/// Upstream's `setupBasics` of the named transforms section's test: a merger with new
+/// parameters, whose roles, color spaces, named transforms and default strategies are
+/// `strategy`, with family prefixes, without the reference space adjustment, with the duplicate
+/// search, input first.
+fn setup_named_transforms_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    let p = merger.params(0).unwrap();
+    // Note that these tests run several of the mergers.
+    // Need to run the color space merger too, since that affects how the named transform
+    // merger will work (in terms of avoiding conflicts with color space names).
+    p.set_roles(strategy);
+    p.set_colorspaces(strategy);
+    p.set_named_transforms(strategy);
+    p.set_default_strategy(strategy);
+
+    p.set_input_family_prefix("Input/");
+    p.set_base_family_prefix("Base/");
+
+    p.set_adjust_input_reference_space(false);
+    p.set_avoid_duplicates(true);
+    p.set_input_first(true);
+
+    params
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, named_transform_section)` @ v2.5.2.
+#[test]
+fn named_transform_section() {
+    let base_config = get_base_config().unwrap();
+
+    let input_config = get_input_config().unwrap();
+
+    let setup_basics = setup_named_transforms_basics;
+
+    // Test that the default strategy is used as a fallback if the section strategy was not defined.
+    {
+        let mut merger = ConfigMerger::new();
+        // Using STRATEGY_UNSPECIFIED as this simulate that the section
+        // is missing from the OCIOM file.
+        let params = setup_basics(&mut merger, MergeStrategies::Unspecified);
+        // Simulate settings from OCIOM file.
+        merger
+            .params(0)
+            .unwrap()
+            .set_default_strategy(MergeStrategies::InputOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ColorspacesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+        merge_section!(
+            NamedTransformsMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(
+            merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+            3
+        );
+
+        let nt = check_named_transform(&merged_config, "nt_both", 0);
+        assert_eq!(nt.num_aliases(), 2);
+        assert_eq!(nt.alias(0), b"Utility - Raw");
+        assert_eq!(nt.alias(1), b"nametr");
+        assert_eq!(nt.family(), b"");
+        assert_eq!(nt.description(), b"from input");
+
+        let nt = check_named_transform(&merged_config, "nt_input", 1);
+        assert_eq!(nt.num_aliases(), 2);
+        assert_eq!(nt.alias(0), b"Raw");
+        assert_eq!(nt.alias(1), b"in nt");
+        assert_eq!(nt.family(), b"Raw");
+        assert_eq!(nt.description(), b"from input");
+
+        let nt = check_named_transform(&merged_config, "view_2", 2);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"g22_ap1");
+        assert_eq!(nt.family(), b"Raw");
+        assert_eq!(nt.description(), b"from input");
+    }
+
+    // Test NamedTransform with strategy = PreferInput, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Equivalent input color space 'ACES2065-1' replaces 'ACES2065-1' in the base config, preserving aliases.",
+                "Equivalent input color space 'ACEScct - SomeOtherName' replaces 'ACEScct' in the base config, preserving aliases.",
+                "Equivalent input color space 'view_1' replaces 'view_1' in the base config, preserving aliases.",
+                "Equivalent input color space 'view_1B' replaces 'view_1' in the base config, preserving aliases.",
+                "Equivalent input color space 'view_3' replaces 'view_2' in the base config, preserving aliases.",
+                "Equivalent input color space 'log_3' replaces 'log_1' in the base config, preserving aliases.",
+                "Equivalent input color space 'lin_3' replaces 'ACES2065-1' in the base config, preserving aliases.",
+            ],
+        );
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    NamedTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Named transform 'nt_both' will replace a named transform in the base config",
+                "Merged Base named transform 'nt_both' has a conflict with alias 'srgb_tx' in color space 'sRGB - Texture'",
+                "Merged Base named transform 'nt_base' has an alias 'view_3' that conflicts with color space 'view_3'",
+                "Merged Input named transform 'nt_both' has a conflict with alias 'Utility - Raw' in color space 'Raw'",
+                "The name of merged named transform 'nt_input' has a conflict with an alias in named transform 'nt_base'",
+                "Merged Input named transform 'nt_input' has an alias 'Raw' that conflicts with color space 'Raw'",
+                "Named transform 'view_2' was not merged as there's a color space alias with that name.",
+            ],
+        );
+
+        assert_eq!(
+            merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+            3
+        );
+
+        let nt = check_named_transform(&merged_config, "nt_both", 0);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"nametr");
+        assert_eq!(nt.family(), b"Input@");
+        assert_eq!(nt.description(), b"from input");
+
+        let nt = check_named_transform(&merged_config, "nt_input", 1);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"in nt");
+        assert_eq!(nt.family(), b"Input@Raw");
+        assert_eq!(nt.description(), b"from input");
+
+        let nt = check_named_transform(&merged_config, "nt_base", 2);
+        assert_eq!(nt.num_aliases(), 0);
+        assert_eq!(nt.family(), b"Base@nt");
+        assert_eq!(nt.description(), b"from base");
+    }
+
+    // Test NamedTransform with strategy=PreferInput, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(false);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Equivalent input color space 'ACES2065-1' replaces 'ACES2065-1' in the base config, preserving aliases.",
+                "Equivalent input color space 'ACEScct - SomeOtherName' replaces 'ACEScct' in the base config, preserving aliases.",
+                "Equivalent input color space 'view_1' replaces 'view_1' in the base config, preserving aliases.",
+                "Equivalent input color space 'view_1B' replaces 'view_1' in the base config, preserving aliases.",
+                "Equivalent input color space 'view_3' replaces 'view_2' in the base config, preserving aliases.",
+                "Equivalent input color space 'log_3' replaces 'log_1' in the base config, preserving aliases.",
+                "Equivalent input color space 'lin_3' replaces 'ACES2065-1' in the base config, preserving aliases.",
+            ],
+        );
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    NamedTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Named transform 'nt_both' will replace a named transform in the base config",
+                "Merged Base named transform 'nt_both' has a conflict with alias 'srgb_tx' in color space 'sRGB - Texture'",
+                "Merged Base named transform 'nt_base' has an alias 'view_3' that conflicts with color space 'view_3'",
+                "Merged Input named transform 'nt_both' has a conflict with alias 'Utility - Raw' in color space 'Raw'",
+                "The name of merged named transform 'nt_input' has a conflict with an alias in named transform 'nt_base'",
+                "Merged Input named transform 'nt_input' has an alias 'Raw' that conflicts with color space 'Raw'",
+                "Named transform 'view_2' was not merged as there's a color space alias with that name.",
+            ],
+        );
+
+        assert_eq!(
+            merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+            3
+        );
+
+        let nt = check_named_transform(&merged_config, "nt_base", 0);
+        assert_eq!(nt.num_aliases(), 0);
+        assert_eq!(nt.family(), b"Base@nt");
+        assert_eq!(nt.description(), b"from base");
+
+        let nt = check_named_transform(&merged_config, "nt_both", 1);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"nametr");
+        assert_eq!(nt.family(), b"Input@");
+        assert_eq!(nt.description(), b"from input");
+
+        let nt = check_named_transform(&merged_config, "nt_input", 2);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"in nt");
+        assert_eq!(nt.family(), b"Input@Raw");
+        assert_eq!(nt.description(), b"from input");
+
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"Gamma 2.2 AP1 - Texture, Linear Rec.2020, nt_both, nt_input"
+        );
+    }
+
+    // Test NamedTransform with strategy = PreferBase, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Equivalent base color space 'ACES2065-1' overrides 'ACES2065-1' in the input config, preserving aliases.",
+                "Equivalent base color space 'ACEScct' overrides 'ACEScct - SomeOtherName' in the input config, preserving aliases.",
+                "Equivalent base color space 'view_1' overrides 'view_1' in the input config, preserving aliases.",
+                "Equivalent base color space 'view_1' overrides 'view_1B' in the input config, preserving aliases.",
+                "Equivalent base color space 'view_2' overrides 'view_3' in the input config, preserving aliases.",
+                "Equivalent base color space 'log_1' overrides 'log_3' in the input config, preserving aliases.",
+                "Equivalent base color space 'ACES2065-1' overrides 'lin_3' in the input config, preserving aliases.",
+            ],
+        );
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    NamedTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Merged Base named transform 'nt_both' has a conflict with alias 'srgb_tx' in color space 'sRGB - Texture'",
+                "Merged Base named transform 'nt_base' has a conflict with alias 'view_3' in color space 'view_2'.",
+                "Named transform 'nt_both' was not merged as it's already present in the base config",
+                "Named transform 'nt_input' was not merged as it conflicts with an alias in named transform 'nt_base'",
+                "Named transform 'view_2' was not merged as there's a color space with that name",
+            ],
+        );
+
+        assert_eq!(
+            merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+            2
+        );
+
+        let nt = check_named_transform(&merged_config, "nt_both", 0);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"namet2");
+        assert_eq!(nt.family(), b"Base#");
+        assert_eq!(nt.description(), b"from base");
+
+        let nt = check_named_transform(&merged_config, "nt_base", 1);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"nt_input");
+        assert_eq!(nt.family(), b"Base#nt");
+        assert_eq!(nt.description(), b"from base");
+
+        // NB: The nt_input is included referring to the alias in the base config, not the input config.
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"Linear Rec.2020, nt_both, view_2, Gamma 2.2 AP1 - Texture"
+        );
+    }
+
+    // Test NamedTransform with strategy = PreferBase, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(false);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Equivalent base color space 'ACES2065-1' overrides 'ACES2065-1' in the input config, preserving aliases.",
+                "Equivalent base color space 'ACEScct' overrides 'ACEScct - SomeOtherName' in the input config, preserving aliases.",
+                "Equivalent base color space 'view_1' overrides 'view_1' in the input config, preserving aliases.",
+                "Equivalent base color space 'view_1' overrides 'view_1B' in the input config, preserving aliases.",
+                "Equivalent base color space 'view_2' overrides 'view_3' in the input config, preserving aliases.",
+                "Equivalent base color space 'log_1' overrides 'log_3' in the input config, preserving aliases.",
+                "Equivalent base color space 'ACES2065-1' overrides 'lin_3' in the input config, preserving aliases.",
+            ],
+        );
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    NamedTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Merged Base named transform 'nt_both' has a conflict with alias 'srgb_tx' in color space 'sRGB - Texture'",
+                "Merged Base named transform 'nt_base' has a conflict with alias 'view_3' in color space 'view_2'.",
+                "Named transform 'nt_both' was not merged as it's already present in the base config",
+                "Named transform 'nt_input' was not merged as it conflicts with an alias in named transform 'nt_base'",
+                "Named transform 'view_2' was not merged as there's a color space with that name",
+            ],
+        );
+
+        assert_eq!(
+            merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+            2
+        );
+
+        let nt = check_named_transform(&merged_config, "nt_both", 0);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"namet2");
+        assert_eq!(nt.family(), b"Base#");
+        assert_eq!(nt.description(), b"from base");
+
+        let nt = check_named_transform(&merged_config, "nt_base", 1);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"nt_input");
+        assert_eq!(nt.family(), b"Base#nt");
+        assert_eq!(nt.description(), b"from base");
+    }
+
+    // Test NamedTransform with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ColorspacesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+        merge_section!(
+            NamedTransformsMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(
+            merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+            2
+        );
+
+        let nt = check_named_transform(&merged_config, "nt_both", 0);
+        assert_eq!(nt.num_aliases(), 2);
+        assert_eq!(nt.alias(0), b"srgb_tx");
+        assert_eq!(nt.alias(1), b"namet2");
+        assert_eq!(nt.family(), b"");
+        assert_eq!(nt.description(), b"from base");
+
+        let nt = check_named_transform(&merged_config, "nt_base", 1);
+        assert_eq!(nt.num_aliases(), 2);
+        assert_eq!(nt.alias(0), b"view_3");
+        assert_eq!(nt.alias(1), b"nt_input");
+        assert_eq!(nt.family(), b"nt");
+        assert_eq!(nt.description(), b"from base");
+    }
+
+    // Test NamedTransform with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ColorspacesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+        merge_section!(
+            NamedTransformsMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(
+            merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+            3
+        );
+
+        let nt = check_named_transform(&merged_config, "nt_both", 0);
+        assert_eq!(nt.num_aliases(), 2);
+        assert_eq!(nt.alias(0), b"Utility - Raw");
+        assert_eq!(nt.alias(1), b"nametr");
+        assert_eq!(nt.family(), b"");
+        assert_eq!(nt.description(), b"from input");
+
+        let nt = check_named_transform(&merged_config, "nt_input", 1);
+        assert_eq!(nt.num_aliases(), 2);
+        assert_eq!(nt.alias(0), b"Raw");
+        assert_eq!(nt.alias(1), b"in nt");
+        assert_eq!(nt.family(), b"Raw");
+        assert_eq!(nt.description(), b"from input");
+
+        let nt = check_named_transform(&merged_config, "view_2", 2);
+        assert_eq!(nt.num_aliases(), 1);
+        assert_eq!(nt.alias(0), b"g22_ap1");
+        assert_eq!(nt.family(), b"Raw");
+        assert_eq!(nt.description(), b"from input");
+    }
+
+    // Test NamedTransform with strategy = Remove
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::Remove);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ColorspacesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+        merge_section!(
+            NamedTransformsMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(
+            merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+            1
+        );
+
+        let nt = check_named_transform(&merged_config, "nt_base", 0);
+        assert_eq!(nt.num_aliases(), 2);
+        assert_eq!(nt.alias(0), b"view_3");
+        assert_eq!(nt.alias(1), b"nt_input");
+        assert_eq!(nt.family(), b"nt");
+        assert_eq!(nt.description(), b"from base");
+    }
+}
+
+/// Upstream's `setupBasics` of the named transforms section errors' test: a merger with new
+/// parameters, whose roles, color spaces, named transforms and default strategies are `strategy`,
+/// with family prefixes, without the reference space adjustment and the duplicate search.
+fn setup_named_transforms_errors_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    let p = merger.params(0).unwrap();
+    // Note that these tests run several of the mergers.
+    p.set_roles(strategy);
+    p.set_colorspaces(strategy);
+    p.set_named_transforms(strategy);
+    p.set_default_strategy(strategy);
+
+    p.set_input_family_prefix("Input/");
+    p.set_base_family_prefix("Base/");
+
+    p.set_adjust_input_reference_space(false);
+    p.set_avoid_duplicates(false);
+
+    params
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, named_transform_section_errors)` @ v2.5.2.
+#[test]
+fn named_transform_section_errors() {
+    let setup_basics = setup_named_transforms_errors_basics;
+
+    // NT name matches a role name.
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+roles:
+    b: Raw
+
+colorspaces:
+- !<ColorSpace>
+    name: Raw
+
+named_transforms:
+  - !<NamedTransform>
+    name: A
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+named_transforms:
+  - !<NamedTransform>
+    name: B
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+            // The role takes priority.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &["Named transform 'B' was not merged as it's identical to a role name"],
+                );
+
+                assert_eq!(merged_config.num_roles(), 1);
+                assert_eq!(merged_config.role_name(0), b"b");
+
+                // NamedTransform B should not be added to the merged config (skipped).
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                assert_eq!(merged_config.named_transform_name_by_index(0), b"A");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &["Named transform 'B' was not merged as it's identical to a role name"],
+                );
+
+                assert_eq!(merged_config.num_roles(), 1);
+                assert_eq!(merged_config.role_name(0), b"b");
+
+                // NamedTransform B should not be added to the merged config (skipped)
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                assert_eq!(merged_config.named_transform_name_by_index(0), b"A");
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                check_throw_what(
+                    merge_section!(
+                        NamedTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Named transform 'B' was not merged as it's identical to a role name",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+named_transforms:
+  - !<NamedTransform>
+    name: A
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+roles:
+    a: B
+
+colorspaces:
+- !<ColorSpace>
+    name: B
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            RolesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The Input config contains a role 'a' that would override Base config named transform: 'A'",
+                    ],
+                );
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    NamedTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+
+                assert_eq!(merged_config.num_roles(), 0);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                check_named_transform(&merged_config, "A", 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            RolesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The Input config contains a role 'a' that would override Base config named transform: 'A'",
+                    ],
+                );
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    NamedTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+
+                assert_eq!(merged_config.num_roles(), 0);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+                check_named_transform(&merged_config, "A", 0);
+            }
+        }
+    }
+
+    // NT name matches a color space name.
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+colorspaces:
+- !<ColorSpace>
+    name: B
+- !<ColorSpace>
+    name: myB
+    aliases: [B1]
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csB}
+
+colorspaces:
+- !<ColorSpace>
+    name: csB
+
+named_transforms:
+  - !<NamedTransform>
+    name: B
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+
+  - !<NamedTransform>
+    name: B1
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+            // The role take priority over the inbound colorspace.
+            // The conflicting colorspace should not be added to the merged config (skipped).
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'B' was not merged as there's a color space with that name",
+                        "Named transform 'B1' was not merged as there's a color space alias with that name",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    0
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 3);
+
+                check_color_space(&merged_config, "B", 0, SEARCH_SCENE);
+                let cs = check_color_space(&merged_config, "myB", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"B1");
+                check_color_space(&merged_config, "csB", 2, SEARCH_SCENE);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'B' was not merged as there's a color space with that name",
+                        "Named transform 'B1' was not merged as there's a color space alias with that name",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    0
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 3);
+
+                check_color_space(&merged_config, "B", 0, SEARCH_SCENE);
+
+                let cs = check_color_space(&merged_config, "myB", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"B1");
+
+                check_color_space(&merged_config, "csB", 2, SEARCH_SCENE);
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        NamedTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Named transform 'B' was not merged as there's a color space with that name",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csA}
+
+colorspaces:
+- !<ColorSpace>
+    name: csA
+
+named_transforms:
+  - !<NamedTransform>
+    name: A
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+
+  - !<NamedTransform>
+    name: A1
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+colorspaces:
+- !<ColorSpace>
+    name: A
+- !<ColorSpace>
+    name: myA
+    aliases: [A1]
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'A' was not merged as there's a color space with that name",
+                        "Named transform 'A1' was not merged as there's a color space alias with that name",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    0
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 3);
+
+                check_color_space(&merged_config, "A", 0, SEARCH_SCENE);
+                let cs = check_color_space(&merged_config, "myA", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"A1");
+                check_color_space(&merged_config, "csA", 2, SEARCH_SCENE);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'A' was not merged as there's a color space with that name",
+                        "Named transform 'A1' was not merged as there's a color space alias with that name",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    0
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 3);
+
+                check_color_space(&merged_config, "A", 0, SEARCH_SCENE);
+                let cs = check_color_space(&merged_config, "myA", 1, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"A1");
+                check_color_space(&merged_config, "csA", 2, SEARCH_SCENE);
+            }
+        }
+    }
+
+    // NT name matches an NT alias.
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csA}
+
+colorspaces:
+- !<ColorSpace>
+    name: csA
+
+named_transforms:
+  - !<NamedTransform>
+    name: A
+    aliases: [B]
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csB}
+
+colorspaces:
+- !<ColorSpace>
+    name: csB
+
+named_transforms:
+  - !<NamedTransform>
+    name: B
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The name of merged named transform 'B' has a conflict with an alias in named transform 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    2
+                );
+
+                let nt = check_named_transform(&merged_config, "A", 0);
+                assert_eq!(nt.num_aliases(), 0);
+                check_named_transform(&merged_config, "B", 1);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The name of merged named transform 'B' has a conflict with an alias in named transform 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    2
+                );
+
+                let nt = check_named_transform(&merged_config, "A", 0);
+                assert_eq!(nt.num_aliases(), 0);
+                check_named_transform(&merged_config, "B", 1);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        NamedTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "The name of merged named transform 'B' has a conflict with an alias in named transform 'A'",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csA}
+
+colorspaces:
+- !<ColorSpace>
+    name: csA
+
+named_transforms:
+  - !<NamedTransform>
+    name: A
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+colorspaces:
+- !<ColorSpace>
+    name: csB
+
+named_transforms:
+  - !<NamedTransform>
+    name: B
+    aliases: [A]
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged Input named transform 'B' has an alias 'A' that conflicts with named transform 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+
+                let nt = check_named_transform(&merged_config, "B", 0);
+                assert_eq!(nt.num_aliases(), 1);
+                assert_eq!(nt.alias(0), b"A");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let mut merged_config = (*base_config).clone();
+
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged Input named transform 'B' has an alias 'A' that conflicts with named transform 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    2
+                );
+
+                let nt = check_named_transform(&merged_config, "B", 0);
+                assert_eq!(nt.num_aliases(), 0);
+                let nt = check_named_transform(&merged_config, "A", 1);
+                assert_eq!(nt.num_aliases(), 0);
+            }
+        }
+    }
+
+    // NT alias matches a role name.
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csA}
+
+roles:
+    b1: csA
+
+colorspaces:
+- !<ColorSpace>
+    name: csA
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csB}
+
+colorspaces:
+- !<ColorSpace>
+    name: csB
+
+named_transforms:
+  - !<NamedTransform>
+    name: B
+    aliases: [B1]
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged Input named transform 'B' has an alias 'B1' that conflicts with a role",
+                    ],
+                );
+
+                assert_eq!(merged_config.num_roles(), 1);
+                assert_eq!(merged_config.role_name(0), b"b1");
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+
+                let nt = check_named_transform(&merged_config, "B", 0);
+                assert_eq!(nt.num_aliases(), 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged Input named transform 'B' has an alias 'B1' that conflicts with a role",
+                    ],
+                );
+
+                assert_eq!(merged_config.num_roles(), 1);
+                assert_eq!(merged_config.role_name(0), b"b1");
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+
+                let nt = check_named_transform(&merged_config, "B", 0);
+                assert_eq!(nt.num_aliases(), 0);
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    RolesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        NamedTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Merged Input named transform 'B' has an alias 'B1' that conflicts with a role",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csA}
+
+colorspaces:
+- !<ColorSpace>
+    name: csA
+
+named_transforms:
+  - !<NamedTransform>
+    name: B
+    aliases: [A1]
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csB}
+
+roles:
+    a1: csB
+
+colorspaces:
+- !<ColorSpace>
+    name: csB
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            RolesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The Input config contains a role 'a1' that would override an alias of Base config named transform: 'B'",
+                    ],
+                );
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    NamedTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+
+                assert_eq!(merged_config.num_roles(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+
+                let nt = check_named_transform(&merged_config, "B", 0);
+                assert_eq!(nt.num_aliases(), 1);
+                assert_eq!(nt.alias(0), b"A1");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            RolesMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "The Input config contains a role 'a1' that would override an alias of Base config named transform: 'B'",
+                    ],
+                );
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                merge_section!(
+                    NamedTransformsMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+
+                assert_eq!(merged_config.num_roles(), 0);
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    1
+                );
+
+                let nt = check_named_transform(&merged_config, "B", 0);
+                assert_eq!(nt.num_aliases(), 1);
+                assert_eq!(nt.alias(0), b"A1");
+            }
+        }
+    }
+
+    // NT name matches color space alias.
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csA}
+
+colorspaces:
+- !<ColorSpace>
+    name: csA
+- !<ColorSpace>
+    name: B
+- !<ColorSpace>
+    name: myB
+    aliases: [B1]
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csB}
+
+colorspaces:
+- !<ColorSpace>
+    name: csB
+
+named_transforms:
+  - !<NamedTransform>
+    name: B
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+
+  - !<NamedTransform>
+    name: B1
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'B' was not merged as there's a color space with that name",
+                        "Named transform 'B1' was not merged as there's a color space alias with that name",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    0
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 4);
+
+                check_color_space(&merged_config, "csA", 0, SEARCH_SCENE);
+                check_color_space(&merged_config, "B", 1, SEARCH_SCENE);
+                let cs = check_color_space(&merged_config, "myB", 2, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"B1");
+                check_color_space(&merged_config, "csB", 3, SEARCH_SCENE);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'B' was not merged as there's a color space with that name",
+                        "Named transform 'B1' was not merged as there's a color space alias with that name",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    0
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 4);
+
+                check_color_space(&merged_config, "csA", 0, SEARCH_SCENE);
+                check_color_space(&merged_config, "B", 1, SEARCH_SCENE);
+                let cs = check_color_space(&merged_config, "myB", 2, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"B1");
+                check_color_space(&merged_config, "csB", 3, SEARCH_SCENE);
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        NamedTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Named transform 'B' was not merged as there's a color space with that name",
+                );
+            }
+        }
+
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csA}
+
+colorspaces:
+- !<ColorSpace>
+    name: csA
+
+named_transforms:
+  - !<NamedTransform>
+    name: A
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+
+  - !<NamedTransform>
+    name: A1
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csB}
+
+colorspaces:
+- !<ColorSpace>
+    name: csB
+- !<ColorSpace>
+    name: A
+- !<ColorSpace>
+    name: myA
+    aliases: [A1]
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'A' was not merged as there's a color space with that name",
+                        "Named transform 'A1' was not merged as there's a color space alias with that name",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    0
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 4);
+
+                check_color_space(&merged_config, "csA", 0, SEARCH_SCENE);
+                check_color_space(&merged_config, "csB", 1, SEARCH_SCENE);
+                check_color_space(&merged_config, "A", 2, SEARCH_SCENE);
+                let cs = check_color_space(&merged_config, "myA", 3, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"A1");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Named transform 'A' was not merged as there's a color space with that name",
+                        "Named transform 'A1' was not merged as there's a color space alias with that name",
+                    ],
+                );
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    0
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 4);
+
+                check_color_space(&merged_config, "csA", 0, SEARCH_SCENE);
+                check_color_space(&merged_config, "csB", 1, SEARCH_SCENE);
+                check_color_space(&merged_config, "A", 2, SEARCH_SCENE);
+                let cs = check_color_space(&merged_config, "myA", 3, SEARCH_SCENE);
+                assert_eq!(cs.num_aliases(), 1);
+                assert_eq!(cs.alias(0), b"A1");
+            }
+        }
+    }
+
+    // NT alias matches existing NT alias.
+    {
+        {
+            const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csA}
+
+colorspaces:
+- !<ColorSpace>
+    name: csA
+
+named_transforms:
+  - !<NamedTransform>
+    name: A
+    aliases: [my_colorspace]
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+
+            const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: csB}
+
+colorspaces:
+- !<ColorSpace>
+    name: csB
+
+named_transforms:
+  - !<NamedTransform>
+    name: B
+    aliases: [my_colorspace]
+    categories: [ working-space, basic-3d, advanced-2d ]
+    encoding: sdr-video
+    transform: !<MatrixTransform> {name: forwardBase, offset: [0.1, 0.2, 0.3, 0.4]}
+"#;
+            let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+            let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged Input named transform 'B' has a conflict with alias 'my_colorspace' in named transform 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    2
+                );
+
+                let nt = check_named_transform(&merged_config, "A", 0);
+                assert_eq!(nt.num_aliases(), 0);
+                let nt = check_named_transform(&merged_config, "B", 1);
+                assert_eq!(nt.num_aliases(), 1);
+                assert_eq!(nt.alias(0), b"my_colorspace");
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged Input named transform 'B' has a conflict with alias 'my_colorspace' in named transform 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    2
+                );
+
+                let nt = check_named_transform(&merged_config, "B", 0);
+                assert_eq!(nt.num_aliases(), 1);
+                assert_eq!(nt.alias(0), b"my_colorspace");
+                let nt = check_named_transform(&merged_config, "A", 1);
+                assert_eq!(nt.num_aliases(), 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+                merger.params(0).unwrap().set_input_first(false);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged Input named transform 'B' has a conflict with alias 'my_colorspace' in named transform 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    2
+                );
+
+                let nt = check_named_transform(&merged_config, "A", 0);
+                assert_eq!(nt.num_aliases(), 1);
+                assert_eq!(nt.alias(0), b"my_colorspace");
+                let nt = check_named_transform(&merged_config, "B", 1);
+                assert_eq!(nt.num_aliases(), 0);
+            }
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_for_log_or_exception(
+                    LogType::Warning,
+                    || {
+                        merge_section!(
+                            NamedTransformsMerger,
+                            &base_config,
+                            &input_config,
+                            &params,
+                            &mut merged_config
+                        )
+                    },
+                    &[
+                        "Merged Input named transform 'B' has a conflict with alias 'my_colorspace' in named transform 'A'",
+                    ],
+                );
+
+                assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+                assert_eq!(
+                    merged_config.num_named_transforms_with(NamedTransformVisibility::All),
+                    2
+                );
+
+                let nt = check_named_transform(&merged_config, "B", 0);
+                assert_eq!(nt.num_aliases(), 0);
+                let nt = check_named_transform(&merged_config, "A", 1);
+                assert_eq!(nt.num_aliases(), 1);
+                assert_eq!(nt.alias(0), b"my_colorspace");
+            }
+            // Testing the error message when Error on conflict is enabled.
+            {
+                let mut merger = ConfigMerger::new();
+                let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+                merger.params(0).unwrap().set_error_on_conflict(true);
+
+                let mut merged_config = (*base_config).clone();
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+                .unwrap();
+                check_throw_what(
+                    merge_section!(
+                        NamedTransformsMerger,
+                        &base_config,
+                        &input_config,
+                        &params,
+                        &mut merged_config
+                    ),
+                    "Merged Input named transform 'B' has a conflict with alias 'my_colorspace' in named transform 'A'",
+                );
+            }
+        }
+    }
 }

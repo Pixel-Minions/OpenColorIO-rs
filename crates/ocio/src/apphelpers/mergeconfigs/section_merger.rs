@@ -25,8 +25,8 @@
 use ocio_ops::exception::{Exception, ExceptionKind, Result};
 use ocio_ops::logging::log_warning;
 use ocio_ops::open_color_types::{
-    ColorSpaceVisibility, ReferenceSpaceType, SearchReferenceSpaceType, ViewTransformDirection,
-    ViewType,
+    ColorSpaceVisibility, NamedTransformVisibility, ReferenceSpaceType, SearchReferenceSpaceType,
+    ViewTransformDirection, ViewType,
 };
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::string_utils::{
@@ -41,6 +41,7 @@ use crate::config::Config;
 use crate::config_utils::{self, ColorSpaceFingerprints};
 use crate::custom_keys::CustomKeysContainer;
 use crate::file_rules::FileRules;
+use crate::named_transform::NamedTransform;
 use crate::tokens_manager::TokensManager;
 use crate::transform::Transform;
 use crate::viewing_rules::ViewingRules;
@@ -3460,6 +3461,774 @@ impl<'o, 'a> Section<'o, 'a> for ColorspacesMerger<'o, 'a> {
             m.merged_config.remove_color_space(name);
         }
         Ok(())
+    }
+}
+
+/////////////////////////////////// NamedTransformsMerger ////////////////////////////////
+
+/// Rewrites the merged config's inactive color spaces with only the trimmed entries that name a
+/// color space or a named transform of it (by name, not alias, ignoring case), joined with
+/// `", "`.
+///
+/// Port of `cleanUpInactiveList` (SectionMerger.cpp:2043-2070 @ v2.5.2).
+fn clean_up_inactive_list(merge_config: &mut Config) {
+    let mut original_list = StringVec::new();
+    let mut valid_list = StringVec::new();
+    split_active_list(merge_config.inactive_color_spaces(), &mut original_list);
+    for item in &original_list {
+        let name = trim(item);
+        if let Some(existing_cs) = merge_config.color_space(name) {
+            // Don't want aliases in the inactive list.
+            if strcasecmp(existing_cs.name(), name).is_eq() {
+                valid_list.push(name.to_vec());
+            }
+        } else if let Some(existing_nt) = merge_config.named_transform(name)
+            && strcasecmp(existing_nt.name(), name).is_eq()
+        {
+            valid_list.push(name.to_vec());
+        }
+    }
+    merge_config.set_inactive_color_spaces(join(&valid_list, b','));
+}
+
+/// Merges the named transforms, then cleans up the inactive color spaces.
+///
+/// Port of `NamedTransformsMerger` (SectionMerger.h:423-475, SectionMerger.cpp:3078-3728 @
+/// v2.5.2). The header declares 13 more functions (`iterateOverColorSpaces`, the
+/// `handleAddNtError...` ones, `handleErrorCodeWhenAddingInputFirst`, `handleErrorCodes`), which
+/// OCIO 2.5.2 neither defines nor calls.
+pub(crate) struct NamedTransformsMerger<'o, 'a>(SectionMerger<'o, 'a>);
+
+impl<'o, 'a> NamedTransformsMerger<'o, 'a> {
+    /// Port of `NamedTransformsMerger::NamedTransformsMerger` (SectionMerger.h:426-437 @
+    /// v2.5.2).
+    pub(crate) fn new(options: &'o mut MergeHandlerOptions<'a>) -> Result<Self> {
+        let mut m = SectionMerger::new(options)?;
+        m.strategy = section_strategy(m.params.named_transforms(), m.params);
+        Ok(NamedTransformsMerger(m))
+    }
+
+    /// Prefixes `family` as the color spaces merger does: by the color spaces' strategy, not
+    /// the named transforms' (docs/improvements.md, I-436).
+    ///
+    /// Port of `NamedTransformsMerger::updateFamily` (SectionMerger.cpp:3078-3121 @ v2.5.2).
+    fn update_family(&self, family: &mut Vec<u8>, from_base: bool) {
+        let m = &self.0;
+        // Note that if a prefix is present, it is always added, even if the CS did not have a
+        // family.
+
+        let merged_sep = m.merged_config.family_separator();
+        let mut updated_prefix = Vec::new();
+        let strategy = m.params.colorspaces();
+        if strategy == MergeStrategies::PreferInput {
+            if from_base {
+                // If the color space is from the base config, need to update its family
+                // separator.
+                if !family.is_empty() {
+                    *family =
+                        replace_separator(family, m.base_config.family_separator(), merged_sep);
+                }
+                // Note: The family prefix argument must always use the default slash separator.
+                // TODO: Should do this just once in the initializer.
+                updated_prefix =
+                    replace_separator(&m.params.base_family_prefix(), b'/', merged_sep);
+            } else {
+                updated_prefix =
+                    replace_separator(&m.params.input_family_prefix(), b'/', merged_sep);
+            }
+        } else if strategy == MergeStrategies::PreferBase {
+            if from_base {
+                // TODO: Should do this just once in the initializer.
+                updated_prefix =
+                    replace_separator(&m.params.base_family_prefix(), b'/', merged_sep);
+            } else {
+                // If the color space is from the input config, need to update its family
+                // separator.
+                if !family.is_empty() {
+                    *family =
+                        replace_separator(family, m.input_config.family_separator(), merged_sep);
+                }
+                updated_prefix =
+                    replace_separator(&m.params.input_family_prefix(), b'/', merged_sep);
+            }
+        }
+        // Append the prefix to the family.
+        // Note that the prefix should end with a separator, if desired.  Not adding one here.
+        updated_prefix.extend_from_slice(family);
+        *family = updated_prefix;
+    }
+
+    /// Whether the named transform `nt` may be merged into `merge_config`: always when no
+    /// color space (by name, alias or role) or named transform (by name or alias) has its name;
+    /// never when a role or a color space does; never for a base one whose name is taken; else
+    /// by the named transforms' strategy (`PreferInput` and `InputOnly` replace the named
+    /// transform or take the alias of that name), each case with a message.
+    ///
+    /// Port of `NamedTransformsMerger::namedTransformMayBeMerged` (SectionMerger.cpp:3123-3261
+    /// @ v2.5.2), whose null named transform can't happen with a reference.
+    fn named_transform_may_be_merged(
+        params: &ConfigMergingParameters,
+        merge_config: &Config,
+        nt: &NamedTransform,
+        from_base: bool,
+    ) -> Result<bool> {
+        let name = nt.name();
+
+        // This will compare the name against roles, color space names, and aliases.
+        // (Note that if the role refers to a named transform, this will return null,
+        //  but it's illegal for a role to point to a named transform.)
+        let existing_cs = merge_config.color_space(name);
+
+        let existing_nt = merge_config.named_transform(name);
+
+        if existing_cs.is_none() && existing_nt.is_none() {
+            // No name conflicts, go ahead and add it.
+            return Ok(true);
+        }
+
+        // OK, something has this name, figure out what it is.
+
+        // Does it have the same name as a role?
+        if merge_config.has_role(name) {
+            // Don't merge it if it would override a role.
+
+            let os = [
+                b"Named transform '".as_slice(),
+                name,
+                b"' was not merged as it's identical to a role name.",
+            ]
+            .concat();
+            notify(&os, params.is_error_on_conflict())?;
+
+            return Ok(false);
+        }
+
+        if let Some(existing_cs) = existing_cs {
+            // Does it have the same name as another color space?
+            let os = if strcasecmp(existing_cs.name(), name).is_eq() {
+                // The name matches a color space name in the mergeConfig.
+                // Don't merge it, color spaces always have precedence.
+                [
+                    b"Named transform '".as_slice(),
+                    name,
+                    b"' was not merged as there's a color space with that name.",
+                ]
+                .concat()
+            } else {
+                // The name conflicts with an alias of a color space.
+                // Don't merge it, color spaces always have precedence.
+                [
+                    b"Named transform '".as_slice(),
+                    name,
+                    b"' was not merged as there's a color space alias with that name.",
+                ]
+                .concat()
+            };
+            notify(&os, params.is_error_on_conflict())?;
+
+            return Ok(false);
+        }
+
+        if let Some(existing_nt) = existing_nt {
+            if from_base {
+                // Should not happen if the base config was legal.
+                let os = [
+                    b"Named transform '".as_slice(),
+                    name,
+                    b"' was not merged as there's more than one with that name in the base \
+                      config.",
+                ]
+                .concat();
+                notify(&os, params.is_error_on_conflict())?;
+
+                return Ok(false);
+            }
+
+            let strategy = params.named_transforms();
+
+            // At this point, only dealing with transforms from the input config.
+
+            if strcasecmp(existing_nt.name(), name).is_eq() {
+                // The name matches a named transform name in the mergeConfig.
+                // Whether to allow the merge is based on the merge strategy.
+
+                if prefers_input(strategy) {
+                    // Allow the merger.
+
+                    let os = [
+                        b"Named transform '".as_slice(),
+                        name,
+                        b"' will replace a named transform in the base config.",
+                    ]
+                    .concat();
+                    notify(&os, params.is_error_on_conflict())?;
+
+                    return Ok(true);
+                } else {
+                    // Don't merge it if it would replace a named transform from the base
+                    // config.
+
+                    let os = [
+                        b"Named transform '".as_slice(),
+                        name,
+                        b"' was not merged as it's already present in the base config.",
+                    ]
+                    .concat();
+                    notify(&os, params.is_error_on_conflict())?;
+
+                    return Ok(false);
+                }
+            } else {
+                // The name conflicts with an alias of another named transform.
+                // Whether to allow the merge is based on the merge strategy.
+
+                if prefers_input(strategy) {
+                    // Allow the merger.
+
+                    let os = [
+                        b"The name of merged named transform '".as_slice(),
+                        name,
+                        b"'",
+                        b" has a conflict with an alias in named transform '",
+                        existing_nt.name(),
+                        b"'.",
+                    ]
+                    .concat();
+                    notify(&os, params.is_error_on_conflict())?;
+
+                    return Ok(true);
+                } else {
+                    // Don't merge it if it would replace an alias from the base config.
+
+                    let os = [
+                        b"Named transform '".as_slice(),
+                        name,
+                        b"' was not merged as it conflicts with an alias ",
+                        b"in named transform '",
+                        existing_nt.name(),
+                        b"'.",
+                    ]
+                    .concat();
+                    notify(&os, params.is_error_on_conflict())?;
+
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    /// Adds `e_nt` to `merge_config`, replacing the named transform of its name, taking its
+    /// name from the alias of another named transform, and resolving the conflicts of its
+    /// aliases with color spaces, aliases and roles (the alias is removed) and with named
+    /// transforms (by the named transforms' strategy, `PreferBase` for a base one), each with a
+    /// message; records the name of an input one in `added_input_named_transforms`.
+    ///
+    /// Port of `NamedTransformsMerger::mergeNamedTransform` (SectionMerger.cpp:3263-3468 @
+    /// v2.5.2).
+    fn merge_named_transform(
+        params: &ConfigMergingParameters,
+        merge_config: &mut Config,
+        e_nt: &mut NamedTransform,
+        from_base: bool,
+        added_input_named_transforms: &mut Vec<Vec<u8>>,
+    ) -> Result<()> {
+        // NB: This routine assumes all NamedTransforms have been removed from the mergeConfig.
+        // Not trying to handle name conflicts with NamedTransforms, color spaces have
+        // precedence.
+
+        // Check if mergeConfig already has a color space with the same name as the input CS.
+
+        let name = e_nt.name().to_vec();
+
+        if merge_config.named_transform(&name).is_some() {
+            // If there is a named transform with this name in the existing config,
+            // remove it (and any aliases it may contain). This is the case when
+            // the strategy calls for replacing an existing transform.
+            //
+            // If the eNT name matched an alias rather than a named transform name,
+            // this does nothing (and the alias is handled below).
+            //
+            // The notification is handled in namedTransformMayBeMerged to avoid having to
+            // determine again whether the conflict is with the name or alias of originalNT.
+
+            merge_config.remove_named_transform(&name);
+        }
+
+        // Handle conflicts of the eNT name with aliases of other named transforms.
+        // NB: Would not be here if there is a name conflict with anything other than
+        // named transforms since the decision would have been not to merge it.
+
+        if let Some(existing_nt) = merge_config.named_transform(&name) {
+            // Get the name of the named transform that contains the alias.
+
+            // Verify that the name is actually an alias rather than some other conflict.
+            // (Should never happen.)
+            if !existing_nt.has_alias(&name) {
+                return Err(Exception::new(
+                    [
+                        b"Problem merging named transform: '".as_slice(),
+                        &name,
+                        b"'.",
+                    ]
+                    .concat(),
+                ));
+            }
+
+            // Remove the alias from that existing named transform.
+            //    Note that this conflict was detected and allowed in namedTransformMayBeMerged
+            //    based on the merge strategy, so the decision has already been made to remove
+            //    this alias from a named transform in the base config.
+
+            let mut e_existing_nt = existing_nt.clone();
+            e_existing_nt.remove_alias(&name);
+            // Edit the named transform in the copy of the merged config.
+            merge_config.add_named_transform(&e_existing_nt)?;
+
+            // The notification is handled in namedTransformMayBeMerged to avoid having to
+            // determine again whether the conflict is with the name or alias of originalNT.
+        }
+
+        let mut strategy = params.named_transforms();
+        if from_base {
+            strategy = MergeStrategies::PreferBase;
+        }
+
+        //
+        // Handle conflicts of the eNT aliases with other color spaces, named transforms, and
+        // etc.
+        //
+
+        // First initialize the list of names, since eNT is being edited within the loop.
+        let alias_names: Vec<Vec<u8>> = (0..e_nt.num_aliases())
+            .map(|i| e_nt.alias(i).to_vec())
+            .collect();
+
+        for alias_name in &alias_names {
+            // Conflicts with color spaces or roles.  (Always remove this alias.)
+
+            // (One stream for the whole alias: a message of a named transform conflict
+            // follows the one of a color space conflict, as upstream's `os`.)
+            let mut os: Vec<u8> = Vec::new();
+
+            let source: &[u8] = if from_base { b"Base" } else { b"Input" };
+
+            if let Some(conflicting_cs) = merge_config.color_space(alias_name) {
+                if strcasecmp(conflicting_cs.name(), alias_name).is_eq() {
+                    // The alias conflicts with the name of the conflicting color space.
+
+                    os.extend_from_slice(
+                        &[
+                            b"Merged ".as_slice(),
+                            source,
+                            b" named transform '",
+                            &name,
+                            b"'",
+                            b" has an alias '",
+                            alias_name,
+                            b"' that conflicts with color space '",
+                            conflicting_cs.name(),
+                            b"'.",
+                        ]
+                        .concat(),
+                    );
+
+                    // Remove the alias from the named transform.
+                    e_nt.remove_alias(alias_name);
+                } else if conflicting_cs.has_alias(alias_name) {
+                    // The alias conflicts with an alias of the conflicting color space.
+
+                    os.extend_from_slice(
+                        &[
+                            b"Merged ".as_slice(),
+                            source,
+                            b" named transform '",
+                            &name,
+                            b"'",
+                            b" has a conflict with alias '",
+                            alias_name,
+                            b"' in color space '",
+                            conflicting_cs.name(),
+                            b"'.",
+                        ]
+                        .concat(),
+                    );
+
+                    // Remove the alias from the named transform.
+                    e_nt.remove_alias(alias_name);
+                } else if merge_config.has_role(alias_name) {
+                    os.extend_from_slice(
+                        &[
+                            b"Merged ".as_slice(),
+                            source,
+                            b" named transform '",
+                            &name,
+                            b"'",
+                            b" has an alias '",
+                            alias_name,
+                            b"' that conflicts with a role.",
+                        ]
+                        .concat(),
+                    );
+
+                    // Remove the alias from the named transform.
+                    e_nt.remove_alias(alias_name);
+                } else {
+                    // (Should never happen.)
+                    return Err(Exception::new(
+                        [
+                            b"Problem merging named transform: '".as_slice(),
+                            &name,
+                            b"' due to its aliases.",
+                        ]
+                        .concat(),
+                    ));
+                }
+
+                // Throw if requested, otherwise log a warning.
+                notify(&os, params.is_error_on_conflict())?;
+            }
+
+            // Conflicts of the alias with other named transforms.
+
+            if let Some(conflicting_nt) = merge_config.named_transform(alias_name) {
+                let conflicting_nt = conflicting_nt.clone();
+                if strcasecmp(conflicting_nt.name(), alias_name).is_eq() {
+                    // The alias conflicts with the name of an existing named transform.
+
+                    os.extend_from_slice(
+                        &[
+                            b"Merged ".as_slice(),
+                            source,
+                            b" named transform '",
+                            &name,
+                            b"'",
+                            b" has an alias '",
+                            alias_name,
+                            b"' that conflicts with named transform '",
+                            conflicting_nt.name(),
+                            b"'.",
+                        ]
+                        .concat(),
+                    );
+
+                    if prefers_input(strategy) {
+                        // Remove that base named transform.
+                        merge_config.remove_named_transform(conflicting_nt.name());
+                    } else {
+                        // Remove the alias from the input named transform.
+                        e_nt.remove_alias(alias_name);
+                    }
+                } else if conflicting_nt.has_alias(alias_name) {
+                    // The alias conflicts with an alias of the conflicting named transform.
+
+                    os.extend_from_slice(
+                        &[
+                            b"Merged ".as_slice(),
+                            source,
+                            b" named transform '",
+                            &name,
+                            b"'",
+                            b" has a conflict with alias '",
+                            alias_name,
+                            b"' in named transform '",
+                            conflicting_nt.name(),
+                            b"'.",
+                        ]
+                        .concat(),
+                    );
+
+                    if prefers_input(strategy) {
+                        // Remove the alias from that base named transform.
+                        let mut e_conflicting_nt = conflicting_nt.clone();
+                        e_conflicting_nt.remove_alias(alias_name);
+
+                        // Replace the colorspace in the copy of the merged config.
+                        merge_config.add_named_transform(&e_conflicting_nt)?;
+                    } else {
+                        // Remove the alias from the input named transform.
+                        e_nt.remove_alias(alias_name);
+                    }
+                } else {
+                    // (Should never happen.)
+                    return Err(Exception::new(
+                        [
+                            b"Problem merging named transform: '".as_slice(),
+                            &name,
+                            b"' due to its aliases.",
+                        ]
+                        .concat(),
+                    ));
+                }
+
+                notify(&os, params.is_error_on_conflict())?;
+            }
+        }
+
+        // Add the named transform. This will throw if a problem is found.
+        // (But all name conflicts should have been handled already.)
+        merge_config.add_named_transform(e_nt)?;
+
+        // Keep a record that this input NT was added to allow reordering later.
+        if !from_base {
+            added_input_named_transforms.push(name);
+        }
+        Ok(())
+    }
+
+    /// Merges the named transform `name` of `cfg` (the base's with `from_base`) into
+    /// `merge_config`, when it may be merged.
+    ///
+    /// The body of the loops of `NamedTransformsMerger::addNamedTransforms`, `handleInputOnly`,
+    /// `handleBaseOnly` and `handleRemove` (SectionMerger.cpp:3470-3728 @ v2.5.2).
+    fn merge_from(
+        params: &ConfigMergingParameters,
+        merge_config: &mut Config,
+        cfg: &Config,
+        name: &[u8],
+        from_base: bool,
+        added_input_named_transforms: &mut Vec<Vec<u8>>,
+    ) -> Result<()> {
+        let Some(nt) = cfg.named_transform(name) else {
+            return Ok(());
+        };
+
+        let mut e_nt = nt.clone();
+
+        if Self::named_transform_may_be_merged(params, merge_config, &e_nt, from_base)? {
+            // NB: This may make changes to existing color spaces in mergeConfig
+            // to resolve name conflicts.
+            Self::merge_named_transform(
+                params,
+                merge_config,
+                &mut e_nt,
+                from_base,
+                added_input_named_transforms,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The named transforms of both configs (the base's first, then the input's), merged into a
+    /// copy of the merged config, then written in order (the input's first with the
+    /// input-first option) with their family prefixes; the inactive color spaces cleaned up.
+    ///
+    /// Port of `NamedTransformsMerger::addNamedTransforms` (SectionMerger.cpp:3470-3624 @
+    /// v2.5.2).
+    fn add_named_transforms(&mut self) -> Result<()> {
+        // Delete all the NamedTransforms, color spaces take precedence, so don't want them
+        // interfering with merges by causing name conflicts.
+
+        // NB: This is only intended to be called for the prefer_input and prefer_base
+        // strategies.
+
+        // Need to add even the base to ensure there are not conflicts with the merged color
+        // spaces.
+
+        self.0.merged_config.clear_named_transforms();
+
+        // Make a temp copy to merge the input color spaces into (will reorder them later).
+        let mut merge_config = self.0.merged_config.clone();
+
+        let mut added_input_named_transforms: Vec<Vec<u8>> = Vec::new();
+
+        // Loop over all active and inactive color spaces of all reference types in the input
+        // config. Merge them into the temp config (which already contains the base color
+        // spaces).
+
+        // Merge from Base config.
+
+        let base = self.0.base_config;
+        for i in 0..base.num_named_transforms_with(NamedTransformVisibility::All) {
+            let name = base.named_transform_name_by_index_with(NamedTransformVisibility::All, i);
+
+            let from_base = true;
+            Self::merge_from(
+                self.0.params,
+                &mut merge_config,
+                base,
+                name,
+                from_base,
+                &mut added_input_named_transforms,
+            )?;
+        }
+
+        // Merge from Input config.
+
+        let input = self.0.input_config;
+        for i in 0..input.num_named_transforms_with(NamedTransformVisibility::All) {
+            let name = input.named_transform_name_by_index_with(NamedTransformVisibility::All, i);
+
+            // Doing this against the mergedConfig rather than the base config so that the most
+            // recent state of any aliases that get added or color spaces that are removed are
+            // considered by the duplicate consolidation process.
+
+            // TODO: Handle duplicate named transforms.
+
+            let from_base = false;
+            Self::merge_from(
+                self.0.params,
+                &mut merge_config,
+                input,
+                name,
+                from_base,
+                &mut added_input_named_transforms,
+            )?;
+        }
+
+        self.0.merged_config.clear_named_transforms();
+
+        // Add the named transforms to the real merged config.
+
+        if self.0.params.is_input_first() {
+            // Add color spaces from the input config.
+            for name in &added_input_named_transforms {
+                if let Some(input_nt) = merge_config.named_transform(name) {
+                    let mut e_input_nt = input_nt.clone();
+
+                    // Add family prefix.
+                    let from_base = false;
+                    let mut family = e_input_nt.family().to_vec();
+                    self.update_family(&mut family, from_base);
+                    e_input_nt.set_family(&family);
+
+                    self.0.merged_config.add_named_transform(&e_input_nt)?;
+
+                    merge_config.remove_named_transform(name);
+                }
+            }
+
+            // Add color spaces from the base config.
+            for i in 0..merge_config.num_named_transforms_with(NamedTransformVisibility::All) {
+                // Note that during the merge process, some of the color spaces from the base
+                // config may be replaced if their aliases are edited. This should not change
+                // their order in the config, but may want to account for this, if that ever
+                // changes and they get moved to the end.
+                let name = merge_config
+                    .named_transform_name_by_index_with(NamedTransformVisibility::All, i);
+
+                if let Some(base_nt) = merge_config.named_transform(name) {
+                    let mut e_base_nt = base_nt.clone();
+
+                    // Add family prefix.
+                    let from_base = true;
+                    let mut family = e_base_nt.family().to_vec();
+                    self.update_family(&mut family, from_base);
+                    e_base_nt.set_family(&family);
+
+                    self.0.merged_config.add_named_transform(&e_base_nt)?;
+                }
+            }
+        } else {
+            // The color spaces should already be in the correct order.
+            // Copy them into the real merged config and add family prefix.
+            for i in 0..merge_config.num_named_transforms_with(NamedTransformVisibility::All) {
+                let name = merge_config
+                    .named_transform_name_by_index_with(NamedTransformVisibility::All, i);
+
+                if let Some(nt) = merge_config.named_transform(name) {
+                    let mut e_nt = nt.clone();
+
+                    // Add family prefix.
+                    let from_base = !added_input_named_transforms.iter().any(|n| n == name);
+                    let mut family = e_nt.family().to_vec();
+                    self.update_family(&mut family, from_base);
+                    e_nt.set_family(&family);
+
+                    self.0.merged_config.add_named_transform(&e_nt)?;
+                }
+            }
+        }
+
+        // Ensure the inactive_colorspaces doesn't contain anything that was removed.
+        // TODO: Should move this to a higher level?
+        clean_up_inactive_list(self.0.merged_config);
+
+        // TODO: What if the environment contains a color space that was removed?
+        Ok(())
+    }
+
+    /// The named transforms of `cfg` (the base's with `from_base`), each when `keep` holds for
+    /// its name, merged into the merged config itself after removing its named transforms; the
+    /// inactive color spaces cleaned up.
+    ///
+    /// The body of `NamedTransformsMerger::handleInputOnly`, `handleBaseOnly` and
+    /// `handleRemove` (SectionMerger.cpp:3636-3728 @ v2.5.2).
+    fn merge_into_merged(&mut self, from_base: bool, keep: impl Fn(&[u8]) -> bool) -> Result<()> {
+        let m = &mut self.0;
+        m.merged_config.clear_named_transforms();
+
+        let cfg = if from_base {
+            m.base_config
+        } else {
+            m.input_config
+        };
+        for i in 0..cfg.num_named_transforms_with(NamedTransformVisibility::All) {
+            let name = cfg.named_transform_name_by_index_with(NamedTransformVisibility::All, i);
+            if keep(name) {
+                let mut added_input_named_transforms = Vec::new();
+                Self::merge_from(
+                    m.params,
+                    m.merged_config,
+                    cfg,
+                    name,
+                    from_base,
+                    &mut added_input_named_transforms,
+                )?;
+            }
+        }
+
+        // Ensure the inactive_colorspaces doesn't contain anything that was removed.
+        clean_up_inactive_list(m.merged_config);
+        Ok(())
+    }
+}
+
+impl<'o, 'a> Section<'o, 'a> for NamedTransformsMerger<'o, 'a> {
+    fn state(&self) -> &SectionMerger<'o, 'a> {
+        &self.0
+    }
+
+    /// Port of `NamedTransformsMerger::getName` (SectionMerger.h:440 @ v2.5.2).
+    fn name(&self) -> &'static str {
+        "Named Transforms"
+    }
+
+    /// Port of `NamedTransformsMerger::handlePreferInput` (SectionMerger.cpp:3626-3629 @
+    /// v2.5.2).
+    fn handle_prefer_input(&mut self) -> Result<()> {
+        self.add_named_transforms()
+    }
+
+    /// Port of `NamedTransformsMerger::handlePreferBase` (SectionMerger.cpp:3631-3634 @
+    /// v2.5.2).
+    fn handle_prefer_base(&mut self) -> Result<()> {
+        self.add_named_transforms()
+    }
+
+    /// The input's named transforms that may be merged.
+    ///
+    /// Port of `NamedTransformsMerger::handleInputOnly` (SectionMerger.cpp:3636-3665 @ v2.5.2).
+    fn handle_input_only(&mut self) -> Result<()> {
+        // Add the NamedTransforms from the input config.
+        self.merge_into_merged(false, |_| true)
+    }
+
+    /// The base's named transforms that may be merged.
+    ///
+    /// Port of `NamedTransformsMerger::handleBaseOnly` (SectionMerger.cpp:3667-3696 @ v2.5.2).
+    fn handle_base_only(&mut self) -> Result<()> {
+        // Add the NamedTransforms from the base config.
+        self.merge_into_merged(true, |_| true)
+    }
+
+    /// The base's named transforms that the input doesn't have (by name or alias).
+    ///
+    /// Port of `NamedTransformsMerger::handleRemove` (SectionMerger.cpp:3698-3728 @ v2.5.2).
+    fn handle_remove(&mut self) -> Result<()> {
+        let input = self.0.input_config;
+        // Add the NamedTransforms from the base config if they do not exist in the INPUT config.
+        self.merge_into_merged(true, |name| input.named_transform(name).is_none())
     }
 }
 

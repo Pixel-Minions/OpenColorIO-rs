@@ -11,11 +11,10 @@
 //! duplicate search or the reference-space conversion, so that they neither raise nor change
 //! these.
 //!
-//! From 9.2e on, whole merges are compared too (the displays and views from 9.2f, the view
-//! transforms from 9.2g, the color spaces from 9.2h): with the sections not ported yet keeping
-//! the base's (whose `BaseOnly` handlers change nothing that configs without named transforms
-//! or inactive color spaces have), the merged config's `serialize()` byte for byte, the whole
-//! log, or the exception.
+//! From 9.2e on, whole merges are compared too, every section run by the port's mergers in
+//! upstream's order (the displays and views from 9.2f, the view transforms from 9.2g, the color
+//! spaces from 9.2h, the named transforms from 9.2i): the merged config's `serialize()` byte for
+//! byte, the whole log, or the exception.
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -439,8 +438,9 @@ fn general_and_roles_match_the_wheel() {
 /// (9.2g); color spaces of both and of one, named as a role, an alias or a color space of the
 /// other config, with aliases that are one, of either reference space type, families with
 /// other separators, environment variables, search paths that differ in case or contain one
-/// another, v1 configs (9.2h). No named transforms or inactive color spaces, which the sections
-/// not ported yet would change.
+/// another, v1 configs (9.2h); named transforms of both and of one, named as a role, a color
+/// space, an alias or another named transform, with aliases that are one, and inactive lists
+/// with aliases, named transforms, spaces and names that don't exist (9.2i).
 const WHOLE_PAIRS: &[Pair] = &[
     Pair {
         label: "rules and looks",
@@ -1142,6 +1142,124 @@ colorspaces:
     to_reference: !<LogTransform> {base: 2, direction: inverse}
 "#,
     },
+    Pair {
+        label: "named transforms",
+        base: r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+  rendering: lin
+  texture_paint: log
+
+inactive_colorspaces: [log, nt_base, lin_alias, missing, nt_shared]
+
+named_transforms:
+  - !<NamedTransform>
+    name: nt_base
+    aliases: [ntb, shared_nt_alias]
+    family: NT/Base
+    transform: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}
+  - !<NamedTransform>
+    name: nt_shared
+    aliases: [nts]
+    transform: !<MatrixTransform> {offset: [0.2, 0, 0, 0]}
+  - !<NamedTransform>
+    name: nt_alias_target
+    aliases: [nt_in_name]
+    inverse_transform: !<MatrixTransform> {offset: [0.3, 0, 0, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: lin
+    aliases: [lin_alias]
+  - !<ColorSpace>
+    name: log
+    to_scene_reference: !<LogTransform> {base: 2, direction: inverse}
+"#,
+        input: r#"ocio_profile_version: 2.1
+
+roles:
+  default: raw
+
+inactive_colorspaces: [nt_input, lin, nt_shared, ghost]
+
+named_transforms:
+  - !<NamedTransform>
+    name: NT_SHARED
+    aliases: [nts, ntb]
+    family: NT/Input
+    transform: !<MatrixTransform> {offset: [0.4, 0, 0, 0]}
+  - !<NamedTransform>
+    name: nt_input
+    aliases: [lin, nt_base, texture_paint, input_only_alias]
+    transform: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}
+  - !<NamedTransform>
+    name: nt_in_name
+    transform: !<MatrixTransform> {offset: [0.6, 0, 0, 0]}
+  - !<NamedTransform>
+    name: log
+    transform: !<MatrixTransform> {offset: [0.7, 0, 0, 0]}
+  - !<NamedTransform>
+    name: lin_alias
+    transform: !<MatrixTransform> {offset: [0.8, 0, 0, 0]}
+  - !<NamedTransform>
+    name: Rendering
+    transform: !<MatrixTransform> {offset: [0.9, 0, 0, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: Input Space
+    aliases: [shared_nt_alias]
+"#,
+    },
+    Pair {
+        label: "inactive lists",
+        base: r#"ocio_profile_version: 2
+
+roles:
+  default: a
+
+inactive_colorspaces: [b, " c ", A_ALIAS, nt1]
+
+named_transforms:
+  - !<NamedTransform>
+    name: nt1
+    transform: !<MatrixTransform> {}
+
+colorspaces:
+  - !<ColorSpace>
+    name: a
+    aliases: [a_alias]
+  - !<ColorSpace>
+    name: b
+  - !<ColorSpace>
+    name: c
+"#,
+        input: r#"ocio_profile_version: 2
+
+roles:
+  default: a
+
+inactive_colorspaces: [B, d, nt2, a]
+
+named_transforms:
+  - !<NamedTransform>
+    name: nt2
+    transform: !<MatrixTransform> {}
+
+colorspaces:
+  - !<ColorSpace>
+    name: a
+  - !<ColorSpace>
+    name: d
+"#,
+    },
 ];
 
 /// The index in [`WHOLE_PAIRS`] of the first pair with displays: the displays and views section
@@ -1157,6 +1275,14 @@ const FIRST_VIEW_TRANSFORMS_PAIR: usize = 6;
 /// color spaces section takes every strategy over these, with and without the overrides of the
 /// search path and the environment, and with and without family prefixes.
 const FIRST_COLORSPACES_PAIR: usize = 9;
+
+/// The index in [`WHOLE_PAIRS`] of the first pair with named transforms: the named transforms
+/// section takes every strategy over these, with and without the override of the inactive color
+/// spaces, and with and without family prefixes.
+const FIRST_NAMED_TRANSFORMS_PAIR: usize = 11;
+
+/// The inactive color spaces the override sets, when a case sets it.
+const INACTIVE_OVERRIDE: &str = "d, nt1, ghost, a_alias, nt_base, LOG";
 
 /// The active displays and views the overrides set, when a case sets them.
 const ACTIVE_DISPLAYS_OVERRIDE: &str = "DISP_2, A";
@@ -1184,8 +1310,21 @@ const COLORSPACES_MESSAGES: &[&str] = &[
     "' that conflicts with a role.",
 ];
 
-/// The setters of the sections the whole merges keep the base's: the sections not ported yet.
-const NOT_PORTED_SECTIONS: &[&str] = &["setNamedTransforms"];
+/// Fragments of the messages of the named transforms section (SectionMerger.cpp:3123-3468 @
+/// v2.5.2) that the merges of the named transform pairs must log.
+const NAMED_TRANSFORMS_MESSAGES: &[&str] = &[
+    "' was not merged as it's identical to a role name.",
+    "' was not merged as there's a color space with that name.",
+    "' was not merged as there's a color space alias with that name.",
+    "' will replace a named transform in the base config.",
+    "' was not merged as it's already present in the base config.",
+    "' has a conflict with an alias in named transform '",
+    "' was not merged as it conflicts with an alias in named transform '",
+    "' that conflicts with color space '",
+    "' that conflicts with a role.",
+    "' that conflicts with named transform '",
+    "' in named transform '",
+];
 
 /// One whole merge: a pair of [`WHOLE_PAIRS`], the default strategy (which the general and
 /// roles sections take), the file rules', the displays and views', the view transforms', the
@@ -1207,6 +1346,8 @@ struct WholeCase {
     active_overrides: bool,
     adjust_reference: bool,
     colorspaces_overrides: bool,
+    named_transforms: usize,
+    inactive_override: bool,
     family_prefixes: bool,
 }
 
@@ -1252,7 +1393,7 @@ fn whole_cases() -> Vec<WholeCase> {
                         });
                     }
                 }
-            } else {
+            } else if pair < FIRST_NAMED_TRANSFORMS_PAIR {
                 for colorspaces in 0..STRATEGIES.len() {
                     for (colorspaces_overrides, family_prefixes) in
                         [(false, false), (true, false), (false, true), (true, true)]
@@ -1260,6 +1401,19 @@ fn whole_cases() -> Vec<WholeCase> {
                         sections.push(WholeCase {
                             colorspaces,
                             colorspaces_overrides,
+                            family_prefixes,
+                            ..WholeCase::default()
+                        });
+                    }
+                }
+            } else {
+                for named_transforms in 0..STRATEGIES.len() {
+                    for (inactive_override, family_prefixes) in
+                        [(false, false), (true, false), (false, true), (true, true)]
+                    {
+                        sections.push(WholeCase {
+                            named_transforms,
+                            inactive_override,
                             family_prefixes,
                             ..WholeCase::default()
                         });
@@ -1322,9 +1476,10 @@ fn whole_calls(case: &WholeCase) -> Vec<Value> {
         );
         calls.push(json!({"call": "setBaseFamilyPrefix", "on": "p", "args": [BASE_FAMILY_PREFIX]}));
     }
-    for setter in NOT_PORTED_SECTIONS {
-        calls
-            .push(json!({"call": setter, "on": "p", "args": [strategy_arg("STRATEGY_BASE_ONLY")]}));
+    if case.inactive_override {
+        calls.push(
+            json!({"call": "setInactiveColorSpaces", "on": "p", "args": [INACTIVE_OVERRIDE]}),
+        );
     }
     for (setter, index) in [
         ("setDefaultStrategy", case.default),
@@ -1333,6 +1488,7 @@ fn whole_calls(case: &WholeCase) -> Vec<Value> {
         ("setViewTransforms", case.view_transforms),
         ("setLooks", case.looks),
         ("setColorspaces", case.colorspaces),
+        ("setNamedTransforms", case.named_transforms),
     ] {
         if let Some(name) = STRATEGIES[index].0 {
             calls.push(json!({"call": setter, "on": "p", "args": [strategy_arg(name)]}));
@@ -1383,11 +1539,10 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
         params.set_input_family_prefix(INPUT_FAMILY_PREFIX);
         params.set_base_family_prefix(BASE_FAMILY_PREFIX);
     }
-    let not_ported: [StrategySetter; 1] = [ConfigMergingParameters::set_named_transforms];
-    for setter in not_ported {
-        setter(&params, MergeStrategies::BaseOnly);
+    if case.inactive_override {
+        params.set_inactive_color_spaces(INACTIVE_OVERRIDE);
     }
-    let ported: [(StrategySetter, usize); 6] = [
+    let ported: [(StrategySetter, usize); 7] = [
         (ConfigMergingParameters::set_default_strategy, case.default),
         (ConfigMergingParameters::set_file_rules, case.file_rules),
         (
@@ -1400,6 +1555,10 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
         ),
         (ConfigMergingParameters::set_looks, case.looks),
         (ConfigMergingParameters::set_colorspaces, case.colorspaces),
+        (
+            ConfigMergingParameters::set_named_transforms,
+            case.named_transforms,
+        ),
     ];
     for (setter, index) in ported {
         if STRATEGIES[index].0.is_some() {
@@ -1420,7 +1579,8 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
         DisplayViewMerger::new(&mut options).and_then(|mut m| m.merge())?;
         ViewTransformsMerger::new(&mut options).and_then(|mut m| m.merge())?;
         LooksMerger::new(&mut options).and_then(|mut m| m.merge())?;
-        ColorspacesMerger::new(&mut options).and_then(|mut m| m.merge())
+        ColorspacesMerger::new(&mut options).and_then(|mut m| m.merge())?;
+        NamedTransformsMerger::new(&mut options).and_then(|mut m| m.merge())
     });
     (
         result.and_then(|()| merged.serialize()),
@@ -1429,10 +1589,11 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
     )
 }
 
-/// Whole merges whose other sections keep the base's, as the wheel's `MergeConfigs` makes
-/// them: the merged config's `serialize()` byte for byte, the log, or the exception, over the
-/// strategies of the general, roles, file rules, displays and views and looks sections, both
-/// options, and the overrides of the active lists.
+/// Whole merges, as the wheel's `MergeConfigs` makes them: the merged config's `serialize()`
+/// byte for byte, the log, or the exception, over the strategies of every section, the
+/// input-first and error-on-conflict options, the adjustment of the reference space, the
+/// overrides (active lists, search path, environment, inactive color spaces) and the family
+/// prefixes.
 #[test]
 fn whole_merges_match_the_wheel() {
     let cases = whole_cases();
@@ -1457,6 +1618,8 @@ fn whole_merges_match_the_wheel() {
     let mut view_transform_texts = std::collections::BTreeSet::new();
     let mut colorspace_texts = std::collections::BTreeSet::new();
     let mut colorspaces_messages = [0; COLORSPACES_MESSAGES.len()];
+    let mut named_transform_texts = std::collections::BTreeSet::new();
+    let mut named_transforms_messages = [0; NAMED_TRANSFORMS_MESSAGES.len()];
     let mut adjusted_raised = 0;
     let mut adjusted_texts = std::collections::BTreeSet::new();
     let mut mismatches = Vec::new();
@@ -1470,13 +1633,23 @@ fn whole_merges_match_the_wheel() {
         let merge = &calls[calls.len() - 2];
         let serialize = &calls[calls.len() - 1];
         let wheel_log = log(&merge["log"]).concat();
-        if case.pair >= FIRST_COLORSPACES_PAIR {
+        if (FIRST_COLORSPACES_PAIR..FIRST_NAMED_TRANSFORMS_PAIR).contains(&case.pair) {
             for (i, fragment) in COLORSPACES_MESSAGES.iter().enumerate() {
                 if wheel_log
                     .windows(fragment.len())
                     .any(|w| w == fragment.as_bytes())
                 {
                     colorspaces_messages[i] += 1;
+                }
+            }
+        }
+        if case.pair >= FIRST_NAMED_TRANSFORMS_PAIR {
+            for (i, fragment) in NAMED_TRANSFORMS_MESSAGES.iter().enumerate() {
+                if wheel_log
+                    .windows(fragment.len())
+                    .any(|w| w == fragment.as_bytes())
+                {
+                    named_transforms_messages[i] += 1;
                 }
             }
         }
@@ -1521,7 +1694,9 @@ fn whole_merges_match_the_wheel() {
                         String::from_utf8_lossy(&text)
                     ));
                 }
-                if case.pair >= FIRST_COLORSPACES_PAIR {
+                if case.pair >= FIRST_NAMED_TRANSFORMS_PAIR {
+                    named_transform_texts.insert(text.clone());
+                } else if case.pair >= FIRST_COLORSPACES_PAIR {
                     colorspace_texts.insert(text.clone());
                 } else if case.pair >= FIRST_VIEW_TRANSFORMS_PAIR {
                     // (The base configs of these pairs have no group transforms: the input's
@@ -1586,6 +1761,18 @@ fn whole_merges_match_the_wheel() {
     );
     // Each kind of color space conflict is logged.
     for (fragment, count) in COLORSPACES_MESSAGES.iter().zip(colorspaces_messages) {
+        assert!(count >= 10, "{count} merges logged \"{fragment}\"");
+    }
+    assert!(
+        named_transform_texts.len() >= 60,
+        "{} different merged configs with named transforms",
+        named_transform_texts.len()
+    );
+    // Each kind of named transform conflict is logged.
+    for (fragment, count) in NAMED_TRANSFORMS_MESSAGES
+        .iter()
+        .zip(named_transforms_messages)
+    {
         assert!(count >= 10, "{count} merges logged \"{fragment}\"");
     }
 }
