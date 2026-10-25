@@ -450,6 +450,23 @@ fn a_module_whose_top_level_runs_code_is_shared() {
         "class Base:\n    def __init_subclass__(cls, **kw):\n        PLUGINS.append(cls)\n\n\n\
          PLUGINS = []\n",
     );
+    // Modules that hold one-shot iterators, data, and an object of a module outside the
+    // package.
+    const IDS: (&str, &str) = (
+        "ids.py",
+        "import itertools\n\nCOUNTER = itertools.count()\n",
+    );
+    const GEN: (&str, &str) = ("gen.py", "VALUES = (v for v in range(100))\n");
+    const PAIRS: (&str, &str) = (
+        "pairs.py",
+        "PAIRS = zip([\"a\", \"b\", \"c\"], [1, 2, 3])\n",
+    );
+    const ROWS: (&str, &str) = (
+        "rows.py",
+        "ROWS = enumerate([\"a\", \"b\", \"c\", \"d\"])\n",
+    );
+    const STORE: (&str, &str) = ("store.py", "QUEUE = [1, 2]\n");
+    const ENVS: (&str, &str) = ("envs.py", "import os\n\nE = os.environ\n");
     let shared: &[(&str, Files)] = &[
         ("import os\n\nos.environ[\"G\"] = \"1\"\n", &[]),
         ("from . import spec\n\nspec.version = lambda: 2\n", &[]),
@@ -636,6 +653,96 @@ fn a_module_whose_top_level_runs_code_is_shared() {
              class C(object):\n    pass\n",
             &[],
         ),
+        // A one-shot iterator that another module holds, or that this one holds, consumed: by a
+        // call, a comprehension, through a name, unpacked, in a default, an annotation or a
+        // class's body, or through a display that holds it (verifier 3).
+        (
+            "from . import ids\n\nKINDS = dict(zip([\"a\"], ids.COUNTER))\n",
+            &[IDS],
+        ),
+        (
+            "from . import ids\n\nFIRST = [i for i, _ in zip(ids.COUNTER, range(1))]\n",
+            &[IDS],
+        ),
+        (
+            "from . import gen\n\nTOP = max(zip(range(1), gen.VALUES))\n",
+            &[GEN],
+        ),
+        (
+            "from .ids import COUNTER\n\nC = COUNTER\nUSED = list(zip(range(1), C))\n",
+            &[IDS],
+        ),
+        (
+            "from . import pairs\n\nHEAD = list(pairs.PAIRS)\n",
+            &[PAIRS],
+        ),
+        (
+            "from . import pairs\n\nHEAD = [p for p, _ in zip(pairs.PAIRS, range(1))]\n",
+            &[PAIRS],
+        ),
+        ("from . import rows\n\nFIRST = sorted(rows.ROWS)\n", &[ROWS]),
+        ("from .pairs import PAIRS\n\nA, B, C = PAIRS\n", &[PAIRS]),
+        ("R = reversed([1, 2])\nX = list(R)\n", &[]),
+        ("R = reversed([1, 2])\nA, B = R\n", &[]),
+        ("G = (x for x in [1, 2])\nN = sum(G)\n", &[]),
+        ("G = (x for x in [1, 2])\nN = {*G}\n", &[]),
+        (
+            "from . import ids\n\n\ndef f(x=list(zip(range(1), ids.COUNTER))):\n    return x\n",
+            &[IDS],
+        ),
+        (
+            "from . import ids\n\nX: sorted(zip(range(1), ids.COUNTER)) = 1\n",
+            &[IDS],
+        ),
+        (
+            "from . import ids\n\n\nclass C:\n    X = list(zip(range(1), ids.COUNTER))\n",
+            &[IDS],
+        ),
+        (
+            "from . import ids\n\nT = (ids.COUNTER, 1)\nX = list(T)\n",
+            &[IDS],
+        ),
+        ("import sys\n\nX = list(zip(range(0), sys.stdin))\n", &[]),
+        (
+            "from sys import stdin\n\nX = list(zip(range(0), stdin))\n",
+            &[],
+        ),
+        (
+            "import sys\n\nX = list(zip(range(0), sys.stdin.buffer))\n",
+            &[],
+        ),
+        // A display that holds an iterator holds it, made where it is used or not.
+        ("T = [reversed([1, 2])]\nX = list(T[0])\n", &[]),
+        ("X = list([reversed([1, 2]) for _ in range(1)][0])\n", &[]),
+        // A method of the package's data, or a function outside the package, that a call calls.
+        (
+            "from . import store\n\nY = sorted([0], key=store.QUEUE.pop)\n",
+            &[STORE],
+        ),
+        (
+            "import os\n\nY = sorted([\"a\"], key=os.path.basename)\n",
+            &[],
+        ),
+        (
+            "import functools\n\nfrom . import store\n\n\n\
+             @functools.lru_cache(store.QUEUE.append)\ndef f():\n    return 1\n",
+            &[STORE],
+        ),
+        (
+            "import functools\n\nfrom . import store\n\n\n\
+             @functools.lru_cache(maxsize=store.QUEUE.append)\ndef f():\n    return 1\n",
+            &[STORE],
+        ),
+        // An object of a module outside the package under another name: its methods aren't
+        // builtin data's.
+        ("import os\n\nE = os.environ\nX = E.copy()\n", &[]),
+        ("from os import environ\n\nX = environ.copy()\n", &[]),
+        (
+            "import string\n\nS = string\nX = S.ascii_letters.count(\"a\")\n",
+            &[],
+        ),
+        ("from . import envs\n\nX = envs.E.copy()\n", &[ENVS]),
+        ("from .envs import E\n\nX = E.get(\"A\")\n", &[ENVS]),
     ];
     let private: &[(&str, Files)] = &[
         ("import re\n\nPATTERN = re.compile(\"x\")\n", &[]),
@@ -706,6 +813,34 @@ fn a_module_whose_top_level_runs_code_is_shared() {
         (
             "X = [1, 2]\nY = sorted(X, reverse=True)\nZ = \", \".join(str(x) for x in X)\n\
              W = {**{\"a\": 1}, \"b\": [*X]}\n",
+            &[],
+        ),
+        // Iterators held, as the oracle's `text._file_counter = itertools.count()`; and made of
+        // data where they are consumed, as `config_api.MODULE_FUNCTIONS` (verifier 3).
+        ("import itertools\n\nCOUNTER = itertools.count()\n", &[]),
+        (
+            "P = zip([1], [2])\nG = (x for x in [1])\nT = (P, G, reversed([1]))\nD = {\"g\": G}\n\n\n\
+             def f(x=enumerate([1]), y=P):\n    return x\n",
+            &[],
+        ),
+        (
+            "from . import ids\n\nC = ids.COUNTER\nT = [ids.COUNTER]\n",
+            &[IDS],
+        ),
+        (
+            "import itertools\n\nKEYS = [\"a\", \"b\"]\nTABLE = dict(zip(KEYS, itertools.count()))\n\
+             NAMES = {*(f\"{k}!\" for k in KEYS)}\nA, B = zip(KEYS, KEYS)\nE = list(enumerate(KEYS))\n\
+             F, G = (reversed(KEYS), 1)\n",
+            &[],
+        ),
+        // Streams, objects of modules outside the package and methods, held.
+        (
+            "import os\nimport sys\n\nOUT = sys.stdout\nE = os.environ\nD = {\"env\": E}\n\
+             L = [1]\nPOP = L.pop\n",
+            &[],
+        ),
+        (
+            "import struct\n\nS = struct.Struct(\"<f\")\nSIZES = {\"f\": S.size}\n",
             &[],
         ),
     ];
@@ -786,6 +921,25 @@ fn what_runs_at_import_must_be_resolved() {
             )],
             true,
         ),
+        // A class's decorator too, one the analysis can't resolve or one that runs a command
+        // (verifier 3, M15b).
+        (
+            "from . import h\n\n\n@h.deco\nclass C:\n    pass\n",
+            &[(
+                "h.py",
+                "def deco(cls):\n    __import__(\"json\")\n    return cls\n",
+            )],
+            true,
+        ),
+        (
+            "from . import h\n\n\n@h.run\nclass C:\n    pass\n",
+            &[(
+                "h.py",
+                "from .commands import COMMANDS\n\n\ndef run(cls):\n    \
+                 COMMANDS[\"d_cmd\"]({}, [])\n    return cls\n",
+            )],
+            true,
+        ),
         // A command run when every process starts, directly or through a function.
         (
             "from .commands import COMMANDS\n\nX = COMMANDS[\"d_cmd\"]({}, [])\n",
@@ -799,6 +953,13 @@ fn what_runs_at_import_must_be_resolved() {
                 "from .commands import COMMANDS\n\n\ndef run():\n    \
                  return COMMANDS[\"d_cmd\"]({}, [])\n",
             )],
+            true,
+        ),
+        // The method of an object of a module outside the package, through a name another
+        // module imports it as: the statement runs code, and what it uses isn't resolved.
+        (
+            "from . import envs\n\nX = envs.E.copy()\n",
+            &[("envs.py", "from os import environ as E\n")],
             true,
         ),
         // The registry changed when every process starts.
@@ -860,6 +1021,7 @@ const UNRESOLVED: &[&str] = &[
     "import os\n\n\ndef f():\n    return os.system(\"x\")\n",
     "def f(o):\n    return o.system(\"x\")\n",
     "def f(o):\n    return o.execv(\"x\", [])\n",
+    "def f(o):\n    return o.popen(\"x\")\n",
     "import os\n\n\ndef f():\n    return os.__dict__[\"x\"]\n",
     "def f(d):\n    return d[\"os\"]\n",
     "import json\n\n\ndef f():\n    return vars(json)[\"system\"]\n",
@@ -869,6 +1031,8 @@ const UNRESOLVED: &[&str] = &[
     "def load(d):\n    return d[\"__import__\"]\n",
     "def f(g):\n    return g(name=\"__globals__\")\n",
     "def f(g):\n    return getattr(g, \"__globals__\")\n",
+    // A module's namespace through `setattr` (no other rule names `__dict__` as a string).
+    "import os\n\n\ndef f(d):\n    setattr(os.environ, \"__dict__\", d)\n",
     "def f():\n    import operator\n    return operator.attrgetter(\"a.__globals__\")\n",
     // Imports that can't be resolved, and two imports of one name.
     "from .a import *\n",
@@ -904,6 +1068,7 @@ const UNRESOLVED: &[&str] = &[
     "def argv(name):\n    return f\"ocio_oracle.{name}\"\n",
     "def argv(name):\n    return \"ocio_oracle.\" + name\n",
     "def f(n):\n    return f\"{n}.py\"\n",
+    "def f(c):\n    return f\"python -m ocio_oracle {c}\"\n",
     "def f(n):\n    return n + \".py\"\n",
     "def f(x):\n    return \"ocio_oracle/d\" + x\n",
     "def f(m):\n    return m.__file__\n",

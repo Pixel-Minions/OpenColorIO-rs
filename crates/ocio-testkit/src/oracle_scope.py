@@ -33,8 +33,9 @@ oracle's key) or a "global" reason (every key covers the module and what it reac
 
 Global: a module's top level may hold only
 - constants (a docstring), ``pass``, and imports of a sibling or of a module of IMPORTABLE;
-- ``def``, whose decorators are the innermost ``@command`` and those of PURE_DECORATORS, and
-  whose defaults and annotations are inert (below);
+- ``def``, whose decorators are the innermost ``@command`` and those of PURE_DECORATORS (called
+  with constants only: ``functools.lru_cache(f)`` decorates ``f`` and calls it), and whose
+  defaults and annotations are inert (below);
 - ``class`` without keywords or decorators, whose bases are builtin types, ``object``, a
   class of a module outside the package, or an earlier class of the module that defines (or
   assigns) none of CLASS_HOOKS; whose body holds constants, ``pass``, ``def`` (decorated as
@@ -43,23 +44,37 @@ Global: a module's top level may hold only
   ``object`` and the builtin exceptions (PLAIN_BASES) is among its ancestors, whose metaclass
   may call what the class defines while it makes the class (``enum.Enum`` makes its members
   by calling the class), its body holds no ``def`` and no class, and assigns only DATA;
-- assignments of inert values to names (``X = ...``, ``X: T = ...``, ``A, B = ...``);
+- assignments of inert values to names (``X = ...``, ``X: T = ...``, ``A, B = ...``, which
+  unpacks DATA or a tuple or list display);
 - ``if __name__ == "__main__":`` without ``else``.
 An inert value runs no code of the package and calls nothing outside an allowlist. It is DATA
-(it runs no code of the package when it is used) or CODE (it is, or holds, a function, a
-class or a lambda of the package). DATA: constants; builtin types and exceptions,
-``__file__`` and ``__name__``; a module outside the package and its attributes; operators,
-comparisons, tests, subscripts, slices and f-strings of DATA; sets, dict keys, comprehensions
-(over names, iterating DATA) and ``*`` items of DATA; the non-mutating methods INERT_METHODS of
-DATA, and the calls PURE_CALLS (builtins) and PURE_EXTERNAL_CALLS, with DATA arguments. CODE:
-a function of the package, an earlier class of the module (as above), a lambda (its body
-isn't evaluated, its defaults are), an attribute of CODE, and a display that holds CODE. A
-name bound once to an inert value, here or in the sibling it is imported from, and
-``<sibling>.<name>`` of one, is of its value's kind. CODE may only be held (by a name, a
-display's item, a dict's value, a default or an annotation): an operator, a hash, an
-iteration, a format, a call it is passed to or a method of it can run the package's code
-(``sorted(x, key=f)``, ``K[0]`` and ``__class_getitem__``, ``{E.A: 1}`` and ``__hash__``).
-Anything else is a global reason.
+(using it runs no code of the package and changes nothing that other code shares), CODE (it
+is, or holds, a function, a class or a lambda of the package) or HELD (it is, or holds, a
+one-shot iterator that other code may share).
+- DATA: constants; builtin types and exceptions, ``__file__`` and ``__name__``; a module
+  outside the package and its attributes but STREAMS, which are OUTSIDE, a kind of DATA, under
+  any name; operators, comparisons, tests, subscripts, slices and f-strings of DATA; sets, dict
+  keys, comprehensions (over names, iterating DATA) and ``*`` items of DATA; the non-mutating
+  methods INERT_METHODS of DATA but OUTSIDE (an object of a module outside the package isn't
+  builtin data: ``os.environ.copy()``, or ``E.copy()`` after ``E = os.environ``); the calls
+  PURE_CALLS (builtins) and PURE_EXTERNAL_CALLS, with DATA arguments and no ``key=`` (a
+  function the call calls: ``sorted(x, key=os.chdir)``, or a method that changes data,
+  ``sorted([0], key=QUEUE.pop)``); and an iterator made where it is used (what ITERATOR_CALLS
+  and ITERATOR_EXTERNAL_CALLS return, ``zip``, ``enumerate``, ``reversed`` and
+  ``itertools.count``, with DATA arguments, and a generator expression), which shares nothing
+  with other code until it is held (``dict(zip(KEYS, VALUES))``).
+- CODE: a function of the package, an earlier class of the module (as above), a lambda (its
+  body isn't evaluated, its defaults are), an attribute of CODE, and a display that holds
+  CODE.
+- HELD: an iterator held (by a name, a display, ...), the STREAMS of ``sys`` and their
+  attributes, and a display that holds HELD.
+A name bound once to an inert value, here or in the sibling it is imported from, and
+``<sibling>.<name>`` of one, is of its value's kind. CODE and HELD may only be held (by a
+name, a display's item, a dict's value, a default or an annotation): an operator, a hash, an
+iteration, an unpacking, a format, a call it is passed to or a method of it can run the
+package's code (``sorted(x, key=f)``, ``K[0]`` and ``__class_getitem__``, ``{E.A: 1}`` and
+``__hash__``), or consume an iterator that other code shares (``dict(zip(KEYS,
+ids.COUNTER))``, ``list(pairs.PAIRS)``). Anything else is a global reason.
 
 Edges:
 - imports of a sibling, at any depth: ``from . import x``, ``from .x import y``, ``import
@@ -155,8 +170,9 @@ doesn't follow it.
 
 What the analysis doesn't follow, by design: values. A module name or a path assembled at run
 time from fragments none of which names the package or a ``.py`` file, or attributes walked by
-names a request gives (``getattr`` of a library object), aren't followed. The request itself
-is part of every key.
+names a request gives (``getattr`` of a library object), aren't followed; nor is the state of
+an object of a module outside the package that its operators, conversions or iteration may
+change, but the process's streams (STREAMS). The request itself is part of every key.
 """
 
 import ast
@@ -247,13 +263,19 @@ SAFE_BUILTINS = frozenset({
 })
 PURE_CALLS = frozenset({
     "type", "frozenset", "set", "tuple", "list", "dict", "range", "len", "sorted", "str",
-    "int", "float", "bytes", "bool", "repr", "chr", "ord", "abs", "min", "max", "sum", "zip",
-    "enumerate", "reversed", "isinstance", "issubclass", "vars",
+    "int", "float", "bytes", "bool", "repr", "chr", "ord", "abs", "min", "max", "sum",
+    "isinstance", "issubclass", "vars",
 })
 PURE_EXTERNAL_CALLS = frozenset({
-    "re.compile", "itertools.count", "struct.Struct", "numpy.dtype", "os.path.join",
-    "os.path.dirname", "os.path.abspath", "os.path.basename",
+    "re.compile", "struct.Struct", "numpy.dtype", "os.path.join", "os.path.dirname",
+    "os.path.abspath", "os.path.basename",
 })
+# The calls that return an iterator, which any use but holding it consumes: the builtins and the
+# functions of modules outside the package.
+ITERATOR_CALLS = frozenset({"zip", "enumerate", "reversed"})
+ITERATOR_EXTERNAL_CALLS = frozenset({"itertools.count"})
+# The objects of modules outside the package that are iterators: the process's streams.
+STREAMS = frozenset({"sys.stdin", "sys.stdout", "sys.stderr"})
 INERT_METHODS = frozenset({
     "items", "keys", "values", "get", "copy", "union", "intersection", "difference",
     "format", "join", "split", "strip", "lower", "upper", "startswith", "endswith", "count",
@@ -1199,10 +1221,23 @@ def targets_of(modules, scope, nodes, skip=frozenset()):
 
 # The kinds of an inert value. DATA runs no code of the package when it is used: builtin data,
 # a module outside the package and its attributes, what PURE_CALLS, PURE_EXTERNAL_CALLS and
-# INERT_METHODS return. CODE is, or may hold, the package's code: a function, a class, a
-# lambda, and what holds one; it may only be held (by a name, a display or a dict's value).
+# INERT_METHODS return. OUTSIDE is DATA that is a module outside the package or one of its
+# attributes, under any name: INERT_METHODS are builtin data's, not its. CODE is, or may hold,
+# the package's code: a function, a class, a lambda, and what holds one. HELD is, or may hold,
+# a one-shot iterator that other code may share. CODE and HELD may only be held (by a name, a
+# display or a dict's value). FRESH is DATA: an iterator made of DATA where it is used, which
+# shares nothing with other code until it is held, and is HELD then.
 DATA = "data"
+OUTSIDE = "outside"
+FRESH = "fresh"
 CODE = "code"
+HELD = "held"
+PLAIN = (DATA, OUTSIDE, FRESH)
+
+
+def outside(path):
+    """The kind of the module outside the package, or the attribute of one, `path`."""
+    return HELD if any(path == s or path.startswith(s + ".") for s in STREAMS) else OUTSIDE
 
 
 def class_hooks(node):
@@ -1238,7 +1273,7 @@ class Purity:
             return DATA
         binding = self.scope.binding_at(name, None)
         if binding[0] in ("external", "forbidden"):
-            return DATA
+            return outside(binding[1])
         if binding[0] == "name":
             return self.definition(binding[1], binding[2])
         if binding[0] != "":
@@ -1267,11 +1302,12 @@ class Purity:
                         and isinstance(node.targets[0], ast.Name):
                     purity = self if module is self.module \
                         else Purity(self.modules, module, self.resolving)
-                    return purity.kind(node.value, set())
+                    kind = purity.kind(node.value, set())
+                    return HELD if kind == FRESH else kind
                 return None
             binding = module.scope.binding_at(name, None)
             if binding[0] in ("external", "forbidden"):
-                return DATA
+                return outside(binding[1])
             if binding[0] == "name":
                 return self.definition(binding[1], binding[2])
             return None
@@ -1285,9 +1321,10 @@ class Purity:
 
     def plain(self, node, local):
         """Whether `node` is inert and DATA: code outside the package may use its value."""
-        return self.kind(node, local) == DATA
+        return self.kind(node, local) in PLAIN
 
     def all_plain(self, nodes, local):
+        """DATA when the values of `nodes` are, used to make a value; else None."""
         return DATA if all(self.plain(n, local) for n in nodes) else None
 
     def held(self, nodes, local):
@@ -1295,15 +1332,15 @@ class Purity:
         kinds = [self.kind(n, local) for n in nodes]
         if None in kinds:
             return None
-        return CODE if CODE in kinds else DATA
+        return CODE if CODE in kinds else HELD if HELD in kinds or FRESH in kinds else DATA
 
     def kind(self, node, local):
         """The kind of the value of `node` when evaluating it runs no code of the package and
         calls nothing outside the allowlists (with the comprehension variables `local`, which
         are DATA); else None. A value that is used (an operand, a subscript's value or index,
         an iterable, a set's item or a dict's key, a formatted value, a test, a call's argument
-        or a method's object) must be DATA: the package's classes and functions run no code
-        only while they are held."""
+        or a method's object) must be DATA: the package's classes and functions run no code,
+        and iterators and methods change nothing, only while they are held."""
         if node is None or isinstance(node, ast.Constant):
             return DATA
         if isinstance(node, (ast.Tuple, ast.List)):
@@ -1325,12 +1362,17 @@ class Purity:
             # Reading an attribute of a class of the package runs no code of the package: none
             # has a metaclass, and none of their instances is made at import but the members
             # of an enum, whose class has no methods (pure_class).
-            if external_path(self.scope, node) is not None:
-                return DATA
+            path = external_path(self.scope, node)
+            if path is not None:
+                return outside(path)
             if isinstance(node.value, ast.Name):
                 binding = self.scope.binding_at(node.value.id, None)
                 if binding[0] == "module":
                     return self.definition(binding[1], node.attr)
+            # An attribute of OUTSIDE is OUTSIDE (`S.ascii_letters` after `S = string`). One of
+            # DATA may be a method that changes the data when it is called (`QUEUE.pop`): no
+            # call of the allowlists calls an argument but with `key=`, and a decorator takes
+            # constants only.
             return self.kind(node.value, local)
         if isinstance(node, ast.BinOp):
             return self.all_plain([node.left, node.right], local)
@@ -1366,24 +1408,34 @@ class Purity:
                 if not all(self.plain(c, inner) for c in generator.ifs):
                     return None
             if isinstance(node, ast.DictComp):
-                return self.kind(node.value, inner) if self.plain(node.key, inner) else None
+                return self.held([node.value], inner) if self.plain(node.key, inner) else None
             if isinstance(node, ast.SetComp):
                 return self.all_plain([node.elt], inner)
-            return self.kind(node.elt, inner)
+            elt = self.held([node.elt], inner)
+            # A generator is a one-shot iterator, of DATA where it is made.
+            return FRESH if isinstance(node, ast.GeneratorExp) and elt is not None else elt
         if isinstance(node, ast.Call):
-            # The arguments go to code outside the package (`sorted(x, key=f)` calls `f`).
+            # The arguments go to code outside the package (`sorted(x, key=f)` calls `f`), which
+            # consumes an iterator it is given (`dict(zip(KEYS, ids.COUNTER))`).
             if not all(self.plain(a, local) for a in node.args) or \
-                    not all(k.arg is not None and self.plain(k.value, local)
+                    not all(k.arg not in (None, "key") and self.plain(k.value, local)
                             for k in node.keywords):
                 return None
             func = node.func
-            if isinstance(func, ast.Name) and func.id in PURE_CALLS and self.unbound(func.id):
-                return DATA if func.id not in ("type", "vars") or len(node.args) == 1 else None
-            if external_path(self.scope, func) in PURE_EXTERNAL_CALLS:
+            if isinstance(func, ast.Name) and self.unbound(func.id):
+                if func.id in PURE_CALLS:
+                    return DATA if func.id not in ("type", "vars") or len(node.args) == 1 \
+                        else None
+                if func.id in ITERATOR_CALLS:
+                    return FRESH
+            path = external_path(self.scope, func)
+            if path in PURE_EXTERNAL_CALLS:
                 return DATA
+            if path in ITERATOR_EXTERNAL_CALLS:
+                return FRESH
+            # Builtin data's methods: not those of an object of a module outside the package.
             if isinstance(func, ast.Attribute) and func.attr in INERT_METHODS \
-                    and external_path(self.scope, func) is None \
-                    and self.plain(func.value, local):
+                    and self.kind(func.value, local) == DATA:
                 return DATA
             return None
         return None
@@ -1402,9 +1454,11 @@ class Purity:
         if is_command(self.scope, node):
             return True
         target = node.func if isinstance(node, ast.Call) else node
+        # Constants only: `functools.lru_cache(f)` decorates `f`, then calls it with the function
+        # it decorates (`f = QUEUE.append`).
         if isinstance(node, ast.Call) and not (
-                all(self.plain(a, set()) for a in node.args)
-                and all(k.arg is not None and self.plain(k.value, set())
+                all(isinstance(a, ast.Constant) for a in node.args)
+                and all(k.arg is not None and isinstance(k.value, ast.Constant)
                         for k in node.keywords)):
             return False
         path = external_path(self.scope, target)
@@ -1469,8 +1523,13 @@ class Purity:
     def pure_assign(self, node, plain=False):
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
         for target in targets:
-            names = target.elts if isinstance(target, (ast.Tuple, ast.List)) else [target]
+            unpacks = isinstance(target, (ast.Tuple, ast.List))
+            names = target.elts if unpacks else [target]
             if not all(isinstance(n, ast.Name) for n in names):
+                return False
+            # Unpacking iterates the value: DATA, or a display, whose items are only held.
+            if unpacks and not isinstance(node.value, (ast.Tuple, ast.List)) \
+                    and not self.plain(node.value, set()):
                 return False
         check = self.plain if plain else self.inert
         return check(node.value, set()) and check(getattr(node, "annotation", None), set())
