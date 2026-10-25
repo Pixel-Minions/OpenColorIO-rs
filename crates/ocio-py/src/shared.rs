@@ -96,6 +96,11 @@ impl<T> WeakShared<T> {
     pub(crate) fn alive(&self) -> bool {
         self.0.strong_count() > 0
     }
+
+    /// The value, while a [`Shared`] handle of it lives.
+    pub(crate) fn upgrade(&self) -> Option<Shared<T>> {
+        self.0.upgrade().map(Shared)
+    }
 }
 
 /// [`Shared::lock`]'s guard: taking the value mutably counts a change ([`Shared::version`]),

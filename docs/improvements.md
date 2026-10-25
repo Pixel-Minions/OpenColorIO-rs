@@ -6191,3 +6191,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   with every object alive, its clone's empty properties; the port's after the description is
   gone, kept by a `DynamicProperty` object, by its uniform iterator, by a clone, by nothing,
   by an object since deleted; of an exposure and a contrast, only the contrast's object kept).
+
+### U-201. `None` for a baker's config or format name
+
+- **Upstream:** `Baker.setConfig` and the `Baker` constructor take a `ConstConfigRcPtr` through
+  pybind11's holder caster, which passes `None` as a null pointer, and `Baker::setConfig` copies
+  it unchecked (`config->createEditableCopy()`, Baker.cpp:93-96 @ v2.5.2; the constructor's
+  factory calls it first, PyBaker.cpp:43-64); `Baker.setFormat` passes `None` as a null
+  `const char *` to `Baker::setFormat`, which makes the `std::string` of
+  `FormatRegistry::getFileFormatByName` of it (Baker.cpp:118-139). The Windows wheel's process
+  dies for each (probed 2026-10-25); libstdc++ may throw `std::logic_error` for the null string
+  instead.
+- **Who notices:** Python code that passes `None` there.
+- **A fix:** check both pointers, as `setDisplayView` checks its own ("Both display and view
+  must be set.").
+- **Status:** the port raises ValueError "Baker.setConfig(config): None, a null pointer the
+  wheel dereferences (its process dies; docs/improvements.md, U-201)" (and
+  "Baker(config)", "Baker.setFormat(formatName)"), the baker unchanged; in `p6-baker` (6.3i,
+  `crates/ocio-py/src/py_baker.rs`, `null_argument`); `baker_oracle.rs`,
+  `where_the_wheels_process_dies_the_port_raises` (the wheel's process dies, its steps before
+  run; the port's error).

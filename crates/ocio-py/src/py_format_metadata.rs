@@ -5,7 +5,8 @@
 //! `FormatMetadata` and its four iterator classes (chunk 6.3d).
 //!
 //! **References.** No Python code makes a `FormatMetadata`: each is a C++ reference into a
-//! transform's metadata (`getFormatMetadata`, pybind11's `reference_internal`), or into the
+//! transform's or a baker's metadata (`getFormatMetadata`, pybind11's `reference_internal`; a
+//! baker's since chunk 6.3i, which the binding holds as a transform's), or into the
 //! vector of an element's child elements (the child element iterators' `__getitem__` and
 //! `__next__`), and each iterator holds a C++ reference to its element. The library holds a
 //! transform's metadata by value, so the binding's reference ([`MetadataPtr`]) names the element
@@ -39,12 +40,14 @@ use pyo3::sync::PyOnceLock;
 use pyo3::types::{PyCFunction, PyTuple};
 
 use crate::dispatch::{Function, NonNullCharPtr, Param, StdString};
+use crate::py_baker::BakerNode;
 use crate::py_open_color_io::py_result;
 use crate::py_transform::{
     FORMAT_METADATA, INT, Out, Registry, TransformRc, WeakTransformRc, class, def, lock,
     nested_class, none, ok, register_in, string_out,
 };
 use crate::py_utils::{check_index, new_iterator};
+use crate::shared::{Shared, WeakShared};
 use crate::{method_def, q, this_iter};
 
 const ATTRIBUTE_NAME_ITERATOR: &str = q!("FormatMetadata.AttributeNameIterator");
@@ -231,6 +234,8 @@ impl MetadataHeap {
 enum Root {
     /// A transform's (a reference that doesn't keep the transform alive).
     Transform(WeakTransformRc),
+    /// A baker's (chunk 6.3i), as a transform's.
+    Baker(WeakShared<BakerNode>),
     /// A processor's (`None`) or its op's (`Some(i)`): read only (D-13). pybind11's
     /// `reference_internal` keeps the processor alive while the reference lives.
     Processor(Arc<ocio::Processor>, Option<i32>),
@@ -269,6 +274,17 @@ fn dangling() -> PyErr {
          elements holding it reallocated, cleared or shortened), and the wheel reads its memory \
          anyway (docs/improvements.md, U-121)",
     )
+}
+
+/// The element at `path` in `md`: the port's error when the wheel's reference dangles.
+fn descend<'a>(mut md: &'a mut FormatMetadata, path: &[usize]) -> PyResult<&'a mut FormatMetadata> {
+    for &i in path {
+        md = md
+            .get_children_elements_mut()
+            .get_mut(i)
+            .ok_or_else(dangling)?;
+    }
+    Ok(md)
 }
 
 /// The metadata of a transform class that has some.
@@ -317,40 +333,49 @@ impl MetadataPtr {
     /// The registry's key of the element.
     fn registry_key(&self) -> MetadataKey {
         let op = match self.root {
-            Root::Transform(_) => None,
+            Root::Transform(_) | Root::Baker(_) => None,
             Root::Processor(_, op) => Some(op),
         };
         (self.key, op, self.at)
     }
 
-    /// `f` of the element, the transform's buffers, and the element's path: the port's error
-    /// when the wheel's reference dangles.
+    /// The path of the element in the metadata whose buffers are `heap`: the port's error when
+    /// the wheel's reference dangles.
+    fn path(&self, heap: &MetadataHeap) -> PyResult<Vec<usize>> {
+        Ok(match self.at {
+            None => Vec::new(),
+            Some((id, i)) => {
+                let buffer = heap.buffers.get(&id).ok_or_else(dangling)?;
+                child_path(&buffer.owner, i)
+            }
+        })
+    }
+
+    /// `f` of the element, the transform's (or baker's) buffers, and the element's path: the
+    /// port's error when the wheel's reference dangles.
     pub(crate) fn with<R>(
         &self,
         f: impl FnOnce(&mut FormatMetadata, &mut MetadataHeap, &[usize]) -> PyResult<R>,
     ) -> PyResult<R> {
         let rc = match &self.root {
             Root::Transform(node) => node.upgrade().ok_or_else(dangling)?,
+            Root::Baker(node) => {
+                let rc = node.upgrade().ok_or_else(dangling)?;
+                let mut node = rc.lock();
+                let node = &mut *node;
+                let path = self.path(&node.metadata_heap)?;
+                let md = descend(node.baker.format_metadata_mut(), &path)?;
+                return f(md, &mut node.metadata_heap, &path);
+            }
             Root::Processor(p, op) => return self.with_processor(p, *op, f),
         };
         let mut node = rc.lock();
         let node = &mut *node;
-        let path = match self.at {
-            None => Vec::new(),
-            Some((id, i)) => {
-                let buffer = node.metadata_heap.buffers.get(&id).ok_or_else(dangling)?;
-                child_path(&buffer.owner, i)
-            }
-        };
-        let mut md = metadata_mut(&mut node.transform).ok_or_else(|| {
+        let path = self.path(&node.metadata_heap)?;
+        let md = metadata_mut(&mut node.transform).ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err("the transform holds no format metadata")
         })?;
-        for &i in &path {
-            md = md
-                .get_children_elements_mut()
-                .get_mut(i)
-                .ok_or_else(dangling)?;
-        }
+        let md = descend(md, &path)?;
         f(md, &mut node.metadata_heap, &path)
     }
 
@@ -499,6 +524,20 @@ pub(crate) fn transform_metadata_out(
     rc: &TransformRc,
 ) -> Out {
     element_out(py, MetadataPtr::root(rc), this)
+}
+
+/// `getFormatMetadata()` of the baker object `this` holding `rc` (chunk 6.3i).
+pub(crate) fn baker_metadata_out(
+    py: Python<'_>,
+    this: &Bound<'_, PyAny>,
+    rc: &Shared<BakerNode>,
+) -> Out {
+    let ptr = MetadataPtr {
+        root: Root::Baker(rc.downgrade()),
+        key: rc.key(),
+        at: None,
+    };
+    element_out(py, ptr, this)
 }
 
 /// `getFormatMetadata()` (`op` none) or the iterator's `getTransformFormatMetadata(op)` of the

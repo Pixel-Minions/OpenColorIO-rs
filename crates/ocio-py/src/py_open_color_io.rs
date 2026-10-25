@@ -467,6 +467,7 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::pybind11::def_function(m, &IS_ENV_VARIABLE_PRESENT)?;
 
     // The classes' bindings (PyOpenColorIO.cpp:70-103), those ported so far.
+    crate::py_baker::bind_py_baker(m)?;
     crate::py_builtin_config_registry::bind_py_builtin_config_registry(m)?;
     crate::py_color_space::bind_py_color_space(m)?;
     crate::py_color_space_set::bind_py_color_space_set(m)?;

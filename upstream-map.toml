@@ -3726,7 +3726,8 @@ note = "build system"
 path = "src/bindings/python/PyBaker.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_baker.rs"]
-status = "todo"
+status = "done"
+note = "p6-baker 6.3i"
 
 [[file]]
 path = "src/bindings/python/PyBuiltinConfigRegistry.cpp"

@@ -29,6 +29,8 @@ pub mod embed;
 #[cfg(feature = "python")]
 pub mod enums;
 #[cfg(feature = "python")]
+pub(crate) mod py_baker;
+#[cfg(feature = "python")]
 pub(crate) mod py_builtin_config_registry;
 #[cfg(feature = "python")]
 pub(crate) mod py_builtin_transform_registry;
