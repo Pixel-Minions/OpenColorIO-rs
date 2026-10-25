@@ -69,7 +69,16 @@ pub(crate) fn write_files(entries: &[Entry]) -> String {
                         std::thread::current().id()
                     ));
                     std::fs::write(&temp, bytes).unwrap();
-                    std::fs::rename(&temp, &path).unwrap();
+                    // On Windows a rename onto a file that another test holds open fails
+                    // ("Access is denied"); that test wrote the same bytes, so its file stays.
+                    if let Err(e) = std::fs::rename(&temp, &path) {
+                        let _ = std::fs::remove_file(&temp);
+                        assert!(
+                            std::fs::read(&path).ok().as_deref() == Some(bytes.as_slice()),
+                            "{}: {e}",
+                            path.display()
+                        );
+                    }
                 }
             }
             Entry::Dir(name) => std::fs::create_dir_all(dir.join(name)).unwrap(),
