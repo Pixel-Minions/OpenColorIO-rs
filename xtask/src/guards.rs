@@ -1696,7 +1696,8 @@ const SCRIPTS_DIR: &str = "scripts";
 /// oracle (`crates/ocio-testkit/src/oracle_scope.rs`) can't pass CI. Every workflow (`.yml` or
 /// `.yaml` in [`WORKFLOWS_DIR`]: one that runs tests, one that doesn't yet, and a reusable one,
 /// whose jobs don't get its caller's `env`) sets [`ORACLE_NO_CACHE`] in its top-level `env`, and
-/// every script in [`SCRIPTS_DIR`] that starts a container passes it in (`scripts/rocky9.sh`).
+/// every command that starts a container, in a workflow or in a script under [`SCRIPTS_DIR`]
+/// ([`is_script`]), passes it in ([`container_problems`]: `scripts/rocky9.sh`).
 fn check_oracle_cache_off(root: &Path, problems: &mut Vec<String>) {
     let mut workflows = Vec::new();
     match std::fs::read_dir(root.join(WORKFLOWS_DIR)) {
@@ -1721,24 +1722,27 @@ fn check_oracle_cache_off(root: &Path, problems: &mut Vec<String>) {
     }
     workflows.sort();
     for rel in &workflows {
-        match std::fs::read_to_string(root.join(rel)) {
-            Ok(text) => problems.extend(workflow_cache_problems(rel, &text)),
-            Err(e) => problems.push(format!("{rel}: {e}")),
-        }
-    }
-    let mut scripts = Vec::new();
-    collect_scripts(&root.join(SCRIPTS_DIR), SCRIPTS_DIR, &mut scripts, problems);
-    if scripts.is_empty() {
-        problems.push(format!("{SCRIPTS_DIR}: no script found"));
-    }
-    scripts.sort();
-    for rel in &scripts {
         match std::fs::read(root.join(rel)) {
-            Ok(bytes) => {
-                problems.extend(script_cache_problems(rel, &String::from_utf8_lossy(&bytes)))
-            }
+            Ok(bytes) => problems.extend(workflow_cache_problems(rel, &script_text(&bytes))),
             Err(e) => problems.push(format!("{rel}: {e}")),
         }
+    }
+    let mut files = Vec::new();
+    collect_scripts(&root.join(SCRIPTS_DIR), SCRIPTS_DIR, &mut files, problems);
+    files.sort();
+    let mut scripts = 0;
+    for rel in &files {
+        match std::fs::read(root.join(rel)) {
+            Ok(bytes) if is_script(rel, &bytes) => {
+                scripts += 1;
+                problems.extend(script_cache_problems(rel, &script_text(&bytes)));
+            }
+            Ok(_) => {}
+            Err(e) => problems.push(format!("{rel}: {e}")),
+        }
+    }
+    if scripts == 0 {
+        problems.push(format!("{SCRIPTS_DIR}: no script found"));
     }
 }
 
@@ -1766,9 +1770,50 @@ fn collect_scripts(dir: &Path, rel: &str, out: &mut Vec<String>, problems: &mut 
     }
 }
 
+/// The extensions, in any case, of the files that run as scripts; a file that starts with a
+/// shebang (`#!`) runs too, whatever its name. Others (a README) are only read by people.
+const SCRIPT_EXTENSIONS: [&str; 7] = ["sh", "bash", "ps1", "psm1", "py", "cmd", "bat"];
+
+/// Whether the file `rel`, of bytes `bytes`, runs as a script.
+fn is_script(rel: &str, bytes: &[u8]) -> bool {
+    let extension = rel
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase());
+    bytes.starts_with(b"#!") || extension.is_some_and(|e| SCRIPT_EXTENSIONS.contains(&e.as_str()))
+}
+
+/// The text of a script or a workflow: UTF-16 with its byte order mark (PowerShell's), else
+/// UTF-8, lossily.
+fn script_text(bytes: &[u8]) -> String {
+    let utf16 = |big: bool| {
+        let units: Vec<u16> = bytes[2..]
+            .chunks(2)
+            .map(|c| {
+                let pair = [c[0], *c.get(1).unwrap_or(&0)];
+                if big {
+                    u16::from_be_bytes(pair)
+                } else {
+                    u16::from_le_bytes(pair)
+                }
+            })
+            .collect();
+        String::from_utf16_lossy(&units)
+    };
+    match bytes {
+        [0xff, 0xfe, ..] => utf16(false),
+        [0xfe, 0xff, ..] => utf16(true),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
 /// The problems of workflow `rel`: its top-level `env:` must set [`ORACLE_NO_CACHE`] to `"1"`,
 /// and nothing else in it may name the variable (a job or a step that set it otherwise, or a
-/// script that unset it).
+/// script that unset it) but a command that passes it into a container (`-e
+/// OCIO_RS_ORACLE_NO_CACHE`); and every command of its steps that starts a container must pass
+/// it in ([`container_problems`]).
 fn workflow_cache_problems(rel: &str, text: &str) -> Vec<String> {
     let expected = format!("  {ORACLE_NO_CACHE}: \"1\"");
     let mut in_env = false;
@@ -1784,9 +1829,10 @@ fn workflow_cache_problems(rel: &str, text: &str) -> Vec<String> {
         }
         if in_env && line == expected && !set {
             set = true;
-        } else {
+        } else if line.matches(ORACLE_NO_CACHE).count() != forwards(&tokens_of(line, i, false)) {
             problems.push(format!(
-                "{rel}:{}: {ORACLE_NO_CACHE} is named other than once, in the top-level env",
+                "{rel}:{}: {ORACLE_NO_CACHE} is named other than once, in the top-level env, and \
+                 in the `-e {ORACLE_NO_CACHE}` of a command that starts a container",
                 i + 1
             ));
         }
@@ -1797,64 +1843,226 @@ fn workflow_cache_problems(rel: &str, text: &str) -> Vec<String> {
              the wheel, never the oracle's response cache"
         ));
     }
+    problems.extend(container_problems(rel, text, false));
     problems
 }
 
-/// The subcommands of a container engine that start no container. Any other (`run`, `create`,
-/// `exec`, `start`, `compose`, `container ...`, an option, a word the check can't read) may.
-const NO_CONTAINER: [&str; 17] = [
-    "build", "image", "images", "inspect", "volume", "ps", "pull", "push", "rm", "rmi", "info",
-    "version", "system", "login", "logout", "tag", "network",
+/// The problems of script `rel` ([`container_problems`]; a `.py` script is read as Python).
+fn script_cache_problems(rel: &str, text: &str) -> Vec<String> {
+    container_problems(rel, text, rel.to_ascii_lowercase().ends_with(".py"))
+}
+
+/// Container engines: a word's last path component, in any case, with or without `.exe`.
+const ENGINES: [&str; 5] = [
+    "docker",
+    "podman",
+    "docker-compose",
+    "podman-compose",
+    "nerdctl",
+];
+/// An engine's subcommands that group others (`docker container run`, `docker compose up`).
+const ENGINE_GROUPS: [&str; 6] = ["container", "compose", "service", "stack", "pod", "play"];
+/// An engine's subcommands that start a container, or run a command in one.
+const CONTAINER_STARTS: [&str; 8] = [
+    "run", "create", "start", "exec", "restart", "up", "deploy", "kube",
 ];
 
-/// The problems of script `rel`: every command that names a container engine (a word whose last
-/// path component starts with `docker` or `podman`, in any case, outside a comment line) and may
-/// start a container (its subcommand isn't one of [`NO_CONTAINER`]) must pass
-/// [`ORACLE_NO_CACHE`] into it: `-e OCIO_RS_ORACLE_NO_CACHE` (or `--env`), on the command's own
-/// line or on one of the lines its trailing `\`s continue it onto.
-fn script_cache_problems(rel: &str, text: &str) -> Vec<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    let words_of = |line: &str| -> Vec<String> {
-        if line.trim_start().starts_with('#') {
-            return Vec::new();
+/// A word of a script's command ([`tokens_of`]).
+struct ScriptWord {
+    text: String,
+    /// It was quoted (`"run"`).
+    quoted: bool,
+    /// Its line, from 0.
+    line: usize,
+    /// It is in a comment that follows code on its line: it starts nothing, and passes nothing.
+    commented: bool,
+}
+
+/// The words of line `line` (number `index`): split at blanks, `,`, brackets and the shell's
+/// `;`, `|`, `&`, `<` and `>`, without the quotes, braces and backquotes around them. A word
+/// that starts with `#`, and those after it, are `commented`.
+fn tokens_of(line: &str, index: usize, commented: bool) -> Vec<ScriptWord> {
+    let mut commented = commented;
+    let mut out = Vec::new();
+    for raw in line.split(|c: char| c.is_whitespace() || ",()[];|&<>".contains(c)) {
+        if raw.starts_with('#') {
+            commented = true;
         }
-        line.split_whitespace()
-            .map(|w| w.trim_matches(|c| c == '"' || c == '\'').to_string())
-            .collect()
-    };
-    let mut problems = Vec::new();
-    for (i, line) in lines.iter().enumerate() {
-        let words = words_of(line);
-        for (j, word) in words.iter().enumerate() {
-            let program = word
-                .rsplit('/')
-                .next()
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            if !(program.starts_with("docker") || program.starts_with("podman")) {
-                continue;
-            }
-            let subcommand = words.get(j + 1).map(String::as_str);
-            if program.len() == 6 && subcommand.is_some_and(|s| NO_CONTAINER.contains(&s)) {
-                continue;
-            }
-            // The command: this line and those its trailing `\`s continue it onto.
-            let mut end = i;
-            while end + 1 < lines.len() && lines[end].trim_end().ends_with('\\') {
-                end += 1;
-            }
-            let forwards = lines[i..=end].iter().any(|l| {
-                words_of(l)
-                    .windows(2)
-                    .any(|w| (w[0] == "-e" || w[0] == "--env") && w[1] == ORACLE_NO_CACHE)
+        let text = raw.trim_matches(|c| "\"'`{}".contains(c));
+        // A line's continuation (`\`, `` ` ``, `^`) is no word.
+        if !text.is_empty() && !["\\", "^"].contains(&text) {
+            out.push(ScriptWord {
+                text: text.to_string(),
+                quoted: raw.starts_with(['"', '\'']),
+                line: index,
+                commented,
             });
-            if !forwards {
-                problems.push(format!(
-                    "{rel}:{}: `{word}` may start a container without passing {ORACLE_NO_CACHE} \
-                     into it (`-e {ORACLE_NO_CACHE} \\`)",
-                    i + 1
-                ));
+        }
+    }
+    out
+}
+
+/// How many times `tokens` pass [`ORACLE_NO_CACHE`] into a container: `-e
+/// OCIO_RS_ORACLE_NO_CACHE`, `--env OCIO_RS_ORACLE_NO_CACHE` or `--env=OCIO_RS_ORACLE_NO_CACHE`.
+fn forwards(tokens: &[ScriptWord]) -> usize {
+    let tokens: Vec<&str> = tokens
+        .iter()
+        .filter(|t| !t.commented)
+        .map(|t| t.text.as_str())
+        .collect();
+    let pairs = tokens
+        .windows(2)
+        .filter(|w| (w[0] == "-e" || w[0] == "--env") && w[1] == ORACLE_NO_CACHE)
+        .count();
+    let joined = format!("--env={ORACLE_NO_CACHE}");
+    pairs + tokens.iter().filter(|&&t| t == joined).count()
+}
+
+/// Whether the trailing characters of `line` continue its command onto the next line: a
+/// shell's `\`, PowerShell's `` ` ``, cmd's `^`.
+fn continues(line: &str) -> bool {
+    line.trim_end().ends_with(['\\', '`', '^'])
+}
+
+/// A line that is only a comment: `#` (a shell, PowerShell, Python, YAML), `REM` or `::` (cmd).
+fn comment_line(line: &str) -> bool {
+    let line = line.trim_start();
+    line.starts_with('#')
+        || line.starts_with("::")
+        || line
+            .get(..4)
+            .is_some_and(|w| w.eq_ignore_ascii_case("rem "))
+}
+
+/// How much Python's open brackets of `line` change, outside its strings and its comment.
+fn bracket_depth(line: &str) -> i64 {
+    let mut depth = 0;
+    let mut quote = None;
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(_), '\\') => {
+                chars.next();
             }
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '#') => break,
+            (None, '(' | '[' | '{') => depth += 1,
+            (None, ')' | ']' | '}') => depth -= 1,
+            _ => {}
+        }
+    }
+    depth
+}
+
+/// The commands of `text`: each line with those its trailing `\` (or `` ` ``, `^`) continues it
+/// onto and, in Python (`python`), those its open brackets do. A line that is only a comment is
+/// left out, and ends a command a `\` continued onto it (as a shell reads it).
+fn commands_of(text: &str, python: bool) -> Vec<Vec<ScriptWord>> {
+    let mut commands = Vec::new();
+    let mut current: Vec<ScriptWord> = Vec::new();
+    let mut depth = 0i64;
+    let mut open = false;
+    for (i, line) in text.lines().enumerate() {
+        if comment_line(line) {
+            if !(python && depth > 0) && open {
+                commands.push(std::mem::take(&mut current));
+                open = false;
+            }
+            continue;
+        }
+        current.extend(tokens_of(line, i, false));
+        if python {
+            depth = (depth + bracket_depth(line)).max(0);
+        }
+        open = continues(line) || python && depth > 0;
+        if !open {
+            commands.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        commands.push(current);
+    }
+    commands
+}
+
+/// Whether `token` may name a container engine: one of [`ENGINES`], a variable or a command's
+/// output that may hold one (`$DOCKER`, `${ENGINE}`, `$(...)`, `%DOCKER%`, PowerShell's
+/// `$docker`), or, in Python (`python`) when the script names an engine in a string (`named`),
+/// a name, whose subcommand must then be a string too (`[ENGINE, "run"]`, not `return
+/// run(x)`). `Some(whether the words after it must be strings)`.
+fn engine_word(token: &ScriptWord, python: bool, named: bool) -> Option<bool> {
+    let text = token.text.as_str();
+    if text.starts_with(['$', '%']) {
+        return Some(false);
+    }
+    if python
+        && named
+        && !token.quoted
+        && text
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+    {
+        return Some(true);
+    }
+    let program = text
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let program = program.strip_suffix(".exe").unwrap_or(&program);
+    ENGINES.contains(&program).then_some(false)
+}
+
+/// Whether the words after an engine's, `rest`, start a container: past its options (and the
+/// value an option may take) and its groups ([`ENGINE_GROUPS`]), the subcommand is one of
+/// [`CONTAINER_STARTS`]. With `strings`, only strings count.
+fn starts_container(rest: &[ScriptWord], strings: bool) -> bool {
+    let mut after_option = false;
+    for token in rest {
+        let word = token.text.to_ascii_lowercase();
+        if strings && !token.quoted {
+            return false;
+        }
+        if word.starts_with('-') {
+            after_option = !word.contains('=');
+        } else if CONTAINER_STARTS.contains(&word.as_str()) {
+            return true;
+        } else if ENGINE_GROUPS.contains(&word.as_str()) || after_option {
+            after_option = false;
+        } else {
+            return false;
+        }
+    }
+    false
+}
+
+/// The problems of script or workflow `rel`: every command (a line and those it continues onto,
+/// [`commands_of`]) that starts a container (a container engine, [`engine_word`], followed by a
+/// subcommand that starts one, [`starts_container`]) must pass [`ORACLE_NO_CACHE`] into it, as
+/// `-e OCIO_RS_ORACLE_NO_CACHE` (or `--env`). A Python list of arguments counts as a command
+/// (`["docker", "run", "-e", "OCIO_RS_ORACLE_NO_CACHE", ...]`).
+fn container_problems(rel: &str, text: &str, python: bool) -> Vec<String> {
+    let commands = commands_of(text, python);
+    let named = commands.iter().flatten().any(|t| {
+        t.quoted && ENGINES.contains(&t.text.to_ascii_lowercase().trim_end_matches(".exe"))
+    });
+    let mut problems = Vec::new();
+    for command in &commands {
+        let start = (0..command.len()).find(|&j| {
+            engine_word(&command[j], python, named)
+                .is_some_and(|strings| starts_container(&command[j + 1..], strings))
+        });
+        if let Some(j) = start
+            && forwards(command) == 0
+        {
+            problems.push(format!(
+                "{rel}:{}: `{}` may start a container without passing {ORACLE_NO_CACHE} \
+                 into it (`-e {ORACLE_NO_CACHE} \\`)",
+                command[j].line + 1,
+                command[j].text
+            ));
         }
     }
     problems
@@ -1894,17 +2102,87 @@ mod tests {
                 "      - env:\n          OCIO_RS_ORACLE_NO_CACHE: \"\"\n",
             ),
             &format!("{good}env:\n  OCIO_RS_ORACLE_NO_CACHE: \"1\"\n"),
+            // A step that starts a container without passing the variable in, or sets it there
+            // (verifier 4).
+            &good.replace(
+                "      - run: x\n",
+                "      - run: docker run --rm x cargo test\n",
+            ),
+            &good.replace(
+                "      - run: x\n",
+                "      - run: |\n          docker run --rm \\\n            x cargo test\n",
+            ),
+            &good.replace(
+                "      - run: x\n",
+                "      - run: docker run -e OCIO_RS_ORACLE_NO_CACHE=0 x\n",
+            ),
+            &good.replace(
+                "      - run: x\n",
+                "      - run: OCIO_RS_ORACLE_NO_CACHE= docker run -e OCIO_RS_ORACLE_NO_CACHE x\n",
+            ),
         ] {
             assert!(!workflow_cache_problems("w", bad).is_empty(), "{bad}");
+        }
+        // A step that starts a container and passes the variable in, and one that only builds an
+        // image.
+        for step in [
+            "      - run: docker run --rm -e OCIO_RS_ORACLE_NO_CACHE x cargo test\n",
+            "      - run: |\n          docker run --rm \\\n            -e OCIO_RS_ORACLE_NO_CACHE \\\n            \
+             x cargo test\n",
+            "      - run: docker build -t x docker/rocky9\n",
+        ] {
+            let text = good.replace("      - run: x\n", step);
+            assert_eq!(
+                workflow_cache_problems("w", &text),
+                Vec::<String>::new(),
+                "{text}"
+            );
         }
 
         let rocky = "docker run --rm \\\n    -e OCIO_RS_TIER \\\n    -e OCIO_RS_ORACLE_NO_CACHE \\\n    \
                      \"$image\" \"$@\"\n";
         let quiet = "# Builds the image with docker run's help.\nif ! docker image inspect x; then\n    \
                      docker build -t x .\nfi\ndocker volume create \\\n    v\n";
-        for good in [rocky, quiet, "set -e\necho hello\n", ""] {
+        // Commands that name an engine but start no container, and a mount of the engine's
+        // socket on a line before or after the variable (verifier 4).
+        let named = "if ! command -v docker >/dev/null 2>&1; then\n    echo \"docker not found\"\n    \
+                     exit 1\nfi\nwhich podman || echo 'podman is missing'\n";
+        let socket = "docker run --rm \\\n    -v /var/run/docker.sock:/var/run/docker.sock \\\n    \
+                      -e OCIO_RS_ORACLE_NO_CACHE \\\n    \"$image\" \"$@\"\n";
+        let socket_after = "docker run --rm \\\n    -e OCIO_RS_ORACLE_NO_CACHE \\\n    \
+                            -v /var/run/docker.sock:/var/run/docker.sock \\\n    \"$image\"\n";
+        for good in [
+            rocky,
+            quiet,
+            named,
+            socket,
+            socket_after,
+            "set -e\necho hello\n",
+            "",
+            // A comment, and a script whose name starts as an engine's.
+            "# Then: docker run --rm x\n",
+            "./docker-images.sh start x\n",
+            // Compose's subcommands that start nothing.
+            "docker-compose build\ndocker compose pull\n",
+            // A variable that isn't followed by a subcommand that starts a container.
+            "\"$CARGO\" test\n$UV sync\n",
+        ] {
             assert_eq!(
                 script_cache_problems("r", good),
+                Vec::<String>::new(),
+                "{good}"
+            );
+        }
+        // Python: a list of arguments, over several lines; a function named `run`; and a name
+        // followed by a subcommand in a script that names no engine.
+        for good in [
+            "import subprocess\n\nsubprocess.run([\n    \"docker\", \"run\", \"--rm\",\n    \
+             \"-e\", \"OCIO_RS_ORACLE_NO_CACHE\",  # the cache\n    image,\n])\n",
+            "ENGINE = \"docker\"\n\n\ndef run(x):\n    return run(x)\n",
+            "import subprocess\n\nsubprocess.run([UV, \"run\", \"x\"])\n",
+        ] {
+            assert_eq!(
+                script_cache_problems("r.py", good),
                 Vec::<String>::new(),
                 "{good}"
             );
@@ -1938,10 +2216,33 @@ mod tests {
             "\"$root/bin/Docker\" run x\n".to_string(),
             "docker \\\n    run x\n".to_string(),
             "if true; then docker run x; fi\n".to_string(),
-            // Only the engines themselves have subcommands known to start nothing.
-            "docker-compose build\n".to_string(),
+            // An engine through a variable or a command's output (verifier 4).
+            "$DOCKER run --rm x\n".to_string(),
+            "${DOCKER} run --rm x\n".to_string(),
+            "\"$ENGINE\" run --rm x\n".to_string(),
+            "\"${ENGINE:-docker}\" --context remote run x\n".to_string(),
+            "$(command -v docker) run x\n".to_string(),
+            "& $docker run --rm x\n".to_string(),
+            "%DOCKER% run --rm x\n".to_string(),
+            "docker compose -f c.yml up\n".to_string(),
+            // The variable in a comment after the command, or after a comment line that ends
+            // the command a `\` continued.
+            "docker run --rm x # -e OCIO_RS_ORACLE_NO_CACHE\n".to_string(),
+            "docker run --rm \\\n# The cache.\n    -e OCIO_RS_ORACLE_NO_CACHE x\n".to_string(),
         ] {
             assert!(!script_cache_problems("r", &bad).is_empty(), "{bad}");
+        }
+        // Python: a list of arguments, inline or over several lines, and an engine held by a
+        // name (verifier 4).
+        for bad in [
+            "import subprocess\n\nsubprocess.run([\"docker\", \"run\", \"--rm\", image])\n",
+            "import subprocess\n\nsubprocess.run(\n    [\n        \"podman\",\n        \
+             \"run\",\n        image,\n    ]\n)\n",
+            "import subprocess\n\nENGINE = \"docker\"\nsubprocess.run([ENGINE, \"run\", image])\n",
+            "import subprocess\n\nsubprocess.run([\"docker\", \"run\", image])  # \"-e\", \
+             \"OCIO_RS_ORACLE_NO_CACHE\"\n",
+        ] {
+            assert!(!script_cache_problems("r.py", bad).is_empty(), "{bad}");
         }
 
         // Every workflow of the directory, a reusable one too, and every script, at any depth.
@@ -1952,6 +2253,9 @@ mod tests {
         std::fs::write(root.join(".github/workflows/a.yml"), good).unwrap();
         std::fs::write(root.join(".github/workflows/README.md"), "docs\n").unwrap();
         std::fs::write(root.join("scripts/rocky9.sh"), rocky).unwrap();
+        // Files that don't run: only people read them (verifier 4).
+        std::fs::write(root.join("scripts/README.md"), "Run `docker run x`.\n").unwrap();
+        std::fs::write(root.join("scripts/ci/notes"), "docker run x\n").unwrap();
         let mut problems = Vec::new();
         check_oracle_cache_off(&root, &mut problems);
         assert_eq!(problems, Vec::<String>::new());
@@ -1962,26 +2266,44 @@ mod tests {
             "docker run x cargo test\n",
         )
         .unwrap();
+        // Scripts: one without an extension that starts with a shebang, a Python one, and a
+        // PowerShell one in UTF-16 (verifier 4).
+        std::fs::write(root.join("scripts/ci/start"), "#!/bin/sh\npodman run x\n").unwrap();
+        std::fs::write(
+            root.join("scripts/ci/helper.py"),
+            "import subprocess\n\nsubprocess.run([\"docker\", \"run\", \"x\"])\n",
+        )
+        .unwrap();
+        let utf16: Vec<u8> = [0xff, 0xfe]
+            .into_iter()
+            .chain(
+                "& docker run x\r\n"
+                    .encode_utf16()
+                    .flat_map(u16::to_le_bytes),
+            )
+            .collect();
+        std::fs::write(root.join("scripts/ci/run.PS1"), utf16).unwrap();
         let mut problems = Vec::new();
         check_oracle_cache_off(&root, &mut problems);
         let _ = std::fs::remove_dir_all(&root);
-        assert!(
-            problems
-                .iter()
-                .any(|p| p.starts_with(".github/workflows/reusable.YAML: ")),
-            "{problems:?}"
-        );
-        assert!(
-            problems
-                .iter()
-                .any(|p| p.starts_with("scripts/ci/shard.sh:1: ")),
-            "{problems:?}"
-        );
-        assert_eq!(problems.len(), 2, "{problems:?}");
+        for prefix in [
+            ".github/workflows/reusable.YAML: ",
+            "scripts/ci/helper.py:3: ",
+            "scripts/ci/run.PS1:1: ",
+            "scripts/ci/shard.sh:1: ",
+            "scripts/ci/start:2: ",
+        ] {
+            assert!(
+                problems.iter().any(|p| p.starts_with(prefix)),
+                "{prefix} {problems:?}"
+            );
+        }
+        assert_eq!(problems.len(), 5, "{problems:?}");
 
-        // No workflow, or no script, fails closed.
+        // No workflow, or no script (a file that doesn't run isn't one), fails closed.
         std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
         std::fs::create_dir_all(root.join("scripts")).unwrap();
+        std::fs::write(root.join("scripts/README.md"), "docs\n").unwrap();
         let mut problems = Vec::new();
         check_oracle_cache_off(&root, &mut problems);
         let _ = std::fs::remove_dir_all(&root);
