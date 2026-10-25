@@ -49,7 +49,7 @@ pub use apphelpers::color_space_helpers::{self, ColorSpaceMenuHelper, ColorSpace
 pub use apphelpers::display_view_helpers;
 pub use apphelpers::legacy_viewing_pipeline::LegacyViewingPipeline;
 pub use apphelpers::mergeconfigs::merge_configs_helpers::{
-    ConfigMerger, ConfigMergingParameters, MergeStrategies,
+    ConfigMerger, ConfigMergingParameters, MergeStrategies, config_merging_helpers,
 };
 pub use apphelpers::mixing_helpers::{MixingColorSpaceManager, MixingSlider};
 pub use baker::Baker;

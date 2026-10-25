@@ -18,10 +18,6 @@
 //! `SectionMerger.h` declares `mergeStringVecWithoutDuplicate` and `inputFirstMergeStringVec`
 //! (`SectionMerger.h:112-116` @ v2.5.2), which OCIO 2.5.2 neither defines nor calls.
 
-// `mergeConfigs` and `MergeConfigs` (9.2j, p9-merge-3) run the mergers; until then only the
-// tests do.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use ocio_ops::exception::{Exception, ExceptionKind, Result};
 use ocio_ops::logging::log_warning;
 use ocio_ops::open_color_types::{
@@ -4230,6 +4226,56 @@ impl<'o, 'a> Section<'o, 'a> for NamedTransformsMerger<'o, 'a> {
         // Add the NamedTransforms from the base config if they do not exist in the INPUT config.
         self.merge_into_merged(true, |name| input.named_transform(name).is_none())
     }
+}
+
+/////////////////////////////////// The merges ///////////////////////////////////////////
+
+/// Runs the mergers of every section on `merged_config` (a copy of `base_config`), in
+/// upstream's order: general, roles, file rules, displays and views, view transforms, looks,
+/// color spaces, named transforms. Stops at the first error, which a merger's constructor (null
+/// parameters, the reference space converters) or its merge returns.
+///
+/// The `try` blocks of `ConfigMerger::mergeConfigs` and `ConfigMergingHelpers::MergeConfigs`
+/// (MergeConfigsHelpers.cpp:701-712, 747-758 @ v2.5.2).
+pub(crate) fn merge_all_sections(
+    base_config: &Config,
+    input_config: &Config,
+    params: Option<&ConfigMergingParameters>,
+    merged_config: &mut Config,
+) -> Result<()> {
+    let mut options = MergeHandlerOptions {
+        base_config,
+        input_config,
+        params,
+        merged_config,
+    };
+    GeneralMerger::new(&mut options)?.merge()?;
+    RolesMerger::new(&mut options)?.merge()?;
+    FileRulesMerger::new(&mut options)?.merge()?;
+    DisplayViewMerger::new(&mut options)?.merge()?;
+    ViewTransformsMerger::new(&mut options)?.merge()?;
+    LooksMerger::new(&mut options)?.merge()?;
+    ColorspacesMerger::new(&mut options)?.merge()?;
+    NamedTransformsMerger::new(&mut options)?.merge()
+}
+
+/// Runs the color spaces merger alone on `merged_config` (a copy of `base_config`).
+///
+/// The `try` block of `ConfigMergingHelpers::MergeColorSpace` (MergeConfigsHelpers.cpp:
+/// 789-793 @ v2.5.2).
+pub(crate) fn merge_color_spaces_section(
+    base_config: &Config,
+    input_config: &Config,
+    params: &ConfigMergingParameters,
+    merged_config: &mut Config,
+) -> Result<()> {
+    let mut options = MergeHandlerOptions {
+        base_config,
+        input_config,
+        params: Some(params),
+        merged_config,
+    };
+    ColorspacesMerger::new(&mut options)?.merge()
 }
 
 #[cfg(test)]

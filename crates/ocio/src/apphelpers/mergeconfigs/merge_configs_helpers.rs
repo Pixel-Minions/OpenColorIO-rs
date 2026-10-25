@@ -5,16 +5,20 @@
 //! series of merges (`ConfigMerger`): a port of
 //! `src/OpenColorIO/apphelpers/mergeconfigs/MergeConfigsHelpers.h` and
 //! `MergeConfigsHelpers.cpp` @ v2.5.2, whose public API is
-//! `include/OpenColorIO/OpenColorAppHelpers.h:536-853` (owner decision P9-2).
+//! `include/OpenColorIO/OpenColorAppHelpers.h:536-886` (owner decision P9-2), with the merges
+//! in memory of `ConfigMergingHelpers` ([`config_merging_helpers`]).
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ocio_ops::exception::{Exception, Result};
+use ocio_ops::exception::{Exception, ExceptionKind, Result};
 use ocio_ops::platform::{create_input_file_stream, strcasecmp};
 use ocio_ops::utils::pystring::os_path;
 use ocio_ops::utils::string_utils::{c_str, right_trim_char, split, trim};
 
 use crate::apphelpers::mergeconfigs::ociom_yaml::{self, WriteError, enum_to_strategy_string};
+use crate::apphelpers::mergeconfigs::section_merger::{
+    merge_all_sections, merge_color_spaces_section,
+};
 use crate::config::Config;
 use crate::yaml_cpp::stream::IStream;
 
@@ -919,8 +923,6 @@ impl ConfigMerger {
     /// are refused where upstream dereferences them (U-176).
     ///
     /// Port of `ConfigMerger::Impl::loadConfig` (MergeConfigsHelpers.cpp:449-516 @ v2.5.2).
-    // `mergeConfigs` (9.2j, p9-merge-3) calls it.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn load_config(&self, value: &[u8]) -> Result<Option<Arc<Config>>> {
         // Get the absolute path.
         let mut searchpaths: Vec<Vec<u8>> = Vec::new();
@@ -1178,6 +1180,144 @@ impl ConfigMerger {
         }
 
         Ok(Arc::new(ociom_yaml::read(IStream::file(&data), filepath)?))
+    }
+}
+
+/// The error of a merge as upstream rethrows it: `catch(const Exception & e) { throw(e); }`
+/// throws a copy of the static type, so an `ExceptionMissingFile` comes out as a plain
+/// `Exception` (docs/improvements.md, I-437); other errors pass unchanged.
+///
+/// The handlers of `ConfigMerger::mergeConfigs` and `ConfigMergingHelpers::MergeConfigs`,
+/// `MergeColorSpace` (MergeConfigsHelpers.cpp:713-716, 759-762, 794-797 @ v2.5.2).
+fn rethrown(e: Exception) -> Exception {
+    if e.kind() == ExceptionKind::MissingFile {
+        Exception::new(e.what())
+    } else {
+        e
+    }
+}
+
+impl ConfigMerger {
+    /// A copy of the merger ([`ConfigMerger::create_editable_copy`]) with one more merged
+    /// config per merge: each merge loads its base and input configs
+    /// ([`ConfigMerger::load_config`], through the copy, so an earlier merge's output can be a
+    /// later merge's base or input) and runs the mergers of every section on a copy of the base.
+    /// Fails with "Could not load the base or the input config" when either can't be found
+    /// (after looking for both), and with the first error of a merger.
+    ///
+    /// Port of `ConfigMerger::mergeConfigs` (MergeConfigsHelpers.cpp:681-729 @ v2.5.2).
+    #[doc(alias = "mergeConfigs")]
+    pub fn merge_configs(&self) -> Result<Arc<ConfigMerger>> {
+        let mut editable_merger = self.create_editable_copy()?;
+
+        for (i, params) in self.merge_params.iter().enumerate() {
+            // (The copy refused parameters that are `None`, which upstream dereferences.)
+            let params = params
+                .as_ref()
+                .ok_or_else(|| null_params("mergeConfigs", i))?;
+
+            // Load base config.
+            let base_cfg = editable_merger.load_config(&params.base_config_name())?;
+
+            // Load input config.
+            let input_cfg = editable_merger.load_config(&params.input_config_name())?;
+
+            let (Some(base_cfg), Some(input_cfg)) = (base_cfg, input_cfg) else {
+                return Err(Exception::new(
+                    "Could not load the base or the input config",
+                ));
+            };
+
+            // The merged config must be initialized with a copy of the base config.
+            let mut merged_config = (*base_cfg).clone();
+
+            // Process merge.
+            merge_all_sections(&base_cfg, &input_cfg, Some(params), &mut merged_config)
+                .map_err(rethrown)?;
+
+            // Add new config object to m_mergedConfigs so they can be used for following
+            // merges.
+            editable_merger.merged_configs.push(Arc::new(merged_config));
+        }
+
+        Ok(Arc::new(editable_merger))
+    }
+}
+
+/// Merges of configs or a color space in memory.
+///
+/// Port of the namespace `ConfigMergingHelpers` (include/OpenColorIO/OpenColorAppHelpers.h:
+/// 855-886, src/OpenColorIO/apphelpers/mergeconfigs/MergeConfigsHelpers.cpp:731-802 @ v2.5.2;
+/// owner decision P9-2 (d)).
+pub mod config_merging_helpers {
+    use super::*;
+    use crate::color_space::ColorSpace;
+
+    /// `input_config` merged into a copy of `base_config` by `params`, every section in turn.
+    /// Fails with "The input or base config was not set." for a config that is `None`, with
+    /// "SectionMerger arguments were not initialized." for parameters that are `None`, and with
+    /// the first error of a merger.
+    ///
+    /// Port of `ConfigMergingHelpers::MergeConfigs` (MergeConfigsHelpers.cpp:734-765 @
+    /// v2.5.2).
+    #[doc(alias = "MergeConfigs")]
+    pub fn merge_configs(
+        params: Option<&ConfigMergingParameters>,
+        base_config: Option<&Config>,
+        input_config: Option<&Config>,
+    ) -> Result<Config> {
+        let (Some(base_config), Some(input_config)) = (base_config, input_config) else {
+            return Err(Exception::new("The input or base config was not set."));
+        };
+
+        // The merged config must be initialized with a copy of the base config.
+        let mut merged_config = base_config.clone();
+
+        // Process the merge.
+        merge_all_sections(base_config, input_config, params, &mut merged_config)
+            .map_err(rethrown)?;
+
+        Ok(merged_config)
+    }
+
+    /// `color_space` merged into a copy of `base_config` by the color spaces section, as the
+    /// only color space of an input config, with a copy of `params` that doesn't adjust the
+    /// reference space. Fails with "The base config or color space object was not set." for a
+    /// config or color space that is `None`, where the input config can't take the color
+    /// space, and with the first error of the merger. The parameters are a reference: upstream
+    /// dereferences null ones (docs/improvements.md, U-176).
+    ///
+    /// Port of `ConfigMergingHelpers::MergeColorSpace` (MergeConfigsHelpers.cpp:767-800 @
+    /// v2.5.2).
+    #[doc(alias = "MergeColorSpace")]
+    pub fn merge_color_space(
+        params: &ConfigMergingParameters,
+        base_config: Option<&Config>,
+        colorspace: Option<&ColorSpace>,
+    ) -> Result<Config> {
+        let (Some(base_config), Some(colorspace)) = (base_config, colorspace) else {
+            return Err(Exception::new(
+                "The base config or color space object was not set.",
+            ));
+        };
+
+        // Create an input config and add the color space.
+        let mut input_config = Config::new()?;
+        input_config.add_color_space(colorspace)?;
+
+        // The merged config must be initialized with a copy of the base config.
+        let mut merged_config = base_config.clone();
+
+        // With only the color space, the reference space is unknown, so turn off
+        // automatic reference space conversion to the reference space of the base config.
+        let e_params = params.create_editable_copy()?;
+        e_params.set_adjust_input_reference_space(false);
+
+        // Process the merge.
+        merge_color_spaces_section(base_config, &input_config, &e_params, &mut merged_config)
+            .map_err(rethrown)?;
+
+        Ok(merged_config)
     }
 }
 

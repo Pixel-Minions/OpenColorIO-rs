@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp` @ v2.5.2: the OCIOM tests
-//! (9.2c) and the section tests, each with its merger (9.2d-9.2i). The merges come with 9.2j.
+//! (9.2c), the section tests, each with its merger (9.2d-9.2i), and the merges (9.2j).
 
 use super::*;
 use crate::apphelpers::mergeconfigs::section_merger::{
@@ -10,6 +10,7 @@ use crate::apphelpers::mergeconfigs::section_merger::{
     MergeHandlerOptions, NamedTransformsMerger, RolesMerger, Section, ViewTransformsMerger,
 };
 use crate::color_space::ColorSpace;
+use crate::context::Context;
 use crate::file_rules::FileRules;
 use crate::fileformats::test_utils::get_test_files_dir;
 use crate::named_transform::NamedTransform;
@@ -8295,4 +8296,504 @@ named_transforms:
             }
         }
     }
+}
+
+/// `pystring::os::path::normpath(pystring::os::path::join(paths))` of the test files'
+/// directory, `configs` and `parts`.
+fn configs_test_file(parts: &[&str]) -> Vec<u8> {
+    let joined = std::iter::once("configs")
+        .chain(parts.iter().copied())
+        .fold(get_test_files_dir().into_bytes(), |acc, p| {
+            os_path::join(&acc, p.as_bytes())
+        });
+    os_path::normpath(&joined)
+}
+
+/// The first transform of the group of a processor between two color spaces, as a matrix: its
+/// first value.
+#[track_caller]
+fn first_matrix_value(config: &Config, ctx: &Context, src: &str, dst: &str) -> f64 {
+    let processor = config
+        .processor_between_with_context(ctx, src, dst)
+        .unwrap();
+    let group = processor.create_group_transform().unwrap();
+    let tr = group.transform(0).unwrap();
+    let Transform::Matrix(mtx) = tr else {
+        panic!("not a MatrixTransform: {tr}");
+    };
+    mtx.matrix()[0]
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, merges_with_ociom_file)` @ v2.5.2.
+#[test]
+fn merges_with_ociom_file() {
+    {
+        let ociom_path = configs_test_file(&["mergeconfigs", "merged1", "merged1.ociom"]);
+
+        // PreferInput, Input first
+        {
+            let merger = ConfigMerger::from_file(&ociom_path).unwrap();
+            let mut new_merger = None;
+            check_for_log_or_exception(
+                LogType::Warning,
+                || {
+                    new_merger = Some(merger.merge_configs()?);
+                    Ok(())
+                },
+                &[
+                    "The Input config contains a value that would override the Base config: file_rules: Default",
+                    "Merged color space 'ACES2065-1' has a conflict with alias 'aces' in color space 'ACEScg'",
+                    "Equivalent input color space 'sRGB - Display' replaces 'sRGB - Display' in the base config, preserving aliases.",
+                    "Equivalent input color space 'CIE-XYZ-D65' replaces 'CIE-XYZ-D65' in the base config, preserving aliases.",
+                    "Equivalent input color space 'ACES2065-1' replaces 'ap0' in the base config, preserving aliases.",
+                    "Equivalent input color space 'sRGB' replaces 'sRGB - Texture' in the base config, preserving aliases.",
+                ],
+            );
+            let merged_config = new_merger.unwrap().last_merged_config().unwrap();
+
+            // This test is essentially the same as the first sub-test in the above test
+            // colorspaces_section_common_reference_and_duplicates.  So just do a quick
+            // sanity test here rather than redoing all the same checks.
+
+            assert_eq!(merged_config.name(), b"Merged1");
+            assert_eq!(
+                merged_config.description(),
+                b"Basic merge with default strategy"
+            );
+            assert_eq!(num_all_color_spaces(&merged_config), 7);
+        }
+    }
+
+    // Test is similar to the previous one but it has two merges in the
+    // OCIOM file and it is using the output of the first merged config
+    // as the input for the second merge.
+    {
+        let ociom_path = configs_test_file(&["mergeconfigs", "merged2", "merged.ociom"]);
+
+        {
+            let merger = ConfigMerger::from_file(&ociom_path).unwrap();
+            let mut new_merger = None;
+            check_for_log_or_exception(
+                LogType::Warning,
+                || {
+                    new_merger = Some(merger.merge_configs()?);
+                    Ok(())
+                },
+                &[
+                    "The Input config contains a value that would override the Base config: file_rules: Default",
+                    "The Input config contains a role that would override Base config role 'cie_xyz_d65_interchange'",
+                    "Color space 'sRGB - Display' was not merged as it's already present in the base config",
+                    "Color space 'CIE-XYZ-D65' was not merged as it's already present in the base config",
+                    "Merged color space 'ACES2065-1' has a conflict with alias 'aces' in color space 'ACEScg'",
+                    "Color space 'sRGB' was not merged as it conflicts with an alias in color space 'sRGB - Texture'",
+                    "Equivalent base color space 'ap0' overrides 'rec709' in the input config, preserving aliases",
+                ],
+            );
+            let new_merger = new_merger.unwrap();
+
+            assert_eq!(new_merger.num_merged_configs(), 2);
+
+            let merged_config = new_merger.last_merged_config().unwrap();
+
+            merged_config.validate().unwrap();
+
+            assert_eq!(merged_config.name(), b"Merged2");
+            assert_eq!(merged_config.description(), b"Description override");
+            assert_eq!(num_all_color_spaces(&merged_config), 7);
+
+            // The second merge replaces the file rules of the first merge with the input config.
+            let fr = merged_config.file_rules().get();
+            assert_eq!(fr.num_entries(), 1);
+            assert_eq!(fr.name(0).unwrap(), b"Default");
+            assert_eq!(fr.color_space(0).unwrap(), b"sRGB");
+
+            // The second merge replaces the roles of the first merge with the input config.
+            assert_eq!(merged_config.num_roles(), 1);
+            assert_eq!(
+                merged_config.role_color_space("cie_xyz_d65_interchange"),
+                b"CIE-XYZ-D65"
+            );
+
+            // The rest of the config should be the result of the first merge.
+
+            assert_eq!(merged_config.num_displays_all(), 1);
+            assert_eq!(merged_config.display(0), b"sRGB - Display");
+            assert_eq!(
+                merged_config.num_views_of_type(ViewType::DisplayDefined, "sRGB - Display"),
+                2
+            );
+
+            let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+            assert_eq!(cs.num_aliases(), 1);
+            assert_eq!(cs.alias(0), b"srgb_display");
+            assert_eq!(cs.family(), b"Display-Basic");
+            assert_eq!(cs.description(), b"from base");
+
+            let cs = check_color_space(&merged_config, "ACES2065-1", 0, SEARCH_SCENE);
+            assert_eq!(cs.num_aliases(), 0);
+            assert_eq!(cs.family(), b"ACES~Linear");
+            assert_eq!(cs.description(), b"from input");
+
+            assert_eq!(merged_config.inactive_color_spaces(), b"ACES2065-1");
+        }
+    }
+
+    // Test with external LUT files.
+    {
+        let ociom_path = configs_test_file(&["mergeconfigs", "merged3", "merged.ociom"]);
+
+        // PreferInput, Input first
+        {
+            let merger = ConfigMerger::from_file(&ociom_path).unwrap();
+            let mut new_merger = None;
+            check_for_log_or_exception(
+                LogType::Warning,
+                || {
+                    new_merger = Some(merger.merge_configs()?);
+                    Ok(())
+                },
+                &["Color space 'raw' will replace a color space in the base config."],
+            );
+            let merged_config = new_merger.unwrap().last_merged_config().unwrap();
+            merged_config.validate().unwrap();
+
+            assert_eq!(merged_config.search_path(), b"./$SHOT:./shot1:shot2:.");
+            let cs = merged_config.color_space("shot1_lut1_cs").unwrap();
+            let tf = cs.transform(ColorSpaceDirection::ToReference).unwrap();
+            let Transform::File(ftf) = tf else {
+                panic!("not a FileTransform: {tf}");
+            };
+            assert_eq!(ftf.src(), b"shot1/lut1.clf");
+            merged_config.processor(tf).unwrap();
+
+            let look = merged_config.look("shot_look").unwrap();
+            let ltf = look.transform().unwrap();
+            merged_config.processor(ltf).unwrap();
+        }
+    }
+
+    // Test that a merge could go wrong if the search_paths are merged with a different strategy
+    // than the other sections.
+    {
+        let ociom_path = configs_test_file(&["mergeconfigs", "merged3", "merged.ociom"]);
+
+        {
+            let merger = ConfigMerger::from_file(&ociom_path).unwrap();
+            // Changing the strategy for colorspace merger to INPUT_ONLY.
+            // This will break the looks "shot_look" (from base) as it needs the search paths
+            // from the base config (search_paths are managed by the colorspace merger).
+            merger
+                .params(0)
+                .unwrap()
+                .set_colorspaces(MergeStrategies::InputOnly);
+            // The rest of the merges uses PreferInput strategy.
+
+            let new_merger = merger.merge_configs().unwrap();
+            let merged_config = new_merger.last_merged_config().unwrap();
+            assert!(merged_config.config_io_proxy().is_none());
+
+            let look = merged_config.look("shot_look").unwrap();
+            let ltf = look.transform().unwrap();
+
+            // Expected to throw as the search_paths were merged following the InputOnly strategy
+            // and the looks were merged following the PreferInput (see OCIOM file default strategy).
+            // Therefore, the look's FileTransform can not find "look.cdl" and throws an exception.
+            assert!(merged_config.processor(ltf).is_err());
+
+            // It can happen with any section that uses the search_paths such as looks,
+            // named transforms, and colorspaces.
+        }
+    }
+
+    // Test with a built-in config.
+    {
+        let ociom_path = configs_test_file(&["mergeconfigs", "merged4", "merged.ociom"]);
+
+        // InputOnly
+        {
+            let merger = ConfigMerger::from_file(&ociom_path).unwrap();
+            let new_merger = merger.merge_configs().unwrap();
+            let merged_config = new_merger.last_merged_config().unwrap();
+
+            merged_config.validate().unwrap();
+
+            assert_eq!(
+                merged_config.name(),
+                b"cg-config-v1.0.0_aces-v1.3_ocio-v2.1"
+            );
+            assert_eq!(num_all_color_spaces(&merged_config), 20);
+        }
+    }
+}
+
+/// Upstream's merge parameters of the in-memory merge tests: not input first, `PreferInput`
+/// for the roles, color spaces, named transforms and the default, with family prefixes,
+/// without the reference space adjustment and the duplicate search.
+fn in_memory_params() -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    params.set_input_first(false);
+    let strategy = MergeStrategies::PreferInput;
+    params.set_roles(strategy);
+    params.set_colorspaces(strategy);
+    params.set_named_transforms(strategy);
+    params.set_default_strategy(strategy);
+    params.set_input_family_prefix("Input/");
+    params.set_base_family_prefix("Base/");
+    params.set_adjust_input_reference_space(false);
+    params.set_avoid_duplicates(false);
+    params
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, merges_with_ocioz_file)` @ v2.5.2.
+#[test]
+fn merges_with_ocioz_file() {
+    let archive_path_linux = configs_test_file(&["context_test1", "context_test1_linux.ocioz"]);
+    let base_config = Config::create_from_file(&archive_path_linux).unwrap();
+
+    let config_path_input = configs_test_file(&["mergeconfigs", "merged3", "input.ocio"]);
+    let input_config = Config::create_from_file(&config_path_input).unwrap();
+
+    let params = in_memory_params();
+
+    {
+        let mut merged_config = None;
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merged_config = Some(config_merging_helpers::merge_configs(
+                    Some(&params),
+                    Some(&base_config),
+                    Some(&input_config),
+                )?);
+                Ok(())
+            },
+            &[
+                "Color space 'reference' will replace a color space in the base config.",
+                "Color space 'raw' will replace a color space in the base config.",
+                "Color space 'plain_lut1_cs' will replace a color space in the base config.",
+                "Color space 'shot1_lut1_cs' will replace a color space in the base config.",
+            ],
+        );
+        let merged_config = merged_config.unwrap();
+
+        // The working dir is empty.
+        assert_eq!(merged_config.working_dir(), b"");
+        // The configIOProxy is not NULL.
+        assert!(merged_config.config_io_proxy().is_some());
+
+        let mut ctx = (*merged_config.current_context().get()).clone();
+
+        // This is resolved in the OCIOZ base.
+        {
+            // Note: the $SHOT = shot4 search path takes precedence for this color space.
+            let mat0 = first_matrix_value(&merged_config, &ctx, "plain_lut1_cs", "reference");
+            assert_eq!(mat0, 40.); // is 40 in the base config, 20 in input
+        }
+        {
+            let mat0 = first_matrix_value(&merged_config, &ctx, "shot1_lut1_cs", "reference");
+            assert_eq!(mat0, 10.); // is 10 in the base config, 100 in input
+        }
+        {
+            // Will try to resolve it using relative paths and won't find it.
+            assert!(
+                merged_config
+                    .processor_between_with_context(&ctx, "shot1_lut2_cs", "reference")
+                    .is_err()
+            );
+        }
+
+        // Add an absolute search path for the input config.
+        let search_path_input = configs_test_file(&["mergeconfigs", "merged3"]);
+
+        ctx.clear_search_paths();
+        ctx.add_search_path(&search_path_input);
+        for i in 0..merged_config.num_search_paths() {
+            ctx.add_search_path(merged_config.search_path_with_index(i));
+        }
+
+        {
+            let mat0 = first_matrix_value(&merged_config, &ctx, "shot1_lut2_cs", "reference");
+            assert_eq!(mat0, 42.); // doesn't exist in the base config
+        }
+
+        // TODO: The next test won't work without this.  Is that expected that you need to clear
+        // the cache after adding a search path, or is there a bug involving the cacheID of processors
+        // when OCIOZ is being used?
+        merged_config.clear_processor_cache();
+
+        {
+            let mat0 = first_matrix_value(&merged_config, &ctx, "shot1_lut1_cs", "reference");
+            assert_eq!(mat0, 100.); // is 10 in the base config, 100 in input
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, merge_in_memory_configs)` @ v2.5.2.
+#[test]
+fn merge_in_memory_configs() {
+    const BASE: &str = r#"ocio_profile_version: 2.1
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+roles:
+    a: colorspace_a
+
+colorspaces:
+- !<ColorSpace>
+    name: colorspace_a
+    family: utility
+"#;
+
+    const INPUT: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+colorspaces:
+- !<ColorSpace>
+    name: B
+    family: aces
+"#;
+
+    const RESULT: &str = r#"ocio_profile_version: 2.1
+
+roles:
+  a: colorspace_a
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+colorspaces:
+  - !<ColorSpace>
+    name: colorspace_a
+    family: Base/utility
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: B
+    family: Input/aces
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform"#;
+
+    let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+    let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+
+    let params = in_memory_params();
+
+    let mut merged_config = None;
+    check_for_log_or_exception(
+        LogType::Warning,
+        || {
+            merged_config = Some(config_merging_helpers::merge_configs(
+                Some(&params),
+                Some(&base_config),
+                Some(&input_config),
+            )?);
+            Ok(())
+        },
+        &[
+            "The Input config contains a value that would override the Base config: file_rules: Default",
+        ],
+    );
+
+    let oss = merged_config.unwrap().serialize().unwrap();
+
+    let result_config = Config::create_from_stream(RESULT.as_bytes()).unwrap();
+    let oss_result = result_config.serialize().unwrap();
+
+    assert_eq!(
+        String::from_utf8_lossy(&oss),
+        String::from_utf8_lossy(&oss_result)
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, merge_single_colorspace)` @ v2.5.2.
+#[test]
+fn merge_single_colorspace() {
+    const BASE: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+roles:
+    a: colorspace_a
+
+colorspaces:
+- !<ColorSpace>
+    name: colorspace_a
+    family: utility
+"#;
+
+    const INPUT: &str = r#"ocio_profile_version: 2.1
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: B}
+
+colorspaces:
+- !<ColorSpace>
+    name: B
+    family: aces
+"#;
+
+    const RESULT: &str = r#"ocio_profile_version: 2
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  a: colorspace_a
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: A}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: colorspace_a
+    family: Base/utility
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: B
+    family: Input/aces
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform"#;
+
+    let base_config = Config::create_from_stream(BASE.as_bytes()).unwrap();
+    let input_config = Config::create_from_stream(INPUT.as_bytes()).unwrap();
+    let colorspace = input_config.color_space("B");
+
+    let params = in_memory_params();
+
+    let merged_config =
+        config_merging_helpers::merge_color_space(&params, Some(&base_config), colorspace).unwrap();
+
+    let oss = merged_config.serialize().unwrap();
+
+    let result_config = Config::create_from_stream(RESULT.as_bytes()).unwrap();
+    let oss_result = result_config.serialize().unwrap();
+
+    assert_eq!(
+        String::from_utf8_lossy(&oss),
+        String::from_utf8_lossy(&oss_result)
+    );
 }

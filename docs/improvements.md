@@ -4157,6 +4157,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `NamedTransformsMerger::update_family`); `section_merger_oracle_tests.rs`
   (`whole_merges_match_the_wheel`, the "named transforms" configs).
 
+### I-437. A merge reports a missing file as a plain exception
+
+- **Upstream:** `ConfigMerger::mergeConfigs`, `ConfigMergingHelpers::MergeConfigs` and
+  `MergeColorSpace` catch the mergers' errors as `const Exception &` and rethrow them with
+  `throw(e)` (`MergeConfigsHelpers.cpp:713-716, 759-762, 794-797` @ v2.5.2), which throws a
+  copy of the static type: an `ExceptionMissingFile` (a LUT file the reference space
+  converters can't find) comes out as an `Exception`, and Python gets `Exception` rather than
+  `ExceptionMissingFile`. The message is kept.
+- **Who notices:** callers that catch `ExceptionMissingFile` around a merge.
+- **A fix:** rethrow with `throw;`, or let the error through.
+- **Status:** matched in `p9-merge-3` (9.2j, `apphelpers/mergeconfigs/merge_configs_helpers.rs`,
+  `rethrown`); `crates/ocio/tests/merge_configs_oracle.rs`
+  (`a_missing_file_in_a_merge_is_a_plain_exception`, probed on the Windows wheel, 2026-10-25).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
