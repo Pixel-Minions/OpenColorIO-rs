@@ -102,12 +102,17 @@ fn text(c: CharPtr) -> Vec<u8> {
 }
 
 /// The library's `GpuLanguage` of the C++ value `v`: the port's error outside its enumerators,
-/// which the wheel stores, and then reads through its `switch`es (docs/improvements.md, U-112).
-fn gpu_language(v: i64) -> PyResult<GpuLanguage> {
+/// which the wheel stores, and then reads through its `switch`es: D-15's inside the enum's
+/// values (docs/deviations.md), U-112's outside them (docs/improvements.md).
+pub(crate) fn gpu_language(v: i64) -> PyResult<GpuLanguage> {
     GpuLanguage::ALL
         .into_iter()
         .find(|l| *l as i64 == v)
-        .ok_or_else(|| outside_enumerators(GPU_LANGUAGE, v))
+        .ok_or_else(|| match v {
+            // Inside the enum's values (no fixed type, enumerators 0 to 9): D-15.
+            10..=15 => crate::py_transform::not_an_enumerator(GPU_LANGUAGE, v),
+            _ => outside_enumerators(GPU_LANGUAGE, v),
+        })
 }
 
 // .def("clone", &GpuShaderCreator::clone) (PyGpuShaderCreator.cpp:59-60 @ v2.5.2): a

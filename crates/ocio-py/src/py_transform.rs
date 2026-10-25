@@ -1230,6 +1230,17 @@ pub(crate) fn outside_enumerators(qualified: &str, v: i64) -> PyErr {
     ))
 }
 
+/// The port's error for a value inside an enum's values ([dcl.enum]: an enum without a fixed
+/// type holds the values of the smallest bit-field that holds its enumerators) that isn't an
+/// enumerator, which the wheel stores and the port's library enum can't hold: `GpuLanguage` 10
+/// to 15, `BitDepth` 9 to 15 (docs/deviations.md, D-15).
+pub(crate) fn not_an_enumerator(qualified: &str, v: i64) -> PyErr {
+    pyo3::exceptions::PyValueError::new_err(format!(
+        "{qualified}({v}): a value of the enum that is none of its enumerators, which the wheel \
+         stores and the port's library can't hold (docs/deviations.md, D-15)"
+    ))
+}
+
 /// The wheel's error for a style outside its enumerators that the library converts at once
 /// (and so never stores): `std::stringstream ss(initial); ss << style;` at the end of the
 /// conversion's `switch`, which writes the number over the start of `initial`

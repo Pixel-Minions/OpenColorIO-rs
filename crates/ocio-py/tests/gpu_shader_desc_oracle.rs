@@ -1068,3 +1068,45 @@ fn texture_values_inside_the_enums_are_the_wheels() {
     assert_eq!(message, "Error: Unsupported texture type");
     common::script::compare_with(std::slice::from_ref(&sc), &theirs);
 }
+
+/// A language inside the enum's values (`GpuLanguage`: no fixed type, enumerators 0 to 9,
+/// values 0 to 15) that is no enumerator: the wheel stores it (its `getLanguage` gives it
+/// back; its `getCacheID` would end its process), the port raises D-15's error and keeps the
+/// language it had.
+#[test]
+fn a_language_inside_the_enums_values_is_d15() {
+    let mut sc = Script::new();
+    let mut refused = Vec::new();
+    let mut read = Vec::new();
+    for v in [10, 15] {
+        let d = sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![]);
+        let lang = sc.call(n("OCIO.GpuLanguage"), vec![i(v)]);
+        refused.push(sc.call(ra(d, "setLanguage"), vec![r(lang)]));
+        read.push((v, sc.call(ra(d, "getLanguage"), vec![])));
+        refused.push(sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![r(lang)]));
+    }
+    let theirs = common::wheel(&[sc.json()]);
+    let theirs = theirs[0]["steps"].as_array().unwrap();
+    let ours = common::port(&sc.json());
+    let ours = ours["steps"].as_array().unwrap();
+    assert_eq!(theirs.len(), sc.steps.len());
+    assert_eq!(ours.len(), sc.steps.len());
+    for (k, (step, wheel_step)) in ours.iter().zip(theirs).enumerate() {
+        assert!(wheel_step.get("value").is_some(), "step {k}: {wheel_step}");
+        if refused.contains(&k) {
+            let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
+                &step["raised"]["message"],
+            ))
+            .unwrap();
+            assert!(message.contains("D-15"), "step {k}: {step}");
+            assert_eq!(step["raised"]["type"], "builtins.ValueError", "step {k}");
+        } else {
+            assert!(step.get("value").is_some(), "step {k}: {step}");
+        }
+    }
+    for (v, k) in read {
+        // The wheel's description holds the value; the port's the one it had.
+        assert_eq!(theirs[k]["value"]["enum"][1], json!(v), "{}", theirs[k]);
+        assert_ne!(ours[k]["value"]["enum"][1], json!(v), "{}", ours[k]);
+    }
+}

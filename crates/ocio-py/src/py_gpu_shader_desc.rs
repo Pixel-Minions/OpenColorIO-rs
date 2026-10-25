@@ -283,10 +283,7 @@ static CREATE_SHADER_DESC: Function = static_def!(
         let StdString(pixel_name) = arg!(a, 2, convert, StdString);
         let StdString(resource_prefix) = arg!(a, 3, convert, StdString);
         let StdString(uid) = arg!(a, 4, convert, StdString);
-        let lang = GpuLanguage::ALL
-            .into_iter()
-            .find(|l| *l as i64 == lang)
-            .ok_or_else(|| outside_enumerators(GPU_LANGUAGE, lang))?;
+        let lang = crate::py_gpu_shader_creator::gpu_language(lang)?;
         let mut p = GpuShaderDesc::default();
         p.set_language(lang);
         if !function_name.is_empty() {

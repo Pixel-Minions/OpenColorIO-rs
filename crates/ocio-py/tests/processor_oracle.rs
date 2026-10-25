@@ -854,7 +854,64 @@ fn the_embedding_api_shares_processors() {
         let gback = ocio_py::embed::gpu_processor_from_python(&from_python).unwrap();
         assert!(std::sync::Arc::ptr_eq(&gback, &gpu));
         assert!(ocio_py::embed::gpu_processor_from_python(obj.bind(py)).is_err());
+        // D-14: Python's change of the processor's metadata, which Python's objects see, is
+        // not in the library's metadata a Rust host reads.
+        let before = p.processor_metadata().clone();
+        let pm = obj.bind(py).call_method0("getProcessorMetadata").unwrap();
+        pm.call_method1("addFile", ("a.clf",)).unwrap();
+        let again = obj.bind(py).call_method0("getProcessorMetadata").unwrap();
+        let files: Vec<String> = py
+            .import("builtins")
+            .unwrap()
+            .getattr("list")
+            .unwrap()
+            .call1((again.call_method0("getFiles").unwrap(),))
+            .unwrap()
+            .extract()
+            .unwrap();
+        assert_eq!(files, ["a.clf"]);
+        assert_eq!(*p.processor_metadata(), before);
     });
+}
+
+/// A bit depth inside the enum's values (`BitDepth`: no fixed type, enumerators 0 to 8, values 0
+/// to 15) that is no enumerator, which the wheel hands the library (an optimized processor
+/// without ops is made, and cached under the number), is the port's D-15 error.
+#[test]
+fn a_bit_depth_inside_the_enums_values_is_d15() {
+    let mut sc = Script::new();
+    let cfg = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    let group = sc.call(n("OCIO.GroupTransform"), vec![]);
+    let pg = sc.call(ra(cfg, "getProcessor"), vec![r(group)]);
+    let mut refused = Vec::new();
+    for v in [9, 15] {
+        let bd = sc.call(n("OCIO.BitDepth"), vec![i(v)]);
+        refused.push(sc.call(
+            ra(pg, "getOptimizedProcessor"),
+            vec![r(bd), n("OCIO.BIT_DEPTH_F32"), n("OCIO.OPTIMIZATION_NONE")],
+        ));
+        refused.push(sc.call(
+            ra(pg, "getOptimizedProcessor"),
+            vec![n("OCIO.BIT_DEPTH_F32"), r(bd), n("OCIO.OPTIMIZATION_NONE")],
+        ));
+    }
+    let theirs = common::wheel(&[sc.json()]).remove(0);
+    let ours = common::port(&sc.json());
+    let (ours, theirs) = (
+        ours["steps"].as_array().unwrap(),
+        theirs["steps"].as_array().unwrap(),
+    );
+    assert_eq!(ours.len(), sc.steps.len());
+    assert_eq!(refused.len(), 4);
+    for (k, (o, t)) in ours.iter().zip(theirs).enumerate() {
+        assert!(t.get("value").is_some(), "step {k}: {t}");
+        if refused.contains(&k) {
+            assert!(message(o).contains("D-15"), "step {k}: {o}");
+            assert_eq!(o["raised"]["type"], "builtins.ValueError");
+        } else {
+            assert_eq!(o["value"], t["value"], "step {k}");
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

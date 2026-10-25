@@ -72,6 +72,16 @@ macro_rules! this_proc {
     };
 }
 
+/// The library's bit depth of the C++ value `v` given to an optimized processor: a value
+/// inside the enum's values (no fixed type, enumerators 0 to 8: 0 to 15) that is no
+/// enumerator is D-15's error, one outside them U-112's.
+fn processor_bit_depth(v: i64) -> PyResult<ocio_ops::open_color_types::BitDepth> {
+    match v {
+        9..=15 => Err(crate::py_transform::not_an_enumerator(BIT_DEPTH, v)),
+        _ => bit_depth(v),
+    }
+}
+
 /// The flags of the C++ value `v` (`OptimizationFlags : unsigned long`).
 fn flags(v: i64) -> OptimizationFlags {
     OptimizationFlags(v as CULong)
@@ -270,7 +280,7 @@ static GET_OPTIMIZED_PROCESSOR: Function = Function {
                 let in_bd = enum_param!(o, a, 1);
                 let out_bd = enum_param!(o, a, 2);
                 let f = flags(enum_param!(o, a, 3));
-                let (in_bd, out_bd) = (bit_depth(in_bd)?, bit_depth(out_bd)?);
+                let (in_bd, out_bd) = (processor_bit_depth(in_bd)?, processor_bit_depth(out_bd)?);
                 let opt = p.optimized_processor_with_bit_depths(in_bd, out_bd, f);
                 processor_out(py, py_result(py, opt)?)
             },
@@ -348,7 +358,7 @@ static GET_OPTIMIZED_CPU_PROCESSOR: Function = Function {
                 let in_bd = enum_param!(o, a, 1);
                 let out_bd = enum_param!(o, a, 2);
                 let f = flags(enum_param!(o, a, 3));
-                let (in_bd, out_bd) = (bit_depth(in_bd)?, bit_depth(out_bd)?);
+                let (in_bd, out_bd) = (processor_bit_depth(in_bd)?, processor_bit_depth(out_bd)?);
                 let cpu = p.optimized_cpu_processor_with_bit_depths(in_bd, out_bd, f);
                 let cpu = py_result(py, cpu)?;
                 Ok(Some(cpu_processor_out(py, &cpu)?.unbind()))

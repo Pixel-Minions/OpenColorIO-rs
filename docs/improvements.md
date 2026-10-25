@@ -5372,11 +5372,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   "1D LUT cannot have more than two dimensions: 3 > 2" when `getTextures` gives the texture,
   GpuShader.cpp:247-253), matched in `p6-processors` (6.3h, verifier 1: the library's
   `add_texture_raw`, `add_3d_texture_raw`, `Texture::raw_dimensions`); `gpu_shader_desc_oracle.rs`,
-  `texture_values_inside_the_enums_are_the_wheels`. A language from 10 to 15 is inside
-  `GpuLanguage`'s values too (the wheel stores it and gives it back as `???`, extraction raises
-  "Unknown GPU shader language." after the ops before it wrote their code, `getCacheID` ends
-  its process); the port still raises this entry's error there, pending the owner's decision
-  (reported 2026-10-25: the library's `GpuLanguage` can't hold it).
+  `texture_values_inside_the_enums_are_the_wheels`. A language from 10 to 15, inside
+  `GpuLanguage`'s values, is D-15 (docs/deviations.md), not this entry.
   Also the bit depths of `Processor.getOptimizedProcessor` and `getOptimizedCPUProcessor`
   outside the enum's values (`BitDepth`, enumerators 0 to 8, values 0 to 15: `OCIO.BitDepth(42)`),
   which the wheel hands the library: its cache key writes the number, and the processor is
@@ -5384,10 +5381,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   bit-depth ops), where it raises "Bit depth is not supported: unknown." (probed on Windows,
   2026-10-25); the port raises before the library runs, in both cases; in `p6-processors`
   (6.3h, `crates/ocio-py/src/py_processor.rs`, `bit_depth`); `processor_oracle.rs`,
-  `a_bit_depth_outside_the_enumerators_is_the_ports_error`. A bit depth from 9 to 15 is
-  inside the enum's values (the wheel's processors behave as for `BIT_DEPTH_UNKNOWN`, cached
-  under the number); the port still raises this entry's error there, pending the owner's
-  decision (reported 2026-10-25: the library's `BitDepth` can't hold it).
+  `a_bit_depth_outside_the_enumerators_is_the_ports_error`. A bit depth from 9 to 15, inside
+  the enum's values, is D-15 (docs/deviations.md), not this entry.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
