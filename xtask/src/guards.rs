@@ -199,6 +199,7 @@ pub(crate) fn run() -> Result<(), String> {
     problems.extend(crate::registers::check(root));
     problems.extend(crate::upstream::validate(&crate::upstream::load_map()?));
     check_submodule(root, &mut problems);
+    check_oracle_cache_off(root, &mut problems);
 
     if problems.is_empty() {
         println!("guards: ok");
@@ -1683,9 +1684,124 @@ fn check_submodule(root: &Path, problems: &mut Vec<String>) {
     }
 }
 
+/// The variable that turns the oracle's response cache off (`crates/ocio-testkit/src/oracle.rs`).
+const ORACLE_NO_CACHE: &str = "OCIO_RS_ORACLE_NO_CACHE";
+
+/// The workflows whose jobs run the tests, each of which must set [`ORACLE_NO_CACHE`].
+const TEST_WORKFLOWS: [&str; 2] = [".github/workflows/ci.yml", ".github/workflows/sde.yml"];
+
+/// CI's safety net for the oracle's cache keys: every job of the workflows that run tests asks
+/// the wheel, never the response cache, so that an answer cached under a key that missed a change
+/// of the oracle (`crates/ocio-testkit/src/oracle_scope.rs`) can't pass CI. The workflows set
+/// [`ORACLE_NO_CACHE`] for every job, and `scripts/rocky9.sh` passes it into the container.
+fn check_oracle_cache_off(root: &Path, problems: &mut Vec<String>) {
+    for rel in TEST_WORKFLOWS.into_iter().chain(["scripts/rocky9.sh"]) {
+        match std::fs::read_to_string(root.join(rel)) {
+            Ok(text) if rel.ends_with(".sh") => problems.extend(rocky_cache_problems(rel, &text)),
+            Ok(text) => problems.extend(workflow_cache_problems(rel, &text)),
+            Err(e) => problems.push(format!("{rel}: {e}")),
+        }
+    }
+}
+
+/// The problems of workflow `rel`: its top-level `env:` must set [`ORACLE_NO_CACHE`] to `"1"`,
+/// and nothing else in it may name the variable (a job or a step that set it otherwise, or a
+/// script that unset it).
+fn workflow_cache_problems(rel: &str, text: &str) -> Vec<String> {
+    let expected = format!("  {ORACLE_NO_CACHE}: \"1\"");
+    let mut in_env = false;
+    let mut set = false;
+    let mut problems = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let top_level = !line.is_empty() && !line.starts_with([' ', '#']);
+        if top_level {
+            in_env = line == "env:";
+        }
+        if !line.contains(ORACLE_NO_CACHE) {
+            continue;
+        }
+        if in_env && line == expected && !set {
+            set = true;
+        } else {
+            problems.push(format!(
+                "{rel}:{}: {ORACLE_NO_CACHE} is named other than once, in the top-level env",
+                i + 1
+            ));
+        }
+    }
+    if !set {
+        problems.push(format!(
+            "{rel}: the top-level env must set `{ORACLE_NO_CACHE}: \"1\"`, so that every test asks \
+             the wheel, never the oracle's response cache"
+        ));
+    }
+    problems
+}
+
+/// The problems of `scripts/rocky9.sh`: it must pass [`ORACLE_NO_CACHE`] into the container.
+fn rocky_cache_problems(rel: &str, text: &str) -> Vec<String> {
+    let expected = format!("-e {ORACLE_NO_CACHE} \\");
+    if text.lines().any(|line| line.trim() == expected) {
+        Vec::new()
+    } else {
+        vec![format!(
+            "{rel}: `docker run` must pass {ORACLE_NO_CACHE} into the container (`{expected}`)"
+        )]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The workflows that run tests turn the oracle's response cache off for every job, and
+    /// the Rocky Linux 9 script passes that on: the repository's files, and the cases the check
+    /// refuses.
+    #[test]
+    fn ci_never_reads_the_oracle_cache() {
+        let root = paths::workspace_root();
+        let mut problems = Vec::new();
+        check_oracle_cache_off(root, &mut problems);
+        assert_eq!(problems, Vec::<String>::new());
+
+        let good = "name: CI\n\nenv:\n  CARGO_TERM_COLOR: always\n  # The cache.\n  \
+                    OCIO_RS_ORACLE_NO_CACHE: \"1\"\n\njobs:\n  a:\n    steps:\n      - run: x\n";
+        assert_eq!(workflow_cache_problems("w", good), Vec::<String>::new());
+        for bad in [
+            // Not set, set to another value, set in a job only, set after the top-level env.
+            "env:\n  CARGO_TERM_COLOR: always\njobs:\n  a:\n    steps: []\n",
+            "env:\n  OCIO_RS_ORACLE_NO_CACHE: \"0\"\n",
+            "env:\n  OCIO_RS_ORACLE_NO_CACHE: 1\n",
+            "jobs:\n  a:\n    env:\n      OCIO_RS_ORACLE_NO_CACHE: \"1\"\n",
+            "env:\n  A: b\njobs:\n  OCIO_RS_ORACLE_NO_CACHE: \"1\"\n",
+            // Set, then named again: a step's env, or a script that unsets it.
+            &good.replace(
+                "      - run: x\n",
+                "      - run: unset OCIO_RS_ORACLE_NO_CACHE\n",
+            ),
+            &good.replace(
+                "      - run: x\n",
+                "      - env:\n          OCIO_RS_ORACLE_NO_CACHE: \"\"\n",
+            ),
+            &format!("{good}env:\n  OCIO_RS_ORACLE_NO_CACHE: \"1\"\n"),
+        ] {
+            assert!(!workflow_cache_problems("w", bad).is_empty(), "{bad}");
+        }
+
+        let rocky = "docker run --rm \\\n    -e OCIO_RS_TIER \\\n    -e OCIO_RS_ORACLE_NO_CACHE \\\n    \
+                     \"$image\" \"$@\"\n";
+        assert_eq!(rocky_cache_problems("r", rocky), Vec::<String>::new());
+        for bad in [
+            rocky.replace("    -e OCIO_RS_ORACLE_NO_CACHE \\\n", ""),
+            rocky.replace("-e OCIO_RS_ORACLE_NO_CACHE", "-e OCIO_RS_ORACLE_NO_CACHE=0"),
+            rocky.replace(
+                "    -e OCIO_RS_ORACLE_NO_CACHE \\\n",
+                "    # -e OCIO_RS_ORACLE_NO_CACHE\n",
+            ),
+        ] {
+            assert!(!rocky_cache_problems("r", &bad).is_empty(), "{bad}");
+        }
+    }
 
     #[test]
     fn unsafe_code_relaxed_in_any_lint_attribute() {
