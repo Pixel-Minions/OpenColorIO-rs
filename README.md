@@ -86,7 +86,7 @@ one.
 
 ## Progress
 
-Status as of 2026-10-25: **milestones M0, M1, M2 and M3 are complete**, about 78% of the
+Status as of 2026-10-25 (evening): **milestones M0, M1, M2 and M3 are complete**, about 78% of the
 planned work (1,158 of 1,191 upstream C++ tests ported; 318 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
