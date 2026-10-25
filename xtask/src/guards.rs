@@ -1687,18 +1687,80 @@ fn check_submodule(root: &Path, problems: &mut Vec<String>) {
 /// The variable that turns the oracle's response cache off (`crates/ocio-testkit/src/oracle.rs`).
 const ORACLE_NO_CACHE: &str = "OCIO_RS_ORACLE_NO_CACHE";
 
-/// The workflows whose jobs run the tests, each of which must set [`ORACLE_NO_CACHE`].
-const TEST_WORKFLOWS: [&str; 2] = [".github/workflows/ci.yml", ".github/workflows/sde.yml"];
+/// The directory of GitHub's workflows, and the directory of the scripts they and the gate run.
+const WORKFLOWS_DIR: &str = ".github/workflows";
+const SCRIPTS_DIR: &str = "scripts";
 
-/// CI's safety net for the oracle's cache keys: every job of the workflows that run tests asks
-/// the wheel, never the response cache, so that an answer cached under a key that missed a change
-/// of the oracle (`crates/ocio-testkit/src/oracle_scope.rs`) can't pass CI. The workflows set
-/// [`ORACLE_NO_CACHE`] for every job, and `scripts/rocky9.sh` passes it into the container.
+/// CI's safety net for the oracle's cache keys: every job of every workflow asks the wheel,
+/// never the response cache, so that an answer cached under a key that missed a change of the
+/// oracle (`crates/ocio-testkit/src/oracle_scope.rs`) can't pass CI. Every workflow (`.yml` or
+/// `.yaml` in [`WORKFLOWS_DIR`]: one that runs tests, one that doesn't yet, and a reusable one,
+/// whose jobs don't get its caller's `env`) sets [`ORACLE_NO_CACHE`] in its top-level `env`, and
+/// every script in [`SCRIPTS_DIR`] that starts a container passes it in (`scripts/rocky9.sh`).
 fn check_oracle_cache_off(root: &Path, problems: &mut Vec<String>) {
-    for rel in TEST_WORKFLOWS.into_iter().chain(["scripts/rocky9.sh"]) {
+    let mut workflows = Vec::new();
+    match std::fs::read_dir(root.join(WORKFLOWS_DIR)) {
+        Ok(entries) => {
+            for entry in entries {
+                match entry {
+                    Ok(entry) => {
+                        let name = entry.file_name().to_string_lossy().into_owned();
+                        let lower = name.to_ascii_lowercase();
+                        if lower.ends_with(".yml") || lower.ends_with(".yaml") {
+                            workflows.push(format!("{WORKFLOWS_DIR}/{name}"));
+                        }
+                    }
+                    Err(e) => problems.push(format!("{WORKFLOWS_DIR}: {e}")),
+                }
+            }
+        }
+        Err(e) => problems.push(format!("{WORKFLOWS_DIR}: {e}")),
+    }
+    if workflows.is_empty() {
+        problems.push(format!("{WORKFLOWS_DIR}: no workflow found"));
+    }
+    workflows.sort();
+    for rel in &workflows {
         match std::fs::read_to_string(root.join(rel)) {
-            Ok(text) if rel.ends_with(".sh") => problems.extend(rocky_cache_problems(rel, &text)),
             Ok(text) => problems.extend(workflow_cache_problems(rel, &text)),
+            Err(e) => problems.push(format!("{rel}: {e}")),
+        }
+    }
+    let mut scripts = Vec::new();
+    collect_scripts(&root.join(SCRIPTS_DIR), SCRIPTS_DIR, &mut scripts, problems);
+    if scripts.is_empty() {
+        problems.push(format!("{SCRIPTS_DIR}: no script found"));
+    }
+    scripts.sort();
+    for rel in &scripts {
+        match std::fs::read(root.join(rel)) {
+            Ok(bytes) => {
+                problems.extend(script_cache_problems(rel, &String::from_utf8_lossy(&bytes)))
+            }
+            Err(e) => problems.push(format!("{rel}: {e}")),
+        }
+    }
+}
+
+/// Every file under `dir` (whose path from the root is `rel`), at any depth.
+fn collect_scripts(dir: &Path, rel: &str, out: &mut Vec<String>, problems: &mut Vec<String>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            problems.push(format!("{rel}: {e}"));
+            return;
+        }
+    };
+    for entry in entries {
+        match entry {
+            Ok(entry) => {
+                let name = format!("{rel}/{}", entry.file_name().to_string_lossy());
+                if entry.path().is_dir() {
+                    collect_scripts(&entry.path(), &name, out, problems);
+                } else {
+                    out.push(name);
+                }
+            }
             Err(e) => problems.push(format!("{rel}: {e}")),
         }
     }
@@ -1738,16 +1800,64 @@ fn workflow_cache_problems(rel: &str, text: &str) -> Vec<String> {
     problems
 }
 
-/// The problems of `scripts/rocky9.sh`: it must pass [`ORACLE_NO_CACHE`] into the container.
-fn rocky_cache_problems(rel: &str, text: &str) -> Vec<String> {
-    let expected = format!("-e {ORACLE_NO_CACHE} \\");
-    if text.lines().any(|line| line.trim() == expected) {
-        Vec::new()
-    } else {
-        vec![format!(
-            "{rel}: `docker run` must pass {ORACLE_NO_CACHE} into the container (`{expected}`)"
-        )]
+/// The subcommands of a container engine that start no container. Any other (`run`, `create`,
+/// `exec`, `start`, `compose`, `container ...`, an option, a word the check can't read) may.
+const NO_CONTAINER: [&str; 17] = [
+    "build", "image", "images", "inspect", "volume", "ps", "pull", "push", "rm", "rmi", "info",
+    "version", "system", "login", "logout", "tag", "network",
+];
+
+/// The problems of script `rel`: every command that names a container engine (a word whose last
+/// path component starts with `docker` or `podman`, in any case, outside a comment line) and may
+/// start a container (its subcommand isn't one of [`NO_CONTAINER`]) must pass
+/// [`ORACLE_NO_CACHE`] into it: `-e OCIO_RS_ORACLE_NO_CACHE` (or `--env`), on the command's own
+/// line or on one of the lines its trailing `\`s continue it onto.
+fn script_cache_problems(rel: &str, text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let words_of = |line: &str| -> Vec<String> {
+        if line.trim_start().starts_with('#') {
+            return Vec::new();
+        }
+        line.split_whitespace()
+            .map(|w| w.trim_matches(|c| c == '"' || c == '\'').to_string())
+            .collect()
+    };
+    let mut problems = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let words = words_of(line);
+        for (j, word) in words.iter().enumerate() {
+            let program = word
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !(program.starts_with("docker") || program.starts_with("podman")) {
+                continue;
+            }
+            let subcommand = words.get(j + 1).map(String::as_str);
+            if program.len() == 6 && subcommand.is_some_and(|s| NO_CONTAINER.contains(&s)) {
+                continue;
+            }
+            // The command: this line and those its trailing `\`s continue it onto.
+            let mut end = i;
+            while end + 1 < lines.len() && lines[end].trim_end().ends_with('\\') {
+                end += 1;
+            }
+            let forwards = lines[i..=end].iter().any(|l| {
+                words_of(l)
+                    .windows(2)
+                    .any(|w| (w[0] == "-e" || w[0] == "--env") && w[1] == ORACLE_NO_CACHE)
+            });
+            if !forwards {
+                problems.push(format!(
+                    "{rel}:{}: `{word}` may start a container without passing {ORACLE_NO_CACHE} \
+                     into it (`-e {ORACLE_NO_CACHE} \\`)",
+                    i + 1
+                ));
+            }
+        }
     }
+    problems
 }
 
 #[cfg(test)]
@@ -1790,7 +1900,22 @@ mod tests {
 
         let rocky = "docker run --rm \\\n    -e OCIO_RS_TIER \\\n    -e OCIO_RS_ORACLE_NO_CACHE \\\n    \
                      \"$image\" \"$@\"\n";
-        assert_eq!(rocky_cache_problems("r", rocky), Vec::<String>::new());
+        let quiet = "# Builds the image with docker run's help.\nif ! docker image inspect x; then\n    \
+                     docker build -t x .\nfi\ndocker volume create \\\n    v\n";
+        for good in [rocky, quiet, "set -e\necho hello\n", ""] {
+            assert_eq!(
+                script_cache_problems("r", good),
+                Vec::<String>::new(),
+                "{good}"
+            );
+        }
+        assert_eq!(
+            script_cache_problems(
+                "r",
+                &rocky.replace(" -e OCIO_RS_ORACLE", " --env OCIO_RS_ORACLE")
+            ),
+            Vec::<String>::new()
+        );
         for bad in [
             rocky.replace("    -e OCIO_RS_ORACLE_NO_CACHE \\\n", ""),
             rocky.replace("-e OCIO_RS_ORACLE_NO_CACHE", "-e OCIO_RS_ORACLE_NO_CACHE=0"),
@@ -1798,9 +1923,75 @@ mod tests {
                 "    -e OCIO_RS_ORACLE_NO_CACHE \\\n",
                 "    # -e OCIO_RS_ORACLE_NO_CACHE\n",
             ),
+            // A second container, without the variable.
+            format!("{rocky}docker run --rm \"$image\" true\n"),
+            // Other engines, spellings and subcommands that start a container.
+            "podman run --rm x cargo test\n".to_string(),
+            "docker container run --rm x cargo test\n".to_string(),
+            "docker exec box cargo test\n".to_string(),
+            "docker start -a box\n".to_string(),
+            "docker create --name box x\n".to_string(),
+            "docker --context remote run x\n".to_string(),
+            "docker compose run tests\n".to_string(),
+            "docker-compose up\n".to_string(),
+            "/usr/bin/docker run x\n".to_string(),
+            "\"$root/bin/Docker\" run x\n".to_string(),
+            "docker \\\n    run x\n".to_string(),
+            "if true; then docker run x; fi\n".to_string(),
+            // Only the engines themselves have subcommands known to start nothing.
+            "docker-compose build\n".to_string(),
         ] {
-            assert!(!rocky_cache_problems("r", &bad).is_empty(), "{bad}");
+            assert!(!script_cache_problems("r", &bad).is_empty(), "{bad}");
         }
+
+        // Every workflow of the directory, a reusable one too, and every script, at any depth.
+        let root = paths::target_dir().join(format!("xtask-cache-off-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
+        std::fs::create_dir_all(root.join("scripts/ci")).unwrap();
+        std::fs::write(root.join(".github/workflows/a.yml"), good).unwrap();
+        std::fs::write(root.join(".github/workflows/README.md"), "docs\n").unwrap();
+        std::fs::write(root.join("scripts/rocky9.sh"), rocky).unwrap();
+        let mut problems = Vec::new();
+        check_oracle_cache_off(&root, &mut problems);
+        assert_eq!(problems, Vec::<String>::new());
+        let reusable = "on:\n  workflow_call:\njobs:\n  t:\n    steps:\n      - run: cargo test\n";
+        std::fs::write(root.join(".github/workflows/reusable.YAML"), reusable).unwrap();
+        std::fs::write(
+            root.join("scripts/ci/shard.sh"),
+            "docker run x cargo test\n",
+        )
+        .unwrap();
+        let mut problems = Vec::new();
+        check_oracle_cache_off(&root, &mut problems);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with(".github/workflows/reusable.YAML: ")),
+            "{problems:?}"
+        );
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.starts_with("scripts/ci/shard.sh:1: ")),
+            "{problems:?}"
+        );
+        assert_eq!(problems.len(), 2, "{problems:?}");
+
+        // No workflow, or no script, fails closed.
+        std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        let mut problems = Vec::new();
+        check_oracle_cache_off(&root, &mut problems);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(
+            problems,
+            [
+                ".github/workflows: no workflow found",
+                "scripts: no script found"
+            ],
+        );
     }
 
     #[test]
