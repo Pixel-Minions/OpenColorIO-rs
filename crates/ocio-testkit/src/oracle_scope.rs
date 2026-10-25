@@ -25,10 +25,11 @@
 //!   module of the package in every process), and every module those reach;
 //! - for `batch` and `with_files`, which run other commands named in their arguments, the
 //!   modules of every command they run, at any depth up to [`MAX_DEPTH`] ([`nested`]);
-//! - as the whole oracle's key does: `pyproject.toml`, `uv.lock` and `.python-version`, every
-//!   file of the package that isn't a top-level module (data a module could read), upstream's
-//!   test data, the allowed variables and this machine (`environment` in `oracle.rs`), and
-//!   `oracle_scope.py` itself.
+//! - as the whole oracle's key does: every file of the oracle's directory that isn't a
+//!   top-level module of the package (`oracle_files` in `oracle.rs`: `pyproject.toml`,
+//!   `uv.lock` and `.python-version`, data a module could read, a file that would shadow a
+//!   module the oracle imports), upstream's test data, the allowed variables and this machine
+//!   (`environment` in `oracle.rs`), and `oracle_scope.py` itself.
 //!
 //! The whole oracle's key is the fallback:
 //! - for a command the analysis doesn't know (or that two modules define);
@@ -187,33 +188,26 @@ struct Fingerprint {
 
 /// The fingerprint of the package in `oracle_dir` and of the analyzer `analyzer`.
 fn fingerprint(oracle_dir: &Path, analyzer: &str) -> Result<Fingerprint, String> {
-    let package = oracle_dir.join("ocio_oracle");
-    let mut files = Vec::new();
-    crate::oracle::collect_files(&package, &mut files);
-    files.sort();
-
     let mut modules = Vec::new();
     let mut base = Xxh3::new();
-    base.update(b"oracle scope v2");
+    base.update(b"oracle scope v3");
     hash_named(&mut base, "oracle_scope.py", analyzer.as_bytes());
-    for name in ENVIRONMENT_FILES {
-        match std::fs::read(oracle_dir.join(name)) {
-            Ok(bytes) => hash_named(&mut base, name, &bytes),
-            Err(_) => hash_named(&mut base, name, b"\0missing"),
-        }
-    }
-    base.update(b"package files");
-    for file in &files {
+    // Every file of the oracle's directory but the package's top-level modules: the
+    // environment's files, the package's other files (data a module could read), and any
+    // other file (one that would shadow a module the oracle imports).
+    base.update(b"oracle files");
+    for file in crate::oracle::oracle_files(oracle_dir) {
         let rel = file
-            .strip_prefix(&package)
+            .strip_prefix(oracle_dir)
             .map_err(|e| e.to_string())?
             .to_string_lossy()
             .replace('\\', "/");
-        let bytes = std::fs::read(file).map_err(|e| format!("{}: {e}", file.display()))?;
-        if rel.ends_with(".py") && !rel.contains('/') {
-            modules.push((rel, xxh3_128(&bytes)));
-        } else {
-            hash_named(&mut base, &rel, &bytes);
+        let bytes = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        match rel.strip_prefix("ocio_oracle/") {
+            Some(name) if name.ends_with(".py") && !name.contains('/') => {
+                modules.push((name.to_string(), xxh3_128(&bytes)));
+            }
+            _ => hash_named(&mut base, &rel, &bytes),
         }
     }
     let base = base.digest128();

@@ -408,11 +408,27 @@ fn a_shared_source_changes_every_key() {
         let after = keys(&scopes(&dir), &COMMANDS);
         assert_eq!(changed(&COMMANDS, &before, &after), COMMANDS, "{file}");
     }
-    for file in ["pyproject.toml", "uv.lock", ".python-version"] {
+    // The environment's files, and any other file of the oracle's directory: the oracle runs
+    // from it, so `oracle/json.py` would shadow `json`.
+    for file in [
+        "pyproject.toml",
+        "uv.lock",
+        ".python-version",
+        "json.py",
+        "tools/notes.txt",
+    ] {
         let before = keys(&scopes(&dir), &COMMANDS);
+        std::fs::create_dir_all(dir.join(file).parent().unwrap()).unwrap();
         std::fs::write(dir.join(file), "changed").unwrap();
         let after = keys(&scopes(&dir), &COMMANDS);
         assert_eq!(changed(&COMMANDS, &before, &after), COMMANDS, "{file}");
+    }
+    // Not a virtual environment's files, nor bytecode.
+    for file in [".venv/pyvenv.cfg", "__pycache__/json.pyc"] {
+        let before = keys(&scopes(&dir), &COMMANDS);
+        std::fs::create_dir_all(dir.join(file).parent().unwrap()).unwrap();
+        std::fs::write(dir.join(file), "changed").unwrap();
+        assert_eq!(keys(&scopes(&dir), &COMMANDS), before, "{file}");
     }
     let before = keys(&scopes(&dir), &COMMANDS);
     let after = keys(&scopes_with(&dir, ENV + 1), &COMMANDS);
@@ -1453,16 +1469,20 @@ fn strings_that_name_a_module_are_edges() {
 #[test]
 fn the_cached_analysis_follows_the_sources() {
     let dir = package("cached");
-    let cache = dir.join("cache");
+    // Outside the oracle's directory, as `<target>/oracle-cache` is: every file in it is a
+    // source.
+    let cache =
+        Package(paths::target_dir().join(format!("testkit-scope-cache-{}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&*cache);
     let python = Oracle::get().python();
     let compute_with = |analyzer: &str| {
-        Scopes::compute_with(analyzer, python, &dir, FULL, ENV, Some(&cache))
+        Scopes::compute_with(analyzer, python, &dir, FULL, ENV, Some(&*cache))
             .unwrap_or_else(|e| panic!("{e}"))
     };
     let compute = || compute_with(ANALYZER);
     let first = keys(&compute(), &COMMANDS);
     let entries = || -> Vec<PathBuf> {
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(&cache)
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(&*cache)
             .unwrap()
             .map(|e| e.unwrap().path())
             .collect();
@@ -1515,7 +1535,7 @@ fn the_cached_analysis_follows_the_sources() {
         "import os, sys\nwith open(os.path.join(sys.argv[1], 'd.py'), 'a') as f:\n    \
          f.write('# touched\\n')\n{ANALYZER}"
     );
-    let result = Scopes::compute_with(&touching, python, &dir, FULL, ENV, Some(&cache));
+    let result = Scopes::compute_with(&touching, python, &dir, FULL, ENV, Some(&*cache));
     assert!(result.is_err());
     assert_eq!(entries().len(), count);
 }

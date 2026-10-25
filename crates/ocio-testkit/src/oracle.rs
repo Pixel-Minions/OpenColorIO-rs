@@ -735,17 +735,11 @@ fn identity_with(
 }
 
 /// Hash of everything that determines the oracle's answers on this machine: every file of the
-/// oracle in `oracle_dir` (its environment's files and its package), and the hash of what
-/// isn't in it, [`environment`]. The cache key of every command whose reach can't be scoped
-/// (`oracle_scope.rs`).
+/// oracle's directory `oracle_dir` ([`oracle_files`]: its environment's files, its package,
+/// and any other file there), and the hash of what isn't in it, [`environment`]. The cache key
+/// of every command whose reach can't be scoped (`oracle_scope.rs`).
 fn identity_from(oracle_dir: &Path, environment: u128) -> Result<u128, String> {
-    let mut files = Vec::new();
-    for name in ["pyproject.toml", "uv.lock", ".python-version"] {
-        files.push(oracle_dir.join(name));
-    }
-    collect_files(&oracle_dir.join("ocio_oracle"), &mut files);
-    files.sort();
-
+    let files = oracle_files(oracle_dir);
     let mut h = Xxh3::new();
     for file in &files {
         let rel = file.strip_prefix(oracle_dir).unwrap_or(file);
@@ -797,6 +791,44 @@ fn hash_test_data(h: &mut Xxh3, data: &Path) {
             Err(_) => h.update(b"unreadable"),
         }
     }
+}
+
+/// Every file of the oracle's directory `oracle_dir`, at any depth, in path order: its
+/// environment's files (listed even when missing, so that reading them fails), its package,
+/// and any other file. The oracle runs from that directory, which Python puts first on its
+/// module search path, so a file there can change what the oracle does (`oracle/json.py`
+/// would shadow `json`). Left out: Python's bytecode caches (`__pycache__`, which the
+/// interpreter may write) and a virtual environment (`.venv`, which git ignores there and the
+/// oracle doesn't run from).
+pub(crate) fn oracle_files(oracle_dir: &Path) -> Vec<PathBuf> {
+    fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path
+                    .file_name()
+                    .is_some_and(|n| n != "__pycache__" && n != ".venv")
+                {
+                    collect(&path, out);
+                }
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    collect(oracle_dir, &mut files);
+    for name in crate::oracle_scope::ENVIRONMENT_FILES {
+        let file = oracle_dir.join(name);
+        if !files.contains(&file) {
+            files.push(file);
+        }
+    }
+    files.sort();
+    files
 }
 
 /// Every file under `dir`, at any depth, except Python's bytecode caches (`__pycache__`),
@@ -1753,12 +1785,38 @@ mod tests {
         std::fs::write(package.join("table.json"), "[1]").unwrap();
         std::fs::write(package.join("commands.py"), "c2").unwrap();
         let code_changed = identity(&dir).unwrap();
+        std::fs::write(package.join("commands.py"), "c").unwrap();
+        assert_eq!(identity(&dir).unwrap(), before);
+
+        // Files of the oracle's directory outside the package: one that would shadow a module
+        // the oracle imports, at any depth; not a virtual environment's, nor bytecode there.
+        std::fs::create_dir_all(dir.join(".venv")).unwrap();
+        std::fs::write(dir.join(".venv").join("pyvenv.cfg"), "v").unwrap();
+        std::fs::create_dir_all(dir.join("__pycache__")).unwrap();
+        std::fs::write(dir.join("__pycache__").join("json.pyc"), "b").unwrap();
+        let ignored = identity(&dir).unwrap();
+        std::fs::write(dir.join("json.py"), "j").unwrap();
+        let shadowing = identity(&dir).unwrap();
+        std::fs::remove_file(dir.join("json.py")).unwrap();
+        std::fs::create_dir_all(dir.join("struct")).unwrap();
+        std::fs::write(dir.join("struct").join("__init__.py"), "s").unwrap();
+        let nested = identity(&dir).unwrap();
+        // A missing environment file fails the identity.
+        std::fs::remove_file(dir.join("uv.lock")).unwrap();
+        let missing = identity(&dir);
         let _ = std::fs::remove_dir_all(&dir);
         assert_ne!(
             data_changed, before,
             "a data file didn't change the identity"
         );
         assert_ne!(code_changed, before, "a module didn't change the identity");
+        assert_eq!(ignored, before, ".venv or __pycache__ changed the identity");
+        assert_ne!(
+            shadowing, before,
+            "oracle/json.py didn't change the identity"
+        );
+        assert_ne!(nested, before, "oracle/struct/ didn't change the identity");
+        assert!(missing.is_err(), "a missing uv.lock gave an identity");
     }
 
     /// The directory the cache identity hashes is upstream's tests directory: it holds the
