@@ -53,6 +53,8 @@ pub(crate) mod py_format_metadata;
 #[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
 #[cfg(feature = "python")]
+pub(crate) mod py_gpu_shader_desc;
+#[cfg(feature = "python")]
 pub(crate) mod py_grading_data;
 #[cfg(feature = "python")]
 pub(crate) mod py_image_desc;

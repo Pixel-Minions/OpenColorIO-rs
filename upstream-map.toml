@@ -3834,20 +3834,20 @@ status = "todo"
 path = "src/bindings/python/PyGpuShaderCreator.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_gpu_shader_creator.rs"]
-status = "partial"
-note = "6.2b: the enums TextureType and TextureDimensions and the export of their values; the methods and DynamicPropertyIterator come with the GPU classes' card"
+status = "done"
+note = "6.2b: the enums TextureType and TextureDimensions; 6.3h: the methods and DynamicPropertyIterator"
 
 [[file]]
 path = "src/bindings/python/PyGpuShaderCreator.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_gpu_shader_creator.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/PyGpuShaderDesc.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_gpu_shader_desc.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/bindings/python/PyGradingData.cpp"

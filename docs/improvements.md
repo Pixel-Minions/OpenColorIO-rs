@@ -2150,7 +2150,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p6-buffers` (6.5a, 6.5b: `crates/ocio-py/src/py_image_desc.rs`,
   `read_items`; `transforms/py_lut1d_transform.rs`, `py_lut3d_transform.rs`, `SET_DATA`);
   `image_desc_oracle.rs`, `lut_transforms_oracle.rs`, against the wheel. Values that this
-  reads past the buffer's items are U-148.
+  reads past the buffer's items are U-148. Also `GpuShaderDesc.addTexture` and
+  `add3DTexture`, which hand the library the buffer's data pointer, from which it copies the
+  texture's floats one after another (PyGpuShaderDesc.cpp:116-183 @ v2.5.2), in
+  `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_shader_desc.rs`, `add_with_values`);
+  `gpu_shader_desc_oracle.rs`, a view of every other value, against the wheel.
 
 ### I-366. A curve's size beyond memory fails with the C++ runtime's texts
 
@@ -5351,6 +5355,14 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`a_display_view_direction_outside_the_enumerators_is_the_ports_error`);
   and the direction of `MixingColorSpaceManager.getProcessor`, with which the wheel makes a
   processor (`a_mixing_direction_outside_the_enumerators_is_the_ports_error`).
+  Also the GPU shader description's language (`GpuShaderCreator.setLanguage` and
+  `GpuShaderDesc.CreateShaderDesc(language=...)`, which the wheel stores; its `getCacheID`
+  then kills the wheel's process, probed on Windows 2026-10-25), and a texture's dimensions
+  (`addTexture`) and interpolation (`addTexture`, `add3DTexture`), which the wheel stores
+  and returns as `???`; the port raises after the binding's checks of the channel and the
+  buffer, before the library's own checks; in `p6-processors` (6.3h,
+  `crates/ocio-py/src/py_gpu_shader_creator.rs`, `gpu_language`; `py_gpu_shader_desc.rs`);
+  `gpu_shader_desc_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error`.
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -5692,7 +5704,11 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   to the binding, so the port refuses every read outside the span, those the wheel answers
   included (sound, not the wheel's answer). An image layout that reaches outside its buffer,
   which the wheel's binding doesn't check (only the entry count), is refused when the
-  description is made (D-2).
+  description is made (D-2). Also `GpuShaderDesc.addTexture` and `add3DTexture` (I-328), in
+  `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_shader_desc.rs`, `add_with_values`):
+  the library's own checks (the width limit, the names, a size of 0) come first, as the
+  wheel's do before it reads the values; `gpu_shader_desc_oracle.rs`,
+  `textures_past_the_buffer_are_the_ports_error`.
 
 ### U-149. The alpha plane of a planar image without one
 
@@ -6097,3 +6113,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `a_lut_loader_that_changes_the_config_of_the_processor_is_u184` (the four changes that
   lock, through the four ways to make a processor: the wheel's crash report on Windows, the
   port's errors) and `a_lut_loader_that_changes_the_config_without_the_cache_lock_is_as_the_wheels`.
+
+### U-194. A texture's values copied past its floats
+
+- **Upstream:** `GpuShaderDesc.Texture.getValues` copies `m_height * m_width * numChannels`
+  floats from the texture's values (PyGpuShaderDesc.cpp:259-285 @ v2.5.2): the first product
+  is in `unsigned`, which wraps, and the channels multiply it in `py::ssize_t`; the texture
+  holds `width * height * depth * channels` floats, all in `unsigned`
+  (`Texture::Texture`, GpuShader.cpp:67-108). For an RGB texture of `width * height` from
+  2^32 / 3 up to 2^32, the copy reads past the texture's floats. It takes a buffer of more than
+  2^32 floats (16 GiB) to make such a texture.
+- **Who notices:** no one in practice.
+- **A fix:** compute the count in `py::ssize_t` from the start, or ask the texture for it.
+- **Status:** the port raises RuntimeError "GpuShaderDesc.Texture.getValues:
+  height*width*channels exceeds 32 bits, and the wheel copies more floats than the texture
+  holds (docs/improvements.md, U-194)" where the count exceeds the texture's floats, in
+  `p6-processors` (6.3h, `crates/ocio-py/src/py_gpu_shader_desc.rs`, `TX_GET_VALUES`); not
+  tested (the buffer it takes).

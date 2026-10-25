@@ -766,6 +766,18 @@ pub(crate) fn def_readwrite(
     cls.setattr(name, prop)
 }
 
+/// `cls.def_readonly(name, ...)`: a property whose getter pybind11 makes as a method of the
+/// class, without a name, and no setter (`def_property_readonly`, `fset` None).
+pub(crate) fn def_readonly(
+    cls: &Bound<'_, PyType>,
+    name: &str,
+    get: &'static Function,
+) -> PyResult<()> {
+    let py = cls.py();
+    let prop = property(pybind11::method(py, get)?, py.None().into_bound(py))?;
+    cls.setattr(name, prop)
+}
+
 /// `cls.def_property(name, getter, setter)` of two lambdas: a property over two functions
 /// pybind11 makes before it knows their class (no scope: `__module__` None, not methods), each
 /// without a name.
