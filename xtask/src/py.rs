@@ -192,6 +192,10 @@ pub(crate) fn cargo_vars(
 /// `uv sync` of the project `py-port/` into the environment (from uv's cache when it holds
 /// Python 3.13 and NumPy already, as the oracle's environment leaves them).
 fn sync_env(layout: &Layout) -> Result<(), String> {
+    // A directory without its interpreter, which uv refuses to sync into ("not a valid Python
+    // environment"): CI's build cache restored target/py-port without its executables
+    // (PR #69's Windows checks). It is made again.
+    remove_broken_env(&layout.env, &layout.python())?;
     let status = Command::new(uv())
         .arg("sync")
         .arg("--project")
@@ -207,6 +211,14 @@ fn sync_env(layout: &Layout) -> Result<(), String> {
     } else {
         Err(format!("uv sync of py-port/ failed: {status}"))
     }
+}
+
+/// Removes `env` when it exists without its interpreter `python`.
+fn remove_broken_env(env: &Path, python: &Path) -> Result<(), String> {
+    if env.exists() && !python.exists() {
+        std::fs::remove_dir_all(env).map_err(|e| format!("{}: {e}", crate::display_path(env)))?;
+    }
+    Ok(())
 }
 
 fn uv() -> std::ffi::OsString {
@@ -597,6 +609,26 @@ fn passing_functions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_environment_without_its_interpreter_is_removed() {
+        let dir = std::env::temp_dir().join(format!("ocio-rs-xtask-py-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let env = dir.join("py-port");
+        let python = env.join("Scripts").join("python.exe");
+        std::fs::create_dir_all(env.join("Lib")).unwrap();
+        // A whole environment stays.
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(&python, b"").unwrap();
+        remove_broken_env(&env, &python).unwrap();
+        assert!(env.join("Lib").exists());
+        // One without its interpreter goes; none at all is fine.
+        std::fs::remove_file(&python).unwrap();
+        remove_broken_env(&env, &python).unwrap();
+        assert!(!env.exists());
+        remove_broken_env(&env, &python).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn the_drivers_modules_are_its_entries() {
