@@ -182,6 +182,12 @@ pub(crate) fn port_transform(spec: &Value) -> Result<Transform, Exception> {
     };
     let unknown = |name: &str| -> ! { panic!("port_transform: no {class}.{name}") };
     let transform: Transform = match class {
+        // Read as the binding builds them (`common::grading_specs`).
+        "ExposureContrastTransform"
+        | "GradingPrimaryTransform"
+        | "GradingToneTransform"
+        | "GradingRGBCurveTransform"
+        | "GradingHueCurveTransform" => return super::grading_specs::transform(spec),
         "GroupTransform" => {
             check_args(&[]);
             let mut t = GroupTransform::new();

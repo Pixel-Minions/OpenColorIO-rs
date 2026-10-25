@@ -1,0 +1,2291 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: t0000
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0001
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.5, pivot: 0}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.6}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.3, pivot: 1}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.4, width: 0.5}
+      s_contrast: 1.3
+
+  - !<ColorSpace>
+    name: t0002
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0003
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.5, pivot: 0}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.6}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.3, pivot: 1}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.4, width: 0.5}
+      s_contrast: 1.3
+
+  - !<ColorSpace>
+    name: t0004
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0005
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.5, pivot: 0}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.6}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.3, pivot: 1}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.4, width: 0.5}
+      s_contrast: 1.3
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0006
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0007
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.5, pivot: 0}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.6}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.3, pivot: 1}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.4, width: 0.5}
+      s_contrast: 1.3
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0008
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0009
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0, width: 4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 2, pivot: -7}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0, width: 8}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: -2, pivot: 9}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0, width: 8}
+      s_contrast: 1.3
+
+  - !<ColorSpace>
+    name: t0010
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0011
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0, width: 4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 2, pivot: -7}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0, width: 8}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: -2, pivot: 9}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0, width: 8}
+      s_contrast: 1.3
+
+  - !<ColorSpace>
+    name: t0012
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0013
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0, width: 4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 2, pivot: -7}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0, width: 8}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: -2, pivot: 9}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0, width: 8}
+      s_contrast: 1.3
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0014
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0015
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0, width: 4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 2, pivot: -7}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0, width: 8}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: -2, pivot: 9}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0, width: 8}
+      s_contrast: 1.3
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0016
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0017
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.6, pivot: 0}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.7}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.2, pivot: 1}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.5, width: 0.5}
+      s_contrast: 1.3
+
+  - !<ColorSpace>
+    name: t0018
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0019
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.6, pivot: 0}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.7}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.2, pivot: 1}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.5, width: 0.5}
+      s_contrast: 1.3
+
+  - !<ColorSpace>
+    name: t0020
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0021
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.6, pivot: 0}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.7}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.2, pivot: 1}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.5, width: 0.5}
+      s_contrast: 1.3
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0022
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0023
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
+      shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.6, pivot: 0}
+      midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.7}
+      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.2, pivot: 1}
+      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.5, width: 0.5}
+      s_contrast: 1.3
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0024
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [.nan, 1, 1], master: 1, start: 0.4, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0025
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [.nan, 1, 1], master: 1, start: 0, width: 4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0026
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [.nan, 1, 1], master: 1, start: 0.4, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0027
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, .nan, 1], master: 1, start: 0.4, width: 0.4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0028
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, .nan, 1], master: 1, start: 0, width: 4}
+
+  - !<ColorSpace>
+    name: t0029
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, .nan, 1], master: 1, start: 0.4, width: 0.4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0030
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, 1, .nan], master: 1, start: 0.4, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0031
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, .nan], master: 1, start: 0, width: 4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0032
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, .nan], master: 1, start: 0.4, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0033
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, 1, 1], master: .nan, start: 0.4, width: 0.4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0034
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, 1], master: .nan, start: 0, width: 4}
+
+  - !<ColorSpace>
+    name: t0035
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, 1], master: .nan, start: 0.4, width: 0.4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0036
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, 1, 1], master: 1, start: .nan, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0037
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, 1], master: 1, start: .nan, width: 4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0038
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, 1], master: 1, start: .nan, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0039
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, 1, 1], master: 1, start: -0, width: 0.4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0040
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0041
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, 1], master: 1, start: -0, width: 0.4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0042
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, 1, 1], master: 1, start: .inf, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0043
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, 1], master: 1, start: .inf, width: 4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0044
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, 1], master: 1, start: .inf, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0045
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, 1, 1], master: 1, start: 0.4, width: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0046
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, 1], master: 1, start: 0, width: .nan}
+
+  - !<ColorSpace>
+    name: t0047
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, 1], master: 1, start: 0.4, width: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0048
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, 1, 1], master: 1, start: 0.4, width: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0049
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, 1], master: 1, start: 0, width: .inf}
+
+  - !<ColorSpace>
+    name: t0050
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, 1], master: 1, start: 0.4, width: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0051
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [.nan, 1, 1], master: 1, start: 0.5, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0052
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [.nan, 1, 1], master: 1, start: 2, pivot: -7}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0053
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      shadows: {rgb: [.nan, 1, 1], master: 1, start: 0.6, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0054
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [1, .nan, 1], master: 1, start: 0.5, pivot: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0055
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, .nan, 1], master: 1, start: 2, pivot: -7}
+
+  - !<ColorSpace>
+    name: t0056
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      shadows: {rgb: [1, .nan, 1], master: 1, start: 0.6, pivot: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0057
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [1, 1, .nan], master: 1, start: 0.5, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0058
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, .nan], master: 1, start: 2, pivot: -7}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0059
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      shadows: {rgb: [1, 1, .nan], master: 1, start: 0.6, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0060
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [1, 1, 1], master: .nan, start: 0.5, pivot: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0061
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, 1], master: .nan, start: 2, pivot: -7}
+
+  - !<ColorSpace>
+    name: t0062
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      shadows: {rgb: [1, 1, 1], master: .nan, start: 0.6, pivot: 0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0063
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [1, 1, 1], master: 1, start: .nan, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0064
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, 1], master: 1, start: .nan, pivot: -7}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0065
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      shadows: {rgb: [1, 1, 1], master: 1, start: .nan, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0066
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, 1], master: 1, start: -0, pivot: -7}
+
+  - !<ColorSpace>
+    name: t0067
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [1, 1, 1], master: 1, start: .inf, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0068
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, 1], master: 1, start: .inf, pivot: -7}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0069
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      shadows: {rgb: [1, 1, 1], master: 1, start: .inf, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0070
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [1, 1, 1], master: 1, start: 0.5, pivot: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0071
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, 1], master: 1, start: 2, pivot: .nan}
+
+  - !<ColorSpace>
+    name: t0072
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      shadows: {rgb: [1, 1, 1], master: 1, start: 0.6, pivot: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0073
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0074
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, 1], master: 1, start: 2, pivot: -0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0075
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0076
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [.nan, 1, 1], master: 1, center: 0.4, width: 0.6}
+
+  - !<ColorSpace>
+    name: t0077
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [.nan, 1, 1], master: 1, center: 0, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0078
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [.nan, 1, 1], master: 1, center: 0.4, width: 0.7}
+
+  - !<ColorSpace>
+    name: t0079
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [1, .nan, 1], master: 1, center: 0.4, width: 0.6}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0080
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, .nan, 1], master: 1, center: 0, width: 8}
+
+  - !<ColorSpace>
+    name: t0081
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, .nan, 1], master: 1, center: 0.4, width: 0.7}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0082
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [1, 1, .nan], master: 1, center: 0.4, width: 0.6}
+
+  - !<ColorSpace>
+    name: t0083
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, 1, .nan], master: 1, center: 0, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0084
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, .nan], master: 1, center: 0.4, width: 0.7}
+
+  - !<ColorSpace>
+    name: t0085
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [1, 1, 1], master: .nan, center: 0.4, width: 0.6}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0086
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, 1, 1], master: .nan, center: 0, width: 8}
+
+  - !<ColorSpace>
+    name: t0087
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, 1], master: .nan, center: 0.4, width: 0.7}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0088
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [1, 1, 1], master: 1, center: .nan, width: 0.6}
+
+  - !<ColorSpace>
+    name: t0089
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, 1, 1], master: 1, center: .nan, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0090
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, 1], master: 1, center: .nan, width: 0.7}
+
+  - !<ColorSpace>
+    name: t0091
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [1, 1, 1], master: 1, center: -0, width: 0.6}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0092
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0093
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, 1], master: 1, center: -0, width: 0.7}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0094
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [1, 1, 1], master: 1, center: .inf, width: 0.6}
+
+  - !<ColorSpace>
+    name: t0095
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, 1, 1], master: 1, center: .inf, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0096
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, 1], master: 1, center: .inf, width: 0.7}
+
+  - !<ColorSpace>
+    name: t0097
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0.4, width: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0098
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0, width: .nan}
+
+  - !<ColorSpace>
+    name: t0099
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0.4, width: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0100
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0.4, width: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0101
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0, width: .inf}
+
+  - !<ColorSpace>
+    name: t0102
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0.4, width: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0103
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [.nan, 1, 1], master: 1, start: 0.3, pivot: 1}
+
+  - !<ColorSpace>
+    name: t0104
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [.nan, 1, 1], master: 1, start: -2, pivot: 9}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0105
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [.nan, 1, 1], master: 1, start: 0.2, pivot: 1}
+
+  - !<ColorSpace>
+    name: t0106
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, .nan, 1], master: 1, start: 0.3, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0107
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, .nan, 1], master: 1, start: -2, pivot: 9}
+
+  - !<ColorSpace>
+    name: t0108
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, .nan, 1], master: 1, start: 0.2, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0109
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, 1, .nan], master: 1, start: 0.3, pivot: 1}
+
+  - !<ColorSpace>
+    name: t0110
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, 1, .nan], master: 1, start: -2, pivot: 9}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0111
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, .nan], master: 1, start: 0.2, pivot: 1}
+
+  - !<ColorSpace>
+    name: t0112
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, 1, 1], master: .nan, start: 0.3, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0113
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, 1, 1], master: .nan, start: -2, pivot: 9}
+
+  - !<ColorSpace>
+    name: t0114
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, 1], master: .nan, start: 0.2, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0115
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, 1, 1], master: 1, start: .nan, pivot: 1}
+
+  - !<ColorSpace>
+    name: t0116
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, 1, 1], master: 1, start: .nan, pivot: 9}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0117
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, 1], master: 1, start: .nan, pivot: 1}
+
+  - !<ColorSpace>
+    name: t0118
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, 1, 1], master: 1, start: -0, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0119
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, 1, 1], master: 1, start: -0, pivot: 9}
+
+  - !<ColorSpace>
+    name: t0120
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, 1], master: 1, start: -0, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0121
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, 1, 1], master: 1, start: 0.3, pivot: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0122
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, 1, 1], master: 1, start: -2, pivot: .nan}
+
+  - !<ColorSpace>
+    name: t0123
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, 1], master: 1, start: 0.2, pivot: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0124
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, 1, 1], master: 1, start: -2, pivot: -0}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0125
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, 1, 1], master: 1, start: 0.3, pivot: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0126
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, 1, 1], master: 1, start: -2, pivot: .inf}
+
+  - !<ColorSpace>
+    name: t0127
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, 1], master: 1, start: 0.2, pivot: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0128
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [.nan, 1, 1], master: 1, start: 0.4, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0129
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [.nan, 1, 1], master: 1, start: 0, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0130
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [.nan, 1, 1], master: 1, start: 0.5, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0131
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, .nan, 1], master: 1, start: 0.4, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0132
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, .nan, 1], master: 1, start: 0, width: 8}
+
+  - !<ColorSpace>
+    name: t0133
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, .nan, 1], master: 1, start: 0.5, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0134
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, .nan], master: 1, start: 0.4, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0135
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, 1, .nan], master: 1, start: 0, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0136
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, 1, .nan], master: 1, start: 0.5, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0137
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, 1], master: .nan, start: 0.4, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0138
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, 1, 1], master: .nan, start: 0, width: 8}
+
+  - !<ColorSpace>
+    name: t0139
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, 1, 1], master: .nan, start: 0.5, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0140
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, 1], master: 1, start: .nan, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0141
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, 1, 1], master: 1, start: .nan, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0142
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, 1, 1], master: 1, start: .nan, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0143
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, 1], master: 1, start: -0, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0144
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0145
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, 1, 1], master: 1, start: -0, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0146
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, 1], master: 1, start: .inf, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0147
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, 1, 1], master: 1, start: .inf, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0148
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, 1, 1], master: 1, start: .inf, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0149
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, 1], master: 1, start: 0.4, width: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0150
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, 1, 1], master: 1, start: 0, width: .nan}
+
+  - !<ColorSpace>
+    name: t0151
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, 1, 1], master: 1, start: 0.5, width: .nan}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0152
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, 1], master: 1, start: 0.4, width: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0153
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, 1, 1], master: 1, start: 0, width: .inf}
+
+  - !<ColorSpace>
+    name: t0154
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, 1, 1], master: 1, start: 0.5, width: .inf}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0155
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      s_contrast: .nan
+
+  - !<ColorSpace>
+    name: t0156
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      s_contrast: .nan
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0157
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      s_contrast: .nan
+
+  - !<ColorSpace>
+    name: t0158
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [.nan, 1, 1], master: 1, start: 0.4, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0159
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, .nan, 1], master: 1, center: 0, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0160
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, .nan, 1], master: 1, start: 2, pivot: -7}
+
+  - !<ColorSpace>
+    name: t0161
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, .nan], master: 1, start: 0.2, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0162
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0163
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, 1], master: 1, start: -0, width: 0.4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0164
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [1, 1, 1], master: 1, start: 0.5, pivot: 4.94065645841247e-324}
+
+  - !<ColorSpace>
+    name: t0165
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, 1], master: 1, start: 1e+300, width: 0.5}
+
+  - !<ColorSpace>
+    name: t0166
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, 1, 1], master: 1, start: -1e-300, pivot: 1}
+
+  - !<ColorSpace>
+    name: t0167
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, 1], master: 1, start: -1e-300, width: 4}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0168
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, 1, 1], master: 1, start: 0, width: 3.40282346638529e+38}
+
+  - !<ColorSpace>
+    name: t0169
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      midtones: {rgb: [0.1, 1, 1], master: 1, center: 0.4, width: 0.6}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0170
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      whites: {rgb: [1, 0.1, 1], master: 1, start: 0, width: 8}
+
+  - !<ColorSpace>
+    name: t0171
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      highlights: {rgb: [1, 0.333333333333333, 1], master: 1, start: -2, pivot: 9}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0172
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 0.333333333333333, 1], master: 1, start: 0.4, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0173
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, 1], master: 1, start: 1e-05, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0174
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0.0001, width: 0.7}
+
+  - !<ColorSpace>
+    name: t0175
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, 1], master: 1, start: 0, width: 0.01}
+
+  - !<ColorSpace>
+    name: t0176
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      s_contrast: 0.01
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0177
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, 1, 1], master: 1, center: 1234567, width: 8}
+
+  - !<ColorSpace>
+    name: t0178
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, 1], master: 1, start: 9999999.5, pivot: -7}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0179
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, 1], master: 1, start: 0.2, pivot: 9999999.5}
+
+  - !<ColorSpace>
+    name: t0180
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0.4, width: 1e+16}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0181
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      blacks: {rgb: [1, 1, 1], master: 0.123456789012346, start: 0.4, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0182
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [1, 1, 1], master: 1, start: 1, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0183
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      shadows: {rgb: [1, 1, 1], master: 1, start: 1, pivot: 0}
+
+  - !<ColorSpace>
+    name: t0184
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [1, 1, 1], master: 1, start: 1, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0185
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, 1, 1], master: 1, center: 0, width: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0186
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, 1, 1], master: 1, start: 2, pivot: 0.5}
+
+  - !<ColorSpace>
+    name: t0187
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      whites: {rgb: [0.5, 1, 1], master: 1, start: 0.5, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0188
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      blacks: {rgb: [.nan, 1, 1], master: 1, start: 0.4, width: 0.4}
+
+  - !<ColorSpace>
+    name: t0189
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      midtones: {rgb: [1, .nan, 1], master: 1, center: 0, width: 8}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0190
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      shadows: {rgb: [1, .nan, 1], master: 1, start: 2, pivot: -7}
+
+  - !<ColorSpace>
+    name: t0191
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      highlights: {rgb: [1, 1, .nan], master: 1, start: 0.2, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0192
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: video
+      midtones: {rgb: [1, 1, .nan], master: 1, center: 0.4, width: 0.7}
+
+  - !<ColorSpace>
+    name: t0193
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      whites: {rgb: [1, 1, 1], master: .nan, start: 0.4, width: 0.5}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0194
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: log
+      highlights: {rgb: [1, 1, 1], master: .nan, start: 0.3, pivot: 1}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0195
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingToneTransform>
+      style: linear
+      blacks: {rgb: [1, 1, 1], master: .nan, start: 0, width: 4}

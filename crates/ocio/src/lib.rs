@@ -14,6 +14,7 @@ pub mod color_space;
 pub mod color_space_set;
 pub mod config;
 pub mod config_io_proxy;
+pub(crate) mod config_utils;
 pub mod context;
 pub mod context_variable_utils;
 pub(crate) mod custom_keys;
@@ -40,11 +41,16 @@ pub mod yaml_cpp;
 #[cfg(test)]
 mod file_tests;
 #[cfg(test)]
+mod foreign_exception_tests;
+#[cfg(test)]
 mod test_env;
 
 pub use apphelpers::color_space_helpers::{self, ColorSpaceMenuHelper, ColorSpaceMenuParameters};
 pub use apphelpers::display_view_helpers;
 pub use apphelpers::legacy_viewing_pipeline::LegacyViewingPipeline;
+pub use apphelpers::mergeconfigs::merge_configs_helpers::{
+    ConfigMerger, ConfigMergingParameters, MergeStrategies,
+};
 pub use apphelpers::mixing_helpers::{MixingColorSpaceManager, MixingSlider};
 pub use baker::Baker;
 pub use builtinconfigs::builtin_config_registry::{

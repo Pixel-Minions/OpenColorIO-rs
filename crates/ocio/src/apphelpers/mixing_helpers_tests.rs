@@ -402,3 +402,48 @@ fn mixing_slider_color_picker_role() {
     float_check_equal(50501, slider.mixing_to_slider(0.50501));
     float_check_equal(50501, slider.slider_to_mixing(0.50501));
 }
+
+/// `set_config_as_is` (the Python binding's hook) takes the config and changes nothing else:
+/// with a config of other text, the manager is a manager of that config with the same
+/// selections (its processor and its text); with the color picking role added, the mixing
+/// spaces stay those of the last refresh. (The binding's oracle tests compare what Python sees
+/// with the wheel's.)
+#[test]
+fn config_held_as_it_is() {
+    let config = category_config();
+    let mut other = (*config).clone();
+    other.set_description("another description");
+    let other = Arc::new(other);
+
+    let mut manager = MixingColorSpaceManager::new(Arc::clone(&config)).unwrap();
+    manager.set_selected_mixing_space_idx(1).unwrap();
+    manager.set_selected_mixing_encoding_idx(1).unwrap();
+    manager.set_config_as_is(Arc::clone(&other));
+    assert_eq!(manager.selected_mixing_space_idx(), 1);
+    assert_eq!(manager.selected_mixing_encoding_idx(), 1);
+
+    let mut fresh = MixingColorSpaceManager::new(Arc::clone(&other)).unwrap();
+    fresh.set_selected_mixing_space_idx(1).unwrap();
+    fresh.set_selected_mixing_encoding_idx(1).unwrap();
+    assert_eq!(manager.to_bytes().unwrap(), fresh.to_bytes().unwrap());
+    assert_ne!(
+        other.cache_id().unwrap(),
+        config.cache_id().unwrap(),
+        "the configs' texts differ"
+    );
+    let processor = |m: &MixingColorSpaceManager| {
+        m.processor("lin_1", "DISP_1", "VIEW_1", TransformDirection::Forward)
+            .unwrap()
+            .cache_id()
+            .unwrap()
+    };
+    assert_eq!(processor(&manager), processor(&fresh));
+
+    let mut picking = (*other).clone();
+    picking
+        .set_role(ROLE_COLOR_PICKING, Some(b"log_1".as_slice()))
+        .unwrap();
+    manager.set_config_as_is(Arc::new(picking));
+    assert_eq!(manager.num_mixing_spaces(), 2);
+    assert!(!manager.to_bytes().unwrap().ends_with(b", colorPicking"));
+}

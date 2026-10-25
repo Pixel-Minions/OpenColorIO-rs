@@ -768,3 +768,61 @@ fn processor_with_no_op_look() {
     let proc = vp.processor(&cfg, Some(&ctx)).unwrap();
     group_of(&proc);
 }
+
+/// `set_transforms_as_is` (the Python binding's hook) holds the transforms as they are: the
+/// transforms the setters hold give the same pipeline (text and processor) as the setters; a
+/// display view transform whose looks aren't bypassed stays so, with the bypass the setter
+/// remembered kept; and none at all is the missing display transform. (The binding's oracle
+/// tests compare what Python sees with the wheel's.)
+#[test]
+fn transforms_held_as_they_are() {
+    let cfg = Config::create_from_stream(CATEGORY_TEST_CONFIG.as_bytes()).unwrap();
+    cfg.validate().unwrap();
+
+    let mut dt = DisplayViewTransform::new();
+    dt.set_display("DISP_2");
+    dt.set_view("VIEW_2");
+    dt.set_src("in_1");
+    let mut mat = MatrixTransform::new();
+    mat.set_offset(&[0.1, 0.2, 0.3, 0.]);
+
+    let mut vp = LegacyViewingPipeline::new();
+    vp.set_display_view_transform(Some(&dt));
+    vp.set_linear_cc(Some(&ff(FixedFunctionStyle::AcesRedMod03)))
+        .unwrap();
+    vp.set_channel_view(Some(&Transform::from(mat.clone())))
+        .unwrap();
+    let text = vp.to_bytes();
+    let id = vp.processor(&cfg, None).unwrap().cache_id().unwrap();
+
+    let mut held = dt.clone();
+    held.set_looks_bypass(true);
+    let mut as_is = LegacyViewingPipeline::new();
+    as_is.set_display_view_transform(Some(&dt));
+    as_is.set_transforms_as_is(
+        Some(held),
+        Some(ff(FixedFunctionStyle::AcesRedMod03)),
+        None,
+        Some(Transform::from(mat.clone())),
+        None,
+    );
+    assert_eq!(as_is.to_bytes(), text);
+    assert_eq!(as_is.processor(&cfg, None).unwrap().cache_id().unwrap(), id);
+
+    as_is.set_transforms_as_is(
+        Some(dt.clone()),
+        Some(ff(FixedFunctionStyle::AcesRedMod03)),
+        None,
+        Some(Transform::from(mat)),
+        None,
+    );
+    assert!(!as_is.display_view_transform().unwrap().looks_bypass());
+    assert_ne!(as_is.to_bytes(), text);
+
+    as_is.set_transforms_as_is(None, None, None, None, None);
+    assert!(as_is.display_view_transform().is_none() && as_is.linear_cc().is_none());
+    check_throw_what(
+        as_is.processor(&cfg, None),
+        "LegacyViewingPipeline: can't create a processor without a display transform.",
+    );
+}

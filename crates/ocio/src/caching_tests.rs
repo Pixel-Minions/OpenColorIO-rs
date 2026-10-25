@@ -33,12 +33,12 @@ fn generic_cache() {
 
         let entry1 = Arc::new(Data::default());
         {
-            let mut m = cache.lock().expect("an enabled cache");
+            let mut m = cache.lock().unwrap().expect("an enabled cache");
             m.entries().insert(key("entry1"), entry1.clone());
         }
         assert!(cache.exists(&key("entry1")));
         {
-            let mut m = cache.lock().expect("an enabled cache");
+            let mut m = cache.lock().unwrap().expect("an enabled cache");
             assert!(Arc::ptr_eq(&m.entries()[&key("entry1")], &entry1));
         }
 
@@ -59,7 +59,7 @@ fn generic_cache() {
         assert!(!cache.is_enabled());
 
         // Upstream writes the entry to its dummy entry; the port's lock gives no entries.
-        assert!(cache.lock().is_none());
+        assert!(cache.lock().unwrap().is_none());
 
         assert!(!cache.exists(&key("entry1")));
         env.set(&[]);
@@ -75,6 +75,7 @@ fn generic_cache() {
         let entry1 = Arc::new(Data::default());
         cache
             .lock()
+            .unwrap()
             .expect("an enabled cache")
             .entries()
             .insert(key("entry1"), entry1);
@@ -103,6 +104,7 @@ fn processor_cache() {
         let entry1 = Arc::new(Data::default());
         cache
             .lock()
+            .unwrap()
             .expect("an enabled cache")
             .entries()
             .insert(key("entry1"), entry1);
@@ -247,7 +249,7 @@ fn caches_read_the_environment_once() {
     assert!(!disabled.is_enabled());
     disabled.enable(true);
     assert!(!disabled.is_enabled());
-    assert!(disabled.lock().is_none());
+    assert!(disabled.lock().unwrap().is_none());
 }
 
 /// Texts of every length up to 40 bytes, every byte value, and two keys of the caches' form,
@@ -302,4 +304,37 @@ fn libstdcxx_hash_matches_the_library() {
             "{text:?}"
         );
     }
+}
+
+/// A cache counts the runs of `clear` and `enable`, the two `noexcept` functions upstream locks
+/// its mutex in, and tells whether this thread holds its lock (U-184).
+#[test]
+fn a_cache_counts_the_locks_of_its_changes_and_knows_its_holder() {
+    let cache: GenericCache<String, DataRcPtr> = GenericCache::new();
+    assert_eq!(cache.locks_by_changes(), 0);
+    cache.clear();
+    assert_eq!(cache.locks_by_changes(), 1);
+    cache.enable(false);
+    cache.enable(true);
+    assert_eq!(cache.locks_by_changes(), 3);
+    // Taking the lock, or reading the cache, is not a change.
+    assert!(!cache.is_held_by_this_thread());
+    {
+        let guard = cache.lock().unwrap().expect("an enabled cache");
+        assert!(cache.is_held_by_this_thread());
+        // Another cache of this thread is not held.
+        let other: GenericCache<String, DataRcPtr> = GenericCache::new();
+        assert!(!other.is_held_by_this_thread());
+        // Another thread doesn't hold it.
+        std::thread::scope(|s| {
+            s.spawn(|| assert!(!cache.is_held_by_this_thread()));
+        });
+        drop(guard);
+    }
+    assert!(!cache.is_held_by_this_thread());
+    assert_eq!(cache.locks_by_changes(), 3);
+    // A disabled cache's lock is not held (upstream doesn't lock it then).
+    cache.enable(false);
+    assert!(cache.lock().unwrap().is_none());
+    assert!(!cache.is_held_by_this_thread());
 }

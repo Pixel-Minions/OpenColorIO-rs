@@ -54,6 +54,23 @@ pub(crate) struct ColorSpaceNode {
 pub(crate) type ColorSpaceRc = Shared<ColorSpaceNode>;
 
 impl ColorSpaceNode {
+    /// The node of a color space the library holds (a config's): its transforms become nodes
+    /// of their own, which Python then shares with the config (`getTransform` returns the
+    /// config's own transform upstream).
+    pub(crate) fn from_library(cs: &ColorSpace) -> ColorSpaceNode {
+        let node = |dir| cs.transform(dir).map(|t| TransformRc::new(t.clone()));
+        let to_ref = node(ColorSpaceDirection::ToReference);
+        let from_ref = node(ColorSpaceDirection::FromReference);
+        let mut bare = cs.clone();
+        bare.set_transform_as_is(None, ColorSpaceDirection::ToReference);
+        bare.set_transform_as_is(None, ColorSpaceDirection::FromReference);
+        ColorSpaceNode {
+            cs: bare,
+            to_ref,
+            from_ref,
+        }
+    }
+
     fn new(reference: ReferenceSpaceType) -> ColorSpaceNode {
         ColorSpaceNode {
             cs: ColorSpace::with_reference_space(reference),
@@ -826,7 +843,7 @@ macro_rules! iterator {
         );
 
         static $iter: Function = method_def!("__iter__", [$self], $qualified, |_, o, a, _| {
-            let _ = iter_rc!(o, a);
+            let _ = this_iter!(o, a);
             Ok(Some(a[0].clone().unbind()))
         });
 

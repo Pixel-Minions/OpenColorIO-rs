@@ -78,6 +78,17 @@ def yaml_emitter(out_dir):
     return written
 
 
+@group
+def grading_text(out_dir):
+    """O5.3: the text of generated ExposureContrast and grading transforms and grading values
+    (grading_text.py). Per class, spec.json holds the cases (inputs only), text.json each
+    case's repr(), validate() and CTF text from the wheel, serialize.ocio the YAML of the
+    transforms it built, and log.txt OCIO's log messages."""
+    from . import grading_text as gt
+
+    return [_write(out_dir, f"grading_text/{rel}", data) for rel, data in gt.files().items()]
+
+
 def run(name, out_dir):
     if name not in GROUPS:
         raise SystemExit(f"unknown fixture group {name!r}; known: {', '.join(sorted(GROUPS))}")

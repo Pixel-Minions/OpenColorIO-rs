@@ -13,9 +13,11 @@
 //! docstrings the same way on both.
 #![allow(dead_code)]
 
+pub(crate) mod processors;
 pub(crate) mod script;
 
-use std::sync::Once;
+use std::sync::{Condvar, Mutex, Once, OnceLock};
+use std::time::{Duration, Instant};
 
 use ocio_testkit::{Oracle, paths};
 use pyo3::prelude::*;
@@ -24,10 +26,16 @@ use serde_json::{Value, json};
 
 static START: Once = Once::new();
 
+/// The port's module as py_surface_walk.py's `surface()` reports it (its `"module"`), walked
+/// once, right after the module's import and before any script runs (`start_python`).
+static PORT_SURFACE: OnceLock<Value> = OnceLock::new();
+
 /// Starts the embedded interpreter once, with the module registered, the oracle's step
-/// interpreter importable, and target/py-port's site-packages (NumPy) on its path; and, until
-/// WP 6.6 binds them, stand-ins for the logging and hash functions the step interpreter sets
-/// and resets around each script (they do nothing: the scripts here log nothing).
+/// interpreter importable, and target/py-port's site-packages (NumPy) on its path; walks the
+/// module's surface ([`port_surface`]).
+///
+/// Call it without holding the GIL (outside `Python::attach`, or inside `py.detach`): a thread
+/// that waits here for another thread's start while holding the GIL deadlocks with it.
 pub(crate) fn start_python() {
     START.call_once(|| {
         ocio_py::embed::append_to_inittab();
@@ -49,18 +57,41 @@ pub(crate) fn start_python() {
                 path.append(site).unwrap();
             }
             let ocio = py.import("PyOpenColorIO").unwrap();
-            for name in [
-                "SetLoggingFunction",
-                "ResetToDefaultLoggingFunction",
-                "ResetComputeHashFunction",
-            ] {
-                if !ocio.hasattr(name).unwrap() {
-                    let noop = py.eval(c"lambda *args: None", None, None).unwrap();
-                    ocio.setattr(name, noop).unwrap();
-                }
-            }
+            PORT_SURFACE.set(walk_module(py, &ocio)).unwrap();
         });
     });
+}
+
+/// py_surface_walk.py's `_module` of the port's module, as its `surface()` starts the walk
+/// (`seen` holding the module). The wheel's py_surface walks a module no script has used, in a
+/// process of its own; scripts change what a class holds (`copy.copy` makes CPython's
+/// `copyreg` add `__slotnames__` to the class, reading `__annotations__` adds it), so the
+/// port's module is walked before any script runs, once.
+fn walk_module(py: Python<'_>, module: &Bound<'_, PyModule>) -> Value {
+    let walk = py.import("py_surface_walk").unwrap();
+    let seen = py
+        .eval(c"lambda m: {id(m): 'PyOpenColorIO'}", None, None)
+        .unwrap()
+        .call1((module,))
+        .unwrap();
+    let report = walk
+        .call_method1("_module", (module, "PyOpenColorIO", seen))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let text: String = py
+        .import("json")
+        .unwrap()
+        .call_method1("dumps", (report,))
+        .unwrap()
+        .extract()
+        .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The port's module as py_surface_walk.py reports it (the `"module"` of its `surface()`),
+/// walked when the interpreter started, before any script ran.
+pub(crate) fn port_surface() -> &'static Value {
+    start_python();
+    PORT_SURFACE.get().unwrap()
 }
 
 /// target/py-port's site-packages, from the interpreter PyO3 built against (PYO3_PYTHON).
@@ -77,10 +108,69 @@ fn site_packages() -> Option<String> {
     Some(String::from_utf8(out.stdout).ok()?.trim().to_string())
 }
 
+/// Whether the [`Turn`] is held.
+static TURN: Mutex<bool> = Mutex::new(false);
+static TURN_FREE: Condvar = Condvar::new();
+
+/// How long [`turn`] waits for another test's turn to end (a turn takes seconds).
+const TURN_LIMIT: Duration = Duration::from_secs(600);
+
+/// The turn of one Python run of the port's library at a time in this test binary, held until
+/// it drops ([`turn`]).
+///
+/// The wheel runs each script in a process of its own (the oracle's py_eval); the port's
+/// scripts share their test binary's process, whose tests run on threads of their own. What a
+/// script changes or reads of the process's state would meet another test's run meanwhile: the
+/// logging function (`py_eval_steps.run` sets it for its script, and a message another test
+/// logs meanwhile, such as the first current config's "Color management disabled.", would be
+/// the log of this script's step), the logging level, the current config, and the library's
+/// file cache (another test's `ClearAllCaches` makes a processor read its LUT again).
+#[must_use]
+pub(crate) struct Turn(());
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        *TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
+        TURN_FREE.notify_one();
+    }
+}
+
+/// Waits for the [`Turn`] and takes it. It waits with the GIL released when this thread holds
+/// it, since the turn's holder may need it. [`port`] runs each script in its turn; a test whose
+/// own Python code changes or reads the process's state that scripts share (the logging level,
+/// the current config, the file cache) holds it too. Never on a thread that holds the turn
+/// already: it would wait for itself.
+pub(crate) fn turn() -> Turn {
+    start_python();
+    let wait = || {
+        let deadline = Instant::now() + TURN_LIMIT;
+        let mut held = TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *held {
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !left.is_zero(),
+                "no turn within {TURN_LIMIT:?}: another test's Python run never ended"
+            );
+            held = TURN_FREE
+                .wait_timeout(held, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        *held = true;
+        Turn(())
+    };
+    Python::attach(|py| py.detach(wait))
+}
+
 /// The report of `script` ({"steps": [...]}) against the port's module, as
 /// `py_eval_steps.run` makes it, without its "interpreter" flags (an embedded interpreter's).
+/// It runs in its [`turn`].
 pub(crate) fn port(script: &Value) -> Value {
-    start_python();
+    let _turn = turn();
     Python::attach(|py| {
         let json = py.import("json").unwrap();
         let steps = py.import("py_eval_steps").unwrap();
@@ -121,7 +211,9 @@ pub(crate) fn wheel(scripts: &[Value]) -> Vec<Value> {
 /// The object an expression of the step interpreter makes, in the embedded interpreter: the
 /// last step's result of the steps `steps` ({"eval": ...} or {"call": ...}).
 pub(crate) fn port_object<'py>(py: Python<'py>, steps: &Value) -> Bound<'py, PyAny> {
-    start_python();
+    // The caller holds the GIL: waiting for another thread's start (which runs Python, the
+    // module's walk) while holding it would deadlock.
+    py.detach(start_python);
     let json = py.import("json").unwrap();
     let interpreter = py.import("py_eval_steps").unwrap();
     let ocio = py.import("PyOpenColorIO").unwrap();
@@ -177,33 +269,60 @@ pub(crate) fn wheel_member(report: &Value, n: &str) -> Value {
         .clone()
 }
 
-/// The port's entry for `OCIO.<n>`, as py_surface_walk.py reports a class (`_class`) or a value
-/// (`_value`), with the name the module's walk gives it.
+/// The port's entry for `OCIO.<n>` among the module's members, from the walk of the module
+/// made before any script ran ([`port_surface`]), as the wheel's ([`wheel_member`]).
 pub(crate) fn port_member(n: &str) -> Value {
-    start_python();
-    Python::attach(|py| {
-        let walk = py.import("py_surface_walk").unwrap();
-        let ocio = py.import("PyOpenColorIO").unwrap();
-        let v = ocio.getattr(n).unwrap();
-        let entry = if v.is_instance_of::<pyo3::types::PyType>() {
-            let seen = pyo3::types::PyDict::new(py);
-            walk.call_method1("_class", (v, format!("PyOpenColorIO.{n}"), seen))
-                .unwrap()
-        } else {
-            walk.call_method1("_value", (v,)).unwrap()
-        };
-        entry
-            .set_item("name", walk.call_method1("_text", (n,)).unwrap())
-            .unwrap();
-        let text: String = py
-            .import("json")
-            .unwrap()
-            .call_method1("dumps", (entry,))
-            .unwrap()
-            .extract()
-            .unwrap();
-        serde_json::from_str(&text).unwrap()
-    })
+    port_surface()["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| String::from_utf8(ocio_testkit::oracle_values::bytes(&e["name"])).unwrap() == n)
+        .unwrap_or_else(|| panic!("{n} is not a member of the port's module"))
+        .clone()
+}
+
+/// `report` with each spelling of the directory `dir` in its text (the bytes of its
+/// {"bytes": hex} values) written as "$FILES", as the oracle's with_files writes the wheel's: as
+/// given, without Windows' verbatim prefix, and with "/" and with doubled backslashes for "\\".
+pub(crate) fn restore_dir(report: &Value, dir: &std::path::Path) -> Value {
+    let given = dir.to_string_lossy().to_string();
+    let plain = given.strip_prefix(r"\\?\").unwrap_or(&given).to_string();
+    let mut spellings = vec![given.clone(), plain.clone()];
+    if cfg!(windows) {
+        for p in [&given, &plain] {
+            spellings.push(p.replace('\\', "/"));
+            spellings.push(p.replace('\\', "\\\\"));
+        }
+    }
+    spellings.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    spellings.dedup();
+    fn walk(v: &Value, spellings: &[String]) -> Value {
+        match v {
+            Value::Array(items) => Value::Array(items.iter().map(|i| walk(i, spellings)).collect()),
+            Value::Object(o) if o.len() == 1 && o.get("bytes").is_some_and(Value::is_string) => {
+                let mut text = ocio_testkit::oracle_values::bytes(v);
+                for s in spellings {
+                    let mut out = Vec::new();
+                    let mut rest = &text[..];
+                    while let Some(at) = rest.windows(s.len()).position(|w| w == s.as_bytes()) {
+                        out.extend_from_slice(&rest[..at]);
+                        out.extend_from_slice(b"$FILES");
+                        rest = &rest[at + s.len()..];
+                    }
+                    out.extend_from_slice(rest);
+                    text = out;
+                }
+                json!({ "bytes": ocio_testkit::oracle_values::hex(&text) })
+            }
+            Value::Object(o) => Value::Object(
+                o.iter()
+                    .map(|(k, v)| (k.clone(), walk(v, spellings)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+    walk(report, &spellings)
 }
 
 /// The wheel's reports of `scripts`, each run in a directory holding `files` (relative path,

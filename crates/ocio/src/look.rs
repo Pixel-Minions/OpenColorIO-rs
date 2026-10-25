@@ -93,8 +93,9 @@ impl Look {
 
     /// Sets a copy of `transform` as the look's transform. Upstream dereferences a null
     /// pointer here (docs/improvements.md, U-50), which a reference can't be. The copy is
-    /// upstream's `createEditableCopy` ([`Transform::create_editable_copy`]): an invalid
-    /// FixedFunctionTransform is refused with its error, and the look keeps its transform.
+    /// upstream's `createEditableCopy` ([`Transform::create_editable_copy`]): a transform whose
+    /// copy fails (an invalid FixedFunctionTransform, curves that don't validate) is refused
+    /// with the copy's error, and the look keeps its transform.
     ///
     /// Port of `Look::setTransform` (Look.cpp:116-119 @ v2.5.2).
     #[doc(alias = "setTransform")]

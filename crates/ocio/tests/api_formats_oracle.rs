@@ -36,6 +36,14 @@
 //! under it, and the others are counted as not run ([`w0001_skips`]); Linux, and fast math,
 //! compare everything bit for bit.
 //!
+//! The ExposureContrast and grading transforms (`common::api_grading_cases`) also go through
+//! `dynamic_apply` at the same combinations ([`check_dynamic`]): the CPU processor's dynamic
+//! properties are taken, the image applied, then each property set to one value after another
+//! (one the setter refuses among them), the image applied after each set; every buffer must
+//! be the wheel's after every apply, and the gets and sets must succeed or fail as the
+//! wheel's do, with its messages (a CPU processor whose optimizer folded the dynamic op into a
+//! LUT has no property to give, in both).
+//!
 //! Every tier runs the `Lut1DTransform` in full, every case and direction at every combination
 //! (less for its large specs, [`Lut1D::runs`]): the lookups of integer and half inputs, of the
 //! LUT as it is or resampled for the input (`Lut1DOpData::Compose`), the float renderers (with
@@ -49,8 +57,14 @@ use std::sync::Arc;
 
 use common::api::{Calls, LEVELS, port_transform};
 use common::api_cases::{self, Cases};
-use ocio::{BitDepth, Config, Exception, OptimizationFlags, Transform, TransformDirection};
+use common::api_grading_cases::{self, DynCases, DynSet};
+use common::grading_specs::{self, Object};
+use ocio::{
+    BitDepth, Config, DynamicPropertyType, Exception, OptimizationFlags, Transform,
+    TransformDirection,
+};
 use ocio_ops::cpu_processor::CpuProcessor;
+use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
 use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
@@ -64,6 +78,7 @@ use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
 use ocio_testkit::image::{
     Buffer, ChannelOrder, Channels, Data, Packed, Planar, Request, Stride, channel_bytes,
 };
+use ocio_testkit::oracle::{BatchCall, Response};
 use ocio_testkit::probe::{Rng, specials};
 use ocio_testkit::processor_ops::{ProcessorOpsReply, ProcessorOpsRequest};
 use serde_json::{Value, json};
@@ -718,11 +733,22 @@ type PortOutcome = Result<(Value, Vec<Vec<u8>>), (String, String)>;
 /// What the port does for a job: the stage and message of its error, or the cache IDs and
 /// getters as the oracle reports them, and every buffer after the apply.
 fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
-    let fail =
-        |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
     if let Some(ops_of) = &class.ops {
         return port_of_ops(ops_of, job);
     }
+    let (cpu, processor_cache_id) = port_cpu(class, job, calls)?;
+    apply_job(job, &cpu, processor_cache_id)
+}
+
+/// The port's CPU processor of a job, of a class the port has the transform of, and its
+/// processor's cache ID; or the stage and message of its error.
+fn port_cpu(
+    class: &Class,
+    job: &Job,
+    calls: &Calls,
+) -> Result<(Arc<CpuProcessor>, String), (String, String)> {
+    let fail =
+        |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
     let transform = port_transform(&calls.spec(job.dir)).map_err(fail("transform"))?;
     let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
@@ -747,13 +773,11 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
     }
     .map_err(fail("cpu_processor"))?;
     let processor_cache_id = processor.cache_id().map_err(fail("processor"))?;
-    apply_job(job, &cpu, processor_cache_id)
+    Ok((cpu, processor_cache_id))
 }
 
 /// The getters of `cpu` and the job's buffers after `cpu` applied it.
 fn apply_job(job: &Job, cpu: &CpuProcessor, processor_cache_id: String) -> PortOutcome {
-    let fail =
-        |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
     let result = json!({
         "processor_cache_id": processor_cache_id,
         "cpu_cache_id": String::from_utf8(cpu.get_cache_id().to_vec()).expect("UTF-8"),
@@ -767,6 +791,18 @@ fn apply_job(job: &Job, cpu: &CpuProcessor, processor_cache_id: String) -> PortO
     });
 
     let mut buffers: Vec<Vec<u8>> = job.request.buffers.iter().map(Buffer::bytes).collect();
+    apply_to(job, cpu, &mut buffers)?;
+    Ok((result, buffers))
+}
+
+/// `cpu` applies the job to `buffers`: in place, or from the source image to the destination.
+fn apply_to(
+    job: &Job,
+    cpu: &CpuProcessor,
+    buffers: &mut [Vec<u8>],
+) -> Result<(), (String, String)> {
+    let fail =
+        |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
     let src_buffers = job.combo.layout.buffers();
     let (src, dst) = buffers.split_at_mut(src_buffers);
     let src_refs: Vec<&mut [u8]> = src.iter_mut().map(Vec::as_mut_slice).collect();
@@ -797,7 +833,7 @@ fn apply_job(job: &Job, cpu: &CpuProcessor, processor_cache_id: String) -> PortO
         cpu.apply_src_dst(src_img.desc(), dst_img.desc_mut())
             .map_err(fail("apply"))?;
     }
-    Ok((result, buffers))
+    Ok(())
 }
 
 /// [`port`] for a class the port builds from op data: the processor's ops; its cache ID
@@ -1146,4 +1182,356 @@ fn fixed_function_transform_matches_the_wheel_at_every_format_and_level() {
         "FixedFunctionTransform",
         api_cases::fixed_function(),
     ));
+}
+
+/// A dynamic property type's name in PyOpenColorIO.
+fn property_name(ty: DynamicPropertyType) -> &'static str {
+    match ty {
+        DynamicPropertyType::Exposure => "DYNAMIC_PROPERTY_EXPOSURE",
+        DynamicPropertyType::Contrast => "DYNAMIC_PROPERTY_CONTRAST",
+        DynamicPropertyType::Gamma => "DYNAMIC_PROPERTY_GAMMA",
+        DynamicPropertyType::GradingPrimary => "DYNAMIC_PROPERTY_GRADING_PRIMARY",
+        DynamicPropertyType::GradingRgbCurve => "DYNAMIC_PROPERTY_GRADING_RGBCURVE",
+        DynamicPropertyType::GradingTone => "DYNAMIC_PROPERTY_GRADING_TONE",
+        DynamicPropertyType::GradingHueCurve => "DYNAMIC_PROPERTY_GRADING_HUECURVE",
+    }
+}
+
+/// The property types `sets` names, each once, in order.
+fn property_types(sets: &[DynSet]) -> Vec<DynamicPropertyType> {
+    let mut types = Vec::new();
+    for set in sets {
+        if !types.contains(&set.ty) {
+            types.push(set.ty);
+        }
+    }
+    types
+}
+
+/// The `dynamic_apply` request of a job: its processor, buffers and images, and the steps:
+/// take each property `sets` names from the CPU processor, apply, then each set followed by
+/// an apply.
+fn dynamic_request(job: &Job, sets: &[DynSet]) -> (Value, Vec<Vec<u8>>) {
+    let (mut args, blobs) = job.request.args();
+    let blobs: Vec<Vec<u8>> = blobs.into_iter().map(<[u8]>::to_vec).collect();
+    let object = args.as_object_mut().expect("an object");
+    object.remove("apply");
+    object.remove("data_getters");
+    let apply = json!({"apply": job.request.apply});
+    let mut steps: Vec<Value> = property_types(sets)
+        .into_iter()
+        .map(|ty| json!({"get": property_name(ty), "from": "cpu", "as": property_name(ty)}))
+        .collect();
+    steps.push(apply.clone());
+    for set in sets {
+        steps.push(json!({"set": property_name(set.ty), "value": set.value}));
+        steps.push(apply.clone());
+    }
+    args["steps"] = json!(steps);
+    (args, blobs)
+}
+
+/// Sets the port's property to a set's value, built from its spec as the oracle builds it; or
+/// where that raised, as `dynamic_apply` names it ("value" or "set"), and the error.
+fn port_set(prop: &DynamicPropertyRcPtr, set: &DynSet) -> Result<(), (&'static str, Exception)> {
+    let on_set = |e: Exception| ("set", e);
+    if set.value.get("f64").is_some() {
+        prop.as_double()
+            .map_err(on_set)?
+            .set_value(grading_specs::f64_of(&set.value));
+        return Ok(());
+    }
+    let value = grading_specs::object(&set.value["object"]).map_err(|e| ("value", e))?;
+    let set = |r: Result<(), Exception>| r.map_err(on_set);
+    match value {
+        Object::Primary(v, _) => set(prop.as_grading_primary().and_then(|p| p.set_value(&v))),
+        Object::Tone(v) => set(prop.as_grading_tone().and_then(|p| p.set_value(&v))),
+        Object::RgbCurve(v) => set(prop.as_grading_rgb_curve().and_then(|p| p.set_value(&v))),
+        Object::HueCurve(v) => set(prop.as_grading_hue_curve().and_then(|p| p.set_value(&v))),
+        other => panic!("not a dynamic property's value: {other:?}"),
+    }
+}
+
+/// What one dynamic job compared.
+#[derive(Default)]
+struct DynCounts {
+    applies: usize,
+    refused_gets: usize,
+    refused_sets: usize,
+    refusals: usize,
+}
+
+/// The port's applies of a job of [`check_dynamic`] against the wheel's reply, step by step.
+fn compare_dynamic_job(
+    class: &Class,
+    job: &Job,
+    sets: &[DynSet],
+    response: &Response,
+    counts: &mut DynCounts,
+    failures: &mut Vec<String>,
+) {
+    let case = &class.cases.cases[job.case];
+    let what = format!(
+        "{} \"{}\" {:?} {:?}",
+        class.name,
+        case.label(),
+        job.dir,
+        job.combo
+    );
+    let result = &response.result;
+    if result["log"].as_array().is_some_and(|l| !l.is_empty()) {
+        failures.push(format!("{what}: OCIO logged {}", result["log"]));
+    }
+    let (cpu, processor_cache_id) =
+        match (result.get("exception"), port_cpu(class, job, case.params())) {
+            (Some(e), Err((stage, message))) => {
+                if result["stage"] != stage.as_str() || e["message"] != message.as_str() {
+                    failures.push(format!("{what}: wheel {result}, port {stage}: {message}"));
+                }
+                counts.refusals += 1;
+                return;
+            }
+            (None, Ok(port)) => port,
+            (wheel, port) => {
+                failures.push(format!("{what}: wheel {wheel:?}, port {:?}", port.err()));
+                return;
+            }
+        };
+    let port_getters = json!({
+        "processor_cache_id": processor_cache_id,
+        "cpu_cache_id": String::from_utf8(cpu.get_cache_id().to_vec()).expect("UTF-8"),
+        "cpu_processor": {
+            "getInputBitDepth": depth_name(cpu.get_input_bit_depth()),
+            "getOutputBitDepth": depth_name(cpu.get_output_bit_depth()),
+            "isNoOp": cpu.is_no_op(),
+            "isIdentity": cpu.is_identity(),
+            "hasChannelCrosstalk": cpu.has_channel_crosstalk(),
+        },
+    });
+    let wheel_getters = json!({
+        "processor_cache_id": result["processor_cache_id"],
+        "cpu_cache_id": result["cpu_cache_id"],
+        "cpu_processor": result["cpu_processor"],
+    });
+    if wheel_getters != port_getters {
+        failures.push(format!(
+            "{what}\n  wheel {wheel_getters}\n  port  {port_getters}"
+        ));
+    }
+    let steps = result["steps"].as_array().expect("steps");
+    let mut buffers: Vec<Vec<u8>> = job.request.buffers.iter().map(Buffer::bytes).collect();
+    let mut props = Vec::new();
+    let mut k = 0;
+    for ty in property_types(sets) {
+        let step = &steps[k];
+        k += 1;
+        // hasDynamicProperty, whichever way the get goes.
+        if step["has"] != cpu.has_dynamic_property(ty) {
+            failures.push(format!("{what}: has {ty:?}: wheel {step}"));
+        }
+        // A CPU processor whose optimizer folded the dynamic op into a LUT (integer inputs at
+        // the draft level) has no property: both must refuse, with the same message.
+        match (cpu.get_dynamic_property(ty), step.get("exception")) {
+            (Ok(p), None) if step.get("result").is_some() => props.push((ty, Some(p))),
+            (Err(p), Some(e)) if e["message"] == p.message() && step["has"] == false => {
+                counts.refused_gets += 1;
+                props.push((ty, None));
+            }
+            (port, _) => failures.push(format!(
+                "{what}: get {ty:?}: wheel {step}, port {:?}",
+                port.err()
+            )),
+        }
+    }
+    let mut compare_apply = |k: usize, buffers: &mut Vec<Vec<u8>>, failures: &mut Vec<String>| {
+        let step = &steps[k];
+        let port = apply_to(job, &cpu, buffers);
+        let Some(indices) = step["result"]["buffers"].as_array() else {
+            failures.push(format!("{what}: apply: wheel {step}, port {port:?}"));
+            return;
+        };
+        if let Err(e) = port {
+            failures.push(format!("{what}: apply: the port raised {e:?}"));
+            return;
+        }
+        if step["log"].as_array().is_some_and(|l| !l.is_empty()) {
+            failures.push(format!("{what}: OCIO logged {}", step["log"]));
+        }
+        let wheel: Vec<Vec<u8>> = indices
+            .iter()
+            .map(|i| response.blobs[i.as_u64().expect("an index") as usize].clone())
+            .collect();
+        counts.applies += 1;
+        if wheel != *buffers {
+            let report = match compare_images(case, job, &wheel, buffers) {
+                Ok(Comparison::Exact) => return,
+                Ok(other) => format!("{other:?}"),
+                Err(report) => report,
+            };
+            failures.push(format!("{what}: step {k}\n  {report}"));
+        }
+    };
+    compare_apply(k, &mut buffers, failures);
+    k += 1;
+    for set in sets {
+        let step = &steps[k];
+        // A property the port and the wheel disagree on is a failure already.
+        let Some((_, prop)) = props.iter().find(|(t, _)| *t == set.ty) else {
+            return;
+        };
+        let Some(prop) = prop else {
+            // Neither has the property: the wheel's step sets nothing.
+            if step["result"]["unbound"] != true {
+                failures.push(format!("{what}: set of a property not taken: wheel {step}"));
+            }
+            compare_apply(k + 1, &mut buffers, failures);
+            k += 2;
+            continue;
+        };
+        match (step.get("exception"), port_set(prop, set)) {
+            (None, Ok(())) => {}
+            (Some(e), Err((stage, p))) if e["message"] == p.message() && step["stage"] == stage => {
+                counts.refused_sets += 1;
+            }
+            (_, port) => failures.push(format!("{what}: set: wheel {step}, port {port:?}")),
+        }
+        if step["log"].as_array().is_some_and(|l| !l.is_empty()) {
+            failures.push(format!("{what}: OCIO logged {}", step["log"]));
+        }
+        compare_apply(k + 1, &mut buffers, failures);
+        k += 2;
+    }
+}
+
+/// The dynamic cases of `cases` at every combination (as [`check`] picks them per tier), each
+/// through `dynamic_apply`: the CPU processor's properties taken, an apply with the values the
+/// transform holds, then each set and an apply. After every apply the buffers must equal the
+/// wheel's byte for byte; a set the port refuses must be refused by the wheel with the same
+/// message; and the processors' cache IDs and getters must be the wheel's.
+fn check_dynamic(name: &'static str, cases: DynCases) {
+    let tier = Tier::current();
+    let (kept, sets): (Vec<_>, Vec<_>) = cases
+        .cases
+        .cases
+        .into_iter()
+        .zip(cases.sets)
+        .filter(|(_, sets)| !sets.is_empty())
+        .unzip();
+    assert!(!kept.is_empty(), "{name}: no dynamic case");
+    let class = Class::new(
+        name,
+        Cases {
+            cases: kept,
+            bases: Vec::new(),
+        },
+    );
+    let jobs = jobs(&class, tier);
+    let mut failures = Vec::new();
+    let mut counts = DynCounts::default();
+    for batch in jobs.chunks(200) {
+        let requests: Vec<(Value, Vec<Vec<u8>>)> = batch
+            .iter()
+            .map(|job| dynamic_request(job, &sets[job.case]))
+            .collect();
+        let calls: Vec<BatchCall<'_>> = requests
+            .iter()
+            .map(|(args, blobs)| BatchCall {
+                cmd: "dynamic_apply",
+                args: args.clone(),
+                blobs: blobs.iter().map(Vec::as_slice).collect(),
+            })
+            .collect();
+        for (job, response) in batch.iter().zip(Oracle::get().batch(&calls, true)) {
+            let response = response.unwrap_or_else(|e| panic!("{name}: {e}"));
+            compare_dynamic_job(
+                &class,
+                job,
+                &sets[job.case],
+                &response,
+                &mut counts,
+                &mut failures,
+            );
+        }
+    }
+    println!(
+        "{name}: {} jobs ({} tier): {} applies compared, {} properties no CPU processor has, {} refused sets, {} refusals",
+        jobs.len(),
+        tier.name(),
+        counts.applies,
+        counts.refused_gets,
+        counts.refused_sets,
+        counts.refusals
+    );
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures[..failures.len().min(20)].join("\n")
+    );
+    // Every job applies once before the sets and once after each.
+    let expected: usize = jobs.iter().map(|j| sets[j.case].len() + 1).sum();
+    assert_eq!(counts.applies, expected, "{name}: every apply compared");
+}
+
+#[test]
+fn exposure_contrast_transform_matches_the_wheel_at_every_format_and_level() {
+    check(&Class::new(
+        "ExposureContrastTransform",
+        api_grading_cases::exposure_contrast().cases,
+    ));
+}
+
+#[test]
+fn exposure_contrast_dynamic_sets_match_the_wheel_at_every_format_and_level() {
+    check_dynamic(
+        "ExposureContrastTransform",
+        api_grading_cases::exposure_contrast(),
+    );
+}
+
+#[test]
+fn grading_primary_transform_matches_the_wheel_at_every_format_and_level() {
+    check(&Class::new(
+        "GradingPrimaryTransform",
+        api_grading_cases::primary().cases,
+    ));
+}
+
+#[test]
+fn grading_primary_dynamic_sets_match_the_wheel_at_every_format_and_level() {
+    check_dynamic("GradingPrimaryTransform", api_grading_cases::primary());
+}
+
+#[test]
+fn grading_tone_transform_matches_the_wheel_at_every_format_and_level() {
+    check(&Class::new(
+        "GradingToneTransform",
+        api_grading_cases::tone().cases,
+    ));
+}
+
+#[test]
+fn grading_tone_dynamic_sets_match_the_wheel_at_every_format_and_level() {
+    check_dynamic("GradingToneTransform", api_grading_cases::tone());
+}
+
+#[test]
+fn grading_hue_curve_transform_matches_the_wheel_at_every_format_and_level() {
+    check(&Class::new(
+        "GradingHueCurveTransform",
+        api_grading_cases::hue_curve().cases,
+    ));
+}
+
+#[test]
+fn grading_hue_curve_dynamic_sets_match_the_wheel_at_every_format_and_level() {
+    check_dynamic("GradingHueCurveTransform", api_grading_cases::hue_curve());
+}
+
+#[test]
+fn grading_rgb_curve_dynamic_sets_match_the_wheel_at_every_format_and_level() {
+    check_dynamic(
+        "GradingRGBCurveTransform",
+        api_grading_cases::rgb_curve_dynamic(),
+    );
 }

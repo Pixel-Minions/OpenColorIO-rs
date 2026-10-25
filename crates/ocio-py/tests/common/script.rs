@@ -89,8 +89,10 @@ pub(crate) struct Script {
     pub(crate) expect: Vec<Expect>,
     /// Steps whose value's repr isn't compared (a class whose `__repr__` a later chunk binds).
     pub(crate) unrepr: Vec<usize>,
-    /// Steps whose log isn't compared (until the logging functions are bound, 6.6a, the port's
-    /// messages don't reach the step interpreter).
+    /// Steps whose log isn't compared: a message the library logs once per process (the first
+    /// read of a file, which its cache then keeps; the first current config's "Color management
+    /// disabled."), which the wheel logs in the new process of each script and the port only
+    /// in the first script of its test binary that gets there.
     pub(crate) unlog: Vec<usize>,
     /// Steps whose result isn't compared, only their outcome (a stand-in for a class the port
     /// doesn't bind yet makes the value on its side).
@@ -179,9 +181,15 @@ pub(crate) fn compare(scripts: &[Script]) {
 
 /// [`compare`] with the wheel's reports `theirs` of `scripts` (run through `with_files`, say).
 pub(crate) fn compare_with(scripts: &[Script], theirs: &[Value]) {
+    let ours: Vec<Value> = scripts.iter().map(|s| super::port(&s.json())).collect();
+    compare_reports(scripts, &ours, theirs);
+}
+
+/// [`compare`] of the port's reports `ours` and the wheel's `theirs` of `scripts`.
+pub(crate) fn compare_reports(scripts: &[Script], ours: &[Value], theirs: &[Value]) {
     assert_eq!(theirs.len(), scripts.len());
-    for (k, (script, theirs)) in scripts.iter().zip(theirs).enumerate() {
-        let ours = super::port(&script.json());
+    assert_eq!(ours.len(), scripts.len());
+    for (k, ((script, theirs), ours)) in scripts.iter().zip(theirs).zip(ours).enumerate() {
         let (ours, theirs) = (
             ours["steps"].as_array().unwrap(),
             theirs["steps"].as_array().unwrap(),

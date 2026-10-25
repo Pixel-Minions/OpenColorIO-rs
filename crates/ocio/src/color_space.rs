@@ -536,8 +536,9 @@ impl ColorSpace {
 
     /// Sets a copy of `transform` as the transform to the reference space or from it; `None`
     /// (upstream's null pointer) removes it. The copy is upstream's `createEditableCopy`
-    /// ([`Transform::create_editable_copy`]): an invalid FixedFunctionTransform is refused with
-    /// its error, and the color space keeps its transform.
+    /// ([`Transform::create_editable_copy`]): a transform whose copy fails (an invalid
+    /// FixedFunctionTransform, curves that don't validate) is refused with the copy's error, and
+    /// the color space keeps its transform.
     ///
     /// Port of `ColorSpace::setTransform` (ColorSpace.cpp:476-491 @ v2.5.2).
     #[doc(alias = "setTransform")]

@@ -45,6 +45,22 @@ pub(crate) struct ViewTransformNode {
 pub(crate) type ViewTransformRc = Shared<ViewTransformNode>;
 
 impl ViewTransformNode {
+    /// The node of a view transform the library holds (a config's): its transforms become
+    /// nodes of their own, which Python then shares with the config.
+    pub(crate) fn from_library(vt: &ViewTransform) -> ViewTransformNode {
+        let node = |dir| vt.transform(dir).map(|t| TransformRc::new(t.clone()));
+        let to_ref = node(ViewTransformDirection::ToReference);
+        let from_ref = node(ViewTransformDirection::FromReference);
+        let mut bare = vt.clone();
+        bare.set_transform_as_is(None, ViewTransformDirection::ToReference);
+        bare.set_transform_as_is(None, ViewTransformDirection::FromReference);
+        ViewTransformNode {
+            vt: bare,
+            to_ref,
+            from_ref,
+        }
+    }
+
     fn new(reference: ReferenceSpaceType) -> ViewTransformNode {
         ViewTransformNode {
             vt: ViewTransform::new(reference),
@@ -500,7 +516,7 @@ static CAT_GETITEM: Function = method_def!(
 );
 
 static CAT_ITER: Function = method_def!("__iter__", [CAT_SELF], CATEGORY_ITERATOR, |_, o, a, _| {
-    let _ = iter_rc!(o, a);
+    let _ = this_iter!(o, a);
     Ok(Some(a[0].clone().unbind()))
 });
 

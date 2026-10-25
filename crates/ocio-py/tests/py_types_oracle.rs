@@ -22,12 +22,11 @@ mod common;
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle_values::bytes;
-use pyo3::prelude::*;
 use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
 /// for entry (transforms_oracle.rs checks them in detail).
-const COMPLETE: [&str; 31] = [
+const COMPLETE: [&str; 54] = [
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -59,14 +58,48 @@ const COMPLETE: [&str; 31] = [
     "CPUProcessor",
     "Lut1DTransform",
     "Lut3DTransform",
+    "ColorSpaceTransform",
+    "DisplayViewTransform",
+    "LookTransform",
+    "BuiltinConfigRegistry",
+    "GradingRGBM",
+    "GradingPrimary",
+    "GradingRGBMSW",
+    "GradingTone",
+    "GradingControlPoint",
+    "GradingBSplineCurve",
+    "GradingRGBCurve",
+    "GradingHueCurve",
+    "ExposureContrastTransform",
+    "GradingPrimaryTransform",
+    "GradingToneTransform",
+    "GradingRGBCurveTransform",
+    "GradingHueCurveTransform",
+    "DynamicProperty",
+    "ColorSpaceMenuParameters",
+    "ColorSpaceMenuHelper",
+    "LegacyViewingPipeline",
+    "MixingSlider",
+    "MixingColorSpaceManager",
 ];
 
-/// The stand-ins `common::start_python` adds to the port's module until WP 6.6 binds them.
-const STAND_INS: [&str; 3] = [
-    "SetLoggingFunction",
-    "ResetToDefaultLoggingFunction",
-    "ResetComputeHashFunction",
-];
+/// The classes a binding makes itself rather than bindPyTypes' declarations (bindPyConfigIOProxy's
+/// `py::bind_vector`): each compares with the wheel's entry for entry.
+const OWN_CLASSES: [&str; 2] = ["vector_of_uint8_t", "PyConfigIOProxy"];
+
+/// The declared classes bound but for members a later card binds: each compares with the
+/// wheel's entry for entry but for those members, which are exactly these (chunk 6.8a:
+/// `ConfigUtils`).
+const PARTIAL: [(&str, &[&str]); 1] = [(
+    "Config",
+    &[
+        "IdentifyBuiltinColorSpace",
+        "IdentifyInterchangeSpace",
+        "GetProcessorToBuiltinColorSpace",
+        "GetProcessorFromBuiltinColorSpace",
+        "GetProcessorFromConfigs",
+    ],
+)];
 
 fn entry_name(e: &Value) -> String {
     String::from_utf8(bytes(&e["name"])).unwrap()
@@ -78,52 +111,13 @@ fn wheel_members() -> Vec<Value> {
     report["module"]["members"].as_array().unwrap().clone()
 }
 
-/// The port's module members, as py_surface_walk.py's `_members` reports them, without the
-/// stand-ins.
+/// The port's module members, as py_surface_walk.py's `_members` reports them, from the walk
+/// of the module made before any script ran (`common::port_surface`).
 fn port_members() -> Vec<Value> {
-    common::start_python();
-    Python::attach(|py| {
-        let walk = py.import("py_surface_walk").unwrap();
-        let module = py.import("PyOpenColorIO").unwrap();
-        // The walk's `seen`, keyed by id(), as py_surface_walk.surface() starts it.
-        let seen = py
-            .eval(c"lambda m: {id(m): 'PyOpenColorIO'}", None, None)
-            .unwrap()
-            .call1((&module,))
-            .unwrap();
-        let namespace = py
-            .eval(
-                c"lambda m, skip: {k: v for k, v in vars(m).items() if k not in skip}",
-                None,
-                None,
-            )
-            .unwrap()
-            .call1((&module, STAND_INS.to_vec()))
-            .unwrap();
-        let skip = walk.getattr("RUNTIME_NAMES").unwrap();
-        let skip = py
-            .import("builtins")
-            .unwrap()
-            .getattr("set")
-            .unwrap()
-            .call1((skip,))
-            .unwrap();
-        let members = walk
-            .call_method1("_members", (namespace, "PyOpenColorIO", seen, skip))
-            .unwrap();
-        let text: String = py
-            .import("json")
-            .unwrap()
-            .call_method1("dumps", (members,))
-            .unwrap()
-            .extract()
-            .unwrap();
-        serde_json::from_str::<Value>(&text)
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .clone()
-    })
+    common::port_surface()["members"]
+        .as_array()
+        .unwrap()
+        .clone()
 }
 
 /// Every name of the port's module is the wheel's, in the wheel's order.
@@ -154,11 +148,30 @@ fn the_module_members_report_as_the_wheels() {
     let theirs = wheel_members();
     let ours = port_members();
     let (mut enums, mut classes, mut others, mut bound, mut complete) = (0, 0, 0, 0, 0);
+    let mut own = 0;
+    let mut partial = 0;
     for our in &ours {
         let n = entry_name(our);
         let their = theirs.iter().find(|t| entry_name(t) == n).unwrap();
         let is_enum = their.get("entries").is_some();
         let declared = their["metatype"] == "pybind11_builtins.pybind11_type" && !is_enum;
+        if OWN_CLASSES.contains(&n.as_str()) {
+            assert_eq!(our, their, "{n}");
+            own += 1;
+            continue;
+        }
+        if their["kind"] == "module" {
+            // A submodule gets the module's `__file__` (pybind11's `def_submodule`), which the
+            // port's module embedded in the test binary has none of (apphelpers_oracle.rs).
+            let mut their = their.clone();
+            let names = their["runtime_names"].as_array_mut().unwrap();
+            let before = names.len();
+            names.retain(|n| n != "__file__");
+            assert_eq!(names.len(), before - 1, "{n}");
+            assert_eq!(*our, their, "{n}");
+            others += 1;
+            continue;
+        }
         if their["kind"] != "class" || !declared {
             assert_eq!(our, their, "{n}");
             if is_enum {
@@ -169,6 +182,20 @@ fn the_module_members_report_as_the_wheels() {
             continue;
         }
         classes += 1;
+        if let Some((_, missing)) = PARTIAL.iter().find(|(c, _)| *c == n) {
+            let without = |v: &Value| {
+                let mut v = v.clone();
+                let members = v["members"].as_array_mut().unwrap();
+                members.retain(|m| !missing.contains(&entry_name(m).as_str()));
+                v
+            };
+            let their_count = their["members"].as_array().unwrap().len();
+            let our_count = our["members"].as_array().unwrap().len();
+            assert_eq!(our_count + missing.len(), their_count, "{n}");
+            assert_eq!(*our, without(their), "{n}");
+            partial += 1;
+            continue;
+        }
         if COMPLETE.contains(&n.as_str()) {
             assert_eq!(our, their, "{n}");
             complete += 1;
@@ -204,6 +231,8 @@ fn the_module_members_report_as_the_wheels() {
     }
     assert_eq!(classes, 63);
     assert_eq!(complete, COMPLETE.len());
+    assert_eq!(own, OWN_CLASSES.len());
+    assert_eq!(partial, PARTIAL.len());
     assert_eq!(enums, 31);
     // The constants, the exported values and the functions of bindPyTypes and
     // PyOpenColorIO.cpp.

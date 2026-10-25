@@ -168,6 +168,34 @@ pub fn docstring_with(f: &Function, docs: &[&str]) -> String {
     }
 }
 
+/// The function's `__doc__` when its definitions give docstrings of their own (`docs`, one per
+/// overload, `None` for a definition without one), as pybind11 writes it: a single overload's
+/// signature line, a blank line and its docstring; each of several overloads' numbered
+/// signature line, followed by a blank line and its docstring when it has one.
+pub fn docstring_with_docs(f: &Function, docs: &[Option<&str>]) -> String {
+    debug_assert_eq!(docs.len(), f.overloads.len());
+    match (f.overloads, docs) {
+        ([one], [Some(doc)]) => format!("{}{}\n\n{doc}\n", f.name, signature(one)),
+        ([_], [None]) => docstring(f),
+        (many, _) => {
+            let each: Vec<String> = many
+                .iter()
+                .zip(docs)
+                .enumerate()
+                .map(|(i, (o, doc))| match doc {
+                    Some(doc) => format!("{}. {}{}\n\n{doc}\n", i + 1, f.name, signature(o)),
+                    None => format!("{}. {}{}\n", i + 1, f.name, signature(o)),
+                })
+                .collect();
+            format!(
+                "{}(*args, **kwargs)\nOverloaded function.\n\n{}",
+                f.name,
+                each.join("\n")
+            )
+        }
+    }
+}
+
 /// Whether `o` was bound without argument names: no `py::pos_only()`, and each parameter (after
 /// a method's `self`) named as pybind11 names one it has no record of, `arg` and its position
 /// among them (`cpp_function::initialize_generic`'s signature). pybind11 keeps argument records
@@ -224,6 +252,86 @@ fn bind<'py>(
     Ok(Some(values))
 }
 
+/// Whether the arguments after `self` of the overload `o` load as pybind11's casters load them
+/// with conversions, for the parameter types of the overloads [`crate::self_kind`] lists with a
+/// null `self` (a `const char *`: a `str`, `bytes` or `None`; a class's holder: an instance or
+/// `None`; a `std::vector<float>`: a sequence of numbers, whose caster may raise instead of
+/// refusing, as when loading the call's arguments; a `float`, a `size_t` and a `bool`, the only
+/// C++ types of those signatures' `typing.SupportsFloat`, `typing.SupportsInt` and `bool`).
+fn rest_loads(o: &Overload, values: &[Bound<'_, PyAny>]) -> PyResult<bool> {
+    for (p, v) in o.params.iter().zip(values).skip(1) {
+        let loads = if p.ty == "str" {
+            v.is_none() || v.is_instance_of::<PyString>() || v.is_instance_of::<PyBytes>()
+        } else if p.ty.starts_with("PyOpenColorIO.PyOpenColorIO.") {
+            v.is_none() || crate::pybind11::instance_of(v, p.ty).is_some()
+        } else if p.ty == "collections.abc.Sequence[typing.SupportsFloat]" {
+            // `GradingBSplineCurve.setSlopes` (PyGradingData.cpp:353 @ v2.5.2).
+            <Vec<f32> as Cast>::try_load(v, true)?.is_some()
+        } else if p.ty == "typing.SupportsFloat" {
+            // A `float`: `MixingSlider.setSliderMinEdge`, `setSliderMaxEdge`
+            // (PyMixingHelpers.cpp:45-50 @ v2.5.2).
+            <f32 as Cast>::load(v, true).is_some()
+        } else if p.ty == "typing.SupportsInt" {
+            // A `size_t`: `MixingColorSpaceManager.setSelectedMixingSpaceIdx`,
+            // `setSelectedMixingEncodingIdx` (PyMixingHelpers.cpp:70-84 @ v2.5.2).
+            <u64 as Cast>::load(v, true).is_some()
+        } else if p.ty == "bool" {
+            // `LegacyViewingPipeline.setLooksOverrideEnabled` (PyLegacyViewingPipeline.cpp:38 @
+            // v2.5.2).
+            <bool as Cast>::load(v, true).is_some()
+        } else {
+            false
+        };
+        if !loads {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The overload `index` of `f`, `o`, called: where pybind11 would call it with a null `self`
+/// (`None`, an unnamed overload whose `self` is a pointer or a holder, with conversions), the
+/// port's error (U-134, [`crate::self_kind`]), or for an overload that only builds an iterator
+/// of `self`, that iterator of the null pointer; and where pybind11's dispatcher catches C++
+/// exceptions, a Python callback's, which the library carries as a `ForeignException`, is
+/// its Python exception again (`error_already_set::restore`, chunk 6.6a).
+fn call<'py>(
+    py: Python<'py>,
+    f: &Function,
+    index: usize,
+    o: &Overload,
+    values: &[Bound<'py, PyAny>],
+    convert: bool,
+) -> PyResult<Option<Py<PyAny>>> {
+    if convert && f.method && !f.constructor && values.first().is_some_and(|v| v.is_none()) {
+        let ty = o.params[0].ty;
+        let class = ty
+            .strip_prefix("PyOpenColorIO.PyOpenColorIO.")
+            .unwrap_or(ty);
+        let kind = crate::self_kind::kind(class, f.name, index);
+        if matches!(
+            kind,
+            Some(crate::self_kind::SelfKind::Pointer | crate::self_kind::SelfKind::Holder)
+        ) && rest_loads(o, values)?
+        {
+            return Err(crate::self_kind::null_self(class, f.name));
+        }
+        // An overload that only builds an iterator of `self`: the iterator of the null
+        // pointer, an instance of the class it returns.
+        if kind == Some(crate::self_kind::SelfKind::Iterator) && rest_loads(o, values)? {
+            let it = crate::py_utils::new_null_iterator(py, o.ret, class, f.name)?;
+            return Ok(Some(it.unbind()));
+        }
+    }
+    // What the call changes counts as changes, unless it only reads (the current config an
+    // embedding host reads, crate::embed).
+    let _reading = crate::shared::Reading::enter(crate::shared::reads_only(f.name));
+    match ocio_ops::foreign_exception::try_foreign(|| (o.call)(py, o, values, convert)) {
+        Ok(result) => result,
+        Err(e) => Err(crate::callback::into_py_err(e)),
+    }
+}
+
 /// Calls `f` as pybind11's dispatcher does (see the module's documentation).
 pub fn dispatch<'py>(
     py: Python<'py>,
@@ -252,21 +360,21 @@ pub fn dispatch<'py>(
     }
     let overloaded = f.overloads.len() > 1;
     let mut second_pass = Vec::new();
-    for o in f.overloads {
+    for (index, o) in f.overloads.iter().enumerate() {
         let Some(values) = bind(py, o, f.method, args, kwargs)? else {
             continue;
         };
-        if let Some(result) = (o.call)(py, o, &values, !overloaded)? {
+        if let Some(result) = call(py, f, index, o, &values, !overloaded)? {
             return Ok(result);
         }
         // pybind11 tries again, with conversions, an overload with a positional parameter
         // (besides `self`) whose caster may convert: all of them, here.
         if overloaded && o.params.len() > usize::from(f.method) {
-            second_pass.push((o, values));
+            second_pass.push((index, o, values));
         }
     }
-    for (o, values) in second_pass {
-        if let Some(result) = (o.call)(py, o, &values, true)? {
+    for (index, o, values) in second_pass {
+        if let Some(result) = call(py, f, index, o, &values, true)? {
             return Ok(result);
         }
     }

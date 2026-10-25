@@ -14,6 +14,8 @@
 //! port runs every test of this file in one. So every config here has a description of its
 //! own (`tagged`), and no two requests share a config.
 
+mod common;
+
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -1084,5 +1086,50 @@ fn add_color_space_matches_the_wheel() {
         "{} mismatches:\n{}",
         failures.len(),
         failures.join("\n")
+    );
+}
+
+/// Generated menus of upstream's test config files (`common::app_helpers::upstream_test_configs`),
+/// each read from its text.
+#[test]
+fn upstream_test_config_menus_match_the_wheel() {
+    let mut failures = Vec::new();
+    let (mut made, mut refused) = (0, 0);
+    for (k, (name, path)) in common::app_helpers::upstream_test_configs()
+        .into_iter()
+        .enumerate()
+    {
+        let source = Source::Yaml(std::fs::read_to_string(&path).expect("the config"));
+        let source_tokens = tokens(&tagged(&source, "tokens").0);
+        let r = check_menus(
+            &name,
+            &source,
+            &cases(&source_tokens, 0xca7e_0200 + k as u64, 40),
+            40,
+            None,
+            &mut failures,
+        );
+        assert!(
+            r.made >= 10,
+            "{name}: {} made, {} refused",
+            r.made,
+            r.refused
+        );
+        made += r.made;
+        refused += r.refused;
+    }
+    assert!(
+        made >= 150 && refused >= 5,
+        "{made} made, {refused} refused"
+    );
+    assert!(
+        failures.is_empty(),
+        "{} mismatches:
+{}",
+        failures.len(),
+        failures.join(
+            "
+"
+        )
     );
 }

@@ -1026,3 +1026,28 @@ fn a_color_picking_role_naming_no_color_space_is_refused() {
         "the two roles naming no color space, made and refreshed"
     );
 }
+
+/// Generated managers of upstream's test config files
+/// (`common::app_helpers::upstream_test_configs`), each read from its text.
+#[test]
+fn upstream_test_config_managers_match_the_wheel() {
+    let mut failures = Vec::new();
+    let mut totals = Totals::default();
+    for (k, (name, path)) in common::app_helpers::upstream_test_configs()
+        .into_iter()
+        .enumerate()
+    {
+        let text: &'static str = std::fs::read_to_string(&path).expect("the config").leak();
+        let source = Source::Yaml(text);
+        let config = source.port();
+        let tokens = tokens(&config);
+        let mut rng = Rng(0x31c0_0200 + k as u64);
+        let cases: Vec<Vec<Op>> = (0..6).map(|_| gen_ops(&tokens, &mut rng, 16)).collect();
+        check_cases(&name, &source, &cases, 6, &mut totals, &mut failures);
+    }
+    report("mixing_helpers_upstream_configs", &failures);
+    let r = &totals.reached;
+    assert!(r.made >= 40, "{} made", r.made);
+    assert_eq!(r.pixels, 2 * r.made, "pixels compared");
+    assert!(totals.color_picking >= 10, "{}", totals.color_picking);
+}

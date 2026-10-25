@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 
 /// The classes bound so far whose functions the test calls, with their nested classes (the
 /// iterators), as the wheel's module path names them.
-const CLASSES: [&str; 25] = [
+const CLASSES: [&str; 32] = [
     "Transform",
     "GroupTransform",
     "MatrixTransform",
@@ -54,13 +54,65 @@ const CLASSES: [&str; 25] = [
     "Look",
     "NamedTransform",
     "ViewTransform",
+    "ColorSpaceTransform",
+    "DisplayViewTransform",
+    "LookTransform",
+    "BuiltinConfigRegistry",
+    "vector_of_uint8_t",
+    "PyConfigIOProxy",
+    "Config",
 ];
 
 /// The nested classes no function of the module returns: no instance to call them with.
 const UNREACHABLE: [&str; 1] = ["FormatMetadata.ConstChildElementIterator"];
 
-/// Methods the named calls leave out: they write files or search the file system.
-const NOT_RUN: [&str; 2] = ["write", "resolveFileLocation"];
+/// Methods the named calls leave out: they write files or search the file system (or the
+/// system's monitors, which the library ports with Phase 9).
+const NOT_RUN: [&str; 3] = [
+    "write",
+    "resolveFileLocation",
+    "instantiateDisplayFromMonitorName",
+];
+
+/// Functions of the classes above that a later chunk binds (6.8a: `ConfigUtils`).
+const LATER: [&str; 5] = [
+    "Config.IdentifyBuiltinColorSpace",
+    "Config.IdentifyInterchangeSpace",
+    "Config.GetProcessorToBuiltinColorSpace",
+    "Config.GetProcessorFromBuiltinColorSpace",
+    "Config.GetProcessorFromConfigs",
+];
+
+/// A config with something in each of its lists, for its iterators.
+const CONFIG: &str = r#"ocio_profile_version: 2.1
+environment:
+  A: b
+search_path: luts
+roles:
+  default: raw
+shared_views:
+  - !<View> {name: shared, colorspace: raw}
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+    - !<Views> [shared]
+virtual_display:
+  - !<View> {name: VRaw, colorspace: raw}
+active_displays: [sRGB]
+active_views: [Raw]
+looks:
+  - !<Look> {name: look, process_space: raw}
+view_transforms:
+  - !<ViewTransform>
+    name: vt
+    from_scene_reference: !<MatrixTransform> {}
+colorspaces:
+  - !<ColorSpace> {name: raw, isdata: true}
+named_transforms:
+  - !<NamedTransform>
+    name: nt
+    transform: !<MatrixTransform> {}
+"#;
 
 /// The binary operators, which return `NotImplemented` for arguments no overload takes.
 const OPERATORS: [&str; 5] = ["__eq__", "__ne__", "__sub__", "__or__", "__and__"];
@@ -81,6 +133,9 @@ fn instances(sc: &mut Script) -> Vec<(String, usize)> {
         "CDLTransform",
         "FileTransform",
         "FileRules",
+        "ColorSpaceTransform",
+        "DisplayViewTransform",
+        "LookTransform",
     ] {
         let k = sc.call(n(&format!("OCIO.{c}")), vec![]);
         put(c, k);
@@ -115,6 +170,23 @@ fn instances(sc: &mut Script) -> Vec<(String, usize)> {
     put(
         "FileTransform.FormatIterator",
         sc.call(n("OCIO.FileTransform.getFormats"), vec![]),
+    );
+    let bytes = sc.call(
+        n("OCIO.vector_of_uint8_t"),
+        vec![json!({ "list": [i(1), i(2)] })],
+    );
+    put("vector_of_uint8_t", bytes);
+    let proxy = sc.call(n("OCIO.PyConfigIOProxy"), vec![]);
+    put("PyConfigIOProxy", proxy);
+    let configs = sc.call(n("OCIO.BuiltinConfigRegistry"), vec![]);
+    put("BuiltinConfigRegistry", configs);
+    put(
+        "BuiltinConfigRegistry.BuiltinConfigNameIterator",
+        sc.call(ra(configs, "__iter__"), vec![]),
+    );
+    put(
+        "BuiltinConfigRegistry.BuiltinConfigIterator",
+        sc.call(ra(configs, "getBuiltinConfigs"), vec![]),
     );
     let registry = sc.call(n("OCIO.BuiltinTransformRegistry"), vec![]);
     put("BuiltinTransformRegistry", registry);
@@ -236,6 +308,76 @@ fn instances(sc: &mut Script) -> Vec<(String, usize)> {
         "NamedTransform.NamedTransformAliasIterator",
         sc.call(ra(nt, "getAliases"), vec![]),
     );
+    let config = sc.call(n("OCIO.Config.CreateFromStream"), vec![s(CONFIG)]);
+    put("Config", config);
+    let all_spaces = [
+        n("OCIO.SEARCH_REFERENCE_SPACE_ALL"),
+        n("OCIO.COLORSPACE_ALL"),
+    ];
+    for (class, method, args) in [
+        (
+            "EnvironmentVarNameIterator",
+            "getEnvironmentVarNames",
+            vec![],
+        ),
+        ("SearchPathIterator", "getSearchPaths", vec![]),
+        (
+            "ColorSpaceNameIterator",
+            "getColorSpaceNames",
+            all_spaces.to_vec(),
+        ),
+        ("ColorSpaceIterator", "getColorSpaces", all_spaces.to_vec()),
+        ("ActiveColorSpaceNameIterator", "getColorSpaceNames", vec![]),
+        ("ActiveColorSpaceIterator", "getColorSpaces", vec![]),
+        ("RoleNameIterator", "getRoleNames", vec![]),
+        ("RoleColorSpaceIterator", "getRoles", vec![]),
+        ("DisplayIterator", "getDisplays", vec![]),
+        ("DisplayAllIterator", "getDisplaysAll", vec![]),
+        ("SharedViewIterator", "getSharedViews", vec![]),
+        (
+            "VirtualViewIterator",
+            "getVirtualDisplayViews",
+            vec![n("OCIO.VIEW_DISPLAY_DEFINED")],
+        ),
+        ("ViewIterator", "getViews", vec![s("sRGB")]),
+        (
+            "ViewForColorSpaceIterator",
+            "getViews",
+            vec![s("sRGB"), s("raw")],
+        ),
+        (
+            "ViewForViewTypeIterator",
+            "getViews",
+            vec![n("OCIO.VIEW_SHARED"), s("sRGB")],
+        ),
+        ("ActiveDisplaysListIterator", "getActiveDisplays", vec![]),
+        ("ActiveViewsListIterator", "getActiveViews", vec![]),
+        ("LookNameIterator", "getLookNames", vec![]),
+        ("LookIterator", "getLooks", vec![]),
+        ("ViewTransformNameIterator", "getViewTransformNames", vec![]),
+        ("ViewTransformIterator", "getViewTransforms", vec![]),
+        (
+            "NamedTransformNameIterator",
+            "getNamedTransformNames",
+            vec![n("OCIO.NAMEDTRANSFORM_ALL")],
+        ),
+        (
+            "NamedTransformIterator",
+            "getNamedTransforms",
+            vec![n("OCIO.NAMEDTRANSFORM_ALL")],
+        ),
+        (
+            "ActiveNamedTransformNameIterator",
+            "getNamedTransformNames",
+            vec![],
+        ),
+        ("ActiveNamedTransformIterator", "getNamedTransforms", vec![]),
+    ] {
+        put(
+            &format!("Config.{class}"),
+            sc.call(ra(config, method), args),
+        );
+    }
     let vt = sc.call_kw(
         n("OCIO.ViewTransform"),
         vec![],
@@ -490,7 +632,9 @@ fn generate(report: &Value) -> Generated {
         for m in &class.members {
             let name = text(&m["name"]);
             let kind = m["kind"].as_str().unwrap();
-            if ["__init__", "__setstate__", "__new__"].contains(&name.as_str()) {
+            if ["__init__", "__setstate__", "__new__"].contains(&name.as_str())
+                || LATER.contains(&format!("{}.{name}", class.path).as_str())
+            {
                 continue;
             }
             let (doc, call) = match kind {

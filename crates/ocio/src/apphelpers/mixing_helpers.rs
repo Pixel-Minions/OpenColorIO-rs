@@ -120,7 +120,7 @@ fn perceptual_to_linear(percept: f32) -> f32 {
 /// Port of `MixingSlider` (include/OpenColorIO/OpenColorAppHelpers.h:454-483) and
 /// `MixingSliderImpl` (src/OpenColorIO/apphelpers/MixingHelpers.h:15-40, MixingHelpers.cpp:
 /// 52-114 @ v2.5.2), its only implementation (owner decision 2026-10-22, P5-3 d).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MixingSlider {
     /// `m_mixing.isPerceptuallyUniform()`, kept by the manager.
     perceptually_uniform: bool,
@@ -269,12 +269,15 @@ impl fmt::Display for MixingSlider {
 ///   (the working space) and `Display Space` (a (display, view)'s).
 /// - The mixing encodings: `RGB` and `HSV`.
 ///
-/// Upstream deletes the copy constructor, and has no `createEditableCopy`.
+/// Upstream deletes the copy constructor, and has no `createEditableCopy`. The port's `Clone` is
+/// the Python binding's: it calls the library on a copy, so that no lock of its own is held
+/// while the library runs Python code (a config's I/O proxy, a logging function).
 ///
 /// Port of `MixingColorSpaceManager` (include/OpenColorIO/OpenColorAppHelpers.h:490-532) and
 /// `MixingColorSpaceManagerImpl` (src/OpenColorIO/apphelpers/MixingHelpers.h:42-97,
 /// MixingHelpers.cpp:116-395 @ v2.5.2), its only implementation (owner decision 2026-10-22,
 /// P5-3 d).
+#[derive(Clone)]
 pub struct MixingColorSpaceManager {
     /// `m_config`.
     config: Arc<Config>,
@@ -387,6 +390,19 @@ impl MixingColorSpaceManager {
         self.selected_mixing_encoding_idx = 0;
         self.sync_slider();
         Ok(())
+    }
+
+    /// Takes `config` as the manager's config, as it is: nothing else changes (the mixing
+    /// spaces, the selections and the color picking role's color space stay those of the last
+    /// [`MixingColorSpaceManager::refresh`]), as when the config upstream's manager points to
+    /// is changed in place. For the Python binding only (`ocio-py`), whose configs are nodes
+    /// the library's `Arc<Config>` can't follow: it hands the manager the config as Python
+    /// holds it now before the manager reads it (`getProcessor`, `repr`). Behaviour-neutral for
+    /// the Rust API, whose configs don't change in place (coordinator's decision 2026-10-24, as
+    /// `set_value_as_is` of the curve transforms).
+    #[doc(hidden)]
+    pub fn set_config_as_is(&mut self, config: Arc<Config>) {
+        self.config = config;
     }
 
     /// Updates the slider's copy of whether the mixing space is perceptually uniform.
@@ -581,9 +597,18 @@ impl MixingColorSpaceManager {
     /// role's color space, else to the view `view_name` of the display `display_name` (the
     /// display space) or an identity (the rendering space).
     ///
+    /// [`MixingColorSpaceManager::processor`]'s first step, public for the Python binding
+    /// only (`ocio-py`), with [`MixingColorSpaceManager::processor_with_encoding`]: the library
+    /// can run Python code here (a config's I/O proxy loading a LUT), which can change the
+    /// manager, and upstream reads the encoding and the config after it (MixingHelpers.cpp:
+    /// 336-346), so the binding hands the second step the manager as it is then.
+    /// Behaviour-neutral for the Rust API (owner decision 2026-10-24, relayed by the
+    /// coordinator).
+    ///
     /// Port of `MixingColorSpaceManagerImpl::getProcessorWithoutEncoding` (MixingHelpers.cpp:
     /// 296-325 @ v2.5.2).
-    fn processor_without_encoding(
+    #[doc(hidden)]
+    pub fn processor_without_encoding(
         &self,
         working_name: &[u8],
         display_name: &[u8],
@@ -622,13 +647,28 @@ impl MixingColorSpaceManager {
         view_name: impl AsRef<[u8]>,
         direction: TransformDirection,
     ) -> Result<Arc<Processor>> {
-        let mut group = GroupTransform::new();
-
         let processor = self.processor_without_encoding(
             working_name.as_ref(),
             display_name.as_ref(),
             view_name.as_ref(),
         )?;
+        self.processor_with_encoding(&processor, direction)
+    }
+
+    /// [`MixingColorSpaceManager::processor`]'s second step, of the first one's `processor`
+    /// (see [`MixingColorSpaceManager::processor_without_encoding`]): the processor in the
+    /// selected encoding, in `direction`. For the Python binding only.
+    ///
+    /// Port of `MixingColorSpaceManagerImpl::getProcessor` (MixingHelpers.cpp:327-347 @
+    /// v2.5.2), after its call of `getProcessorWithoutEncoding`. Upstream makes the group
+    /// before that call, which reads nothing of the manager.
+    #[doc(hidden)]
+    pub fn processor_with_encoding(
+        &self,
+        processor: &Processor,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let mut group = GroupTransform::new();
 
         group.append_transform(Transform::from(processor.create_group_transform()?));
 

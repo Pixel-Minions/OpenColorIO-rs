@@ -677,6 +677,75 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   replaces the error with the reader and removes this entry.
 - **Status:** interim, in `p3-loading` (3.10b).
 
+### I-376. A data color space converted to a display and view in the inverse direction isn't a no-op
+
+- **Upstream:** `Config::GetProcessorFromConfigs` to a display and view, with interchange
+  spaces (`Config.cpp:5083-5145`), swaps the source color space and its interchange space for
+  `TRANSFORM_DIR_INVERSE` (5106-5109), then tests `srcColorSpace->isData()` (5138) to give an
+  empty processor: in the inverse direction that tests the interchange space instead. A data
+  source color space then gets the inverted view and its interchange conversion, and a data
+  interchange space an empty processor. Probed on the Windows wheel (2026-10-23): a data
+  source color space gives an empty processor forward and a one-transform processor inverse;
+  the same color space as the interchange space gives an empty processor inverse.
+- **Who notices:** callers that convert from a data color space to a display and view in the
+  inverse direction (from the view back to the data space), or that name a data space as the
+  source interchange space.
+- **A fix:** test the color space named `srcName` whatever the direction.
+- **Status:** matched in `p9-config-utils` (9.1b, `Config::processor_from_configs_to_display_view_with_interchange_with_contexts`),
+  checked against the wheel in `crates/ocio/tests/config_from_configs_oracle.rs`.
+
+### I-377. The heuristics look for "srgb" in a color space's aliases case-sensitively
+
+- **Upstream:** `ConfigUtils::containsSRGB` (`ConfigUtils.cpp:164-183`) lowers the color
+  space's name before it looks for `srgb`, but not its aliases. A space whose only sRGB
+  spelling is an alias such as `Tex_SRGB` isn't tried as an sRGB texture space by
+  `IdentifyInterchangeSpace` (and so `IdentifyBuiltinColorSpace` and
+  `GetProcessorTo/FromBuiltinColorSpace`). Probed on the Windows wheel (2026-10-23): a config
+  whose only candidate is such a space fails with "Heuristics were not able to find a known
+  color space in the provided config."; with the alias `tex_srgb` it is identified.
+- **Who notices:** configs without interchange roles whose sRGB texture space is named
+  otherwise and has an upper-case sRGB alias.
+- **A fix:** lower the aliases too.
+- **Status:** matched in `p9-config-utils` (9.1a, `config_utils.rs`, `contains_srgb`), checked
+  against the wheel in `crates/ocio/tests/config_utils_oracle.rs`
+  (`the_srgb_heuristic_quirks_match_the_wheel`).
+
+### I-378. The sRGB heuristic doesn't invert a from-reference transform whose direction is inverse
+
+- **Upstream:** `ConfigUtils::getReferenceSpaceFromSRGBSpace` (`ConfigUtils.cpp:483-504`)
+  turns a color space's from-reference transform into a to-reference one with
+  `setDirection(TRANSFORM_DIR_INVERSE)`, which inverts it only if its direction was forward. A
+  from-reference transform written in the inverse direction stays inverse, so the heuristic
+  tests the wrong direction and rejects the space. Probed on the Windows wheel (2026-10-23): an
+  sRGB texture space whose `from_scene_reference` is a group in the inverse direction (the same
+  pixels as the usual one) isn't identified.
+- **Who notices:** configs without interchange roles whose sRGB texture space's
+  from-reference transform has `direction: inverse`.
+- **A fix:** invert the transform's direction (`GetInverseTransformDirection`).
+- **Status:** matched in `p9-config-utils` (9.1a, `config_utils.rs`,
+  `reference_space_from_srgb_space`), checked against the wheel in
+  `crates/ocio/tests/config_utils_oracle.rs` (`the_srgb_heuristic_quirks_match_the_wheel`).
+
+### I-379. Config merging doesn't invert a transform whose direction is inverse
+
+- **Upstream:** `ConfigUtils::invertTransform` (`ConfigUtils.cpp:857-862`) copies a transform
+  and sets its direction to `TRANSFORM_DIR_INVERSE`, which inverts it only if it was forward.
+  Config merging uses it where a color space has only the other direction's transform
+  (`getTransformForDir`, so the fingerprints of the duplicate search and the reference-space
+  converters) and to invert the reference-space converters (`updateReferenceColorspace`,
+  `updateReferenceView`). Probed on the Windows wheel (2026-10-23): merging, with
+  `ConfigMergingHelpers.MergeColorSpace` into `cg-config-v1.0.0_aces-v1.3_ocio-v2.1`, a color
+  space whose only transform is `to_scene_reference` with the AP1 to AP0 matrix replaces the
+  base config's `ACEScg` as its equivalent ("Equivalent input color space 'my cg' replaces
+  'ACEScg' ..."); written as the AP0 to AP1 matrix with `direction: inverse` (the same pixels),
+  it is added beside `ACEScg`.
+- **Who notices:** merges of configs whose color spaces have a transform in one direction only,
+  written with `direction: inverse`.
+- **A fix:** invert the direction (`GetInverseTransformDirection`), as `CombineTransformDirections`
+  does.
+- **Status:** matched in `p9-config-utils` (9.1c, `config_utils.rs`, `invert_transform`); the
+  wheel shows it only through merges, checked with the merge sweep (9.2j).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
@@ -1986,6 +2055,48 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `color_space_oracle.rs`, `color_spaces_behave_as_the_wheels` (`set_script`), against the
   wheel.
 
+### I-301. `SetComputeHashFunction(None)`: the empty function's error is each C++ runtime's
+
+- **Upstream:** the binding takes `None` for the hash function as an empty `std::function`
+  (pybind11's caster, with conversions), which `SetComputeHashFunction` stores
+  (PyOpenColorIO.cpp:57-58, OpenColorIO.cpp @ v2.5.2). Each later hash of a file calls it, and
+  the call throws `std::bad_function_call`, whose `what()` is the C++ runtime's: "bad function
+  call" with MSVC's STL (the Windows wheel), "bad_function_call" with libstdc++ (the Linux
+  wheel). Where the library passes the exception on, Python gets RuntimeError with that text;
+  where it catches it (the file loader, a config's cache ID), the text is in its message or
+  the hash is "? ".
+- **Who notices:** Python code that passes `None` to `SetComputeHashFunction`, on the two
+  platforms.
+- **A fix:** refuse `None` (or reset to the default hash for it).
+- **Status:** matched per platform in `p6-config` (6.6a, `crates/ocio-py/src/py_open_color_io.rs`,
+  `python_hash_function`); `callbacks_oracle.rs`, `callbacks_as_the_wheels` (`hash_script`).
+
+### I-302. A callback exception's `__notes__` that raises is reported as unraisable
+
+- **Upstream:** the `what()` pybind11 3.0 gives a Python callback's exception (in the message
+  of the library's error for a failing logging function, hash function or `PyConfigIOProxy`
+  override) asks `PyObject_HasAttrString(value, "__notes__")` for its `[WITH __notes__]` mark
+  (`error_fetch_and_normalize`). Under Python 3.13, when reading the attribute raises something
+  other than AttributeError (a `__notes__` property, or a class's `__getattr__`, that raises),
+  that function reports the error as unraisable before it answers no: `sys.unraisablehook`
+  gets it with the text "Exception ignored in PyObject_HasAttrString(); consider using
+  PyObject_HasAttrStringWithError(), PyObject_GetOptionalAttrString() or
+  PyObject_GetAttrString()", and the default hook prints that and the error's traceback to
+  stderr. The message itself has no mark and no notes (pybind11 reads the notes with
+  `PyObject_GetAttrString` and clears its error). Probe: the re-check verifier's `what2.py`,
+  `note_prop_raises`.
+- **Who notices:** Python code whose callback raises an exception with such a `__notes__`, and
+  that watches stderr or sets `sys.unraisablehook`.
+- **A fix:** read the attribute without the report (`PyObject_HasAttrStringWithError`, as later
+  pybind11 versions do), as the port does. Matching the report would take a call of
+  `PyObject_HasAttrString` itself: the hook's argument type (`UnraisableHookArgs`) isn't reachable
+  from Python without raising an unraisable error first, and the binding's FFI file
+  (`crates/ocio-py/ffi`) doesn't make that call (a new FFI call is the owner's decision).
+- **Status:** not matched, by the owner's decision (2026-10-23, relayed by the coordinator: no
+  new FFI call; the entry stays as it is) (`p6-config` 6.6a, `crates/ocio-py/src/callback.rs`,
+  `error_already_set_what`): the message is the wheel's, and the port reports nothing;
+  `callbacks_oracle.rs`, `callbacks_as_the_wheels` (`what_script`).
+
 ### I-326. The buffer checks count entries in 32 bits on Windows
 
 - **Upstream:** the binding counts the entries an image needs in C++ `long`
@@ -2040,6 +2151,45 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `read_items`; `transforms/py_lut1d_transform.rs`, `py_lut3d_transform.rs`, `SET_DATA`);
   `image_desc_oracle.rs`, `lut_transforms_oracle.rs`, against the wheel. Values that this
   reads past the buffer's items are U-148.
+
+### I-366. A curve's size beyond memory fails with the C++ runtime's texts
+
+- **Upstream:** `GradingBSplineCurve(size)` and `setNumControlPoints(size)` take any `size_t`
+  and make (`std::vector(n)`) or grow (`resize`) the curve's control points (8 bytes each)
+  and slopes (4 bytes each) (GradingBSplineCurve.cpp:556-559, 602-606 @ v2.5.2). A size beyond
+  the vector's `max_size()` raises `ValueError` with the C++ runtime's text, "vector too long"
+  on Windows (MSVC's STL), "cannot create std::vector larger than max_size()" (constructor)
+  and "vector::_M_default_append" (`resize`) on Linux (libstdc++); one the allocator can't
+  serve raises `MemoryError` "bad allocation" or "std::bad_alloc"; and the limits differ as
+  for I-236: `max_size()` is `2**61 - 1` points on Windows and `2**60 - 1` on Linux, so `2**60`
+  points is "bad allocation" on Windows and a `ValueError` on Linux (seen through both
+  wheels). A size the allocator grants but memory can't hold depends on the machine: on Linux,
+  whose kernel overcommits memory, `GradingBSplineCurve(2**40)` gets 8 TB of address space
+  and the wheel's process is killed while it zeroes the points (seen in Rocky Linux 9), where
+  the port's curve (whose zeroed memory the kernel maps lazily) is made.
+- **Who notices:** Python code that asks for a curve of an absurd number of points.
+- **A fix:** refuse sizes beyond a sane bound, with one text on both platforms.
+- **Status:** matched in `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`,
+  `vector_alloc`: the same limits and texts, the memory reserved through the allocator before
+  the library allocates, whose failure would abort the process instead);
+  `grading_data_oracle.rs`, `bspline_script` (`2**59`, `2**60`, `2**61`, `2**63`), against the
+  Windows and the Linux wheels. The machine-dependent sizes are not tested.
+
+### I-396. `MixingEncodingIterator.__next__` takes a mixing space iterator
+
+- **Upstream:** the binding defines the `__next__` of `MixingColorSpaceManager`'s
+  `MixingEncodingIterator` with a lambda taking a `MixingSpaceIterator &`
+  (src/bindings/python/apphelpers/PyMixingHelpers.cpp:148-152 @ v2.5.2), the space iterator's
+  type: `next()` of an encoding iterator, and so a `for` loop or `list()` over
+  `getMixingEncodings()`, raises pybind11's TypeError ("__next__(): incompatible function
+  arguments. The following argument types are supported: 1. (self:
+  PyOpenColorIO.PyOpenColorIO.MixingColorSpaceManager.MixingSpaceIterator) -> str"), and the
+  method, given a space iterator (`MixingEncodingIterator.__next__(mix.getMixingSpaces())`),
+  walks the encodings with that iterator's index. `len()` and indexing work.
+- **Who notices:** Python code that iterates over the mixing encodings.
+- **A fix:** take a `MixingEncodingIterator &`.
+- **Status:** matched in `p6-after-p5` (6.7c, `crates/ocio-py/src/apphelpers/py_mixing_helpers.rs`,
+  `ENCODING_NEXT`); `apphelpers_oracle.rs`, `mixing_helpers_behave_as_the_wheels`.
 
 ## Platform, environment and paths
 
@@ -3721,6 +3871,123 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `MixingColorSpaceManager`); `mixing_helpers_oracle.rs` (`managers_match_the_wheel`,
   `builtin_config_managers_match_the_wheel`).
 
+### I-386. A copy of merge parameters shares their overrides with the original
+
+- **Upstream:** `ConfigMergingParameters` keeps the overrides of the search path, the
+  environment, the active displays and views and the inactive color spaces in a config,
+  `m_overrideCfg`, and `Impl::operator=` copies that pointer (`MergeConfigsHelpers.h:106` @
+  v2.5.2), so `createEditableCopy` (Python's `copy.deepcopy`) gives an object that shares them
+  with the original: a search path, an environment variable or an active view set on either
+  shows on both, while the names, options and strategies are the copy's own. Probed on the
+  Windows wheel (2026-10-23). The copies `ConfigMerger::createEditableCopy` makes of its
+  parameters, and `MergeColorSpace` of the parameters given, share them too.
+- **Who notices:** code that copies a merge's parameters to change the copy's overrides.
+- **A fix:** copy the override config (`createEditableCopy`) in `Impl::operator=`.
+- **Status:** matched in `p9-merge-1` (9.2a, `apphelpers/mergeconfigs/merge_configs_helpers.rs`,
+  `ConfigMergingParameters`, whose override config is shared behind an `Arc`);
+  `merge_params_oracle.rs` changes a copy and its original in turn, and reads both.
+
+### I-387. A merge that names a later merge's output fails with the C++ library's error
+
+- **Upstream:** `ConfigMerger::Impl::loadConfig` takes an earlier merge's output by the index
+  of its parameters, `m_mergedConfigs.at(i)` (`MergeConfigsHelpers.cpp:505-513` @ v2.5.2),
+  while `mergeConfigs` runs the merges in order (`681-726`). A base or input that names (ignoring
+  case) the output of its own merge or of a later one, and no file or built-in config, makes
+  `std::vector::at` throw `std::out_of_range`, which no handler of OCIO's catches: Python gets
+  an `IndexError` with the C++ library's text, "invalid vector subscript" from the Windows wheel
+  (MSVC; probed 2026-10-23), "vector::_M_range_check: __n (which is N) >= this->size() (which is
+  M)" from the Linux wheel (libstdc++; the format string is in its `libOpenColorIO.so`). The
+  message names neither the merge nor the config, and differs between the platforms.
+- **Who notices:** OCIOM files whose merges are out of order, or whose merge names its own
+  output.
+- **A fix:** an OCIO exception that names the output and says that its merge comes later.
+- **Status:** matched in `p9-merge-1` (9.2b, `apphelpers/mergeconfigs/merge_configs_helpers.rs`,
+  `ConfigMerger::load_config`, with the error kind `ExceptionKind::OutOfRange` that the binding
+  raises as `IndexError`); `merge_configs_helpers_oracle_tests.rs` compares the text with the
+  wheel's `mergeConfigs` on each platform.
+
+### I-388. The merger doesn't say why a config failed to load
+
+- **Upstream:** `ConfigMerger::Impl::loadConfig` tries `Config::CreateFromFile` at each search
+  path and then `Config::CreateFromBuiltinConfig`, each inside `catch(...)`
+  (`MergeConfigsHelpers.cpp:475-503` @ v2.5.2, with upstream's TODO saying so): a config file
+  that exists but fails to load is passed over like a missing one, and when nothing else
+  matches, `mergeConfigs` fails with "Could not load the base or the input config", which names
+  neither the config nor the reason.
+- **Who notices:** whoever merges a config with an error in it, or misspells a name.
+- **A fix:** keep the first error a file that exists gives, and report it with the config's name.
+- **Status:** matched in `p9-merge-1` (9.2b, `ConfigMerger::load_config`);
+  `merge_configs_helpers_oracle_tests.rs` (files that aren't configs before valid ones along the
+  search paths, and alone).
+
+### I-389. The merger's search path string is split at every colon, even on Windows
+
+- **Upstream:** `ConfigMerger::setSearchPath` splits its argument at each `:`
+  (`StringUtils::Split`, `MergeConfigsHelpers.cpp:583-586` @ v2.5.2), as a config's search path
+  is (I-9): on Windows, `C:/configs` becomes `C` and `/configs`; `""` gives one empty path.
+  `addSearchPath` keeps a path whole. The OCIOM reader sets a `search_path` written as a string
+  this way (9.2c).
+- **Who notices:** Windows users who give the merger, or an OCIOM file, a search path string
+  with a drive letter.
+- **A fix:** as I-9, don't split after a drive letter.
+- **Status:** matched in `p9-merge-1` (9.2b, `ConfigMerger::set_search_path`);
+  `config_merger_oracle.rs` (`C:/drive`, `a:b::c:`, `""`).
+
+### I-390. An empty value in an OCIOM file reads as the text "null"
+
+- **Upstream:** the OCIOM reader reads most values with yaml-cpp's `as<std::string>()`, which
+  gives `"null"` for a null node (`OCIOMYaml.cpp:389-403, 144-148, 173, 235-236` @ v2.5.2): a
+  merge's `base:` or `input:` left empty names the config `null`, an empty family prefix is the
+  prefix `null`, an environment variable with no value gets the value `null`, a merge named `~`
+  is the output `null`, and an empty `default_strategy` or `strategy` is refused as "The value
+  'null' is not recognized. ". The overrides (`name`, `description`, ...) and the top-level
+  keys skip a null value instead (`197`, `316`). Probed on the Windows wheel (2026-10-23).
+- **Who notices:** whoever leaves a value empty in an OCIOM file, meaning "none" or "default".
+- **A fix:** skip null values everywhere, as the overrides do.
+- **Status:** matched in `p9-merge-1` (9.2c, `apphelpers/mergeconfigs/ociom_yaml.rs`, through
+  the port of yaml-cpp's conversion); `ociom_yaml_oracle_tests.rs`.
+
+### I-391. The OCIOM reader ignores unknown and repeated keys silently
+
+- **Upstream:** the reader ignores, without a warning, the keys it doesn't know at the top
+  level, in a merge, in its `options` and in its `overrides`, and the keys other than `strategy`
+  in a section's strategy (`OCIOMYaml.cpp:139-184, 193-261, 312-429, 113-122` @ v2.5.2): a
+  misspelled `input_frist: false` or `bsae: x` leaves the default, while an unknown section
+  under `params` is a warning ("Unsupported property in merge params: key", `302`). Repeated
+  keys are refused in the document, in `merge`, `options`, `overrides` and `params`
+  (`CheckDuplicates`), but not in a merge itself, in a section's strategy or in the
+  environment, where the last one wins.
+- **Who notices:** whoever misspells a key in an OCIOM file.
+- **A fix:** warn about unknown keys and refuse repeated ones at every level, as the config
+  reader does.
+- **Status:** matched in `p9-merge-1` (9.2c, `ociom_yaml.rs`); `ociom_yaml_oracle_tests.rs`.
+
+### I-392. The OCIOM version is read leniently
+
+- **Upstream:** `ociom_version` is split at `.` and each part read with `std::stoi`
+  (`OCIOMYaml.cpp:318-358` @ v2.5.2), which skips leading white space, takes a sign, and stops
+  at the first character that isn't a digit: `1.0abc`, ` 1`, `+1`, `1.-0`, `1e0` and `01.0` all
+  read as 1.0, and `0` or `0.0` are accepted as versions below 1.0. A negative major version
+  wraps to a large unsigned one and is refused as higher than 1.0; one part or two are
+  accepted, three refused. Probed on the Windows wheel (2026-10-23).
+- **Who notices:** OCIOM files with a malformed version, which upstream accepts.
+- **A fix:** accept only `1` and `1.0` (or the digits alone in each part).
+- **Status:** matched in `p9-merge-1` (9.2c, `ociom_yaml.rs`, with `ocio_yaml.rs`'s `stoi`);
+  `ociom_yaml_oracle_tests.rs`.
+
+### I-393. An OCIOM file without a value at the top level sets no working directory
+
+- **Upstream:** the reader sets the merger's working directory to the OCIOM file's directory
+  inside its loop over the top-level keys, after each key whose value isn't null
+  (`OCIOMYaml.cpp:422-428` @ v2.5.2). An empty file, one with only comments, or one whose keys
+  are all empty (`merge:`) leaves the working directory empty, so the merges' configs are looked
+  for relative to the process's current directory rather than the file's. Probed on the Windows
+  wheel (2026-10-23).
+- **Who notices:** whoever reads such an OCIOM file and adds merges to it through the API.
+- **A fix:** set the working directory once, whatever the file holds.
+- **Status:** matched in `p9-merge-1` (9.2c, `ociom_yaml.rs`, `load`);
+  `ociom_yaml_oracle_tests.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -3794,16 +4061,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     upstream wouldn't.
   The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.
 
-### U-4. A Python logging function crashes the interpreter's exit
+### U-4. A Python logging or hash function crashes the interpreter's exit
 
 - **Upstream:** a logging function set from Python is held in a C++ global
   (`Logging.cpp:71`), which outlives the Python interpreter. A process that exits with one
   still set crashes (a segmentation fault on both platforms, seen through the wheel in
   `p1-foundations`); `ResetToDefaultLoggingFunction()` before exit avoids it, and the oracle's
-  commands do so.
+  commands do so. A hash function set with `SetComputeHashFunction` is held the same way
+  (`PathUtils.cpp:33`) and crashes the exit the same way; `ResetComputeHashFunction()` avoids
+  it. Probed 2026-10-22: `python -c "import PyOpenColorIO as O; O.SetLoggingFunction(str.upper)"`
+  and the same with `SetComputeHashFunction` exit with 0xC0000005 (an access violation) on
+  Windows, and 139 (SIGSEGV) in Rocky Linux 9 (the p6-config verifier's probe).
 - **Options:** release the function when Python shuts down, or keep it and never release it;
   either way the process exits cleanly.
-- **Status:** open; decided in Phase 6 (the Python module).
+- **Status:** the port keeps the function and never releases it (a Rust static, which the
+  process doesn't drop at exit): such a process exits with 0 on both platforms, where the
+  wheel's dies (`p6-config`, 6.6a, `crates/ocio-py/src/py_open_color_io.rs`,
+  `SetLoggingFunction`, `SetComputeHashFunction`).
 
 ### U-5. A 1D LUT that doesn't fit its GPU texture width
 
@@ -4967,7 +5241,14 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   given), which the wheel dereferences here (docs/improvements.md, U-110)" where the wheel
   dereferences it, after the children before it (the binding's
   `TransformRc::materialize` and `validate`, `crates/ocio-py/src/py_transform.rs`), in
-  `p6-transforms` (6.3a).
+  `p6-transforms` (6.3a). A config whose own object (a color space, look, view transform or
+  named transform Python got from it) holds such a group can't be written back before a call
+  (owner decision Q1 = A): every call on that config that reads or changes it (an iterator's
+  `len`, `next` and indexing included) raises this error while the group holds the null
+  transform, where the wheel fails only in the calls that reach it (owner decision
+  2026-10-22: stricter than the wheel); once Python removes it, the config's objects are
+  written back and shared as before (`p6-config`, `crates/ocio-py/src/py_config.rs`,
+  `write_back`; `config_oracle.rs`, `an_object_that_cant_be_written_back`).
 
 ### U-111. A group holding itself recurses until the stack overflows
 
@@ -4980,7 +5261,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `prependTransform`.
 - **Status:** the port raises RuntimeError "the group holds itself, through which the wheel
   recurses until its stack overflows (docs/improvements.md, U-111)" where the wheel recurses
-  (`crates/ocio-py/src/py_transform.rs`), in `p6-transforms` (6.3a).
+  (`crates/ocio-py/src/py_transform.rs`), in `p6-transforms` (6.3a). A config whose own object
+  holds such a group raises this error from every call that reads or changes it, while the
+  cycle lasts, where the wheel fails only in the calls that walk it (owner decision
+  2026-10-22, as for U-110); once Python breaks the cycle, the config's objects are written
+  back and shared as before (`p6-config`, `crates/ocio-py/src/py_config.rs`, `write_back`;
+  `config_oracle.rs`, `an_object_that_cant_be_written_back`).
 
 ### U-112. A transform's setter given an enum value outside its enumerators
 
@@ -5020,6 +5306,51 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `bit_depth`, `allocation` of `py_transform.rs` and `transforms/py_allocation_transform.rs`);
   `color_space_oracle.rs`, `an_enum_value_outside_the_enumerators_is_the_ports_error`,
   `look_view_named_oracle.rs`, `a_reference_space_outside_the_enumerators_is_the_ports_error`.
+  Also the config's enum arguments, which the wheel hands to the library as they are
+  (`getProcessor(OCIO.MatrixTransform(), OCIO.TransformDirection(5))` returns a processor,
+  `isColorSpaceLinear('raw', OCIO.ReferenceSpaceType(5))` returns False, probed 2026-10-22):
+  `setEnvironmentMode`, the reference space of `isColorSpaceLinear`, the search reference
+  type and visibility of `getColorSpaces` and `getColorSpaceNames`, the visibility of
+  `getNamedTransforms` and `getNamedTransformNames`, the view type of `getViews` and
+  `getVirtualDisplayViews`, and the direction of `getProcessor`; in `p6-config` (6.3f, 6.3g,
+  `crates/ocio-py/src/py_config.rs`, `enumerator`); `config_oracle.rs`,
+  `an_enum_value_outside_the_enumerators_is_the_ports_error`. Also `SetLoggingLevel`, which
+  the wheel stores (`SetLoggingLevel(OCIO.LoggingLevel(7))` returns, probed 2026-10-22), in
+  `p6-config` (6.6a, `crates/ocio-py/src/py_open_color_io.rs`, `logging_level`);
+  `callbacks_oracle.rs`, `where_the_wheel_fails_the_port_raises`. `LogMessage` given such a
+  level logs nothing, as upstream's `switch` (Logging.cpp:131-160), matched.
+  Also a `GradingBSplineCurve`'s spline type (`GradingBSplineCurve(size, OCIO.BSplineType(9))`
+  and `setSplineType`), which the wheel stores and its getter gives back as
+  `<BSplineType.???: 9>`, in `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`,
+  `spline_type`); `grading_data_oracle.rs`,
+  `a_spline_type_outside_the_enumerators_is_the_ports_error`. (A `HueCurveType` outside the
+  enumerators is read at once, as the `default` of `GetBSplineTypeForHueCurveType`: matched.)
+  Also the style of `GradingPrimaryTransform` and `GradingToneTransform` (`setStyle` and the
+  constructors' `style`), which the wheel stores and whose `repr` then kills the wheel's
+  process; a constructor's values are validated first (a primary's with that style, read as
+  `GRADING_VIDEO` is), so their error comes first, as the wheel's; in `p6-after-p5` (6.7b,
+  `crates/ocio-py/src/transforms/py_grading_primary_transform.rs`, `grading_style`);
+  `grading_transforms_oracle.rs`, `a_grading_style_outside_the_enumerators_is_the_ports_error`.
+  The same for `GradingRGBCurveTransform` and `GradingHueCurveTransform`, and the hue curve
+  transform's `setRGBToHSY` (`an_hsy_style_outside_the_enumerators_is_the_ports_error`).
+  Also the app helpers' (6.7c, `crates/ocio-py/src/apphelpers/`, `apphelpers_oracle.rs`):
+  `ColorSpaceMenuParameters.setSearchReferenceSpaceType` and the constructor's
+  `searchReferenceSpaceType`, which the wheel stores (its getter gives the value back, its
+  `repr` writes no `colorSpaceType`, and a menu of them has no color space;
+  `a_search_reference_type_outside_the_enumerators_is_the_ports_error`);
+  the direction of `DisplayViewHelpers.GetProcessor`, which the wheel's display view transform
+  keeps and the config's `getProcessor` validates ("DisplayViewTransform validation failed:
+  ...: invalid direction."), unless the config's processor cache already holds the processor
+  of that display and view in the inverse direction, whose cache key is the same (the
+  transform's text writes a direction other than forward as `inverse`, ParseUtils.cpp:133-138
+  @ v2.5.2): the cache answers without validating, and then the pipeline the helper builds
+  refuses it ("LegacyViewingPipeline is not valid: DisplayViewTransform validation failed:
+  ...: invalid direction."), or, for a view whose processor has a dynamic exposure and gamma
+  and without a channel view, the wheel returns the cached inverse processor (probed on
+  Windows, 2026-10-24); the port raises before any of these
+  (`a_display_view_direction_outside_the_enumerators_is_the_ports_error`);
+  and the direction of `MixingColorSpaceManager.getProcessor`, with which the wheel makes a
+  processor (`a_mixing_direction_outside_the_enumerators_is_the_ports_error`).
 
 ### U-113. `GroupTransform.write` to a file whose name isn't ASCII, on Windows
 
@@ -5112,7 +5443,15 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** the port raises ValueError "<call>: None, a null pointer from which the wheel
   constructs a std::string (its process dies; docs/improvements.md, U-123)". In `p6-objects`
   (6.3d, `crates/ocio-py/src/py_context.rs`, `null_string`, `py_processor_metadata.rs`,
-  `py_viewing_rules.rs`); `context_oracle.rs`, `rules_oracle.rs`.
+  `py_viewing_rules.rs`); `context_oracle.rs`, `rules_oracle.rs`. Also the config's
+  `const char *` arguments that upstream makes a `std::string` of or compares unchecked:
+  `CreateFromBuiltinConfig`, `getColorSpace`, `getCanonicalName`, `isColorSpaceLinear`,
+  `isInactiveColorSpace`, `setActiveDisplays`, `setActiveViews` and `archive` given `None`
+  (each probed in its own process on Windows, 2026-10-22: the wheel's process dies); in
+  `p6-config` (6.3f, 6.3g, `crates/ocio-py/src/py_config.rs`, `checked`); `config_oracle.rs`,
+  `where_the_wheels_process_dies_the_port_raises`. Also `LogMessage(level, None)`, in
+  `p6-config` (6.6a, `crates/ocio-py/src/py_open_color_io.rs`); `callbacks_oracle.rs`,
+  `where_the_wheel_fails_the_port_raises`.
 
 ### U-124. `None` for a color space set, a color space or a transform that upstream dereferences
 
@@ -5140,6 +5479,111 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   an empty set as the wheel's; a set of one color space or none removing its own returns, as
   the wheel's. In `p6-objects` (6.3e, `crates/ocio-py/src/py_color_space_set.rs`,
   `py_look.rs`, `py_named_transform.rs`); `color_space_oracle.rs`, `look_view_named_oracle.rs`.
+  Also the config's: `addColorSpace`, `addLook`, `addViewTransform`, `setFileRules`,
+  `setViewingRules`, `AreViewsEqual`, `AreVirtualViewsEqual` and `SetCurrentConfig` given
+  `None`, and `getProcessor` of a named transform with neither transform (through
+  `NamedTransform::GetTransform`), each probed in its own process on Windows (2026-10-22); in
+  `p6-config` (6.3f, 6.3g, `crates/ocio-py/src/py_config.rs`, `null_object`);
+  `config_oracle.rs`, `where_the_wheels_process_dies_the_port_raises`. Also
+  `Config.CreateFromConfigIOProxy(None)`, in `p6-config` (6.6a,
+  `crates/ocio-py/src/py_config_io_proxy.rs`, `null_proxy`); `callbacks_oracle.rs`,
+  `where_the_wheel_fails_the_port_raises`.
+
+### U-131. `ExtractOCIOZArchive` given `None` for a path
+
+- **Upstream:** `ExtractOCIOZArchive(const char * archivePath, const char * destination)`
+  makes a `std::string` of the destination (`pystring::os::path::normpath(destination)`) and
+  hands the archive path to minizip's `mz_zip_reader_open_file`, neither checked for null
+  (OCIOZArchive.cpp:335-388 @ v2.5.2); the binding (PyConfig.cpp:1486-1487) passes `None` as a
+  null pointer. The Windows wheel's process dies for either path, or both (probed 2026-10-22).
+- **Who notices:** Python code that passes `None` as a path to `ExtractOCIOZArchive`.
+- **A fix:** refuse null paths with an `Exception`.
+- **Status:** the port raises ValueError "ExtractOCIOZArchive: None, a null pointer the wheel
+  reads as a path (its process dies; docs/improvements.md, U-131)". In `p6-config` (6.3f,
+  `crates/ocio-py/src/py_config.rs`); `config_functions_oracle.rs`.
+
+### U-132. `vector_of_uint8_t`: deleting a slice with a negative step erases outside the vector
+
+- **Upstream:** pybind11's `bind_vector` (`stl_bind.h`, which the wheel builds
+  `vector_of_uint8_t` with, PyConfigIOProxy.cpp:54 @ v2.5.2) deletes a slice one element at a
+  time, `v.erase(v.begin() + start)` then `start += step - 1`, which is right for a positive
+  step only. With a negative step the positions drift: some slices delete other elements than
+  Python's (`del v[::-2]` of `[1, 2, 3, 4]` leaves `[2, 3]`, which the port matches), and
+  others reach a position before the vector's start or past its end (`del v[::-1]` of four
+  elements), where `erase` moves memory the vector doesn't own (probed on Windows,
+  2026-10-22: the wheel survived and printed `[]`). The three slice methods also read the
+  vector's size before the slice's bounds run their `__index__`: a bound whose `__index__`
+  shrinks the vector (`v[:P()]` with `P.__index__` being `v.pop`) makes `__getitem__` read,
+  `__setitem__` write and `__delitem__` erase past the vector's new end (probed on Windows,
+  2026-10-22: `__getitem__` gave the popped byte back).
+- **Who notices:** Python code that deletes a slice with a negative step from a
+  `vector_of_uint8_t`, or slices one with a bound whose `__index__` shrinks it.
+- **A fix:** erase the slice's positions from the highest down; compute the slice after its
+  bounds' `__index__`, or check the positions against the size then.
+- **Status:** the port raises ValueError "vector_of_uint8_t.__delitem__: a slice whose erasing
+  loop leaves the vector, where the wheel erases memory it doesn't own (docs/improvements.md,
+  U-132)", before erasing anything, where the loop would leave the vector; elsewhere it erases
+  what the wheel's loop erases. For a slice whose `__index__` shrank the vector, `__getitem__`
+  and `__setitem__` raise ValueError "vector_of_uint8_t.__getitem__: a slice whose index
+  shrank the vector, where the wheel reads memory the vector no longer holds
+  (docs/improvements.md, U-132)" (`__setitem__` and "writes" in it) before reading or writing
+  any element. In `p6-config` (6.6a,
+  `crates/ocio-py/src/py_config_io_proxy.rs`); `vector_oracle.rs`.
+
+### U-133. A `vector_of_uint8_t` iterator read after its vector reallocated or shrank
+
+- **Upstream:** pybind11's `make_iterator` (the `__iter__` of `bind_vector`) keeps the vector's
+  `begin()` and `end()` iterators; a change of the vector's size invalidates them. Reading one
+  after the vector reallocated its buffer reads freed memory (`it = iter(v); v.append(4);
+  list(it)` gave `[1, 0, 0]`, probed on Windows, 2026-10-22); after it shrank, the bytes past
+  its new end (`v.clear()` then `list(it)` gave the old `[1, 2, 3]`).
+- **Who notices:** Python code that iterates a `vector_of_uint8_t` while it changes its size.
+- **A fix:** iterate by index, checking the size at each step (as Python's own list iterator).
+- **Status:** the port keeps the capacity the wheel's C++ runtime gives the vector (MSVC's STL
+  grows a buffer by half, libstdc++ doubles it), and raises ValueError "iterator of
+  vector_of_uint8_t: the vector reallocated or shrank since the iterator was made, and the
+  wheel's iterator reads memory the vector no longer holds there (docs/improvements.md,
+  U-133)" where the wheel's iterator would read a byte from a freed buffer or past the
+  vector's end; where it reaches its saved end it stops, and where the byte is the vector's it
+  reads it, as the wheel's does. In `p6-config` (6.6a,
+  `crates/ocio-py/src/py_config_io_proxy.rs`); `vector_oracle.rs`.
+
+### U-134. `None` as `self` of a method bound without argument names
+
+- **Upstream:** pybind11 gives a method bound with `py::arg` names an argument record for
+  `self` that refuses `None`; a method bound without them (`.def("getName",
+  &ColorSpace::getName)`, and most of the module's lambdas) has none, and its class caster
+  loads `None` as a null pointer when it may convert (a function of one overload, or the
+  second pass of an overloaded one). A member function pointer is then called through the
+  null `this`, and a lambda taking the class's `shared_ptr` (`defRepr` included) dereferences
+  an empty one: `OCIO.Context.getSearchPath(None)`, `OCIO.ColorSpace.getName(None)`,
+  `OCIO.Context.__repr__(None)`, `OCIO.ColorSpaceSet.__eq__(None, OCIO.ColorSpaceSet())`,
+  `OCIO.Config.archive(None, 'out.ocioz')`, `OCIO.PyConfigIOProxy.getLutData(None, 'a')`:
+  the wheel's process dies (probed on Windows, 2026-10-22, each in its own process). A lambda
+  taking a reference (`Class &`: the iterators, `bind_vector`, `defRepr` of a class held by
+  value) refuses `None` with pybind11's TypeError, as a named overload does. A lambda taking
+  the `shared_ptr` that only builds an iterator holding it (35 overloads: the iterator getters
+  of `Config`, such as `getRoles` and `getLooks`, of `ColorSpace`, `ColorSpaceSet`,
+  `Context`, `NamedTransform`, `ViewTransform`, `ProcessorMetadata` and others, and
+  `Context.__iter__`, `GroupTransform.__iter__`) returns an iterator of the empty pointer that
+  lives: `iter()` gives it back and `repr()` works, and its `__len__`, `__getitem__` and
+  `__next__` read through the null pointer (`len(OCIO.Config.getRoles(None))`: the process
+  dies; probed on Windows, 2026-10-22).
+- **Who notices:** Python code that calls a method through its class with `None` for `self`.
+- **A fix:** pybind11 could give every method's `self` a record that refuses `None`
+  (`py::arg("self").none(false)`), or upstream could name its arguments.
+- **Status:** the port raises ValueError "<Class>.<method>: None as self, a null pointer the
+  wheel calls the method through (its process dies; docs/improvements.md, U-134)" where
+  pybind11 would make that call (`self` `None` with conversions, the other arguments loading),
+  and pybind11's TypeError elsewhere, as the wheel. An overload that only builds an iterator
+  returns it, as the wheel's, and its `__len__`, `__getitem__` and `__next__` raise ValueError
+  "the iterator <Class>.<method> made of None as self, a null pointer the wheel's iterator
+  reads through (its process dies; docs/improvements.md, U-134)". Every unnamed method
+  overload of the wheel's classes is listed with how its `self` binds, read from upstream's
+  bindings (`crates/ocio-py/src/self_kind.rs`, owner decision 2026-10-22), and the
+  dispatcher checks it (`crates/ocio-py/src/dispatch.rs`, `call`); in `p6-config`. `none_self_oracle.rs`: the
+  table is the wheel's unnamed overloads, exactly; a probe per kind against the wheel in its
+  own process; every listed overload the port binds, each error's text as given here.
 
 ### U-141. A menu of a role that names no color space
 
@@ -5318,15 +5762,29 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   after it was built (`setParams`), the copy throws, the exception leaves a `noexcept`
   function, and `std::terminate` ends the process (probed on Windows, 2026-10-22:
   `FixedFunctionTransform(ACES_GAMUT_COMP_13, 7 params)`, `setParams([1.0])`, then
-  `pipeline.setLinearCC(ff)` ends the wheel's process without a Python exception).
+  `pipeline.setLinearCC(ff)` ends the wheel's process without a Python exception). The copy of
+  a GradingRGBCurveTransform or GradingHueCurveTransform sets its curves again with the
+  property's `setValue` (`GradingRGBCurveTransform.cpp:28-33`, `GradingRGBCurveOpData.cpp:65`;
+  `GradingHueCurveTransform.cpp:29-34`, `GradingHueCurveOpData.cpp:73`), which throws for
+  curves that don't validate; Python code makes them so through the curves `getValue` returns
+  (probed on Windows, 2026-10-23: a control point of the `red` or `hue_sat` curve set to
+  `(1.5, 0.5)` through `getControlPoints()`, then `pipeline.setLinearCC(t)` ends the wheel's
+  process).
 - **Who notices:** an application handing the pipeline a fixed function transform it changed
-  to parameters the style refuses.
+  to parameters the style refuses, or, in Python, a curve transform whose curves it changed in
+  place to curves that don't validate.
 - **A fix:** let the setters throw (drop `noexcept`), as `ColorSpace::setTransform` does.
 - **Status:** the port's setters return the copy's error, and the pipeline keeps the transform
   it had (owner decision 2026-10-22, P5-3 c: setters taking `Option<&Transform>` and returning
   `Result`, as `ColorSpace::set_transform`). In `p5-helpers-2` (5.7d,
   `apphelpers/legacy_viewing_pipeline.rs`, `editable_copy`); `legacy_viewing_pipeline_oracle.rs`
-  (`setters_refuse_an_invalid_fixed_function`).
+  (`setters_refuse_an_invalid_fixed_function`). The Python binding's `setLinearCC`,
+  `setColorTimingCC`, `setChannelView` and `setDisplayCC` raise that error (the text the wheel
+  raises for a transform made with those values: `FixedFunctionTransform(style, params)`, a
+  curve transform's `setValue`) and keep the transform they had, where the wheel's process dies
+  (`p6-after-p5`, 6.7c, `crates/ocio-py/src/apphelpers/py_legacy_viewing_pipeline.rs`,
+  `cc_setter`); `apphelpers_oracle.rs`, `a_pipeline_given_an_invalid_transform_raises`
+  (against `py_eval`'s crash report).
 
 ### U-152. A color picking role that names no color space
 
@@ -5351,7 +5809,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (owner decision 2026-10-22, P5-3 d: `new` and `refresh` return `Result`). In `p5-helpers-2`
   (5.7e, `apphelpers/mixing_helpers.rs`, `color_picker_of`); `mixing_helpers_oracle.rs`
   (`a_color_picking_role_naming_no_color_space_is_refused`, against the wheel's crash in
-  `py_eval`).
+  `py_eval`). The Python binding raises it from `MixingColorSpaceManager(config)` and
+  `refresh(config)`, the manager left as it was (`p6-after-p5`, 6.7c,
+  `crates/ocio-py/src/apphelpers/py_mixing_helpers.rs`).
 
 ### U-156. Read-only buffers are written
 
@@ -5388,3 +5848,252 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (docs/improvements.md, U-157)", once the export is made, which it then releases
   (`crates/ocio-py/ffi/src/lib.rs`, `Buffer::request`), in `p6-buffers` (6.5a). Not reachable
   from Python code, so not tested through an exporter.
+
+### U-167. `None` for a grading curve that the wheel dereferences
+
+- **Upstream:** pybind11's holder caster takes `None` as a null `GradingBSplineCurveRcPtr`,
+  `GradingRGBCurveRcPtr` or `GradingHueCurveRcPtr` when it may convert (a function of one
+  overload, or the second pass), and these lambdas dereference it
+  (src/bindings/python/PyGradingData.cpp @ v2.5.2): the getters and setters of the RGB
+  curve's and the hue curve's curve properties (`GradingRGBCurve.red.fget(None)`, 429-468,
+  511-590), their setters given `None` (`rgb.red = None`, `CopyGradingBSpline`, 22-33), and
+  `GradingHueCurve(...)` given `None` among its eight curves (`GradingHueCurveImpl`'s
+  constructor copies each through its pointer, GradingHueCurve.cpp:99-117); and
+  `GradingRGBCurveTransform` and `GradingHueCurveTransform` given `None` for their values
+  (`setValue(None)`, the constructor's `values`: the property validates through the pointer,
+  DynamicProperty.cpp:216-223, 315-322), and `DynamicProperty.setGradingRGBCurve(None)` and
+  `setGradingHueCurve(None)` on a property of that kind (PyDynamicProperty.h:117-145). The
+  wheel's process dies. (`GradingRGBCurve(..., None)` checks its curves: "All curves have to be
+  defined", matched. The methods bound without argument names are U-134's.)
+- **Who notices:** Python code that passes `None` for a curve.
+- **A fix:** refuse `None` there (`py::arg().none(false)`), or check the pointers.
+- **Status:** the port raises ValueError "<class>: None for a curve, a null pointer the wheel
+  dereferences (its process dies; docs/improvements.md, U-167)" (`null_curve`), in
+  `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`; 6.7b,
+  `transforms/py_grading_rgb_curve_transform.rs`, `py_grading_hue_curve_transform.rs`);
+  `grading_data_oracle.rs`, `a_null_curve_is_the_ports_error`, `grading_transforms_oracle.rs`,
+  `null_values_are_the_ports_error`; 6.7a, `crates/ocio-py/src/py_dynamic_property.rs`,
+  `dynamic_property_oracle.rs`, `null_curves_are_the_ports_error` (each case's process dies in
+  the wheel, and only at that step).
+
+### U-171. The heuristics turn a shared config's processor cache off while other threads use it
+
+- **Upstream:** `ConfigUtils::SuspendCacheGuard` (`ConfigUtils.h:78-101`) switches a config's
+  processor cache off for the heuristics and back on afterwards, through a const pointer
+  (`setProcessorCacheFlags` is `const`). The flags are a plain member: another thread using
+  the same config meanwhile (making processors, or running the heuristics too) races with the
+  guard, a data race, undefined behaviour; and a second guard on another thread can restore
+  the flags the first one set off.
+- **Who notices:** applications that call `IdentifyInterchangeSpace`,
+  `IdentifyBuiltinColorSpace` or `GetProcessorTo/FromBuiltinColorSpace` on a config other
+  threads use.
+- **A fix:** don't change the shared config; make the heuristics' processors without caching
+  instead.
+- **Status:** the port's flags are atomic (1.8g), so there is no data race: another thread sees
+  the cache off while a guard lives, and the guards restore flags in the order they end, as
+  upstream's would without the race (`config_utils.rs`, `SuspendCacheGuard`, in
+  `p9-config-utils` 9.1a). Nothing to refuse: no wheel behaviour is defined to compare.
+
+### U-172. The binding's config utilities crash the wheel when a config is None
+
+- **Upstream:** `PyConfig.cpp` binds `Config.IdentifyInterchangeSpace`,
+  `Config.IdentifyBuiltinColorSpace`, `Config.GetProcessorToBuiltinColorSpace`,
+  `Config.GetProcessorFromBuiltinColorSpace` and the 8 overloads of
+  `Config.GetProcessorFromConfigs` with `ConstConfigRcPtr` arguments (and
+  `GetProcessorFromConfigs`' contexts) that accept `None`. pybind11 passes a null pointer, and
+  the functions dereference it without a check: the interpreter dies with a segmentation
+  fault (exit 139). Seen with `Config.IdentifyBuiltinColorSpace(None, builtin, "ACEScg")`,
+  `Config.GetProcessorFromConfigs(None, "a", Config.CreateRaw(), "raw")` and
+  `Config.GetProcessorToBuiltinColorSpace(None, "a", "ACEScg")`.
+- **Who notices:** Python code that passes `None` for a config, typically after a failed
+  lookup.
+- **A fix:** a null check in each binding that raises an exception.
+- **Status:** the Rust API takes `&Config` and `&Context`, so `None` can't reach it. The
+  binding refuses `None` for these arguments with an exception instead of a crash, to be
+  enforced in 6.8a. Not testable through the oracle (it would end the wheel's
+  process).
+
+### U-176. A config merger holding `None` parameters dereferences them
+
+- **Upstream:** the binding's `ConfigMerger.addParams` takes `None` (pybind11's holder caster)
+  and stores a null pointer, which `getParams` returns (as `None`) and
+  `getNumConfigMergingParameters` counts. `ConfigMerger::createEditableCopy` (Python's
+  `copy.deepcopy`, and `mergeConfigs`, which starts from a copy) calls
+  `param->createEditableCopy()` on it (`MergeConfigsHelpers.h:167-170` @ v2.5.2), the writer
+  (`serialize()` and `repr()`) reads its output name (`OCIOMYaml.cpp:548-549`), and
+  `loadConfig` its output name too (`MergeConfigsHelpers.cpp:506-508`): the wheel's process
+  dies with a segmentation fault (probed on Windows, 2026-10-23, each call apart).
+  `ConfigMergingHelpers.MergeColorSpace(None, base, colorspace)` does the same with its
+  parameters (`params->createEditableCopy()`, `785`) once the color space is added.
+- **Who notices:** Python code that adds `None` to a merger, or passes it as the parameters.
+- **A fix:** refuse `None` in `addParams` (`"params"_a.none(false)`), and check the
+  parameters in `MergeColorSpace`.
+- **Status:** the port keeps a `None` (`add_params(Option<ConfigMergingParameters>)`), counts
+  and returns it as the wheel does, and where the wheel dereferences it returns the error
+  "<call>: the merge parameters at index N are None, a null pointer the wheel dereferences (its
+  process dies; docs/improvements.md, U-176)" (`createEditableCopy`, `serialize`,
+  `mergeConfigs`), in `p9-merge-1` (9.2b, `apphelpers/mergeconfigs/merge_configs_helpers.rs`);
+  `config_merger_oracle.rs` (`none_parameters`) and `merge_configs_helpers_oracle_tests.rs`.
+  `MergeColorSpace` takes its parameters by reference in the Rust API (P9-2): its binding
+  refuses `None` (6.8a). The copy makes the new parameters (`ConfigMergingParameters::Create`,
+  so a `Config::Create`) before it reads the null pointer, so under an environment that
+  `Config::Create` refuses (an unclosed quote in `OCIO_ACTIVE_DISPLAYS`) the wheel raises that
+  error, not a crash (probed on Windows, 2026-10-23), and so does the port, first.
+
+### U-177. OCIOM readers and writers on several threads race to fill the strategy names
+
+- **Upstream:** `OCIOMYaml` keeps the names of the merge strategies in a static
+  `std::unordered_map`, which its constructor fills when it finds it empty, without a lock
+  (`OCIOMYaml.cpp:22-34` @ v2.5.2); `ConfigMerger::CreateFromFile` and `ConfigMerger::serialize`
+  each construct one. The first two of them that run at the same time on different threads
+  both write the map, or one reads it (`StrategyStringToEnum`) while the other writes it: a data
+  race, undefined behaviour.
+- **Who notices:** applications that read or write OCIOM files on several threads.
+- **A fix:** a constant table, or a function-local static.
+- **Status:** the port matches the names in a `match` (`ociom_yaml.rs`,
+  `strategy_string_to_enum`), with no shared state, in `p9-merge-1` (9.2c). Nothing to refuse:
+  no wheel behaviour is defined to compare.
+
+### U-181. A menu made by a logging function while a menu is made
+
+- **Upstream:** `ColorSpaceMenuHelper::Create` keeps its menus under a static `std::mutex`
+  (`g_mutex`), held while it makes a new menu (ColorSpaceHelpers.cpp:425-443 @ v2.5.2), whose
+  refresh logs at the info level when its parameters select nothing as given
+  (`FindColorSpaceInfos`' `LogMessageHelper`, CategoryHelpers.cpp:297-360: app categories that
+  match no color space, encodings ignored, ...). A logging function that makes a menu then
+  locks that mutex again on the same thread: undefined behaviour. The Windows wheel's C++
+  runtime throws `std::system_error` ("resource deadlock would occur"), which reaches Python as
+  RuntimeError "resource deadlock would occur: resource deadlock would occur" in the logging
+  function (probed on Windows, 2026-10-24); libstdc++'s mutex on Linux is a pthread mutex, which
+  waits for itself: the Linux wheel's process hangs (probed in Rocky Linux 9, 2026-10-24). The
+  Windows outcome is defined only while that error never leaves the logging function: one that
+  lets it out (a plain Python logging function that makes a menu) ends the wheel's process, as
+  any exception out of that logging does (U-183).
+- **Who notices:** an application whose logging function makes color space menus (with the
+  logging level at info).
+- **A fix:** log after the mutex is released, or make the menus outside it.
+- **Status:** on Windows the port matches the wheel: `ColorSpaceMenuHelper::new` returns
+  `std::system_error`'s text ("resource deadlock would occur: resource deadlock would occur",
+  `ExceptionKind::SystemError`, which the binding raises as RuntimeError, as pybind11 does)
+  where upstream locks the mutex again (owner decision 2026-10-24, relayed by the coordinator:
+  the Windows outcome is defined, matched per platform). On Linux, where the wheel hangs, it
+  returns the error "ColorSpaceMenuHelper: a menu is made while this thread makes another one
+  (from a logging function its making calls): OCIO 2.5.2 locks its menus' mutex again on the
+  same thread, which is undefined behaviour (docs/improvements.md, U-181)." Both detect the
+  case by a thread-local flag set while the menus' lock is held; other threads wait for the
+  lock, as upstream's. In `p6-after-p5` (6.7c, `crates/ocio/src/apphelpers/color_space_helpers.rs`,
+  `MAKING_A_MENU`; `crates/ocio-ops/src/exception.rs`, `system_error`);
+  `crates/ocio-py/tests/callbacks_oracle.rs`, `a_menu_made_while_a_menu_is_made` (the logging
+  function a class of `str` whose `__del__` makes the inner menu: compared with the wheel on
+  Windows, the port's error on Linux; a 120 s limit).
+
+### U-182. A processor made again by a callback while the library makes it
+
+- **Upstream:** the library's caches lock a `std::mutex` while they make what they cache: a
+  config's processors' cache while `Config::getProcessor` makes a processor
+  (Config.cpp:4830-4832 @ v2.5.2), a file's entry in the file cache while
+  `GetCachedFileAndFormat` loads it (FileTransform.cpp:837), and a processor's caches of its
+  optimized, CPU and GPU processors. Making them can call the application's code: a config's
+  I/O proxy loading a LUT (`PyConfigIOProxy.getLutData`), a logging function. Code there that
+  makes a processor of the same config (a mixing manager's `getProcessor` from the LUT loader
+  of its config) or loads the same file (another config over the same file) locks the mutex
+  again on the same thread: undefined behaviour. The Windows wheel's C++ runtime throws
+  `std::system_error`, which reaches Python as RuntimeError "resource deadlock would occur:
+  resource deadlock would occur" in the callback, and the outer call goes on (probed on
+  Windows, 2026-10-24); libstdc++'s mutex on Linux is a pthread mutex, which waits for itself:
+  the Linux wheel's process hangs (probed in Rocky Linux 9, 2026-10-24: a manager's own
+  processor, another config's and another manager's over the same file).
+- **Who notices:** an application whose config I/O proxy or logging function makes
+  processors over the same config or files.
+- **A fix:** release the caches' mutexes while the library calls the application, or detect
+  the re-entry.
+- **Status:** on Windows the port matches the wheel: the cache locked again by the thread that
+  holds it returns `std::system_error`'s text ("resource deadlock would occur: resource
+  deadlock would occur", `ExceptionKind::SystemError`, RuntimeError in Python), as U-181. On
+  Linux, where the wheel hangs, it returns the error "A cache's mutex is locked again by the
+  thread that holds it (code the library calls while it makes a processor or loads a file,
+  such as a config's I/O proxy, makes a processor of the same config or loads the same file):
+  OCIO 2.5.2 waits for itself, which is undefined behaviour (docs/improvements.md, U-182)."
+  Both detect the case by a thread-local list of the caches' mutexes the thread holds, checked
+  before each lock (`GenericCache::lock`, the file cache's entries); other threads wait for
+  the lock, as upstream's. `GenericCache::clear` and `enable`, which upstream's
+  `noexcept` functions lock too (a relock there ends upstream's process, U-184), aren't
+  covered by that list: the binding refuses the changes of a config that call them while the
+  library makes a processor of it (U-184). In `p6-after-p5` (6.7c, `crates/ocio/src/caching.rs`,
+  `Held`, `relock_error`; `crates/ocio/src/transforms/file_transform.rs`);
+  `crates/ocio-py/tests/apphelpers_oracle.rs`,
+  `a_lut_loader_that_makes_the_same_processor_again_is_u182` (a mixing manager's LUT loader
+  making the manager's processor, and another config's over the same file: compared with the
+  wheel on Windows, the port's error and the outer processor on Linux; a 120 s limit).
+
+### U-183. A logging function's exception out of a menu's info message
+
+- **Upstream:** when a menu's parameters select nothing as given (app categories that match no
+  color space, encodings ignored, ...), `FindColorSpaceInfos` logs that at the info level from
+  the destructor of its `LogMessageHelper` (CategoryHelpers.cpp:297-346 @ v2.5.2), which is
+  implicitly `noexcept`. A logging function that raises there (a Python one: pybind11's
+  `error_already_set`) ends in `std::terminate`: the wheel's process aborts (Windows: exit
+  status 0xC0000409, the C runtime's fail-fast, probed 2026-10-24; Linux: "terminate called
+  after throwing an instance of 'pybind11::error_already_set'", SIGABRT, probed in Rocky Linux
+  9, 2026-10-24).
+  That includes a logging function that makes a menu and lets the error of U-181 out.
+- **Who notices:** an application whose logging function can raise, with the logging level at
+  info, while it makes color space menus.
+- **A fix:** log outside the destructor, or catch the logging function's exceptions there.
+- **Status:** the port doesn't end the process: the logging function's exception leaves the
+  menu's making, as from any other logging call (`ColorSpaceMenuHelper` raises it in Python;
+  the menus' lock and U-181's flag are released). In `p6-after-p5` (6.7c,
+  `crates/ocio/src/apphelpers/category_helpers.rs`, `LogMessageHelper`'s `Drop`);
+  `crates/ocio-py/tests/callbacks_oracle.rs`, `a_logging_function_that_raises_in_a_menu_is_u183`
+  (`int` as the logging function, and one that makes a menu and lets U-181's error out: the
+  wheel's crash report from py_eval, the steps before the menu succeeding in the wheel; the
+  port's menu raises `int`'s ValueError on the message the wheel logs, and the inner menu's
+  error, the wheel's on Windows and U-181's on Linux; a time limit).
+
+### U-184. A config changed by the code that runs while the library makes a processor of it
+
+- **Upstream:** `Config::getProcessor` locks the config's cache of processors (`std::mutex`)
+  and keeps it locked while it makes the processor (Config.cpp:4830-4832 @ v2.5.2). Making it
+  can call the application's code: a config I/O proxy loading a LUT
+  (`PyConfigIOProxy.getLutData`), a logging function. Every change of the config that calls
+  `resetCacheIDs` (`setRole`, `addColorSpace`, `removeColorSpace`, `setSearchPath`,
+  `addEnvironmentVar`, `setMajorVersion`, `setActiveDisplays`, ...; Config.cpp:5464-5474),
+  `clearProcessorCache` and `setProcessorCacheFlags` flushes or enables that cache through
+  `GenericCache::clear` and `enable`, which are `noexcept` and lock the same mutex
+  (Caching.h:45-57) on the same thread. MSVC's mutex throws `std::system_error` there, which
+  `noexcept` turns into `std::terminate`: the Windows wheel's process dies (exit status 127 of
+  the probe; py_eval's crash report). libstdc++'s mutex waits for itself: the Linux wheel's
+  process hangs (probed in Rocky Linux 9, 2026-10-24: killed after 45 s). It happens through
+  `Config.getProcessor`, `MixingColorSpaceManager.getProcessor`,
+  `LegacyViewingPipeline.getProcessor` and `DisplayViewHelpers.GetProcessor`, with the cache
+  on. A change that doesn't call them (`setName`, `setDescription`, `setFamilySeparator`,
+  `setMinorVersion`, a refused `setRole`, `setMajorVersion` of an unsupported version,
+  `upgradeToLatestVersion` of a config at the latest version), a read, a copy of the config
+  or another config is safe, and so is any change when the config's cache is off (upstream
+  doesn't lock it then).
+- **Who notices:** an application whose config I/O proxy or logging function changes the
+  config it is making a processor of (a LUT loader that registers a role, say).
+- **A fix:** release the cache's mutex while the library calls the application, or make the
+  flush skip a cache its thread holds.
+- **Status:** the port doesn't end the process. The config's own calls hold the config
+  (D-9): `Config.getProcessor`, the pipeline's and `DisplayViewHelpers`' calls give D-9's
+  RuntimeError for any call on the config from the loader (checked with the Windows wheel's
+  crash report, `a_lut_loader_that_changes_the_config_of_the_processor_is_u184`). The mixing
+  manager makes its processors from a copy of the config (the library's `Arc<Config>`), so
+  the loader's call reaches the config itself: the binding counts the times the config's
+  cache would be locked by a change (`Config::processor_cache_locks_by_changes`, counted by
+  `GenericCache::clear` and `enable`) around each call on the config, and when that count
+  rose while this thread holds the lock of the cache of one of the config's copies
+  (`Config::processor_cache_is_held_by_this_thread`, the thread-local list of U-182), the call
+  raises RuntimeError "Config: a callback of the making of a processor of this config changed
+  the config, which locks the cache of processors that call holds: OCIO 2.5.2 ends the
+  process, which the port can't match (docs/improvements.md, U-184)". The change was made, as
+  in upstream's call before it dies. The exact set of calls is the library's own (upstream's
+  `resetCacheIDs` sites are ported), so the changes that don't lock the cache, and the cache
+  off, behave as the wheel (compared step by step). In `p6-after-p5` (6.7c,
+  `crates/ocio-py/src/py_config.rs`, `with_config`; `crates/ocio/src/caching.rs`,
+  `crates/ocio/src/config.rs`);
+  `crates/ocio-py/tests/apphelpers_oracle.rs`,
+  `a_lut_loader_that_changes_the_config_of_the_processor_is_u184` (the four changes that
+  lock, through the four ways to make a processor: the wheel's crash report on Windows, the
+  port's errors) and `a_lut_loader_that_changes_the_config_without_the_cache_lock_is_as_the_wheels`.

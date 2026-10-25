@@ -5,10 +5,12 @@
 - object_calls: a config, value objects built from object specs (grading values, ...), then
   calls in order on them, on the objects the calls make or return (ColorSpaceMenuParameters,
   ColorSpaceMenuHelper, LegacyViewingPipeline, MixingColorSpaceManager, MixingSlider, ...) and
-  on the module functions of DisplayViewHelpers and ColorSpaceHelpers; each call's result or
-  exception and log, every value written out exactly by checks.dump (a processor as
-  processor_ops writes it, a config by serialize()); and the processors the calls stored,
-  written out the same way.
+  on the module functions of DisplayViewHelpers, ColorSpaceHelpers and ConfigMergingHelpers
+  (MergeConfigs, MergeColorSpace: chunk O9.1); each call's result or exception and log, every
+  value written out exactly by checks.dump (a processor as processor_ops writes it, a config
+  by serialize()); and the processors the calls stored, written out the same way. An enum
+  value nested in a class (ConfigMergingParameters' MergeStrategies, which the module doesn't
+  export) is named with its class: {"enum": "ConfigMergingParameters.STRATEGY_REMOVE"} (O9.1).
 
 It takes config_calls' frame from config_api.py (the environment, the files, the config
 sources, the call targets and argument values, the log), with its own call loop, whose values
@@ -33,7 +35,7 @@ from .config_api import (REPORTED, LogCapture, RequestError, _check_current_conf
 from .processor_ops import _processor_dump
 
 # The binding's helper modules, which the calls reach by these names ("on").
-HELPER_MODULES = ("DisplayViewHelpers", "ColorSpaceHelpers")
+HELPER_MODULES = ("DisplayViewHelpers", "ColorSpaceHelpers", "ConfigMergingHelpers")
 
 # The names the request's objects can't take.
 RESERVED = ("config", "OCIO", *HELPER_MODULES)
@@ -274,15 +276,16 @@ def object_calls(args, blobs):
                             on.method(*args, **kwargs): "on" names a stored PyOpenColorIO
                             object (not a list, string or number a call returned), a
                             PyOpenColorIO class (its static methods), "OCIO" (config_api's
-                            MODULE_FUNCTIONS), "DisplayViewHelpers" or "ColorSpaceHelpers"
-                            (those modules' functions)
+                            MODULE_FUNCTIONS), "DisplayViewHelpers", "ColorSpaceHelpers" or
+                            "ConfigMergingHelpers" (those modules' functions)
                   {"new": class, "args", "kwargs", "as"}
                             a PyOpenColorIO class's constructor: ColorSpaceMenuParameters
                             (config), ColorSpaceMenuHelper(parameters), LegacyViewingPipeline(),
                             MixingColorSpaceManager(config), a grading value, ...
                   {"copy": name, "as": name}   copy.deepcopy (createEditableCopy)
                   {"dump": name}               the stored object, written out
-                values as config_api.value_in reads them ({"enum"}, {"transform"}, {"f64"},
+                values as config_api.value_in reads them ({"enum"}, also "Class.NAME",
+                {"transform"}, {"f64"},
                 {"bytes"}, {"ref": name}, {"map"}), and {"object": spec}, a value object; "as"
                 stores the result, also when writing it out raised
       processors

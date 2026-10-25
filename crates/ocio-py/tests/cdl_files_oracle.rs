@@ -75,8 +75,8 @@ fn from_file_script() -> Script {
             serde_json::json!({ "call": n("OCIO.CDLTransform.CreateFromFile"), "args": [s(file), s(id)], "getters": ALL }),
             if ok { Expect::Value } else { Expect::Raised },
         );
-        // The CDL file's warnings, logged on its first read, reach the step interpreter once the
-        // logging functions are bound (6.6a).
+        // The CDL file's warnings, logged on its first read in a process (the file cache keeps
+        // it): the wheel's process is new, the port's may have read it already.
         if file == "cdl_test1.cdl" {
             sc.unlog(step);
         }

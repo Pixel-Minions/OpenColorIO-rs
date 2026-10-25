@@ -1,0 +1,3558 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: t0000
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0001
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0002
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0003
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0004
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0005
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0006
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0007
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0008
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0009
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [-7, 1.1, 0, 1, 7, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [-7, -7, 0, 0.45, 7, 7]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0010
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0011
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [-7, 1.1, 0, 1, 7, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [-7, -7, 0, 0.45, 7, 7]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0012
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0013
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [-7, 1.1, 0, 1, 7, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [-7, -7, 0, 0.45, 7, 7]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0014
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0015
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [-7, 1.1, 0, 1, 7, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [-7, -7, 0, 0.45, 7, 7]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0016
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0017
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0018
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0019
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0020
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0021
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0022
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0023
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0024
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hsy_transform: none
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0025
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 0, 0.5, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0026
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hsy_transform: none
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0027
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 0, 0.5, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0028
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hsy_transform: none
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [-7, 1.1, 0, 1, 7, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [-7, -7, 0, 0.45, 7, 7]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0029
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 0, 0.5, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0030
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hsy_transform: none
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [-7, 1.1, 0, 1, 7, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [-7, -7, 0, 0.45, 7, 7]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0031
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 0, 0.5, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0032
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hsy_transform: none
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0033
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 0, 0.5, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0034
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hsy_transform: none
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.2, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1.2, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      lum_sat: {control_points: [0, 1.1, 0.5, 1, 1, 1]}
+      sat_sat: {control_points: [0, 0, 0.5, 0.55, 1, 1], slopes: [0, 1.2, 0]}
+      lum_lum: {control_points: [0, 0, 0.5, 0.45, 1, 1]}
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0.1, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0035
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 0, 0.5, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0036
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [.nan, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0037
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [.nan, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0038
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [.nan, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0039
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0040
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0041
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0042
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, .nan, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0043
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, .nan, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0044
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, .nan, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0045
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0046
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0047
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0048
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, .nan, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0049
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, .nan, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0050
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, 0, 0.1666667, .nan, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0051
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, -0, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0052
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, -0, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0053
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, 0, 0.1666667, -0, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0054
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [.nan, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0055
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [.nan, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0056
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [.nan, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0057
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0058
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0059
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0060
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, .nan, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0061
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, .nan, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0062
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, .nan, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0063
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, -0, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0064
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, -0, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0065
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, -0, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0066
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, .inf, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0067
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, .inf, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0068
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, .inf, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0069
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, 1, 0.1666667, .nan, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0070
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, .nan, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0071
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, 1, 0.1666667, .nan, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0072
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, 1, 0.1666667, -0, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0073
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, -0, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0074
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, 1, 0.1666667, -0, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0075
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, 1, 0.1666667, .inf, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0076
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, .inf, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0077
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, 1, 0.1666667, .inf, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0078
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [.nan, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0079
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [.nan, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0080
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [.nan, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0081
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0082
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0083
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0084
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, .nan, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0085
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, .nan, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0086
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, .nan, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0087
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, -0, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0088
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, -0, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0089
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, -0, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0090
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, .inf, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0091
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, .inf, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0092
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, .inf, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0093
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, 1, 0.1666667, .nan, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0094
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, 1, 0.1666667, .nan, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0095
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, 1, 0.1666667, .nan, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0096
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, 1, 0.1666667, -0, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0097
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, 1, 0.1666667, -0, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0098
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, 1, 0.1666667, -0, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0099
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, 1, 0.1666667, .inf, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0100
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, 1, 0.1666667, .inf, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0101
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, 1, 0.1666667, .inf, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0102
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [.nan, 1, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0103
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [.nan, 1, 0, 1, 7, 1]}
+
+  - !<ColorSpace>
+    name: t0104
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [.nan, 1, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0105
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0106
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-0, 1, 0, 1, 7, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0107
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0108
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, .nan, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0109
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, .nan, 0, 1, 7, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0110
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, .nan, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0111
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, -0, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0112
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, -0, 0, 1, 7, 1]}
+
+  - !<ColorSpace>
+    name: t0113
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, -0, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0114
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, .inf, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0115
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, .inf, 0, 1, 7, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0116
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, .inf, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0117
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, 1, 0.5, .nan, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0118
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, 1, 0, .nan, 7, 1]}
+
+  - !<ColorSpace>
+    name: t0119
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, 1, 0.5, .nan, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0120
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, 1, 0.5, -0, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0121
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, 1, 0, -0, 7, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0122
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, 1, 0.5, -0, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0123
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, 1, 0.5, .inf, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0124
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, 1, 0, .inf, 7, 1]}
+
+  - !<ColorSpace>
+    name: t0125
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, 1, 0.5, .inf, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0126
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_sat: {control_points: [.nan, 0, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0127
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_sat: {control_points: [.nan, 0, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0128
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_sat: {control_points: [.nan, 0, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0129
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0130
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0131
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0132
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_sat: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0133
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_sat: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0134
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_sat: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0135
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0136
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0137
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0138
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_sat: {control_points: [0, 0, 0.5, .nan, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0139
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_sat: {control_points: [0, 0, 0.5, .nan, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0140
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_sat: {control_points: [0, 0, 0.5, .nan, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0141
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_sat: {control_points: [0, 0, 0.5, -0, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0142
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_sat: {control_points: [0, 0, 0.5, -0, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0143
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_sat: {control_points: [0, 0, 0.5, -0, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0144
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_lum: {control_points: [.nan, 0, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0145
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_lum: {control_points: [.nan, -7, 0, 0, 7, 7]}
+
+  - !<ColorSpace>
+    name: t0146
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_lum: {control_points: [.nan, 0, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0147
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0148
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_lum: {control_points: [-0, -7, 0, 0, 7, 7]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0149
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0150
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_lum: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0151
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_lum: {control_points: [-7, .nan, 0, 0, 7, 7]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0152
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_lum: {control_points: [0, .nan, 0.5, 0.5, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0153
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0154
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_lum: {control_points: [-7, -0, 0, 0, 7, 7]}
+
+  - !<ColorSpace>
+    name: t0155
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0156
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_lum: {control_points: [0, 0, 0.5, .nan, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0157
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_lum: {control_points: [-7, -7, 0, .nan, 7, 7]}
+
+  - !<ColorSpace>
+    name: t0158
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_lum: {control_points: [0, 0, 0.5, .nan, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0159
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_lum: {control_points: [0, 0, 0.5, -0, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0160
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0161
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_lum: {control_points: [0, 0, 0.5, -0, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0162
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [.nan, 1, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0163
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [.nan, 1, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0164
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [.nan, 1, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0165
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0166
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0167
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0168
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, .nan, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0169
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, .nan, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0170
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [0, .nan, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0171
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, -0, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0172
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, -0, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0173
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [0, -0, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0174
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, .inf, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0175
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, .inf, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0176
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [0, .inf, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0177
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, 1, 0.5, .nan, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0178
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, 1, 0.5, .nan, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0179
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [0, 1, 0.5, .nan, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0180
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, 1, 0.5, -0, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0181
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, 1, 0.5, -0, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0182
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [0, 1, 0.5, -0, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0183
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, 1, 0.5, .inf, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0184
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, 1, 0.5, .inf, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0185
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [0, 1, 0.5, .inf, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0186
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_fx: {control_points: [.nan, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0187
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [.nan, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0188
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_fx: {control_points: [.nan, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0189
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0190
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0191
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0192
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_fx: {control_points: [0, .nan, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0193
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [0, .nan, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0194
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_fx: {control_points: [0, .nan, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0195
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0196
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0197
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0198
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_fx: {control_points: [0, .inf, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0199
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [0, .inf, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0200
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_fx: {control_points: [0, .inf, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0201
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_fx: {control_points: [0, 0, 0.1666667, .nan, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0202
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [0, 0, 0.1666667, .nan, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0203
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_fx: {control_points: [0, 0, 0.1666667, .nan, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0204
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0205
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0206
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0207
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_fx: {control_points: [0, 0, 0.1666667, .inf, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0208
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [0, 0, 0.1666667, .inf, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0209
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_fx: {control_points: [0, 0, 0.1666667, .inf, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0210
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333], slopes: [0, .nan, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0211
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333], slopes: [0, .nan, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0212
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333], slopes: [0, .nan, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0213
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0214
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0215
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0216
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333], slopes: [0, .inf, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0217
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333], slopes: [0, .inf, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0218
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333], slopes: [0, .inf, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0219
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .nan, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0220
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .nan, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0221
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .nan, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0222
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0223
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0224
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0225
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .inf, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0226
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .inf, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0227
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .inf, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0228
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .nan, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0229
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .nan, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0230
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .nan, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0231
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0232
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0233
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0234
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .inf, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0235
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .inf, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0236
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, .inf, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0237
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .nan, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0238
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, 1, 0, 1, 7, 1], slopes: [0, .nan, 0]}
+
+  - !<ColorSpace>
+    name: t0239
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .nan, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0240
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0241
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0242
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0243
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .inf, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0244
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, 1, 0, 1, 7, 1], slopes: [0, .inf, 0]}
+
+  - !<ColorSpace>
+    name: t0245
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .inf, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0246
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_sat: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .nan, 0]}
+
+  - !<ColorSpace>
+    name: t0247
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_sat: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .nan, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0248
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_sat: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .nan, 0]}
+
+  - !<ColorSpace>
+    name: t0249
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0250
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0251
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0252
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_sat: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .inf, 0]}
+
+  - !<ColorSpace>
+    name: t0253
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_sat: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .inf, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0254
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_sat: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .inf, 0]}
+
+  - !<ColorSpace>
+    name: t0255
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_lum: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .nan, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0256
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_lum: {control_points: [-7, -7, 0, 0, 7, 7], slopes: [0, .nan, 0]}
+
+  - !<ColorSpace>
+    name: t0257
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_lum: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .nan, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0258
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0259
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0260
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0261
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_lum: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .inf, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0262
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_lum: {control_points: [-7, -7, 0, 0, 7, 7], slopes: [0, .inf, 0]}
+
+  - !<ColorSpace>
+    name: t0263
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_lum: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, .inf, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0264
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .nan, 0]}
+
+  - !<ColorSpace>
+    name: t0265
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .nan, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0266
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .nan, 0]}
+
+  - !<ColorSpace>
+    name: t0267
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0268
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0269
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0270
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .inf, 0]}
+
+  - !<ColorSpace>
+    name: t0271
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .inf, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0272
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, .inf, 0]}
+
+  - !<ColorSpace>
+    name: t0273
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0], slopes: [0, .nan, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0274
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0], slopes: [0, .nan, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0275
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0], slopes: [0, .nan, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0276
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log}
+
+  - !<ColorSpace>
+    name: t0277
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0278
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0279
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0], slopes: [0, .inf, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0280
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0], slopes: [0, .inf, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0281
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0], slopes: [0, .inf, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0282
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [.nan, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0283
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, 1, 0, .nan, 7, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0284
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, .inf, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0285
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, -.inf, 0.5, 1, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0286
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: log, direction: inverse}
+
+  - !<ColorSpace>
+    name: t0287
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: linear}
+
+  - !<ColorSpace>
+    name: t0288
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, 1, 0.5, -0, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0289
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform> {style: video}
+
+  - !<ColorSpace>
+    name: t0290
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 1.401298e-45, 0, 0, 0, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0291
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_sat: {control_points: [0, 1.401298e-45, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0292
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, 3.402823e+38, 0]}
+
+  - !<ColorSpace>
+    name: t0293
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [-3.402823e+38, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0294
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_lum: {control_points: [0, 1, 0.1666667, 1.175494e-38, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0295
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_lum: {control_points: [0, 1.175494e-38, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0296
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_sat: {control_points: [0, 0.1, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0297
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_hue: {control_points: [0, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333], slopes: [0, 0.1, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0298
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0.3333333, 1, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0299
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_lum: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, 0.3333333, 0]}
+
+  - !<ColorSpace>
+    name: t0300
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_fx: {control_points: [0, 0, 0.1666667, 1e-07, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0301
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [0, 0, 0.1666667, 1e-07, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0302
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      sat_sat: {control_points: [0, 0, 0.5, 0.5, 1, 1], slopes: [0, 123456.5, 0]}
+
+  - !<ColorSpace>
+    name: t0303
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_lum: {control_points: [0, 123456.5, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0304
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_sat: {control_points: [0, 1, 0.5, 1.677722e+07, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0305
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [0, 1.677722e+07, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0]}
+
+  - !<ColorSpace>
+    name: t0306
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, 0.1234568, 0]}
+
+  - !<ColorSpace>
+    name: t0307
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_lum: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 0.9999999, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0308
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_sat: {control_points: [0, 1, 0.1666667, 0.9999999, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0309
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      hue_fx: {control_points: [0, 0, 0.1666667, 0, 0.3333333, 0, 0.5, 0, 0.6666667, 0, 0.8333333, 0], slopes: [0, 0.5, 0, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: t0310
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      lum_sat: {control_points: [0, 0.5, 0.5, 1, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0311
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: video
+      hue_sat: {control_points: [0, -1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+
+  - !<ColorSpace>
+    name: t0312
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      lum_lum: {control_points: [-1, 0, 0.5, 0.5, 1, 1]}
+      direction: inverse
+
+  - !<ColorSpace>
+    name: t0313
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      sat_lum: {control_points: [0, 1, 0.5, 2, 1, 1]}
+
+  - !<ColorSpace>
+    name: t0314
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: log
+      hue_hue: {control_points: [.nan, 0, 0.1666667, 0.1666667, 0.3333333, 0.3333333, 0.5, 0.5, 0.6666667, 0.6666667, 0.8333333, 0.8333333]}
+
+  - !<ColorSpace>
+    name: t0315
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GradingHueCurveTransform>
+      style: linear
+      lum_sat: {control_points: [-7, 1, 0, .nan, 7, 1]}
+      direction: inverse

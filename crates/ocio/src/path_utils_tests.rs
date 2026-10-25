@@ -26,7 +26,7 @@ struct ComputeHashGuard;
 
 impl ComputeHashGuard {
     fn new() -> ComputeHashGuard {
-        set_compute_hash_function(custom_compute_hash);
+        set_compute_hash_function(std::sync::Arc::new(custom_compute_hash));
         ComputeHashGuard
     }
 }

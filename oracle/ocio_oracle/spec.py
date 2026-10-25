@@ -30,7 +30,9 @@ than setters.
 Values inside "args", "factory", "attrs" and "calls" are converted recursively:
 - {"enum": "NAME"} becomes the member of a PyOpenColorIO enum of that name,
   ``getattr(OCIO, "NAME")``: any other attribute of the module (a function, a class, a
-  dunder) is refused;
+  dunder) is refused. {"enum": "Class.NAME"} names a member that only a class of the binding
+  exports (``ConfigMergingParameters.STRATEGY_PREFER_INPUT``: the module doesn't export
+  MergeStrategies' values), ``getattr(OCIO.Class, "NAME")``, with the same refusals;
 - {"transform": <spec>} becomes a transform;
 - {"object": <spec>} becomes a value object (an object spec);
 - {"f64": bits} becomes the float (a C double) with those bits, an unsigned 64-bit integer, as
@@ -107,13 +109,23 @@ BINDING_TYPE = type(OCIO.Config)
 
 
 def enum_member(name):
-    """The member of a PyOpenColorIO enum named `name`. Anything else, such as a function of the
-    module (GetCurrentConfig, SetEnvVariable) or a dunder (__setattr__), is refused: a value
-    spec names an enum member, never a callable to hand to the library or to an object."""
-    member = getattr(OCIO, name, None) if isinstance(name, str) else None
+    """The member of a PyOpenColorIO enum named `name`: "NAME", as the module exports it, or
+    "Class.NAME", as a class of the binding exports it (the module doesn't export the values
+    of an enum nested in a class, such as ConfigMergingParameters.MergeStrategies). Anything
+    else, such as a function of the module (GetCurrentConfig, SetEnvVariable) or of a class
+    (ConfigMergingParameters.Create), a nested enum's type, a dunder (__setattr__), or a class
+    that isn't the binding's, is refused: a value spec names an enum member, never a callable
+    to hand to the library or to an object."""
+    owner, short = OCIO, name
+    if isinstance(name, str) and "." in name:
+        owner_name, _, short = name.partition(".")
+        owner = getattr(OCIO, owner_name, None)
+        if not isinstance(owner, type) or type(owner) is not BINDING_TYPE:
+            raise ValueError(f"{name!r} isn't a member of a PyOpenColorIO enum")
+    member = getattr(owner, short, None) if isinstance(short, str) else None
     members = getattr(type(member), "__members__", None)
     if (member is None or type(type(member)) is not BINDING_TYPE or not isinstance(members, dict)
-            or members.get(name) is not member):
+            or members.get(short) is not member):
         raise ValueError(f"{name!r} isn't a member of a PyOpenColorIO enum")
     return member
 

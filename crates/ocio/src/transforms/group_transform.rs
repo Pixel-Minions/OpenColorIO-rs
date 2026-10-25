@@ -214,13 +214,16 @@ impl GroupTransform {
         };
 
         let mut stream = OStringStream::new(Crt::NATIVE);
-        let written = fmt.write(
-            config,
-            &config.current_context().get(),
-            self,
-            format_name,
-            &mut stream,
-        );
+        // `catch (std::exception & e)`: an application's exception too.
+        let written = ocio_ops::foreign_exception::catch_std(|| {
+            fmt.write(
+                config,
+                &config.current_context().get(),
+                self,
+                format_name,
+                &mut stream,
+            )
+        });
         // What the format wrote before an error stays written, as on upstream's stream. A
         // failure of the stream itself goes unreported: a C++ stream keeps it in its state
         // bits and throws nothing (I-178).

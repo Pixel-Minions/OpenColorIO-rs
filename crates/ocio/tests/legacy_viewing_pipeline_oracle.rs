@@ -873,3 +873,44 @@ fn setters_refuse_an_invalid_fixed_function() {
         );
     }
 }
+
+/// Generated pipelines of upstream's test config files
+/// (`common::app_helpers::upstream_test_configs`), each read from its file.
+#[test]
+fn upstream_test_config_pipelines_match_the_wheel() {
+    let mut failures = Vec::new();
+    let mut made = 0;
+    let mut swept = 0;
+    for (k, (name, path)) in common::app_helpers::upstream_test_configs()
+        .into_iter()
+        .enumerate()
+    {
+        let source = Source::File(path);
+        let config = source.port();
+        // The cases are (display, view) pairs: a config without displays has none.
+        if config.num_displays() == 0 {
+            continue;
+        }
+        swept += 1;
+        let (r, _) = check(
+            &name,
+            &source,
+            &cases(&tokens(&config), 0x1e9a_0200 + k as u64, 60),
+            30,
+            &mut failures,
+        );
+        assert!(
+            r.made + r.refused >= 60,
+            "{name}: {} made, {} refused",
+            r.made,
+            r.refused
+        );
+        assert_eq!(r.pixels, 2 * r.made, "{name}: pixels compared");
+        made += r.made;
+    }
+    report("legacy_viewing_pipeline_upstream_configs", &failures);
+    assert_eq!(swept, 5, "the configs with displays");
+    // Most cases of these configs are refused: they have no color_timing or scene_linear role,
+    // and some views name files they lack.
+    assert!(made >= 25, "{made} processors");
+}

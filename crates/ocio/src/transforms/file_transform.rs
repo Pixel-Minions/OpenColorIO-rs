@@ -14,6 +14,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::foreign_exception::{catch_std, rethrow, try_foreign};
 use ocio_ops::logging::{is_debug_logging_enabled, log_debug};
 use ocio_ops::op::OpVec;
 use ocio_ops::op_data::{OpData, OpDataRcPtr};
@@ -27,7 +28,7 @@ use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::pystring::{self, os_path};
 use ocio_ops::utils::string_utils::c_str;
 
-use crate::caching::GenericCache;
+use crate::caching::{GenericCache, Held};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::input_stream::{InputStream, OpenMode};
@@ -259,12 +260,14 @@ pub(crate) fn get_lut_data(
     mode: OpenMode,
 ) -> Result<InputStream> {
     if let Some(proxy) = config.config_io_proxy() {
-        // Try to open through proxy.
-        let buffer = match proxy.lut_data(filepath) {
-            Ok(buffer) => buffer,
+        // Try to open through proxy. Its exceptions are caught as `std::exception`s, an
+        // application's too (rethrown as they are for a relative path).
+        let buffer = match try_foreign(|| proxy.lut_data(filepath)) {
+            Ok(Ok(buffer)) => buffer,
             // If the path is absolute, we'll try the file system, but otherwise nothing to do.
-            Err(e) if !os_path::isabs(filepath) => return Err(e),
-            Err(_) => Vec::new(),
+            Ok(Err(e)) if !os_path::isabs(filepath) => return Err(e),
+            Err(e) if !os_path::isabs(filepath) => rethrow(e),
+            Ok(Err(_)) | Err(_) => Vec::new(),
         };
 
         // If the buffer is empty, we'll try the file system for abs paths.
@@ -391,11 +394,15 @@ fn load_file_uncached(
         let try_format = format_registry
             .raw_format_by_index(index)
             .expect("an index of the registry");
-        match open_and_read(try_format, filepath, interp, config) {
+        // The C++ `try` holds the debug message too, and catches `std::exception`.
+        match catch_std(|| {
+            let cached_file = open_and_read(try_format, filepath, interp, config)?;
+            if is_debug_logging_enabled() {
+                log_debug(format!("    Loaded primary format {}\n", try_format.name()));
+            }
+            Ok(cached_file)
+        }) {
             Ok(cached_file) => {
-                if is_debug_logging_enabled() {
-                    log_debug(format!("    Loaded primary format {}\n", try_format.name()));
-                }
                 return Ok((try_format, cached_file));
             }
             Err(e) => {
@@ -430,11 +437,14 @@ fn load_file_uncached(
             continue;
         }
 
-        match open_and_read(alt_format, filepath, interp, config) {
+        match catch_std(|| {
+            let cached_file = open_and_read(alt_format, filepath, interp, config)?;
+            if is_debug_logging_enabled() {
+                log_debug(format!("    Loaded alt format {}", alt_format.name()));
+            }
+            Ok(cached_file)
+        }) {
             Ok(cached_file) => {
-                if is_debug_logging_enabled() {
-                    log_debug(format!("    Loaded alt format {}", alt_format.name()));
-                }
                 return Ok((alt_format, cached_file));
             }
             Err(e) => {
@@ -530,7 +540,8 @@ static FILE_CACHE: LazyLock<GenericCache<Vec<u8>, Arc<Mutex<FileCacheResult>>>> 
 
 /// The format and contents of the file at `filepath`, loaded once per path while the file
 /// cache is enabled (a failed load fails again with the same text), and at every call
-/// otherwise.
+/// otherwise. Asked for again while this thread loads it (by code the load calls), the error
+/// of upstream's `std::mutex` locked again (docs/improvements.md, U-182).
 ///
 /// Port of `GetCachedFileAndFormat` (FileTransform.cpp:801-888 @ v2.5.2). Its `catch (...)`,
 /// for an exception that isn't a `std::exception`, has nothing to catch here.
@@ -540,7 +551,7 @@ pub(crate) fn get_cached_file_and_format(
     config: &Config,
 ) -> Result<(&'static dyn FileFormat, CachedFileRcPtr)> {
     // Load the file cache ptr from the global map
-    let result = match FILE_CACHE.lock() {
+    let result = match FILE_CACHE.lock()? {
         Some(mut entries) => entries
             .entries()
             .entry(filepath.to_vec())
@@ -550,12 +561,17 @@ pub(crate) fn get_cached_file_and_format(
     };
 
     // If this file has already been loaded, return the result immediately.
+    // The entry's mutex locked again by this thread (code the load calls, such as a config's
+    // I/O proxy, loads the same file) is upstream's undefined behaviour (U-182).
+    let _held = Held::enter(Arc::as_ptr(&result) as usize)?;
     let mut result = result.lock().unwrap_or_else(|e| e.into_inner());
     if !result.ready {
         result.ready = true;
         result.error = false;
 
-        match load_file_uncached(filepath, interp, config) {
+        // `catch (std::exception & e)`, an application's exception too (its `catch (...)`
+        // has nothing else to catch here).
+        match catch_std(|| load_file_uncached(filepath, interp, config)) {
             Ok((format, cached_file)) => {
                 result.format = Some(format);
                 result.cached_file = Some(cached_file);

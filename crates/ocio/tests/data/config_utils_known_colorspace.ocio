@@ -1,0 +1,125 @@
+
+ocio_profile_version: 2
+
+roles:
+  default: raw data
+  scene_linear: ref_cs
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE-XYZ-D65
+    description: The CIE XYZ (D65) display connection colorspace.
+    isdata: false
+
+  - !<ColorSpace>
+    name: sRGB - Display CS
+    description: Convert CIE XYZ (D65 white) to sRGB (piecewise EOTF)
+    isdata: false
+    from_display_reference: !<BuiltinTransform> {style: DISPLAY - CIE-XYZ-D65_to_sRGB}
+
+colorspaces:
+  # Put a couple of test color space first in the config since the heuristics stop upon success.
+
+  - !<ColorSpace>
+    name: File color space AP0 to linear rec.709
+    description: Would be useable by the heuristics except for the clamping and the fact that it's a clf.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<GroupTransform>
+          children:
+            - !<FileTransform> {src: clf/lut3d_as_matrix.clf}
+
+  - !<ColorSpace>
+    name: CS Transform color space
+    description: Verify that that ColorSpaceTransforms load correctly when running the heuristics.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<ColorSpaceTransform> {src: ref_cs, dst: not sRGB}
+
+  - !<ColorSpace>
+    name: raw data
+    description: A data colorspace (should not be used).
+    isdata: true
+
+  - !<ColorSpace>
+    name: ref_cs
+    description: The reference colorspace, ACES2065-1.
+    isdata: false
+
+  - !<ColorSpace>
+    name: not sRGB
+    description: A color space that misleadingly has sRGB in the name, even though it's not.
+    isdata: false
+    to_scene_reference: !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: sRGB - curve
+    description: Just the sRGB gamma curve.  Note - None of the heuristics should be able to use this.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+
+  - !<ColorSpace>
+    name: sRGB - curve 2
+    description: Another sRGB curve the heuristics shouldn't use.  NB - the transform uses a matrix.
+    isdata: false
+    to_scene_reference: !<GroupTransform>
+      children:
+        - !<FileTransform> {src: sRGB_to_linear.spi1d, interpolation: linear}
+
+  - !<ColorSpace>
+    name: pseudo sRGB
+    description: Ensure that a gamma 2.2 Rec.709 space is not mistaken for an sRGB space.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+        - !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1], direction: inverse}
+
+  - !<ColorSpace>
+    name: ACES cg
+    description: An ACEScg space with an unusual spelling.
+    isdata: false
+    to_scene_reference: !<BuiltinTransform> {style: ACEScg_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: Linear ITU-R BT.709
+    description: A linear Rec.709 space with an unusual spelling.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to Linear Rec.709 (sRGB)
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: sRGB Encoded AP1 - Texture
+    description: Another space with "sRGB" in the name that is not actually an sRGB texture space.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to sRGB Encoded AP1 - Texture
+      children:
+        - !<MatrixTransform> {matrix: [1.45143931614567, -0.23651074689374, -0.214928569251925, 0, -0.0765537733960206, 1.17622969983357, -0.0996759264375522, 0, 0.00831614842569772, -0.00603244979102102, 0.997716301365323, 0, 0, 0, 0, 1]}
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+
+  - !<ColorSpace>
+    name: OCIO v1 -- sRGB
+    description: The sRGB texture space from the legacy v1 ACES config. Usable by the heuristics despite the file.
+    isdata: false
+    from_reference: !<GroupTransform>
+      children:
+        - !<MatrixTransform> {matrix: [0.952552, 0, 9.36786e-05, 0, 0.343966, 0.728166, -0.0721325, 0, 0, 0, 1.00883, 0, 0, 0, 0, 1]}
+        - !<MatrixTransform> {matrix: [3.2096, -1.55743, -0.495805, 0, -0.970989, 1.88517, 0.0394894, 0, 0.0597193, -0.210104, 1.14312, 0, 0, 0, 0, 1]}
+        - !<FileTransform> {src: sRGB_to_linear.spi1d, interpolation: linear, direction: inverse}
+
+  - !<ColorSpace>
+    name: Texture -- sRGB
+    description: An sRGB Texture space, spelled differently than in the built-in config.
+    isdata: false
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to sRGB Rec.709
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}

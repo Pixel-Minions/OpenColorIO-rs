@@ -710,13 +710,45 @@ print(exceptions <= steps.BUILTINS)
     assert_eq!(
         lines,
         [
-            "atexit,copy,math,numpy,operator",
+            "atexit,copy,math,numpy,operator,threading",
             "abs,bool,bytearray,bytes,complex,dict,divmod,enumerate,float,frozenset,getattr,\
              hasattr,hash,int,isinstance,issubclass,iter,len,list,max,min,next,object,pow,range,\
              repr,reversed,round,set,setattr,slice,sorted,str,sum,tuple,type,zip",
             "True",
         ]
     );
+}
+
+/// A script runs threads (`threading`, for calls that a callback of another thread's call
+/// meets): a thread appends to a list of the script, a timer releases a semaphore the script
+/// waits on; the list and the semaphore's answer are the script's.
+#[test]
+fn scripts_run_threads() {
+    let script = json!({"steps": [
+        call(name("list"), json!([])),
+        json!({"call": name("threading.Thread"), "args": [],
+               "kwargs": [["target", on(0, "append")], ["args", {"tuple": [s("t")]}]]}),
+        call(on(1, "start"), json!([])),
+        call(on(1, "join"), json!([])),
+        json!({"eval": {"ref": 0}}),
+        call(name("threading.Semaphore"), json!([{"int": "0"}])),
+        call(
+            name("threading.Timer"),
+            json!([{"float": format!("0x{:016x}", 0.2f64.to_bits())}, on(5, "release")]),
+        ),
+        call(on(6, "start"), json!([])),
+        call(on(5, "acquire"), json!([])),
+        call(on(6, "join"), json!([])),
+    ]});
+    let report = eval(json!([script]));
+    let steps = report["scripts"][0]["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 10, "{report}");
+    assert!(steps.iter().all(|r| r.get("value").is_some()), "{report}");
+    assert_eq!(steps[4]["value"]["type"], "builtins.list", "{report}");
+    let items = steps[4]["value"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{report}");
+    assert_eq!(bytes(&items[0]["str"]), b"t", "{report}");
+    assert_eq!(steps[8]["value"]["bool"], true, "{report}");
 }
 
 /// A script's process that exits with a status other than 0 is reported as a crash, even

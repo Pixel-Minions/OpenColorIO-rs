@@ -9,6 +9,8 @@ usage: python -I -B -X utf8 py_eval_steps.py < script.json > report.json
 One script per process: whatever a script changes in the process (the current config, the
 logging level, environment variables, the working directory, attributes of modules, OCIO's
 caches, NumPy's print options) ends with it. py_eval_api.py starts one process per script.
+A script may start threads (`threading`, for calls that meet another thread's call); it joins
+them before it ends, else its process waits for them at exit.
 
 A script is {"steps": [step, ...]}, run in order, with `import PyOpenColorIO as OCIO` done
 first. A step is one of
@@ -45,7 +47,8 @@ Report: {"interpreter": {"isolated", "dont_write_bytecode", "utf8_mode"} (sys.fl
 or {"raised": exception, "log": [...]}: "same_as" lists the earlier steps whose result is this
 very object (every result stays alive until the script ends, so identity is id() equality;
 immutable builtins, which the interpreter may share whoever made them, list none); "log" holds
-the library's messages during the step (SetLoggingFunction, set before the first step); an
+the library's messages during the step (SetLoggingFunction, set before the first step), from
+any thread: a message another thread logs is the log of the step running when it arrives; an
 outcome is {"value": value} or {"raised": exception}.
 
 A value is {"type": qualified name, "repr": text} (or "repr_raised": exception, when repr()
@@ -67,7 +70,7 @@ import os
 import re
 import sys
 
-MODULES = ("atexit", "copy", "math", "numpy", "operator")
+MODULES = ("atexit", "copy", "math", "numpy", "operator", "threading")
 BUILTINS = frozenset([
     "abs", "bool", "bytearray", "bytes", "complex", "dict", "divmod", "enumerate", "float",
     "frozenset", "getattr", "hasattr", "hash", "int", "isinstance", "issubclass", "iter", "len",

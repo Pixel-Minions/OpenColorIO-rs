@@ -48,8 +48,10 @@ use crate::transforms::look_transform::LookTransform;
 /// Port of `LegacyViewingPipeline` (include/OpenColorIO/OpenColorAppHelpers.h:350-432) and
 /// `LegacyViewingPipelineImpl` (src/OpenColorIO/apphelpers/LegacyViewingPipeline.h:16-67 @
 /// v2.5.2), its only implementation. Upstream deletes its copy constructor, and has no
-/// `createEditableCopy`.
-#[derive(Debug, Default)]
+/// `createEditableCopy`. The port's `Clone` is the Python binding's: it calls the library on a
+/// copy, so that no lock of its own is held while the library runs Python code (a config's I/O
+/// proxy, a logging function).
+#[derive(Debug, Clone, Default)]
 pub struct LegacyViewingPipeline {
     /// `m_linearCC`.
     linear_cc: Option<Transform>,
@@ -71,9 +73,9 @@ pub struct LegacyViewingPipeline {
 }
 
 /// A copy of `transform`, as upstream's `createEditableCopy` makes it: an invalid
-/// FixedFunctionTransform is refused. Upstream's pipeline setters are `noexcept`, so the
-/// exception of such a copy ends the wheel's process (`std::terminate`); the port returns it
-/// (docs/improvements.md, U-151).
+/// FixedFunctionTransform, or curves that don't validate, are refused. Upstream's pipeline
+/// setters are `noexcept`, so the exception of such a copy ends the wheel's process
+/// (`std::terminate`); the port returns it (docs/improvements.md, U-151).
 fn editable_copy(transform: Option<&Transform>) -> Result<Option<Transform>> {
     transform.map(Transform::create_editable_copy).transpose()
 }
@@ -123,7 +125,7 @@ impl LegacyViewingPipeline {
     }
 
     /// Sets a copy of `cc` (see [`Transform::create_editable_copy`]) as the linear CC, or
-    /// none. An invalid FixedFunctionTransform is refused, and the pipeline keeps its linear
+    /// none. A transform whose copy fails is refused, and the pipeline keeps its linear
     /// CC; the wheel's process ends there (docs/improvements.md, U-151).
     ///
     /// Port of `LegacyViewingPipelineImpl::setLinearCC` (LegacyViewingPipeline.cpp:53-63 @
@@ -192,6 +194,30 @@ impl LegacyViewingPipeline {
     pub fn set_display_cc(&mut self, cc: Option<&Transform>) -> Result<()> {
         self.display_cc = editable_copy(cc)?;
         Ok(())
+    }
+
+    /// Holds these transforms as they are, without copying them (the display view transform's
+    /// looks bypass as it is, and the bypass remembered by the last
+    /// [`LegacyViewingPipeline::set_display_view_transform`] kept). For the Python binding only
+    /// (`ocio-py`): upstream's getters return the pipeline's own copies, which Python changes in
+    /// place; the binding keeps those copies and hands them to the pipeline as they are now
+    /// before the pipeline reads them (`getProcessor`, `repr`). Behaviour-neutral for the Rust
+    /// API, whose getters give references (coordinator's decision 2026-10-24, as
+    /// `set_value_as_is` of the curve transforms).
+    #[doc(hidden)]
+    pub fn set_transforms_as_is(
+        &mut self,
+        display_view_transform: Option<DisplayViewTransform>,
+        linear_cc: Option<Transform>,
+        color_timing_cc: Option<Transform>,
+        channel_view: Option<Transform>,
+        display_cc: Option<Transform>,
+    ) {
+        self.display_view_transform = display_view_transform;
+        self.linear_cc = linear_cc;
+        self.color_timing_cc = color_timing_cc;
+        self.channel_view = channel_view;
+        self.display_cc = display_cc;
     }
 
     /// Whether the looks override replaces the view's looks (an empty override then means no

@@ -24,50 +24,9 @@
 
 mod common;
 
-use common::{call, name, port, text, wheel};
+use common::{call, name, port, port_member, text, wheel, wheel_member};
 use ocio_testkit::Oracle;
-use pyo3::prelude::*;
 use serde_json::{Value, json};
-
-/// The wheel's py_surface entry named `n` among the module's members.
-fn wheel_member(report: &Value, n: &str) -> Value {
-    report["module"]["members"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|e| String::from_utf8(ocio_testkit::oracle_values::bytes(&e["name"])).unwrap() == n)
-        .unwrap_or_else(|| panic!("{n}"))
-        .clone()
-}
-
-/// The port's entry for `OCIO.<n>`, as py_surface_walk.py reports a class (`_class`) or a value
-/// (`_value`), with the name the module's walk gives it.
-fn port_member(n: &str) -> Value {
-    common::start_python();
-    Python::attach(|py| {
-        let walk = py.import("py_surface_walk").unwrap();
-        let ocio = py.import("PyOpenColorIO").unwrap();
-        let v = ocio.getattr(n).unwrap();
-        let entry = if v.is_instance_of::<pyo3::types::PyType>() {
-            let seen = pyo3::types::PyDict::new(py);
-            walk.call_method1("_class", (v, format!("PyOpenColorIO.{n}"), seen))
-                .unwrap()
-        } else {
-            walk.call_method1("_value", (v,)).unwrap()
-        };
-        entry
-            .set_item("name", walk.call_method1("_text", (n,)).unwrap())
-            .unwrap();
-        let text: String = py
-            .import("json")
-            .unwrap()
-            .call_method1("dumps", (entry,))
-            .unwrap()
-            .extract()
-            .unwrap();
-        serde_json::from_str(&text).unwrap()
-    })
-}
 
 /// The class, its members and the exported values report as the wheel's.
 #[test]

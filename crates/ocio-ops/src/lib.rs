@@ -51,6 +51,8 @@ pub mod cpu_info;
 pub mod cpu_processor;
 pub mod dynamic_property;
 pub mod exception;
+#[doc(hidden)]
+pub mod foreign_exception;
 pub mod format_metadata;
 pub mod hash_utils;
 pub mod image_desc;

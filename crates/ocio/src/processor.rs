@@ -453,7 +453,7 @@ impl Processor {
 
         let o_flags = environment_override(o_flags)?;
 
-        if let Some(mut cache) = self.opt_processor_cache.lock() {
+        if let Some(mut cache) = self.opt_processor_cache.lock()? {
             let key = depths_and_flags_key(in_bit_depth, out_bit_depth, o_flags);
             if let Some(processor) = cache.entries().get(&key) {
                 return Ok(processor.clone());
@@ -501,7 +501,7 @@ impl Processor {
 
         let o_flags = environment_override(o_flags)?;
 
-        if let Some(mut cache) = self.gpu_processor_cache.lock() {
+        if let Some(mut cache) = self.gpu_processor_cache.lock()? {
             let key = flags_key(o_flags);
             if let Some(processor) = cache.entries().get(&key) {
                 return Ok(processor.clone());
@@ -564,7 +564,7 @@ impl Processor {
             true
         };
 
-        if use_cache && let Some(mut cache) = self.cpu_processor_cache.lock() {
+        if use_cache && let Some(mut cache) = self.cpu_processor_cache.lock()? {
             let key = depths_and_flags_key(in_bit_depth, out_bit_depth, o_flags);
             if let Some(processor) = cache.entries().get(&key) {
                 return Ok(processor.clone());
@@ -612,6 +612,20 @@ impl Processor {
         // processor.
         self.ops.finalize()?;
 
+        self.ops.validate_dynamic_properties()
+    }
+
+    /// Sets the ops to those of `p1` then `p2`, shared (their metadata combined), collects
+    /// their files and looks, and checks their dynamic properties together.
+    ///
+    /// Port of `Processor::Impl::concatenate` (Processor.cpp:643-652 @ v2.5.2).
+    pub(crate) fn concatenate(&mut self, p1: &Processor, p2: &Processor) -> Result<()> {
+        self.ops = p1.ops.clone();
+        self.ops.append(&p2.ops)?;
+
+        self.compute_metadata();
+
+        // Ops have been validated by p1 & p2.
         self.ops.validate_dynamic_properties()
     }
 

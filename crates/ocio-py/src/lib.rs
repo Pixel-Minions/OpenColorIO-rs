@@ -19,17 +19,27 @@
 #![forbid(unsafe_code)]
 
 #[cfg(feature = "python")]
+pub(crate) mod apphelpers;
+#[cfg(feature = "python")]
+pub(crate) mod callback;
+#[cfg(feature = "python")]
 pub mod dispatch;
 #[cfg(feature = "python")]
 pub mod embed;
 #[cfg(feature = "python")]
 pub mod enums;
 #[cfg(feature = "python")]
+pub(crate) mod py_builtin_config_registry;
+#[cfg(feature = "python")]
 pub(crate) mod py_builtin_transform_registry;
 #[cfg(feature = "python")]
 pub(crate) mod py_color_space;
 #[cfg(feature = "python")]
 pub(crate) mod py_color_space_set;
+#[cfg(feature = "python")]
+pub(crate) mod py_config;
+#[cfg(feature = "python")]
+pub(crate) mod py_config_io_proxy;
 #[cfg(feature = "python")]
 pub(crate) mod py_context;
 #[cfg(feature = "python")]
@@ -43,6 +53,8 @@ pub(crate) mod py_format_metadata;
 #[cfg(feature = "python")]
 pub(crate) mod py_gpu_shader_creator;
 #[cfg(feature = "python")]
+pub(crate) mod py_grading_data;
+#[cfg(feature = "python")]
 pub(crate) mod py_image_desc;
 #[cfg(feature = "python")]
 pub(crate) mod py_look;
@@ -54,6 +66,8 @@ pub mod py_open_color_io;
 pub(crate) mod py_packed_image_desc;
 #[cfg(feature = "python")]
 pub(crate) mod py_planar_image_desc;
+#[cfg(feature = "python")]
+pub(crate) mod py_processor;
 #[cfg(feature = "python")]
 pub(crate) mod py_processor_metadata;
 #[cfg(feature = "python")]
@@ -72,6 +86,8 @@ pub(crate) mod py_view_transform;
 pub(crate) mod py_viewing_rules;
 #[cfg(feature = "python")]
 pub mod pybind11;
+#[cfg(feature = "python")]
+pub mod self_kind;
 #[cfg(feature = "python")]
 pub(crate) mod shared;
 #[cfg(feature = "python")]

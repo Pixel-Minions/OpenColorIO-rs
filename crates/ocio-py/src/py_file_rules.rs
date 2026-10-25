@@ -10,7 +10,7 @@
 //! name `getIndexForRule` compares: `Platform::Strcasecmp`'s error, the rules never being
 //! empty.
 
-use ocio::FileRules;
+use ocio::{ConfigRules, FileRules};
 use ocio_ops::utils::string_utils::c_str;
 use pyo3::prelude::*;
 
@@ -18,8 +18,12 @@ use crate::dispatch::{CharPtr, Function, Overload, Param};
 use crate::py_context::null_comparison;
 use crate::py_open_color_io::py_result;
 use crate::py_transform::{INT, class, def, none, ok, string_out};
-use crate::shared::{Shared, construct, out};
-use crate::{method_def, q, this_shared};
+use crate::shared::{Held, Shared, construct, out};
+use crate::{method_def, q, this_held};
+
+/// File rules shared by the Python objects that hold them: their own, or a config's
+/// (`Config.getFileRules`).
+pub(crate) type FileRulesRc = Held<FileRules, ConfigRules<FileRules>>;
 
 pub(crate) const FILE_RULES: &str = q!("FileRules");
 const SELF: Param = Param::new("self", FILE_RULES);
@@ -40,7 +44,11 @@ static INIT: Function = Function {
         params: &[SELF],
         ret: "None",
         call: |py, _, a, _| {
-            construct(&a[0], FILE_RULES, Shared::new(FileRules::new()))?;
+            construct(
+                &a[0],
+                FILE_RULES,
+                FileRulesRc::Own(Shared::new(FileRules::new())),
+            )?;
             none(py)
         },
         pos_only: 0,
@@ -54,18 +62,18 @@ static DEEPCOPY: Function = method_def!(
     [SELF, Param::new("memo", "dict")],
     FILE_RULES,
     |py, o, a, _| {
-        let rc = this_shared!(o, a, FileRules);
+        let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
         if !a[1].is_instance_of::<pyo3::types::PyDict>() {
             return Ok(None);
         }
         let copy = rc.lock().clone();
-        out(py, FILE_RULES, &Shared::new(copy))
+        out(py, FILE_RULES, &FileRulesRc::Own(Shared::new(copy)))
     }
 );
 
 // .def("getNumEntries", &FileRules::getNumEntries) (PyFileRules.cpp:25-26 @ v2.5.2).
 static GET_NUM_ENTRIES: Function = method_def!("getNumEntries", [SELF], "int", |py, o, a, _| {
-    let rc = this_shared!(o, a, FileRules);
+    let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
     let n = rc.lock().num_entries();
     ok(py, n)
 });
@@ -77,7 +85,7 @@ static GET_INDEX_FOR_RULE: Function = method_def!(
     [SELF, Param::new("ruleName", "str")],
     "int",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, FileRules);
+        let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
         let Some(name) = crate::arg!(a, 1, convert, CharPtr).0 else {
             return Err(null_comparison(py));
         };
@@ -90,7 +98,7 @@ static GET_INDEX_FOR_RULE: Function = method_def!(
 macro_rules! rule_getter {
     ($name:literal, $get:expr) => {
         method_def!($name, [SELF, RULE_INDEX], "str", |py, o, a, convert| {
-            let rc = this_shared!(o, a, FileRules);
+            let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
             let i = crate::arg!(a, 1, convert, u64) as usize;
             let text: Vec<u8> = py_result(py, $get(&*rc.lock(), i))?;
             string_out(py, c_str(&text))
@@ -106,7 +114,7 @@ macro_rules! rule_setter {
             [SELF, RULE_INDEX, Param::new($param, "str")],
             "None",
             |py, o, a, convert| {
-                let rc = this_shared!(o, a, FileRules);
+                let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
                 let i = crate::arg!(a, 1, convert, u64) as usize;
                 let s = or_empty(crate::arg!(a, 2, convert, CharPtr));
                 py_result(py, $set(&mut *rc.lock(), i, &s))?;
@@ -161,7 +169,7 @@ static GET_NUM_CUSTOM_KEYS: Function = method_def!(
     [SELF, RULE_INDEX],
     "int",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, FileRules);
+        let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
         let i = crate::arg!(a, 1, convert, u64) as usize;
         let n = py_result(py, rc.lock().num_custom_keys(i))?;
         ok(py, n)
@@ -176,7 +184,7 @@ macro_rules! key_getter {
             [SELF, RULE_INDEX, Param::new("key", INT)],
             "str",
             |py, o, a, convert| {
-                let rc = this_shared!(o, a, FileRules);
+                let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
                 let i = crate::arg!(a, 1, convert, u64) as usize;
                 let k = crate::arg!(a, 2, convert, u64) as usize;
                 let text: Vec<u8> = py_result(py, $get(&*rc.lock(), i, k))?;
@@ -207,7 +215,7 @@ static SET_CUSTOM_KEY: Function = method_def!(
     ],
     "None",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, FileRules);
+        let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
         let i = crate::arg!(a, 1, convert, u64) as usize;
         let key = or_empty(crate::arg!(a, 2, convert, CharPtr));
         let value = or_empty(crate::arg!(a, 3, convert, CharPtr));
@@ -237,7 +245,7 @@ static INSERT_RULE: Function = Function {
             ],
             ret: "None",
             call: |py, o, a, convert| {
-                let rc = this_shared!(o, a, FileRules);
+                let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
                 let i = crate::arg!(a, 1, convert, u64) as usize;
                 let name = or_empty(crate::arg!(a, 2, convert, CharPtr));
                 let cs = or_empty(crate::arg!(a, 3, convert, CharPtr));
@@ -261,7 +269,7 @@ static INSERT_RULE: Function = Function {
             ],
             ret: "None",
             call: |py, o, a, convert| {
-                let rc = this_shared!(o, a, FileRules);
+                let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
                 let i = crate::arg!(a, 1, convert, u64) as usize;
                 let name = or_empty(crate::arg!(a, 2, convert, CharPtr));
                 let cs = or_empty(crate::arg!(a, 3, convert, CharPtr));
@@ -278,7 +286,7 @@ static INSERT_RULE: Function = Function {
 macro_rules! rule_action {
     ($name:literal, $act:expr) => {
         method_def!($name, [SELF, RULE_INDEX], "None", |py, o, a, convert| {
-            let rc = this_shared!(o, a, FileRules);
+            let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
             let i = crate::arg!(a, 1, convert, u64) as usize;
             py_result(py, $act(&mut *rc.lock(), i))?;
             none(py)
@@ -299,7 +307,7 @@ static SET_DEFAULT_RULE_COLOR_SPACE: Function = method_def!(
     [SELF, Param::new("colorSpace", "str")],
     "None",
     |py, o, a, convert| {
-        let rc = this_shared!(o, a, FileRules);
+        let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
         let cs = or_empty(crate::arg!(a, 1, convert, CharPtr));
         py_result(py, rc.lock().set_default_rule_color_space(&cs))?;
         none(py)
@@ -318,14 +326,14 @@ static DECREASE_RULE_PRIORITY: Function =
 
 // .def("isDefault", &FileRules::isDefault) (PyFileRules.cpp:75 @ v2.5.2).
 static IS_DEFAULT: Function = method_def!("isDefault", [SELF], "bool", |py, o, a, _| {
-    let rc = this_shared!(o, a, FileRules);
+    let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
     let d = rc.lock().is_default();
     ok(py, d)
 });
 
 // defRepr(clsFileRules) (PyFileRules.cpp:77 @ v2.5.2).
 static REPR: Function = method_def!("__repr__", [SELF], "str", |py, o, a, _| {
-    let rc = this_shared!(o, a, FileRules);
+    let rc = this_held!(o, a, FileRules, ConfigRules<FileRules>);
     let text = rc.lock().to_bytes();
     string_out(py, &text)
 });

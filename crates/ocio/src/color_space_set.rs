@@ -3,6 +3,8 @@
 
 //! A set of color spaces: a port of `src/OpenColorIO/ColorSpaceSet.cpp` @ v2.5.2.
 
+use std::sync::Arc;
+
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::utils::string_utils::{self, c_str, lower};
 
@@ -14,12 +16,29 @@ use crate::color_space::ColorSpace;
 /// A copy is upstream's `createEditableCopy`: it copies the color spaces. Two sets are equal
 /// when they hold as many color spaces and each name of one names a color space of the other.
 ///
+/// Each color space is held as upstream holds its `ColorSpaceRcPtr`, behind a pointer whose
+/// identity the Python module reads ([`ColorSpaceSet::arc_of`]).
+///
 /// Port of `ColorSpaceSet` and its `Impl` (include/OpenColorIO/OpenColorIO.h:2241-2340,
 /// 2355-2389, src/OpenColorIO/ColorSpaceSet.cpp @ v2.5.2).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct ColorSpaceSet {
     /// `m_colorSpaces`.
-    color_spaces: Vec<ColorSpace>,
+    color_spaces: Vec<Arc<ColorSpace>>,
+}
+
+impl Clone for ColorSpaceSet {
+    /// A set of copies of the color spaces (`Impl::operator=`, which copies each with
+    /// `createEditableCopy`, ColorSpaceSet.cpp:23-35 @ v2.5.2).
+    fn clone(&self) -> ColorSpaceSet {
+        ColorSpaceSet {
+            color_spaces: self
+                .color_spaces
+                .iter()
+                .map(|cs| Arc::new((**cs).clone()))
+                .collect(),
+        }
+    }
 }
 
 impl ColorSpaceSet {
@@ -79,7 +98,7 @@ impl ColorSpaceSet {
             return None;
         }
 
-        Some(&self.color_spaces[index as usize])
+        Some(&*self.color_spaces[index as usize])
     }
 
     /// The color space whose name or alias is `name`, ignoring case, or `None`.
@@ -187,11 +206,11 @@ impl ColorSpaceSet {
         }
         if let Some(replace_idx) = replace_idx {
             // The color space replaces the existing one.
-            self.color_spaces[replace_idx] = cs.clone();
+            self.color_spaces[replace_idx] = Arc::new(cs.clone());
             return Ok(());
         }
 
-        self.color_spaces.push(cs.clone());
+        self.color_spaces.push(Arc::new(cs.clone()));
         Ok(())
     }
 
@@ -294,6 +313,40 @@ impl ColorSpaceSet {
         }
 
         Ok(css)
+    }
+}
+
+impl ColorSpaceSet {
+    /// The pointer the set holds `cs` behind, when `cs` is one of its color spaces (the very
+    /// object, as a reference the set gave): its identity, as upstream's `ColorSpaceRcPtr`.
+    ///
+    /// For the Python module, whose objects share the color spaces a config holds
+    /// (`Config.getColorSpace` returns the config's own object upstream).
+    #[doc(hidden)]
+    pub fn arc_of(&self, cs: &ColorSpace) -> Option<Arc<ColorSpace>> {
+        self.color_spaces
+            .iter()
+            .find(|held| std::ptr::eq(&***held, cs))
+            .cloned()
+    }
+
+    /// Replaces the color space `old` (by identity) with `new`, as it is, in its place: what
+    /// a change through upstream's pointer to it does, which none of the set's owners learns
+    /// of. The new color space's pointer, or `None` when the set no longer holds `old`.
+    ///
+    /// For the Python module (see [`ColorSpaceSet::arc_of`]).
+    #[doc(hidden)]
+    pub fn replace_as_is(
+        &mut self,
+        old: &Arc<ColorSpace>,
+        new: ColorSpace,
+    ) -> Option<Arc<ColorSpace>> {
+        let held = self
+            .color_spaces
+            .iter_mut()
+            .find(|held| Arc::ptr_eq(held, old))?;
+        *held = Arc::new(new);
+        Some(held.clone())
     }
 }
 

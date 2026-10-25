@@ -43,6 +43,9 @@ use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, ProcessorCache, std_hash_strin
 use crate::color_space::ColorSpace;
 use crate::color_space_set::ColorSpaceSet;
 use crate::config_io_proxy::ConfigIoProxy;
+use crate::config_utils::{
+    get_interchange_roles_for_color_space_conversion, interchange_role_name,
+};
 use crate::context::Context;
 use crate::context_variable_utils::{
     collect_context_variables, contains_context_variable_token, contains_context_variables,
@@ -290,6 +293,20 @@ enum InactiveType {
 pub struct CurrentContext(Arc<RwLock<Arc<Context>>>);
 
 impl CurrentContext {
+    /// Whether both handles share one context: the Python module's identity of the context
+    /// object upstream's `getCurrentContext` returns.
+    #[doc(hidden)]
+    pub fn ptr_eq(&self, other: &CurrentContext) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// The address the handles of one context share: the key of the Python module's
+    /// registry of its objects ([`CurrentContext::ptr_eq`]).
+    #[doc(hidden)]
+    pub fn key(&self) -> usize {
+        Arc::as_ptr(&self.0) as *const u8 as usize
+    }
+
     fn new(context: Arc<Context>) -> CurrentContext {
         CurrentContext(Arc::new(RwLock::new(context)))
     }
@@ -344,6 +361,21 @@ impl<T> Clone for ConfigRules<T> {
 }
 
 impl<T: Clone> ConfigRules<T> {
+    /// Whether both handles share one rules object (a config's `setFileRules` and
+    /// `setViewingRules` give it a new one): the Python module's identity of the object
+    /// upstream's `getFileRules` and `getViewingRules` return.
+    #[doc(hidden)]
+    pub fn ptr_eq(&self, other: &ConfigRules<T>) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// The address the handles of one rules object share: the key of the Python module's
+    /// registry of its objects ([`ConfigRules::ptr_eq`]).
+    #[doc(hidden)]
+    pub fn key(&self) -> usize {
+        Arc::as_ptr(&self.0) as *const u8 as usize
+    }
+
     fn new(rules: T) -> ConfigRules<T> {
         ConfigRules(Arc::new(RwLock::new(Arc::new(rules))))
     }
@@ -514,13 +546,13 @@ pub struct Config {
     /// `m_activeViewsEnvOverride`: the views of `OCIO_ACTIVE_VIEWS`.
     active_views_env_override: StringVec,
     /// `m_looksList`.
-    looks_list: Vec<Look>,
+    looks_list: Vec<Arc<Look>>,
     /// `m_viewTransforms`.
-    view_transforms: Vec<ViewTransform>,
+    view_transforms: Vec<Arc<ViewTransform>>,
     /// `m_defaultViewTransform`: the name of the default view transform.
     default_view_transform: Vec<u8>,
     /// `m_allNamedTransforms`: all the named transforms, active or not.
-    all_named_transforms: Vec<NamedTransform>,
+    all_named_transforms: Vec<Arc<NamedTransform>>,
     /// `m_activeNamedTransformNames`.
     active_named_transform_names: StringVec,
     /// `m_inactiveNamedTransformNames`.
@@ -565,10 +597,10 @@ impl Clone for Config {
             inactive_color_space_names_env: self.inactive_color_space_names_env.clone(),
             inactive_color_space_names_conf: self.inactive_color_space_names_conf.clone(),
             roles: self.roles.clone(),
-            looks_list: self.looks_list.clone(),
-            view_transforms: self.view_transforms.clone(),
+            looks_list: deep_copy(&self.looks_list),
+            view_transforms: deep_copy(&self.view_transforms),
             default_view_transform: self.default_view_transform.clone(),
-            all_named_transforms: self.all_named_transforms.clone(),
+            all_named_transforms: deep_copy(&self.all_named_transforms),
             active_named_transform_names: self.active_named_transform_names.clone(),
             inactive_named_transform_names: self.inactive_named_transform_names.clone(),
             displays: self.displays.clone(),
@@ -597,6 +629,26 @@ impl Clone for Config {
     }
 }
 
+/// The pointer of `held` that `obj` is the object of.
+fn arc_of<T>(held: &[Arc<T>], obj: &T) -> Option<Arc<T>> {
+    held.iter().find(|h| std::ptr::eq(&***h, obj)).cloned()
+}
+
+/// Replaces the object of `held` behind `old` with `new`, in its place: the new pointer, or
+/// `None` when `held` no longer holds `old`.
+fn replace_as_is<T>(held: &mut [Arc<T>], old: &Arc<T>, new: T) -> Option<Arc<T>> {
+    let slot = held.iter_mut().find(|h| Arc::ptr_eq(h, old))?;
+    *slot = Arc::new(new);
+    Some(slot.clone())
+}
+
+/// Copies of `held`, each behind a pointer of its own (`createEditableCopy` of each, as
+/// `Config::Impl::operator=` copies the looks, view transforms and named transforms,
+/// Config.cpp:401-438 @ v2.5.2).
+fn deep_copy<T: Clone>(held: &[Arc<T>]) -> Vec<Arc<T>> {
+    held.iter().map(|t| Arc::new((**t).clone())).collect()
+}
+
 /// The C library's `strerror` of an I/O error: its text without Rust's " (os error N)".
 fn strerror(e: &std::io::Error) -> String {
     let text = e.to_string();
@@ -609,12 +661,38 @@ fn strerror(e: &std::io::Error) -> String {
 /// `g_currentConfig`, under its lock `g_currentConfigLock` (Config.cpp:110-113 @ v2.5.2).
 static CURRENT_CONFIG: Mutex<Option<Arc<Config>>> = Mutex::new(None);
 
+/// A function [`get_current_config`] calls first, outside the current config's lock: the
+/// Python module's, which writes back the changes Python made in place to its current config
+/// (owner decision 2026-10-22, Q1 = A: Python holds the current config as its own object).
+static CURRENT_CONFIG_HOOK: Mutex<Option<fn()>> = Mutex::new(None);
+
+/// Sets the function [`get_current_config`] calls first (`None`: none), for the Python module.
+#[doc(hidden)]
+pub fn set_current_config_hook(hook: Option<fn()>) {
+    *CURRENT_CONFIG_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = hook;
+}
+
 /// The process's current config: the one [`set_current_config`] gave, or, the first time
 /// without one, [`Config::create_from_env`]'s (whose error leaves no current config).
 ///
 /// Port of `GetCurrentConfig` (src/OpenColorIO/Config.cpp:115-125 @ v2.5.2).
 #[doc(alias = "GetCurrentConfig")]
 pub fn get_current_config() -> Result<Arc<Config>> {
+    let hook = *CURRENT_CONFIG_HOOK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(hook) = hook {
+        hook();
+    }
+    current_config_as_is()
+}
+
+/// [`get_current_config`] without its hook: the current config as the library holds it, for
+/// the Python module.
+#[doc(hidden)]
+pub fn current_config_as_is() -> Result<Arc<Config>> {
     let mut current = CURRENT_CONFIG
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -624,6 +702,23 @@ pub fn get_current_config() -> Result<Arc<Config>> {
     }
 
     Ok(Arc::clone(current.as_ref().expect("set above")))
+}
+
+/// Makes `config` itself the current config, when the current config is still `expected`
+/// (whether it was): the Python module's write-back of its current config, which a
+/// [`set_current_config`] made meanwhile wins over.
+#[doc(hidden)]
+pub fn replace_current_config_as_is(expected: &Arc<Config>, config: Arc<Config>) -> bool {
+    let mut current = CURRENT_CONFIG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match current.as_ref() {
+        Some(c) if Arc::ptr_eq(c, expected) => {
+            *current = Some(config);
+            true
+        }
+        _ => false,
+    }
 }
 
 /// Makes a copy of `config` ([`Config`]'s `Clone`, `createEditableCopy`) the process's current
@@ -1017,13 +1112,17 @@ impl Config {
     /// v2.5.2) and `operator<<(std::ostream&, const Config&)` (Config.cpp:5236-5240), into a
     /// buffer: upstream writes nothing to the stream when it fails.
     pub fn serialize(&self) -> Result<Vec<u8>> {
-        self.check_version_consistency()
-            .and_then(|()| crate::ocio_yaml::write(self))
-            .map_err(|e| {
-                let mut error = b"Error building YAML: ".to_vec();
-                error.extend_from_slice(e.what());
-                Exception::new(error)
-            })
+        // `catch (const std::exception & e)`: an application's exception too (its logging
+        // function's, for a warning the writer logs).
+        ocio_ops::foreign_exception::catch_std(|| {
+            self.check_version_consistency()
+                .and_then(|()| crate::ocio_yaml::write(self))
+        })
+        .map_err(|e| {
+            let mut error = b"Error building YAML: ".to_vec();
+            error.extend_from_slice(e.what());
+            Exception::new(error)
+        })
     }
 
     /// The config's cache ID with its current context ([`Config::cache_id_with_context`]).
@@ -1076,9 +1175,14 @@ impl Config {
                 filehash.extend_from_slice(iter);
                 filehash.push(b'=');
 
-                match context
-                    .resolve_file_location(iter)
-                    .and_then(|resolved| get_fast_file_hash(&resolved, context))
+                // `catch (...)`: an application's exception too (the hash function's, an I/O
+                // proxy's).
+                match ocio_ops::foreign_exception::try_foreign(|| {
+                    context
+                        .resolve_file_location(iter)
+                        .and_then(|resolved| get_fast_file_hash(&resolved, context))
+                })
+                .unwrap_or_else(|e| Err(Exception::new(e.what())))
                 {
                     Ok(hash) => {
                         filehash.extend_from_slice(&hash);
@@ -1451,6 +1555,7 @@ impl Config {
     fn impl_named_transform(&self, name: &[u8]) -> Option<&NamedTransform> {
         self.all_named_transforms
             .get(self.impl_named_transform_index(name))
+            .map(|nt| &**nt)
     }
 
     /// The index of the named transform whose name, or else one of whose aliases, is `name`,
@@ -3930,7 +4035,7 @@ impl Config {
             NamedTransformVisibility::All => self
                 .all_named_transforms
                 .get(index)
-                .map_or(&[], NamedTransform::name),
+                .map_or(&[], |nt| nt.name()),
             NamedTransformVisibility::Active => self
                 .active_named_transform_names
                 .get(index)
@@ -4154,9 +4259,9 @@ impl Config {
                     .concat(),
                 ));
             }
-            self.all_named_transforms[replace_idx] = nt.clone();
+            self.all_named_transforms[replace_idx] = Arc::new(nt.clone());
         } else {
-            self.all_named_transforms.push(nt.clone());
+            self.all_named_transforms.push(Arc::new(nt.clone()));
         }
 
         self.reset_cache_ids();
@@ -4213,6 +4318,7 @@ impl Config {
         self.looks_list
             .iter()
             .find(|look| lower(look.name()) == namelower)
+            .map(|look| &**look)
     }
 
     /// Port of `Config::getNumLooks` (src/OpenColorIO/Config.cpp:4478-4481 @ v2.5.2).
@@ -4229,7 +4335,7 @@ impl Config {
         usize::try_from(index)
             .ok()
             .and_then(|i| self.looks_list.get(i))
-            .map_or(&[], Look::name)
+            .map_or(&[], |l| l.name())
     }
 
     /// Adds a copy of `look`, or replaces the look of the same name (ignoring case).
@@ -4250,9 +4356,9 @@ impl Config {
             .iter()
             .position(|l| lower(l.name()) == namelower)
         {
-            Some(i) => self.looks_list[i] = look.clone(),
+            Some(i) => self.looks_list[i] = Arc::new(look.clone()),
             // Otherwise, add it
-            None => self.looks_list.push(look.clone()),
+            None => self.looks_list.push(Arc::new(look.clone())),
         }
 
         self.reset_cache_ids();
@@ -4286,6 +4392,7 @@ impl Config {
         self.view_transforms
             .iter()
             .find(|vt| lower(vt.name()) == namelower)
+            .map(|vt| &**vt)
     }
 
     /// The name of the view transform at `index`; `""` outside them.
@@ -4297,7 +4404,7 @@ impl Config {
         usize::try_from(index)
             .ok()
             .and_then(|i| self.view_transforms.get(i))
-            .map_or(&[], ViewTransform::name)
+            .map_or(&[], |vt| vt.name())
     }
 
     /// The default view transform from the scene reference space to the display one: the
@@ -4321,6 +4428,7 @@ impl Config {
         self.view_transforms
             .iter()
             .find(|vt| vt.reference_space_type() == ReferenceSpaceType::Scene)
+            .map(|vt| &**vt)
     }
 
     /// Port of `Config::getDefaultViewTransformName` (src/OpenColorIO/Config.cpp:4579-4582 @
@@ -4377,9 +4485,9 @@ impl Config {
             .iter()
             .position(|vt| lower(vt.name()) == namelower)
         {
-            Some(i) => self.view_transforms[i] = view_transform.clone(),
+            Some(i) => self.view_transforms[i] = Arc::new(view_transform.clone()),
             // Otherwise, add it.
-            None => self.view_transforms.push(view_transform.clone()),
+            None => self.view_transforms.push(Arc::new(view_transform.clone())),
         }
 
         self.reset_cache_ids();
@@ -4392,6 +4500,93 @@ impl Config {
         self.view_transforms.clear();
 
         self.reset_cache_ids();
+    }
+
+    // The objects the config holds, as the Python module shares them /////////////////////////
+
+    /// The pointer the config holds `cs` behind, when `cs` is one of its color spaces (a
+    /// reference [`Config::color_space`] or another of its getters gave): its identity, as
+    /// upstream's `ColorSpaceRcPtr`.
+    ///
+    /// For the Python module: upstream's getters return the config's own objects, which a
+    /// Python caller can change (`config.getColorSpace(name).setDescription(...)` changes the
+    /// config); the module keeps an object of its own for each one Python holds and writes it
+    /// back with [`Config::replace_color_space_as_is`].
+    #[doc(hidden)]
+    pub fn color_space_arc(&self, cs: &ColorSpace) -> Option<Arc<ColorSpace>> {
+        self.all_color_spaces.arc_of(cs)
+    }
+
+    /// Replaces the color space `old` (by identity) with `new` in its place, as a change
+    /// through upstream's pointer to it does: none of what the config computed from it
+    /// changes (its cache IDs, its processors, its validation, the lists of active and
+    /// inactive names). The new color space's pointer, or `None` when the config no longer
+    /// holds `old`. For the Python module (see [`Config::color_space_arc`]).
+    #[doc(hidden)]
+    pub fn replace_color_space_as_is(
+        &mut self,
+        old: &Arc<ColorSpace>,
+        new: ColorSpace,
+    ) -> Option<Arc<ColorSpace>> {
+        self.all_color_spaces.replace_as_is(old, new)
+    }
+
+    /// [`Config::color_space_arc`] of a look the config holds.
+    #[doc(hidden)]
+    pub fn look_arc(&self, look: &Look) -> Option<Arc<Look>> {
+        arc_of(&self.looks_list, look)
+    }
+
+    /// [`Config::replace_color_space_as_is`] of a look.
+    #[doc(hidden)]
+    pub fn replace_look_as_is(&mut self, old: &Arc<Look>, new: Look) -> Option<Arc<Look>> {
+        replace_as_is(&mut self.looks_list, old, new)
+    }
+
+    /// [`Config::color_space_arc`] of a view transform the config holds.
+    #[doc(hidden)]
+    pub fn view_transform_arc(&self, vt: &ViewTransform) -> Option<Arc<ViewTransform>> {
+        arc_of(&self.view_transforms, vt)
+    }
+
+    /// [`Config::replace_color_space_as_is`] of a view transform.
+    #[doc(hidden)]
+    pub fn replace_view_transform_as_is(
+        &mut self,
+        old: &Arc<ViewTransform>,
+        new: ViewTransform,
+    ) -> Option<Arc<ViewTransform>> {
+        replace_as_is(&mut self.view_transforms, old, new)
+    }
+
+    /// [`Config::color_space_arc`] of a named transform the config holds.
+    #[doc(hidden)]
+    pub fn named_transform_arc(&self, nt: &NamedTransform) -> Option<Arc<NamedTransform>> {
+        arc_of(&self.all_named_transforms, nt)
+    }
+
+    /// [`Config::replace_color_space_as_is`] of a named transform.
+    #[doc(hidden)]
+    pub fn replace_named_transform_as_is(
+        &mut self,
+        old: &Arc<NamedTransform>,
+        new: NamedTransform,
+    ) -> Option<Arc<NamedTransform>> {
+        replace_as_is(&mut self.all_named_transforms, old, new)
+    }
+
+    /// A copy of the config as it is: [`Config`]'s `Clone` (`createEditableCopy`), whose
+    /// context keeps the environment mode (which `Context::createEditableCopy` resets, I-111).
+    ///
+    /// For the Python module, which holds the process's current config and the configs a Rust
+    /// application hands it as copies of its own (owner decision 2026-10-22: an `Arc<Config>`
+    /// can't be changed through Python, so the module's config is a snapshot of it).
+    #[doc(hidden)]
+    pub fn clone_as_is(&self) -> Config {
+        let copy = self.clone();
+        let mode = self.shared_context.get().environment_mode();
+        copy.shared_context.update(|c| c.set_environment_mode(mode));
+        copy
     }
 
     // File rules //////////////////////////////////////////////////////////////////////////////
@@ -5986,6 +6181,26 @@ impl Config {
         self.processor_cache.clear();
     }
 
+    /// How many times upstream's `m_processorCache.clear()` and `.enable()` would have run on
+    /// the config: every change of its state (`resetCacheIDs`), `clearProcessorCache`
+    /// and `setProcessorCacheFlags`. Both lock the cache's `std::mutex`, which `getProcessor`
+    /// holds while it makes a processor (docs/improvements.md, U-184).
+    ///
+    /// For the Python module, which tells a change of a config made while a copy of it makes a
+    /// processor.
+    #[doc(hidden)]
+    pub fn processor_cache_locks_by_changes(&self) -> u64 {
+        self.processor_cache.locks_by_changes()
+    }
+
+    /// Whether this thread holds the lock of the config's cache of processors: the library is
+    /// making a processor of it, on this thread, and may call the application's code
+    /// meanwhile.
+    #[doc(hidden)]
+    pub fn processor_cache_is_held_by_this_thread(&self) -> bool {
+        self.processor_cache.is_held_by_this_thread()
+    }
+
     /// The processor from the color space `src` to the color space `dst` (a color space
     /// transform's between their names), forward, in the current context.
     ///
@@ -6259,7 +6474,7 @@ impl Config {
             Ok(Arc::new(processor))
         };
 
-        if let Some(mut cache) = self.processor_cache.lock() {
+        if let Some(mut cache) = self.processor_cache.lock()? {
             // Note that the key includes a string description of the transform which does not
             // include all the LUT entries (just the arguments of the FileTransforms for LUTs).
             // `oss << usedContext->getCacheID() << *transform << direction` on one stream (the
@@ -6313,6 +6528,779 @@ impl Config {
     }
 }
 
+/// The processors between two configs (`Config::GetProcessorFromConfigs`), associated
+/// functions as upstream's statics are (owner decision P9-1, 2026-10-23). The configs are
+/// references: upstream never checks its config pointers for null.
+impl Config {
+    /// The processor from the color space `src_name` of `src_config` to the color space
+    /// `dst_name` of `dst_config`, through their interchange roles, in each config's current
+    /// context.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstConfigRcPtr &, const char *, const
+    /// ConstConfigRcPtr &, const char *)` (Config.cpp:4889-4896 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    pub fn processor_from_configs(
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        Config::processor_from_configs_with_contexts(
+            &src_config.current_context().get(),
+            src_config,
+            src_name,
+            &dst_config.current_context().get(),
+            dst_config,
+            dst_name,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the color space
+    /// `dst_name` of `dst_config` (see [`Config::processor_from_configs`]), each config in
+    /// its context: the interchange roles of the two color spaces' reference space type
+    /// ([`get_interchange_roles_for_color_space_conversion`], no heuristics), which both
+    /// configs must have.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const ConstContextRcPtr &, const ConstConfigRcPtr &,
+    /// const char *)` (Config.cpp:4898-4927 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    pub fn processor_from_configs_with_contexts(
+        src_context: &Context,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_context: &Context,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        let (src_name, dst_name) = (src_name.as_ref(), dst_name.as_ref());
+        // Extract the appropriate interchange roles based on the reference space type of the
+        // source and destination color spaces. Note that no heuristics are attempted. If these
+        // roles are missing, an exception is raised. (Note that the names of the returned color
+        // spaces should not depend on the context arguments above.)
+        let roles = get_interchange_roles_for_color_space_conversion(
+            src_config, src_name, dst_config, dst_name,
+        )?;
+        let Some((src_interchange_name, dst_interchange_name)) = roles.names else {
+            let interchange_role_name = interchange_role_name(roles.interchange_type);
+            return Err(Exception::new(format!(
+                "The required role '{interchange_role_name}' is missing from the source and/or \
+                 destination config."
+            )));
+        };
+
+        Config::processor_from_configs_with_interchange_with_contexts(
+            src_context,
+            src_config,
+            src_name,
+            src_interchange_name,
+            dst_context,
+            dst_config,
+            dst_name,
+            dst_interchange_name,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the color space
+    /// `dst_name` of `dst_config`, through the interchange color spaces `src_interchange_name`
+    /// and `dst_interchange_name` (names, aliases or roles), in each config's current context.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstConfigRcPtr &, const char *, const
+    /// char *, const ConstConfigRcPtr &, const char *, const char *)` (Config.cpp:4929-4938 @
+    /// v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    pub fn processor_from_configs_with_interchange(
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        Config::processor_from_configs_with_interchange_with_contexts(
+            &src_config.current_context().get(),
+            src_config,
+            src_name,
+            src_interchange_name,
+            &dst_config.current_context().get(),
+            dst_config,
+            dst_name,
+            dst_interchange_name,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the color space
+    /// `dst_name` of `dst_config` through the interchange color spaces (see
+    /// [`Config::processor_from_configs_with_interchange`]), each config in its context: the
+    /// source config's processor to its interchange space, then the destination config's from
+    /// its interchange space, concatenated. When either color space is a data space, the
+    /// processor is empty.
+    ///
+    /// The names are C strings (`const char *`): each up to its first NUL.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const char *, const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const char *)` (Config.cpp:4940-5004 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_with_interchange_with_contexts(
+        src_context: &Context,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_context: &Context,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        let src_name = c_str(src_name.as_ref());
+        let src_interchange_name = c_str(src_interchange_name.as_ref());
+        let dst_name = c_str(dst_name.as_ref());
+        let dst_interchange_name = c_str(dst_interchange_name.as_ref());
+
+        let Some(src_color_space) = src_config.color_space(src_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source color space '".as_slice(),
+                    src_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let Some(src_ex_cs) = src_config.color_space(src_interchange_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source interchange color space '".as_slice(),
+                    src_interchange_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let Some(dst_color_space) = dst_config.color_space(dst_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find destination color space '".as_slice(),
+                    dst_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let Some(dst_ex_cs) = dst_config.color_space(dst_interchange_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find destination interchange color space '".as_slice(),
+                    dst_interchange_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        // Upstream's checks that p1 and p2 aren't null can't fail: getProcessor returns a
+        // processor or throws.
+        let p1 = src_config.processor_between_color_spaces_with_context(
+            src_context,
+            Some(src_color_space),
+            Some(src_ex_cs),
+        )?;
+
+        let p2 = dst_config.processor_between_color_spaces_with_context(
+            dst_context,
+            Some(dst_ex_cs),
+            Some(dst_color_space),
+        )?;
+
+        let mut processor = Processor::new();
+        processor.set_processor_cache_flags(src_config.processor_cache_flags());
+
+        // If either of the color spaces are data spaces, its corresponding processor will be
+        // empty, but need to make sure the entire result is also empty to better match the
+        // semantics of how data spaces are handled.
+        if !src_color_space.is_data() && !dst_color_space.is_data() {
+            processor.concatenate(&p1, &p2)?;
+        }
+        Ok(Arc::new(processor))
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the view `dst_view` of
+    /// the display `dst_display` of `dst_config`, in the direction `direction`, through their
+    /// interchange roles, in each config's current context.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstConfigRcPtr &, const char *, const
+    /// ConstConfigRcPtr &, const char *, const char *, TransformDirection)`
+    /// (Config.cpp:5006-5015 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    pub fn processor_from_configs_to_display_view(
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        Config::processor_from_configs_to_display_view_with_contexts(
+            &src_config.current_context().get(),
+            src_config,
+            src_name,
+            &dst_config.current_context().get(),
+            dst_config,
+            dst_display,
+            dst_view,
+            direction,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to a (display, view) pair
+    /// of `dst_config` (see [`Config::processor_from_configs_to_display_view`]), each config in
+    /// its context: through the interchange role of the source color space's reference space
+    /// type, which both configs must have, and which must name a color space of each.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const ConstContextRcPtr &, const ConstConfigRcPtr &,
+    /// const char *, const char *, TransformDirection)` (Config.cpp:5017-5068 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_to_display_view_with_contexts(
+        src_context: &Context,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_context: &Context,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let src_name = c_str(src_name.as_ref());
+        let Some(src_color_space) = src_config.color_space(src_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source color space '".as_slice(),
+                    src_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let scene_referred = src_color_space.reference_space_type() == ReferenceSpaceType::Scene;
+        let exchange_role_name = if scene_referred {
+            ROLE_INTERCHANGE_SCENE
+        } else {
+            ROLE_INTERCHANGE_DISPLAY
+        };
+        let src_ex_name = lookup_role(&src_config.roles, exchange_role_name.as_bytes());
+        if src_ex_name.is_empty() {
+            return Err(Exception::new(format!(
+                "The role '{exchange_role_name}' is missing in the source config."
+            )));
+        }
+        if src_config.color_space(src_ex_name).is_none() {
+            return Err(Exception::new(
+                [
+                    b"The role '".as_slice(),
+                    exchange_role_name.as_bytes(),
+                    b"' refers to color space '",
+                    c_str(src_ex_name),
+                    b"' that is missing in the source config.",
+                ]
+                .concat(),
+            ));
+        }
+
+        let dst_ex_name = lookup_role(&dst_config.roles, exchange_role_name.as_bytes());
+        if dst_ex_name.is_empty() {
+            return Err(Exception::new(format!(
+                "The role '{exchange_role_name}' is missing in the destination config."
+            )));
+        }
+        if dst_config.color_space(dst_ex_name).is_none() {
+            return Err(Exception::new(
+                [
+                    b"The role '".as_slice(),
+                    exchange_role_name.as_bytes(),
+                    b"' refers to color space '",
+                    c_str(dst_ex_name),
+                    b"' that is missing in the destination config.",
+                ]
+                .concat(),
+            ));
+        }
+
+        Config::processor_from_configs_to_display_view_with_interchange_with_contexts(
+            src_context,
+            src_config,
+            src_name,
+            src_ex_name,
+            dst_context,
+            dst_config,
+            dst_display,
+            dst_view,
+            dst_ex_name,
+            direction,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to the view `dst_view` of
+    /// the display `dst_display` of `dst_config`, in the direction `direction`, through the
+    /// interchange color spaces `src_interchange_name` and `dst_interchange_name`, in each
+    /// config's current context.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstConfigRcPtr &, const char *, const
+    /// char *, const ConstConfigRcPtr &, const char *, const char *, const char *,
+    /// TransformDirection)` (Config.cpp:5070-5081 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_to_display_view_with_interchange(
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        Config::processor_from_configs_to_display_view_with_interchange_with_contexts(
+            &src_config.current_context().get(),
+            src_config,
+            src_name,
+            src_interchange_name,
+            &dst_config.current_context().get(),
+            dst_config,
+            dst_display,
+            dst_view,
+            dst_interchange_name,
+            direction,
+        )
+    }
+
+    /// The processor from the color space `src_name` of `src_config` to a (display, view) pair
+    /// of `dst_config` through the interchange color spaces (see
+    /// [`Config::processor_from_configs_to_display_view_with_interchange`]), each config in its
+    /// context: the source config's processor between the color space and its interchange
+    /// space, and the destination config's display view processor from its interchange space,
+    /// concatenated in the order of `direction` (inverse: the display view first, inverted,
+    /// then the source side from its interchange space). When the source color space or the
+    /// view's display color space is a data space, the processor is empty.
+    ///
+    /// The names are C strings (`const char *`): each up to its first NUL.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const char *, const ConstContextRcPtr &, const
+    /// ConstConfigRcPtr &, const char *, const char *, const char *, TransformDirection)`
+    /// (Config.cpp:5083-5145 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromConfigs")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_to_display_view_with_interchange_with_contexts(
+        src_context: &Context,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_context: &Context,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let src_name = c_str(src_name.as_ref());
+        let src_interchange_name = c_str(src_interchange_name.as_ref());
+        let dst_display = c_str(dst_display.as_ref());
+        let dst_view = c_str(dst_view.as_ref());
+        let dst_interchange_name = c_str(dst_interchange_name.as_ref());
+
+        let Some(mut src_color_space) = src_config.color_space(src_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source color space '".as_slice(),
+                    src_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let Some(mut src_ex_cs) = src_config.color_space(src_interchange_name) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find source interchange color space '".as_slice(),
+                    src_interchange_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        };
+
+        if direction == TransformDirection::Inverse {
+            std::mem::swap(&mut src_color_space, &mut src_ex_cs);
+        }
+        // Upstream's checks that p1 and p2 aren't null can't fail: getProcessor returns a
+        // processor or throws.
+        let mut p1 = src_config.processor_between_color_spaces_with_context(
+            src_context,
+            Some(src_color_space),
+            Some(src_ex_cs),
+        )?;
+
+        let cs_name = dst_config.display_view_color_space_name(dst_display, dst_view);
+        let display_color_space_name = if View::use_display_name(cs_name) {
+            dst_display
+        } else {
+            c_str(cs_name)
+        };
+        let Some(display_color_space) = dst_config.color_space(display_color_space_name) else {
+            return Err(Exception::new(
+                "Can't create the processor for the destination config: display color space \
+                 not found.",
+            ));
+        };
+
+        let mut p2 = dst_config.processor_for_display_view_with_context(
+            dst_context,
+            dst_interchange_name,
+            dst_display,
+            dst_view,
+            direction,
+        )?;
+
+        let mut processor = Processor::new();
+        processor.set_processor_cache_flags(src_config.processor_cache_flags());
+
+        // If either of the color spaces are data spaces, its corresponding processor will be
+        // empty, but need to make sure the entire result is also empty to better match the
+        // semantics of how data spaces are handled. (After the swap above, upstream's
+        // srcColorSpace is the source interchange space in the inverse direction.)
+        if !src_color_space.is_data() && !display_color_space.is_data() {
+            if direction == TransformDirection::Inverse {
+                std::mem::swap(&mut p1, &mut p2);
+            }
+            processor.concatenate(&p1, &p2)?;
+        }
+        Ok(Arc::new(processor))
+    }
+}
+
+/// The processor from the color space `src_color_space_name` of `src_config` to the color space
+/// `builtin_color_space_name` of the default built-in config (`ocio://default`), or the reverse
+/// for `TransformDirection::Inverse`, through the interchange spaces the roles or the heuristics
+/// identify ([`Config::identify_interchange_space`]).
+///
+/// Port of `GetProcessorToBuiltinCS` (src/OpenColorIO/Config.cpp:5147-5208 @ v2.5.2).
+fn processor_to_builtin_cs(
+    src_config: &Config,
+    src_color_space_name: &[u8],
+    builtin_color_space_name: &[u8],
+    direction: TransformDirection,
+) -> Result<Arc<Processor>> {
+    let builtin_color_space_name = c_str(builtin_color_space_name);
+
+    // Use the Default config as the Built-in config to interpret the known color space name.
+    let builtin_config = Config::create_from_file("ocio://default")?;
+
+    if builtin_config
+        .color_space(builtin_color_space_name)
+        .is_none()
+    {
+        return Err(Exception::new(
+            [
+                b"Built-in config does not contain the requested color space: ".as_slice(),
+                builtin_color_space_name,
+                b".",
+            ]
+            .concat(),
+        ));
+    }
+
+    let (src_interchange, builtin_interchange) = Config::identify_interchange_space(
+        src_config,
+        src_color_space_name,
+        &builtin_config,
+        builtin_color_space_name,
+    )?;
+
+    if !builtin_interchange.is_empty() {
+        // Upstream leaves the processor null for a direction that is neither forward nor
+        // inverse; the port's directions are those two.
+        return match direction {
+            TransformDirection::Forward => Config::processor_from_configs_with_interchange(
+                src_config,
+                src_color_space_name,
+                src_interchange,
+                &builtin_config,
+                builtin_color_space_name,
+                builtin_interchange,
+            ),
+            TransformDirection::Inverse => Config::processor_from_configs_with_interchange(
+                &builtin_config,
+                builtin_color_space_name,
+                builtin_interchange,
+                src_config,
+                src_color_space_name,
+                src_interchange,
+            ),
+        };
+    }
+
+    Err(Exception::new(
+        "Heuristics were not able to find a known color space in the provided config.\nPlease \
+         set the interchange roles in the config.",
+    ))
+}
+
+/// The interchange spaces and built-in color spaces of a config (`ConfigUtils`' heuristics),
+/// associated functions as upstream's statics are (owner decision P9-1, 2026-10-23).
+impl Config {
+    /// The interchange spaces of `src_config` and `builtin_config` to convert from the color
+    /// space `src_color_space_name` to the color space `builtin_color_space_name` of the
+    /// built-in config, or the reverse, in the order the binding returns them (upstream's two
+    /// out-parameters): the interchange roles when both configs have them, else what the
+    /// heuristics find. An error when no suitable spaces are found.
+    ///
+    /// Port of `Config::IdentifyInterchangeSpace` (Config.cpp:2908-2922 @ v2.5.2), with
+    /// `ConfigUtils::IdentifyInterchangeSpace` (ConfigUtils.cpp:590-710).
+    #[doc(alias = "IdentifyInterchangeSpace")]
+    pub fn identify_interchange_space<'s, 'b>(
+        src_config: &'s Config,
+        src_color_space_name: impl AsRef<[u8]>,
+        builtin_config: &'b Config,
+        builtin_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<(&'s [u8], &'b [u8])> {
+        // This will throw if it is unable to identify the interchange spaces.
+        crate::config_utils::identify_interchange_space(
+            src_config,
+            src_color_space_name.as_ref(),
+            builtin_config,
+            builtin_color_space_name.as_ref(),
+        )
+    }
+
+    /// The name of the active color space of `src_config` equivalent to the color space
+    /// `builtin_color_space_name` of `builtin_config`, found by the heuristics. An error when
+    /// the interchange spaces or the equivalent space can't be found.
+    ///
+    /// Port of `Config::IdentifyBuiltinColorSpace` (Config.cpp:2924-2932 @ v2.5.2), with
+    /// `ConfigUtils::IdentifyBuiltinColorSpace` (ConfigUtils.cpp:712-805).
+    #[doc(alias = "IdentifyBuiltinColorSpace")]
+    pub fn identify_builtin_color_space<'s>(
+        src_config: &'s Config,
+        builtin_config: &Config,
+        builtin_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<&'s [u8]> {
+        // This will throw if it is unable to identify the interchange spaces.
+        crate::config_utils::identify_builtin_color_space(
+            src_config,
+            builtin_config,
+            builtin_color_space_name.as_ref(),
+        )
+    }
+
+    /// The processor from the color space `src_color_space_name` of `src_config` to the color
+    /// space `builtin_color_space_name` of the default built-in config.
+    ///
+    /// Port of `Config::GetProcessorToBuiltinColorSpace` (Config.cpp:5210-5218 @ v2.5.2).
+    #[doc(alias = "GetProcessorToBuiltinColorSpace")]
+    pub fn processor_to_builtin_color_space(
+        src_config: &Config,
+        src_color_space_name: impl AsRef<[u8]>,
+        builtin_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        processor_to_builtin_cs(
+            src_config,
+            src_color_space_name.as_ref(),
+            builtin_color_space_name.as_ref(),
+            TransformDirection::Forward,
+        )
+    }
+
+    /// The processor from the color space `builtin_color_space_name` of the default built-in
+    /// config to the color space `src_color_space_name` of `src_config`.
+    ///
+    /// Port of `Config::GetProcessorFromBuiltinColorSpace` (Config.cpp:5220-5228 @ v2.5.2).
+    #[doc(alias = "GetProcessorFromBuiltinColorSpace")]
+    pub fn processor_from_builtin_color_space(
+        builtin_color_space_name: impl AsRef<[u8]>,
+        src_config: &Config,
+        src_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        processor_to_builtin_cs(
+            src_config,
+            src_color_space_name.as_ref(),
+            builtin_color_space_name.as_ref(),
+            TransformDirection::Inverse,
+        )
+    }
+}
+
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod python_identity_tests {
+    //! The hidden API of the objects a config holds, for the Python module: their identity,
+    //! their replacement as they are, the copies of the config and of its color space set.
+
+    use super::*;
+
+    fn config_with_objects() -> Config {
+        let mut config =
+            Arc::try_unwrap(Config::create_raw().unwrap()).unwrap_or_else(|a| (*a).clone());
+        let mut look = Look::new();
+        look.set_name("look");
+        look.set_process_space("raw");
+        config.add_look(&look).unwrap();
+        config
+    }
+
+    #[test]
+    fn a_held_color_space_has_an_identity_until_it_is_replaced_or_removed() {
+        let mut config = config_with_objects();
+        let held = config.color_space("raw").unwrap();
+        let arc = config.color_space_arc(held).unwrap();
+        assert!(std::ptr::eq(&*arc, held));
+        // A copy is no object of the config.
+        let copy = held.clone();
+        assert!(config.color_space_arc(&copy).is_none());
+
+        let cache_id = config.cache_id().unwrap();
+        let mut renamed = (*arc).clone();
+        renamed.set_description("changed");
+        let new = config.replace_color_space_as_is(&arc, renamed).unwrap();
+        assert!(!Arc::ptr_eq(&new, &arc));
+        assert_eq!(config.color_space("raw").unwrap().description(), b"changed");
+        // Nothing the config computed is reset: the same cache ID, the old pointer gone.
+        assert_eq!(config.cache_id().unwrap(), cache_id);
+        assert!(
+            config
+                .replace_color_space_as_is(&arc, (*new).clone())
+                .is_none()
+        );
+        config.remove_color_space("raw");
+        assert!(
+            config
+                .replace_color_space_as_is(&new, (*new).clone())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_rename_as_is_leaves_the_lists_of_names() {
+        let mut config = config_with_objects();
+        let arc = config
+            .color_space_arc(config.color_space("raw").unwrap())
+            .unwrap();
+        let mut renamed = (*arc).clone();
+        renamed.set_name("renamed");
+        config.replace_color_space_as_is(&arc, renamed).unwrap();
+        // The active names stay as they were computed (upstream: m_activeColorSpaceNames).
+        assert_eq!(config.color_space_name_by_index(0), b"raw");
+        assert!(config.color_space("renamed").is_some());
+    }
+
+    #[test]
+    fn looks_view_and_named_transforms_have_identities() {
+        let mut config = config_with_objects();
+        let look = config.look_arc(config.look("look").unwrap()).unwrap();
+        let mut changed = (*look).clone();
+        changed.set_description("d");
+        let new = config.replace_look_as_is(&look, changed).unwrap();
+        assert_eq!(config.look("look").unwrap().description(), b"d");
+        assert!(config.look_arc(&new).is_some());
+        assert!(config.look_arc(&Look::new()).is_none());
+
+        let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+        vt.set_name("vt");
+        vt.set_transform(
+            Some(&Transform::Matrix(Default::default())),
+            ocio_ops::open_color_types::ViewTransformDirection::ToReference,
+        )
+        .unwrap();
+        config.add_view_transform(&vt).unwrap();
+        let held = config
+            .view_transform_arc(config.view_transform("vt").unwrap())
+            .unwrap();
+        assert!(
+            config
+                .replace_view_transform_as_is(&held, vt.clone())
+                .is_some()
+        );
+        assert!(config.view_transform_arc(&vt).is_none());
+
+        let mut nt = NamedTransform::new();
+        nt.set_name("nt");
+        nt.set_transform(
+            Some(&Transform::Matrix(Default::default())),
+            TransformDirection::Forward,
+        )
+        .unwrap();
+        config.add_named_transform(&nt).unwrap();
+        let held = config
+            .named_transform_arc(config.named_transform("nt").unwrap())
+            .unwrap();
+        assert!(
+            config
+                .replace_named_transform_as_is(&held, nt.clone())
+                .is_some()
+        );
+        config.clear_named_transforms();
+        assert!(config.replace_named_transform_as_is(&held, nt).is_none());
+    }
+
+    #[test]
+    fn copies_hold_objects_of_their_own() {
+        let config = config_with_objects();
+        let copy = config.clone();
+        let cs = copy.color_space("raw").unwrap();
+        assert!(config.color_space_arc(cs).is_none());
+        assert!(copy.color_space_arc(cs).is_some());
+        let look = copy.look("look").unwrap();
+        assert!(config.look_arc(look).is_none());
+        let set = ColorSpaceSet::clone(&config.color_spaces(""));
+        assert!(
+            config
+                .color_space_arc(set.color_space_by_index(0).unwrap())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_copy_as_is_keeps_the_environment_mode() {
+        let mut config = config_with_objects();
+        config.set_environment_mode(EnvironmentMode::LoadAll);
+        assert_eq!(
+            config.clone_as_is().environment_mode(),
+            EnvironmentMode::LoadAll
+        );
+        assert!(
+            !config
+                .clone_as_is()
+                .current_context()
+                .ptr_eq(&config.current_context())
+        );
+    }
+
+    #[test]
+    fn rules_and_contexts_have_identities() {
+        let mut config = config_with_objects();
+        let rules = config.file_rules();
+        assert!(rules.ptr_eq(&config.file_rules()));
+        let copy = (*rules.get()).clone();
+        config.set_file_rules(&copy);
+        assert!(!rules.ptr_eq(&config.file_rules()));
+        let vr = config.viewing_rules();
+        assert!(vr.ptr_eq(&config.viewing_rules()));
+        let ctx = config.current_context();
+        assert!(ctx.ptr_eq(&config.current_context()));
+        assert_eq!(ctx.key(), config.current_context().key());
+        assert_ne!(ctx.key(), config.clone().current_context().key());
+        assert_eq!(vr.key(), config.viewing_rules().key());
+        assert_ne!(rules.key(), config.file_rules().key());
+        assert!(!ctx.ptr_eq(&config.clone().current_context()));
+    }
+}

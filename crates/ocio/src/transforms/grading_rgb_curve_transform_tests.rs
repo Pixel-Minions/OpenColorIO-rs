@@ -11,7 +11,7 @@
 use ocio_gpu::GpuShaderDesc;
 use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::open_color_types::{
-    DynamicPropertyType, LoggingLevel, OptimizationFlags, TransformDirection,
+    ColorSpaceDirection, DynamicPropertyType, LoggingLevel, OptimizationFlags, TransformDirection,
 };
 use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
     GradingBSplineCurve, GradingControlPoint,
@@ -484,4 +484,109 @@ fn build_ops_test() {
     check_close(pixel[0], 0.18597151f32, error);
     check_close(pixel[1], 0.47056902f32, error);
     check_close(pixel[2], 1.32527864f32, error);
+}
+
+/// `set_value_as_is` (the Python binding's hook) holds curves that don't validate as they are:
+/// the transform gives them back and refuses them where it validates, and building ops from
+/// it refuses them as building ops from curves set with `set_value` would (the copy's fit).
+/// (The binding's oracle tests compare what Python sees with the wheel's.)
+#[test]
+fn curves_held_as_they_are() {
+    let mut t = GradingRgbCurveTransform::new(GradingStyle::Log);
+    let mut values = t.value();
+    *values.curve_mut(RgbCurveType::Red).unwrap() =
+        curve(&[(0.0, 0.0), (0.5, 0.2), (0.2, 0.5), (1.0, 1.0)]);
+    assert!(values.validate().is_err());
+    assert!(t.set_value(&values).is_err());
+    t.set_value_as_is(&values);
+    assert_eq!(t.value(), values);
+    assert!(t.validate().is_err());
+    let config = Config::create_raw().unwrap();
+    assert!(config.processor(&t.clone().into()).is_err());
+    // Valid curves held as they are build the same ops as curves set.
+    let mut valid = t.value();
+    *valid.curve_mut(RgbCurveType::Red).unwrap() = curve(&[(0.0, 0.1), (0.5, 0.6), (1.0, 0.9)]);
+    let mut set = GradingRgbCurveTransform::new(GradingStyle::Log);
+    set.set_value(&valid).unwrap();
+    t.set_value_as_is(&valid);
+    let apply = |tr: Transform| {
+        let cpu = config
+            .processor(&tr)
+            .unwrap()
+            .default_cpu_processor()
+            .unwrap();
+        let mut px = [0.25f32, 0.5, 0.75];
+        cpu.apply_rgb(&mut px).unwrap();
+        px.map(f32::to_bits)
+    };
+    let (a, b) = (apply(t.clone().into()), apply(set.clone().into()));
+    assert_ne!(
+        a,
+        [0.25f32, 0.5, 0.75].map(f32::to_bits),
+        "the curves change the pixel"
+    );
+    assert_eq!(a, b);
+}
+
+/// `create_editable_copy` sets the copy's curves again, as upstream's `data() = data()` does
+/// (the property's `setValue`): curves held as they are that don't validate are refused with
+/// the curves' own error (no transform prefix), by the transform's copy and by a color space
+/// given the transform, which keeps the transform it had; valid curves are copied with the
+/// direction, the bypass, the metadata and the dynamic state, into a property of the copy's
+/// own. (The wheel's text: `copies_set_the_curves_again` in `ocio-py`'s
+/// `grading_transforms_oracle.rs`.)
+#[test]
+fn editable_copy_sets_the_curves_again() {
+    let mut t = GradingRgbCurveTransform::new(GradingStyle::Log);
+    let mut values = t.value();
+    *values.curve_mut(RgbCurveType::Green).unwrap() =
+        curve(&[(0.0, 0.0), (0.5, 0.2), (0.2, 0.5), (1.0, 1.0)]);
+    let curves_error = values.validate().unwrap_err();
+    t.set_value_as_is(&values);
+    let err = t.create_editable_copy().unwrap_err();
+    assert_eq!(err.what(), curves_error.what());
+    let err = Transform::from(t.clone())
+        .create_editable_copy()
+        .unwrap_err();
+    assert_eq!(err.what(), curves_error.what());
+    let mut cs = crate::color_space::ColorSpace::new();
+    let kept: Transform = GradingRgbCurveTransform::new(GradingStyle::Lin).into();
+    cs.set_transform(Some(&kept), ColorSpaceDirection::ToReference)
+        .unwrap();
+    let err = cs
+        .set_transform(Some(&t.clone().into()), ColorSpaceDirection::ToReference)
+        .unwrap_err();
+    assert_eq!(err.what(), curves_error.what());
+    let Some(Transform::GradingRgbCurve(held)) = cs.transform(ColorSpaceDirection::ToReference)
+    else {
+        panic!("the color space keeps a curve transform");
+    };
+    assert_eq!(held.style(), GradingStyle::Lin);
+
+    // Valid curves held as they are.
+    let mut valid = t.value();
+    *valid.curve_mut(RgbCurveType::Green).unwrap() = curve(&[(0.0, 0.1), (0.5, 0.6), (1.0, 0.9)]);
+    t.set_value_as_is(&valid);
+    t.set_direction(TransformDirection::Inverse);
+    t.set_bypass_lin_to_log(true);
+    t.make_dynamic();
+    t.format_metadata_mut().set_id(Some(b"curves"));
+    let copy = t.create_editable_copy().unwrap();
+    assert_eq!(copy.style(), GradingStyle::Log);
+    assert_eq!(copy.value(), valid);
+    assert_eq!(copy.direction(), TransformDirection::Inverse);
+    assert!(copy.bypass_lin_to_log());
+    assert!(copy.is_dynamic());
+    assert_eq!(copy.format_metadata(), t.format_metadata());
+    let Transform::GradingRgbCurve(copy) =
+        Transform::from(t.clone()).create_editable_copy().unwrap()
+    else {
+        panic!("a curve transform's copy is a curve transform");
+    };
+    assert_eq!(copy.value(), valid);
+    // The copy's curves are its own.
+    let mut copy = copy;
+    copy.set_value(&GradingRgbCurveTransform::new(GradingStyle::Log).value())
+        .unwrap();
+    assert_eq!(t.value(), valid);
 }

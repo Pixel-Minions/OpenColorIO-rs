@@ -64,6 +64,27 @@ impl Clone for TransformRc {
     }
 }
 
+/// [`TransformRc::lock`]'s guard: taking the node mutably counts a change
+/// ([`Node::version`]), unless the binding's call only reads
+/// ([`crate::shared::changes_count`]; the transforms' getters take their node mutably too).
+pub(crate) struct NodeGuard<'a>(MutexGuard<'a, Node>);
+
+impl std::ops::Deref for NodeGuard<'_> {
+    type Target = Node;
+    fn deref(&self) -> &Node {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for NodeGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Node {
+        if crate::shared::changes_count() {
+            self.0.version += 1;
+        }
+        &mut self.0
+    }
+}
+
 /// What a [`TransformRc`] holds.
 #[derive(Debug)]
 pub(crate) struct Node {
@@ -79,6 +100,13 @@ pub(crate) struct Node {
     /// Where the wheel's vectors of the metadata's child elements live, for the references
     /// Python holds into them ([`crate::py_format_metadata`]).
     pub(crate) metadata_heap: crate::py_format_metadata::MetadataHeap,
+    /// How many times the node was changed: taken mutably ([`NodeGuard`]) other than in a
+    /// call that only reads ([`crate::shared::changes_count`]).
+    pub(crate) version: u64,
+    /// The value object `getValue` of a curve transform returned, the transform's own curves
+    /// while the library hasn't replaced them ([`crate::py_grading_data::CurveValue`]):
+    /// written back into the transform, as it is, each time the node is locked.
+    pub(crate) curve_value: Option<crate::py_grading_data::CurveValue>,
 }
 
 impl TransformRc {
@@ -106,15 +134,26 @@ impl TransformRc {
             children,
             direction,
             metadata_heap: Default::default(),
+            version: 0,
+            curve_value: None,
         })))
     }
 
-    /// The node, locked. The binding runs under the GIL, and never locks a node while it holds
-    /// another's lock, so the lock is never contended.
-    pub(crate) fn lock(&self) -> MutexGuard<'_, Node> {
-        self.0
+    /// The node, locked, its transform holding the curves `getValue` gave Python as they are
+    /// now ([`Node::curve_value`]; the curves' locks are taken and released while the node's is
+    /// held, never the other way round). The binding runs under the GIL, and never locks a node
+    /// while it holds another's lock, so the lock is never contended (but by the current
+    /// config's write-back for an embedding host, [`crate::embed`], which locks each node
+    /// briefly).
+    pub(crate) fn lock(&self) -> NodeGuard<'_> {
+        let mut node = self
+            .0
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(value) = node.curve_value.clone() {
+            value.write_back(&mut node.transform);
+        }
+        NodeGuard(node)
     }
 
     /// The node's address, which pybind11's registry keys an instance by.
@@ -565,14 +604,22 @@ macro_rules! variant {
 variant!(ocio::AllocationTransform, Allocation);
 variant!(ocio::BuiltinTransform, Builtin);
 variant!(ocio::CdlTransform, Cdl);
+variant!(ocio::ColorSpaceTransform, ColorSpace);
+variant!(ocio::DisplayViewTransform, DisplayView);
 variant!(ocio::ExponentTransform, Exponent);
 variant!(ocio::ExponentWithLinearTransform, ExponentWithLinear);
+variant!(ocio::ExposureContrastTransform, ExposureContrast);
 variant!(ocio::FileTransform, File);
 variant!(ocio::FixedFunctionTransform, FixedFunction);
+variant!(ocio::GradingHueCurveTransform, GradingHueCurve);
+variant!(ocio::GradingPrimaryTransform, GradingPrimary);
+variant!(ocio::GradingRgbCurveTransform, GradingRgbCurve);
+variant!(ocio::GradingToneTransform, GradingTone);
 variant!(ocio::GroupTransform, Group);
 variant!(ocio::LogAffineTransform, LogAffine);
 variant!(ocio::LogCameraTransform, LogCamera);
 variant!(ocio::LogTransform, Log);
+variant!(ocio::LookTransform, Look);
 variant!(ocio::Lut1DTransform, Lut1D);
 variant!(ocio::Lut3DTransform, Lut3D);
 variant!(ocio::transforms::matrix_transform::MatrixTransform, Matrix);
@@ -695,6 +742,59 @@ pub(crate) fn def_static(cls: &Bound<'_, PyType>, f: &'static Function) -> PyRes
     cls.setattr(f.name, sm)
 }
 
+/// `property(fget, fset, None, "")`, as pybind11 makes an instance property
+/// (`def_property_static_impl`): CPython's `property`, its docstring empty (the wheel's `DOC`
+/// strings are).
+fn property<'py>(fget: Bound<'py, PyAny>, fset: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    let py = fget.py();
+    py.import("builtins")?
+        .getattr("property")?
+        .call1((fget, fset, py.None(), ""))
+}
+
+/// `cls.def_readwrite(name, ...)`: a property whose getter and setter pybind11 makes as methods
+/// of the class (`is_method`: instancemethods over functions with the module's scope), each
+/// without a name (`f.name` empty: its docstring is its signature alone).
+pub(crate) fn def_readwrite(
+    cls: &Bound<'_, PyType>,
+    name: &str,
+    get: &'static Function,
+    set: &'static Function,
+) -> PyResult<()> {
+    let py = cls.py();
+    let prop = property(pybind11::method(py, get)?, pybind11::method(py, set)?)?;
+    cls.setattr(name, prop)
+}
+
+/// `cls.def_property(name, getter, setter)` of two lambdas: a property over two functions
+/// pybind11 makes before it knows their class (no scope: `__module__` None, not methods), each
+/// without a name.
+pub(crate) fn def_property(
+    cls: &Bound<'_, PyType>,
+    name: &str,
+    get: &'static Function,
+    set: &'static Function,
+) -> PyResult<()> {
+    let py = cls.py();
+    let prop = property(
+        pybind11::builtin_unscoped(py, get, true)?,
+        pybind11::builtin_unscoped(py, set, true)?,
+    )?;
+    cls.setattr(name, prop)
+}
+
+/// `cls.def_property_readonly_static(name, getter)`: pybind11's static property over a function
+/// without a scope or a name.
+pub(crate) fn def_property_readonly_static(
+    cls: &Bound<'_, PyType>,
+    name: &str,
+    get: &'static Function,
+) -> PyResult<()> {
+    let py = cls.py();
+    let prop = pybind11::static_property(py, pybind11::builtin_unscoped(py, get, true)?)?;
+    cls.setattr(name, prop)
+}
+
 /// The module's class `qualified`.
 pub(crate) fn class<'py>(py: Python<'py>, qualified: &str) -> PyResult<Bound<'py, PyType>> {
     pybind11::class(py, qualified)
@@ -795,7 +895,8 @@ static DEEPCOPY: Function = method_def!(
 );
 
 /// `createEditableCopy` of the node: a new node of a copy of its transform (a
-/// FixedFunctionTransform's copy validates it); a group's copy shares its children's nodes, as
+/// FixedFunctionTransform's copy validates it, a curve transform's sets its curves again,
+/// which validates them); a group's copy shares its children's nodes, as
 /// upstream's (`GroupTransformImpl::createEditableCopy`, GroupTransform.cpp:37-45 @ v2.5.2).
 pub(crate) fn create_editable_copy(py: Python<'_>, rc: &TransformRc) -> PyResult<TransformRc> {
     let node = rc.lock();
@@ -805,6 +906,8 @@ pub(crate) fn create_editable_copy(py: Python<'_>, rc: &TransformRc) -> PyResult
         children: node.children.clone(),
         direction: node.direction,
         metadata_heap: Default::default(),
+        version: 0,
+        curve_value: None,
     }))))
 }
 
@@ -823,6 +926,12 @@ static VALIDATE: Function = method_def!("validate", [SELF], "None", |py, o, a, _
 /// null child or a group that holds itself is reached only once every node before it passed:
 /// the port's errors, as in [`TransformRc::materialize`].
 pub(crate) fn validate(py: Python<'_>, rc: &TransformRc) -> PyResult<()> {
+    py_result(py, validate_ocio(rc)?)
+}
+
+/// [`validate`], its OCIO error as the library's (the inner result), the port's errors (U-110,
+/// U-111) as Python's (the outer one).
+pub(crate) fn validate_ocio(rc: &TransformRc) -> PyResult<ocio::Result<()>> {
     // Each level: a group's node and its children, the next child.
     let mut stack: Vec<(TransformRc, Vec<Option<TransformRc>>, usize)> = Vec::new();
     let mut current = Some(rc.clone());
@@ -839,18 +948,19 @@ pub(crate) fn validate(py: Python<'_>, rc: &TransformRc) -> PyResult<()> {
             };
             let t = rc.transform_type();
             if direction != 0 && direction != 1 {
-                return Err(crate::py_open_color_io::to_py_err(
-                    py,
-                    &ocio::Exception::new(invalid_direction(t)),
-                ));
+                return Ok(Err(ocio::Exception::new(invalid_direction(t))));
             }
             match transform {
-                Some(transform) => py_result(py, transform.validate())?,
+                Some(transform) => {
+                    if let Err(e) = transform.validate() {
+                        return Ok(Err(e));
+                    }
+                }
                 None => stack.push((rc, children, 0)),
             }
         }
         let Some((_, children, next)) = stack.last_mut() else {
-            return Ok(());
+            return Ok(Ok(()));
         };
         let Some(child) = children.get(*next).cloned() else {
             stack.pop();
@@ -1053,14 +1163,22 @@ pub(crate) fn bind_py_transform(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::transforms::py_allocation_transform::bind(m)?;
     crate::transforms::py_builtin_transform::bind(m)?;
     crate::transforms::py_cdl_transform::bind(m)?;
+    crate::transforms::py_color_space_transform::bind(m)?;
+    crate::transforms::py_display_view_transform::bind(m)?;
     crate::transforms::py_exponent_transform::bind(m)?;
     crate::transforms::py_exponent_with_linear_transform::bind(m)?;
+    crate::transforms::py_exposure_contrast_transform::bind(m)?;
     crate::transforms::py_file_transform::bind(m)?;
     crate::transforms::py_fixed_function_transform::bind(m)?;
+    crate::transforms::py_grading_primary_transform::bind(m)?;
+    crate::transforms::py_grading_rgb_curve_transform::bind(m)?;
+    crate::transforms::py_grading_hue_curve_transform::bind(m)?;
+    crate::transforms::py_grading_tone_transform::bind(m)?;
     crate::transforms::py_group_transform::bind(m)?;
     crate::transforms::py_log_affine_transform::bind(m)?;
     crate::transforms::py_log_camera_transform::bind(m)?;
     crate::transforms::py_log_transform::bind(m)?;
+    crate::transforms::py_look_transform::bind(m)?;
     crate::transforms::py_lut1d_transform::bind(m)?;
     crate::transforms::py_lut3d_transform::bind(m)?;
     crate::transforms::py_matrix_transform::bind(m)?;

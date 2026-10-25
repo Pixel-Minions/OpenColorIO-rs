@@ -110,6 +110,209 @@ static GET_VERSION_HEX: Function = function(
     }],
 );
 
+const LOGGING_LEVEL: &str = "PyOpenColorIO.PyOpenColorIO.LoggingLevel";
+
+/// The library's `LoggingLevel` of the C++ value `v`, if it is an enumerator.
+fn logging_level(v: i64) -> Option<ocio_ops::open_color_types::LoggingLevel> {
+    use ocio_ops::open_color_types::LoggingLevel::*;
+    [None, Warning, Info, Debug, Unknown]
+        .into_iter()
+        .find(|l| *l as i64 == v)
+}
+
+// m.def("GetLoggingLevel", &GetLoggingLevel) (PyOpenColorIO.cpp:47-48 @ v2.5.2).
+static GET_LOGGING_LEVEL: Function = function(
+    "GetLoggingLevel",
+    &[Overload {
+        params: &[],
+        ret: LOGGING_LEVEL,
+        call: |py, _, _, _| {
+            let level = ocio_ops::logging::get_logging_level();
+            crate::py_transform::enum_out(py, LOGGING_LEVEL, level as i64)
+        },
+        pos_only: 0,
+    }],
+);
+
+// m.def("SetLoggingLevel", &SetLoggingLevel, "level"_a) (PyOpenColorIO.cpp:49-50 @ v2.5.2): a
+// level outside the enumerators, which the wheel keeps, is U-112's error.
+static SET_LOGGING_LEVEL: Function = function(
+    "SetLoggingLevel",
+    &[Overload {
+        params: &[Param::new("level", LOGGING_LEVEL)],
+        ret: "None",
+        call: |py, _, a, _| {
+            let Some(v) = crate::enums::enum_value(&a[0], LOGGING_LEVEL)? else {
+                return Ok(None);
+            };
+            let level = logging_level(v)
+                .ok_or_else(|| crate::py_transform::outside_enumerators(LOGGING_LEVEL, v))?;
+            ocio_ops::logging::set_logging_level(level);
+            none(py)
+        },
+        pos_only: 0,
+    }],
+);
+
+/// The library's logging function that calls the Python callable `f` with each message, the
+/// GIL taken (pybind11's `std::function` wrapper): its result ignored, its exception thrown
+/// through the library ([`crate::callback`]).
+fn python_logging_function(f: Py<PyAny>) -> ocio_ops::logging::LoggingFunction {
+    std::sync::Arc::new(move |message: &[u8]| {
+        Python::attach(|py| {
+            use crate::callback::{CallbackError, throw};
+            let outcome =
+                crate::dispatch::char_ptr_to_py(py, Some(message)).and_then(|m| f.call1(py, (m,)));
+            if let Err(e) = outcome {
+                throw(py, CallbackError::Python(e));
+            }
+        })
+    })
+}
+
+/// A `std::function` argument (pybind11's caster): a callable; with conversions, also `None`,
+/// an empty function. `Ok(None)`: refused.
+fn function_arg(obj: &Bound<'_, PyAny>, convert: bool) -> Option<Option<Py<PyAny>>> {
+    if obj.is_none() {
+        return convert.then_some(None);
+    }
+    obj.is_callable().then(|| Some(obj.clone().unbind()))
+}
+
+// m.def("SetLoggingFunction", &SetLoggingFunction, "logFunction"_a) (PyOpenColorIO.cpp:51-52
+// @ v2.5.2): `None` is the empty function the library refuses.
+static SET_LOGGING_FUNCTION: Function = function(
+    "SetLoggingFunction",
+    &[Overload {
+        params: &[Param::new(
+            "logFunction",
+            "collections.abc.Callable[[str], None]",
+        )],
+        ret: "None",
+        call: |py, _, a, convert| {
+            let Some(f) = function_arg(&a[0], convert) else {
+                return Ok(None);
+            };
+            py_result(
+                py,
+                ocio_ops::logging::set_logging_function(f.map(python_logging_function)),
+            )?;
+            none(py)
+        },
+        pos_only: 0,
+    }],
+);
+
+// m.def("ResetToDefaultLoggingFunction", &ResetToDefaultLoggingFunction)
+// (PyOpenColorIO.cpp:53-54 @ v2.5.2).
+static RESET_TO_DEFAULT_LOGGING_FUNCTION: Function = function(
+    "ResetToDefaultLoggingFunction",
+    &[Overload {
+        params: &[],
+        ret: "None",
+        call: |py, _, _, _| {
+            ocio_ops::logging::reset_to_default_logging_function();
+            none(py)
+        },
+        pos_only: 0,
+    }],
+);
+
+// m.def("LogMessage", &LogMessage, "level"_a, "message"_a) (PyOpenColorIO.cpp:55-56 @ v2.5.2):
+// upstream's `switch` (Logging.cpp:131-160) logs nothing for a level outside the enumerators;
+// a null message is made a `std::string` of (U-123).
+static LOG_MESSAGE: Function = function(
+    "LogMessage",
+    &[Overload {
+        params: &[
+            Param::new("level", LOGGING_LEVEL),
+            Param::new("message", "str"),
+        ],
+        ret: "None",
+        call: |py, _, a, convert| {
+            let Some(v) = crate::enums::enum_value(&a[0], LOGGING_LEVEL)? else {
+                return Ok(None);
+            };
+            let CharPtr(message) = arg!(a, 1, convert, CharPtr);
+            let Some(message) = message else {
+                return Err(crate::py_context::null_string("LogMessage(message)"));
+            };
+            if let Some(level) = logging_level(v) {
+                py_result(py, ocio_ops::logging::log_message(level, &message))?;
+            }
+            none(py)
+        },
+        pos_only: 0,
+    }],
+);
+
+/// The library's hash function that calls the Python callable `f` with the path (as a `str`,
+/// strict UTF-8), the GIL taken: its result as a `std::string` (`str`, `bytes` or `bytearray`;
+/// pybind11's `cast_error` otherwise); `None` is the empty `std::function`, whose call throws
+/// `std::bad_function_call` (RuntimeError "bad function call" from MSVC's STL,
+/// "bad_function_call" from libstdc++: I-301).
+fn python_hash_function(f: Option<Py<PyAny>>) -> ocio::path_utils::ComputeHashFunction {
+    std::sync::Arc::new(move |path: &[u8]| {
+        Python::attach(|py| {
+            use crate::callback::{CallbackError, throw};
+            let Some(f) = &f else {
+                let what = if cfg!(windows) {
+                    "bad function call"
+                } else {
+                    "bad_function_call"
+                };
+                throw(py, CallbackError::Cpp(PyRuntimeError::new_err(what)));
+            };
+            let result = std_string_to_py(py, path)
+                .and_then(|p| f.call1(py, (p,)))
+                .map_err(CallbackError::Python);
+            let text = result.and_then(|r| {
+                crate::py_config_io_proxy::cast_string(r.bind(py)).map_err(CallbackError::Cpp)
+            });
+            match text {
+                Ok(t) => t,
+                Err(e) => throw(py, e),
+            }
+        })
+    })
+}
+
+// m.def("SetComputeHashFunction", &SetComputeHashFunction, "hashFunction"_a)
+// (PyOpenColorIO.cpp:57-58 @ v2.5.2).
+static SET_COMPUTE_HASH_FUNCTION: Function = function(
+    "SetComputeHashFunction",
+    &[Overload {
+        params: &[Param::new(
+            "hashFunction",
+            "collections.abc.Callable[[str], str]",
+        )],
+        ret: "None",
+        call: |py, _, a, convert| {
+            let Some(f) = function_arg(&a[0], convert) else {
+                return Ok(None);
+            };
+            ocio::path_utils::set_compute_hash_function(python_hash_function(f));
+            none(py)
+        },
+        pos_only: 0,
+    }],
+);
+
+// m.def("ResetComputeHashFunction", &ResetComputeHashFunction) (PyOpenColorIO.cpp:59-60 @
+// v2.5.2).
+static RESET_COMPUTE_HASH_FUNCTION: Function = function(
+    "ResetComputeHashFunction",
+    &[Overload {
+        params: &[],
+        ret: "None",
+        call: |py, _, _, _| {
+            ocio::path_utils::reset_compute_hash_function();
+            none(py)
+        },
+        pos_only: 0,
+    }],
+);
+
 /// A `const char *` argument's bytes, a null pointer as the empty string: what upstream's
 /// environment functions (Platform.cpp's Getenv, Setenv, Unsetenv) do with it.
 fn c_str(s: CharPtr) -> Vec<u8> {
@@ -251,15 +454,25 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::pybind11::def_function(m, &CLEAR_ALL_CACHES)?;
     crate::pybind11::def_function(m, &GET_VERSION)?;
     crate::pybind11::def_function(m, &GET_VERSION_HEX)?;
+    crate::pybind11::def_function(m, &GET_LOGGING_LEVEL)?;
+    crate::pybind11::def_function(m, &SET_LOGGING_LEVEL)?;
+    crate::pybind11::def_function(m, &SET_LOGGING_FUNCTION)?;
+    crate::pybind11::def_function(m, &RESET_TO_DEFAULT_LOGGING_FUNCTION)?;
+    crate::pybind11::def_function(m, &LOG_MESSAGE)?;
+    crate::pybind11::def_function(m, &SET_COMPUTE_HASH_FUNCTION)?;
+    crate::pybind11::def_function(m, &RESET_COMPUTE_HASH_FUNCTION)?;
     crate::pybind11::def_function(m, &GET_ENV_VARIABLE)?;
     crate::pybind11::def_function(m, &SET_ENV_VARIABLE)?;
     crate::pybind11::def_function(m, &UNSET_ENV_VARIABLE)?;
     crate::pybind11::def_function(m, &IS_ENV_VARIABLE_PRESENT)?;
 
     // The classes' bindings (PyOpenColorIO.cpp:70-103), those ported so far.
+    crate::py_builtin_config_registry::bind_py_builtin_config_registry(m)?;
     crate::py_color_space::bind_py_color_space(m)?;
     crate::py_color_space_set::bind_py_color_space_set(m)?;
+    crate::py_config::bind_py_config(m)?;
     crate::py_context::bind_py_context(m)?;
+    crate::py_config_io_proxy::bind_py_config_io_proxy(m)?;
     crate::py_cpu_processor::bind_py_cpu_processor(m)?;
     crate::py_file_rules::bind_py_file_rules(m)?;
     crate::py_gpu_shader_creator::bind_py_gpu_shader_creator(m)?;
@@ -270,7 +483,15 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::py_viewing_rules::bind_py_viewing_rules(m)?;
     crate::py_view_transform::bind_py_view_transform(m)?;
     crate::py_builtin_transform_registry::bind_py_builtin_transform_registry(m)?;
+    crate::py_dynamic_property::bind_py_dynamic_property(m)?;
     crate::py_format_metadata::bind_py_format_metadata(m)?;
+    crate::py_grading_data::bind_py_grading_data(m)?;
     crate::py_transform::bind_py_transform(m)?;
+
+    // The app helpers (PyOpenColorIO.cpp:98-103), but bindPyConfigMergingHelpers (chunk 6.8).
+    crate::apphelpers::py_color_space_helpers::bind_py_color_space_menu_helpers(m)?;
+    crate::apphelpers::py_display_view_helpers::bind_py_display_view_helpers(m)?;
+    crate::apphelpers::py_legacy_viewing_pipeline::bind_py_legacy_viewing_pipeline(m)?;
+    crate::apphelpers::py_mixing_helpers::bind_py_mixing_helpers(m)?;
     Ok(())
 }

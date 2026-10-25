@@ -1,0 +1,1442 @@
+[
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD dynamic none default",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"9c7ea31e636df2a4c75aa3dc6d8a0a89\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD dynamic Exposure+Contrast+Gamma default",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"6e597ee705d0cb150c7d9790a544260d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD dynamic Exposure default",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"b3f17622f9c2968983b275ee96a38923\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD dynamic Contrast default",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"1ee1ad85f1f53214e35f441a5607d7c9\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD dynamic Gamma default",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"5165dfeef1be94fdb7eaa99a56ba5e48\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD dynamic none typical",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"f1b4c486915eff4d89052697fab5410c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD dynamic Exposure+Contrast+Gamma typical",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5bacf843e48baaf3e33a16085e3cd729\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE dynamic none default",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"50bc29347e0ef79505c44762b1756844\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE dynamic Exposure+Contrast+Gamma default",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"b87e680d169aa0666a06202a226459bd\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE dynamic Exposure default",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"842c20a3281ceff28411db3ab3685d0b\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE dynamic Contrast default",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"01a5a0ba1405a1e4c282b7e72ae15c2c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE dynamic Gamma default",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"68884137f0cb46bd33773672c00aa0d0\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE dynamic none typical",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3f0c12fcedb8715a1f6c62e3a4678d8a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE dynamic Exposure+Contrast+Gamma typical",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"f8c5e03a2c6c701f89c3139c168aed4e\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD dynamic none default",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"af0b502d43fa3135a4e33d828e7b868c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD dynamic Exposure+Contrast+Gamma default",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"a1da4b301389de73d391aa11a7e3dc5a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD dynamic Exposure default",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"9627b9eceed78dc485b94fc3deeca26b\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD dynamic Contrast default",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"a2fda6bc2a22f29a3f269d7eb14a700f\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD dynamic Gamma default",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"7abeab03d99b0e1256a74a6cb213d06a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD dynamic none typical",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"340ed2e03ca18cfc36c8760ffe794c2a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD dynamic Exposure+Contrast+Gamma typical",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"7402f6d45cd58031bd4e7ee2ab0e507a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE dynamic none default",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"a39568bf03db7985e1ec6bdccb0e454b\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE dynamic Exposure+Contrast+Gamma default",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"cb3bd6230f45dc8f3ddfa700b7593690\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE dynamic Exposure default",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"279d977216f91c00b0a9a1b19e892751\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE dynamic Contrast default",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"ab53ac78a79018b581bad61076711301\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE dynamic Gamma default",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"830f8a9125a4525ba753f62f6de2a725\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE dynamic none typical",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3ad29c740e19cebe227f79cbba49e5ee\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE dynamic Exposure+Contrast+Gamma typical",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e176d4c6979fb2792c64c4eb1835882f\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD dynamic none default",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"669020e5299abd80d8f939a7197dd5e4\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD dynamic Exposure+Contrast+Gamma default",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"09d00b55eae43c11f1ef5d3ebb52b568\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD dynamic Exposure default",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"bbacc37f196bdb55d09a2c2b3c77b126\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD dynamic Contrast default",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"71673acfd55764113a6a5b6d27464fc8\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD dynamic Gamma default",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"24d822e0d3cfb703a5787abf34618253\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD dynamic none typical",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"f588a3dd307fe6bd2dece520ea2c784d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD dynamic Exposure+Contrast+Gamma typical",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"17cc92637dbfefd037ef569fbfdf0c76\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE dynamic none default",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"0d106b3ac235b0d24edd5463e9816bf9\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE dynamic Exposure+Contrast+Gamma default",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"bd51787f0517dc1fb2d108cf81a9f84a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE dynamic Exposure default",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"727bf73444a8a513cfc769322b0558e7\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE dynamic Contrast default",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"83426d29c41a64ffd2832aa1d21670e9\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE dynamic Gamma default",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f62b9dd8184ec873d05b3c376cf1d9aa\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE dynamic none typical",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9f04e758d18f653fc075bea0607d4464\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE dynamic Exposure+Contrast+Gamma typical",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0.25, contrast=1.3, gamma=0.8, pivot=0.18, logExposureStep=0.1, logMidGray=0.435, exposureDynamic, contrastDynamic, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"330bbc32b10217f04d665dd136148248\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0.25\" contrast=\"1.3\" gamma=\"0.8\" pivot=\"0.18\" logExposureStep=\"0.1\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n        <DynamicParameter param=\"CONTRAST\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = nan dynamic True",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=nan, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"b3f17622f9c2968983b275ee96a38923\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"nan\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=-0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"a363df74126bbf75f4ade62990a20ad2\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"-0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=inf, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f5fdd538296d78cf3fa1f05c1266962d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"inf\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = nan dynamic True",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=nan, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"01a5a0ba1405a1e4c282b7e72ae15c2c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"nan\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Contrast = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=-0, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"09159ee66fe98463b5cd6a9ad930b404\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"-0\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=inf, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"4885378db351e79c45aeba87298712b7\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"inf\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Gamma = nan dynamic True",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=nan, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"5165dfeef1be94fdb7eaa99a56ba5e48\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"nan\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Gamma = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=-0, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"3cc76e03740f3bcef5c4cd84d1968791\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"-0\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Gamma = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=inf, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f806daa2ff98f0afebf04816da152bea\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"inf\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Pivot = nan dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=nan, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"0c30cdc19e2ea9ea36b3ebc800bc239d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Pivot = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=-0, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"0747287f376b4b0dfe36052366e141c6\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Pivot = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=inf, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"a426caf2716085657023ab1aa15d34af\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD LogExposureStep = nan dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=nan, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e4a4bc177a14e533cc031c57dc0296d8\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE LogExposureStep = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=-0, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"31a1f89f5d91001f75f4435b0a780e7a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD LogExposureStep = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=inf, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"77bf11363ca5fbed7703bf9ba3edaac9\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE LogMidGray = nan dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=nan>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"973c8de72f11f501d2c73d5e49e62d98\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD LogMidGray = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=-0>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"79d019f027a8e58523369ac3a3ea3a7b\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE LogMidGray = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=inf>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cf207197733712a170934d77bf43d48c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Exposure = nan dynamic True",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=nan, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"9627b9eceed78dc485b94fc3deeca26b\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"nan\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Exposure = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=-0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"00f8d424437491cd0714e0ff95e8c9b1\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"-0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Exposure = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=inf, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"b2aa5844c15b9d3f0dec2d243173066a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"inf\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Contrast = nan dynamic True",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=nan, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"ab53ac78a79018b581bad61076711301\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"nan\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Contrast = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=-0, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"3a0ed4d2e6192116540e2fa4fb9475cd\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"-0\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Contrast = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=inf, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"e984a51e9cc8efef669d6d48e0add034\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"inf\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = nan dynamic True",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=nan, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"7abeab03d99b0e1256a74a6cb213d06a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"nan\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Gamma = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=-0, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"edce2e03bef38d72cc99f5b88be4d268\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"-0\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=inf, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"3a183177704ac94b1f82e5855fc3a378\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"inf\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = nan dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=nan, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"74c8f3478878157da86912ea60140f97\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=-0, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"581deeb4e0504726fb57214d8674a6f9\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=inf, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f7ae03ab3172b0a380618ba55f696cb1\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD LogExposureStep = nan dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=nan, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"4123d831cae2450d8dbf6aad600201e6\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE LogExposureStep = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=-0, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"357b8367d358fd34bf3a4b0b00a79ffb\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD LogExposureStep = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=inf, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"1e0f55a53c9daf8ac7cdb3bc88134e52\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE LogMidGray = nan dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=nan>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e71b21abd7a458ac1f5db304d05fddff\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD LogMidGray = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=-0>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"210b7218faf8d977399bf6fcf892c865\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE LogMidGray = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=inf>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"6f0466b67aa3edf72acc2668e7223691\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD Exposure = nan dynamic True",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=nan, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, exposureDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"bbacc37f196bdb55d09a2c2b3c77b126\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"nan\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"EXPOSURE\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE Exposure = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=-0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f2719623fffc317a377950b204e437f6\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"-0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD Exposure = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=inf, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"afd577da19bfcc88db32aeebb99a2324\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"inf\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE Contrast = nan dynamic True",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=nan, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, contrastDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"83426d29c41a64ffd2832aa1d21670e9\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"nan\" gamma=\"1\" pivot=\"0.18\" />\n        <DynamicParameter param=\"CONTRAST\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD Contrast = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=-0, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"a9ce6d42118ebd3df27cd45329c45f68\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"-0\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE Contrast = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=inf, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"d2239b956069b9fbf2c0f4e6165901d7\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"inf\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD Gamma = nan dynamic True",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=nan, pivot=0.18, logExposureStep=0.088, logMidGray=0.435, gammaDynamic>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"24d822e0d3cfb703a5787abf34618253\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"nan\" pivot=\"0.18\" />\n        <DynamicParameter param=\"GAMMA\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE Gamma = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=-0, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"c596bea8a783868a8965fc52f4560c36\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"-0\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD Gamma = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=inf, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"e8e24dfa7a530ddf73a4e02f01d10edb\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"inf\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE Pivot = nan dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=nan, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"571f7ccc9a66879adfabb0045a63bc58\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD Pivot = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=-0, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"c128852e73d2167f39109df371f677c2\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE Pivot = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=inf, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"ba0116337725a231937c4fdb9c0fee06\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = nan dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=nan, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cea608e1e646dab0a7e9253cac4b4cbf\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogExposureStep = -0 dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=-0, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"012d20d3c596bd06e2ef1042742ac18d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = inf dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=inf, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"349407934de4c28100a13a40cd8c7837\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = nan dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=nan>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9c9fff7ba63a6062929a6b458c9fb4bc\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogMidGray = -0 dynamic False",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=-0>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b06f85db88c42021d79a903c047b2cb1\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = inf dynamic False",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=inf>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"63295f7b0c7b44eb80180f4e91bee8a4\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = nan",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=nan, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"cbf1ee4228cd7c775efd061078feb398\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"nan\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = nan",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=nan, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"74c8f3478878157da86912ea60140f97\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = nan payload",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=nan, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"b2c3c649336eedacd9b0d50b5f7c5394\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"nan\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = nan payload",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=nan>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9c9fff7ba63a6062929a6b458c9fb4bc\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"nan\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = inf",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=inf, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"349407934de4c28100a13a40cd8c7837\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = inf",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=inf, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"4885378db351e79c45aeba87298712b7\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"inf\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = -inf",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=-inf, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"386c7ce281fe134ebadcaab917e873ed\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"-inf\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = -inf",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=-inf, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"a85a4454c7d09ffc267ff45c1db2a6ad\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"-inf\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Gamma = 0",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=0, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"07f5efbf39e0f3704f0fab34ed9fcfc1\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"0\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogMidGray = 0",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"fff0359764552a3ae3b7cdeafc25ec61\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogExposureStep = -0",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=-0, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"012d20d3c596bd06e2ef1042742ac18d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"-0\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Contrast = -0",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=-0, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"09159ee66fe98463b5cd6a9ad930b404\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"-0\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = min subnormal",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=4.94066e-324, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"36dae5efcefdef4148f0a5afb80885c5\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"4.94065645841247e-324\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = min subnormal",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=4.94066e-324, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"2927d325cbdb01358aa5a76b22a02338\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"4.94065645841247e-324\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = -min subnormal",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=-4.94066e-324, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"a25465615b552f365ff59c48546d0a10\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"-4.94065645841247e-324\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = -min subnormal",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=-4.94066e-324>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"44743de6b358299791d121cb184c4732\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"-4.94065645841247e-324\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = min normal",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=2.22507e-308, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b9e739a5e523e589d3bfdeaff1c08a49\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"2.2250738585072e-308\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = min normal",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=2.22507e-308, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"750b0e1db3a1efd413f137ca2bda09d2\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"2.2250738585072e-308\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = max",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=1.79769e+308, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"cda84ddcea40bae26ceff7e20b0dc7e3\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"1.79769313486232e+308\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = max",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=1.79769e+308, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"4d1d5962bca452ea50335da13ae8e259\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"1.79769313486232e+308\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Gamma = lowest",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=-1.79769e+308, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"86cf3bbb8c6050b6319f8a6e1ca7a47c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"-1.79769313486232e+308\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogMidGray = lowest",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=-1.79769e+308>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3e69b7c160f2960a5fa95440be541a21\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"-1.79769313486232e+308\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogExposureStep = 1e300",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=1e+300, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"41758d0a382028c71bce4a5259ee8a6d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"1e+300\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Contrast = 1e300",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1e+300, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"335236de24cf0723ccc0e92fa3eac429\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1e+300\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = -1e-300",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=-1e-300, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"424a8faf47f3d1ff111436a0f91baba8\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"-1e-300\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = -1e-300",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=-1e-300, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f181311082920015685f54ab5d9dd1a8\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"-1e-300\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = float max",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=3.40282e+38, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f19355f1abc1f6eb13f2a0bf00dc5d9e\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"3.40282346638529e+38\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = float max",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=3.40282e+38>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"0016312f7c7474ef437c525e610d6dcd\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"3.40282346638529e+38\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = float min normal",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=1.17549e-38, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d9200df542fca123cea9be7a9a8f9135\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"1.17549435082229e-38\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = float min normal",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1.17549e-38, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"d9e11a70920b8f359c39a5a1b37530a7\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1.17549435082229e-38\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = 0.1",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0.1, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"7f8d2fc30b10b44b4e05c815dc8792ec\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0.1\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = 0.1",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.1, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"138218fba6cbd074a0b8151d9098ce5f\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Gamma = 1/3",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=0.333333, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"8b123ee3e93d3353c26c49658bebc802\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"0.333333333333333\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogMidGray = 1/3",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.333333>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b874f1e05a38951eb07d72766bebec3b\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"0.333333333333333\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogExposureStep = -2/3",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=-0.666667, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"0f7ca4d8fcb212d4b1abb4728f9189a4\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"-0.666666666666667\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Contrast = -2/3",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=-0.666667, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"fb1d6b1d375dd41159d1ae6f2263986d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"-0.666666666666667\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = 1e-7",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=1e-07, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"db60367d7926fb517f1ad0378792f7bb\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"1e-07\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = 1e-7",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=1e-07, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"7e73021c290aa10e710fab72ab281377\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"1e-07\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = 1e-5",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1e-05, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"dc48176f367476298bf51c7dbcca37b7\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1e-05\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = 1e-5",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=1e-05>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"00b501b2e2598aaf0ccf4b3e1a4043aa\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"1e-05\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = 0.0001",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.0001, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"f2107db7b4ee8c642d07819840ef02fc\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"0.0001\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = 0.0001",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=0.0001, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"25c42ea31a52a24281857bd9e7779cf8\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"0.0001\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = 0.01",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0.01, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"5d2bd24258c58c4148cd60506e220244\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0.01\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = 0.01",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=0.01, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"ef6ffea120703fcbd9c22eb1335b02eb\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.01\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Gamma = below 0.01",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=0.01, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"288a4b403fec454c391ef74bc3b8cc30\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"0.01\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogMidGray = below 0.01",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.01>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3c17c529aeadd57a7039c5f04fa7127a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"0.01\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogExposureStep = 123456.5",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=123456, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ded3043d8a9df9945326d077bf8e5117\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"123456.5\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Contrast = 123456.5",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=123456, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"2bc5660cd02e06f385b2393cac38d963\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"123456.5\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = 999999.4",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=999999, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"67431c37a96b7bda62bb691a760930be\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"999999.4\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = 999999.4",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=999999, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"9ffc9c464d8a586f6391611dbf2856c4\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"999999.4\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = 999999.5",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1e+06, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"0ab130f9d1b52be568e525e3fe7b9d30\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"999999.5\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = 999999.5",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=1e+06>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"6355838d5e190ca3b4526352b4714779\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"999999.5\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = 1e6",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=1e+06, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3f9d16fbb4076d1bd3c4d908dd86af9c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"1000000\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = 1e6",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1e+06, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"819431ab74e207db6b0e52a5b61f9a19\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1000000\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = 1234567",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=1.23457e+06, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"7dda81897b106a0b4eced6bf6711b127\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"1234567\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = 1234567",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=1.23457e+06, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"c74da913f9f9b52cba7852068aefed33\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"1234567\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Gamma = 9999999.5",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1e+07, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"463caa2ee1eb281f9ab051f7a1d122ea\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"9999999.5\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogMidGray = 9999999.5",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=1e+07>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cc981de71ae50e3579f57b14a4ec44f5\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"9999999.5\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogExposureStep = 9999999999999998",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=1e+16, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5d606d72c3abac27117016d6ffcb4d29\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"1e+16\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Contrast = 9999999999999998",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1e+16, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f8dc47e62b7bbae3e786d5078d5ac54e\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1e+16\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = 1e15+0.3",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=1e+15, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"37cc639b40fa12ef55df6665c614c188\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"1e+15\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = 1e15+0.3",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=1e+15, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"213b1fc5e6348f6e6873bae2ebcb4146\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"1e+15\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = 1e16",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1e+16, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"d3cb82f6f6706f854e8fd27e5495d250\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1e+16\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = 1e16",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=1e+16>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"09332ee18c2ba5dcfdbd385361253a79\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"1e+16\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = 1.2345678901234568e17",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=1.23457e+17, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b96e8a61ae49a9e0d6889a6fe906de05\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"1.23456789012346e+17\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = 1.2345678901234568e17",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=1.23457e+17, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"aa49967bcc5e1ad4cf7e9817e761c288\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"1.23456789012346e+17\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = 1e21",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=1e+21, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"4f2122e7c51b247ecca45b08e292d3d1\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"1e+21\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = 1e21",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=1e+21, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"d3d8025a0bddaa40896a41b6e3ae602c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"1e+21\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Gamma = 0.12345678901234568",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=0.123457, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"2233afb10443a56892730a5698187eca\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"0.123456789012346\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogMidGray = 0.12345678901234568",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.123457>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b68f0116195d2f1d22f27d7b9ef57925\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"0.123456789012346\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogExposureStep = 1+ulp",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=1, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"96bbb7550537beb3359572c8d4e6d91c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Contrast = 1+ulp",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"9c7ea31e636df2a4c75aa3dc6d8a0a89\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = 1-ulp",
+  "repr": "<ExposureContrast direction=forward, style=linear, exposure=1, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"368864eb70f505ed30194ac543d3d33a\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <ECParams exposure=\"1\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = 1-ulp",
+  "repr": "<ExposureContrast direction=inverse, style=video, exposure=0, contrast=1, gamma=1, pivot=1, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"f91b89fd4a8aa3fc99d56e70acc55d76\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = 0.5",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=0.5, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"9fc4bdb62105828453d83e24c2c5b43b\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"0.5\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = 0.5",
+  "repr": "<ExposureContrast direction=inverse, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.5>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3caa832faa27c131b9a4d5cc2c61518c\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logMidGray=\"0.5\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = -1",
+  "repr": "<ExposureContrast direction=forward, style=log, exposure=0, contrast=1, gamma=1, pivot=0.18, logExposureStep=-1, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"04fb95c5604a8ed7b3399abe3894476e\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" logExposureStep=\"-1\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = -1",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=0, contrast=-1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"d6b030d24fb36286ec3c1d00afb55925\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"0\" contrast=\"-1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = 2",
+  "repr": "<ExposureContrast direction=inverse, style=linear, exposure=2, contrast=1, gamma=1, pivot=0.18, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"b1046fcc0ce7e95a5cae8bdd39d72f6d\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <ECParams exposure=\"2\" contrast=\"1\" gamma=\"1\" pivot=\"0.18\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = 2",
+  "repr": "<ExposureContrast direction=forward, style=video, exposure=0, contrast=1, gamma=1, pivot=2, logExposureStep=0.088, logMidGray=0.435>",
+  "validate": null,
+  "ctf": {
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"1.3\" id=\"52c8eaef2228cd8939a33ccc0bf555ab\">\n    <ExposureContrast inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <ECParams exposure=\"0\" contrast=\"1\" gamma=\"1\" pivot=\"2\" />\n    </ExposureContrast>\n</ProcessList>\n"
+  }
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_FORWARD Exposure = -nan",
+  "validate": null
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_INVERSE Pivot = -nan",
+  "validate": null
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Gamma = -nan payload",
+  "validate": null
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_INVERSE LogMidGray = -nan payload",
+  "validate": null
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LOGARITHMIC TRANSFORM_DIR_FORWARD LogExposureStep = snan",
+  "validate": null
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Contrast = snan",
+  "validate": null
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_LINEAR TRANSFORM_DIR_INVERSE Exposure = -snan",
+  "validate": null
+ },
+ {
+  "label": "EXPOSURE_CONTRAST_VIDEO TRANSFORM_DIR_FORWARD Pivot = -snan",
+  "validate": null
+ }
+]

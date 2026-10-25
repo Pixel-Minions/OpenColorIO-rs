@@ -519,7 +519,7 @@ macro_rules! iterator {
         );
 
         static $iter: Function = method_def!("__iter__", [$self], $qualified, |_, o, a, _| {
-            let _ = iter_rc!(o, a);
+            let _ = this_iter!(o, a);
             Ok(Some(a[0].clone().unbind()))
         });
 
@@ -592,4 +592,14 @@ pub(crate) fn bind_py_color_space_set(m: &Bound<'_, PyModule>) -> PyResult<()> {
         def(&spaces, f)?;
     }
     Ok(())
+}
+
+/// A returned set the library made (`Config.getColorSpaces(category)`: copies of the config's
+/// color spaces, each a node of its own).
+pub(crate) fn set_out(py: Python<'_>, set: &ocio::ColorSpaceSet) -> Out {
+    let nodes: Vec<ColorSpaceRc> = (0..set.num_color_spaces())
+        .filter_map(|i| set.color_space_by_index(i))
+        .map(|cs| Shared::new(ColorSpaceNode::from_library(cs)))
+        .collect();
+    out(py, COLOR_SPACE_SET, &Shared::new(nodes))
 }

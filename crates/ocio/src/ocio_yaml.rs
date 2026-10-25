@@ -2564,7 +2564,7 @@ pub(crate) fn load_view(node: &Node, v: &mut View) -> LoadResult<()> {
 /// `std::stoi(str)`: `strtol` in base 10 (white space skipped, a sign, digits), or `None`
 /// where `stoi` throws: no digits (`std::invalid_argument`) or a value outside `int`
 /// (`std::out_of_range`). Both wheels' C++ libraries agree.
-fn stoi(s: &[u8]) -> Option<i32> {
+pub(crate) fn stoi(s: &[u8]) -> Option<i32> {
     let s = c_str(s);
     let mut i = 0;
     // isspace in the C locale: space, \t, \n, \v, \f, \r.
@@ -3169,9 +3169,14 @@ pub(crate) fn read<'a>(
     config: &mut Config,
     filename: Option<&[u8]>,
 ) -> ocio_ops::exception::Result<()> {
-    let loaded = load(input)
-        .map_err(LoadError::from)
-        .and_then(|node| load_config(&node, config, filename));
+    // `catch (const std::exception & e)`: an application's exception (its logging function's,
+    // say) is read by its `what()` too.
+    let loaded = ocio_ops::foreign_exception::try_foreign(|| {
+        load(input)
+            .map_err(LoadError::from)
+            .and_then(|node| load_config(&node, config, filename))
+    })
+    .unwrap_or_else(|e| Err(LoadError::from(Exception::new(e.what()))));
     loaded.map_err(|e| {
         let mut os = b"Error: Loading the OCIO profile ".to_vec();
         if let Some(f) = names_a_file(filename) {
