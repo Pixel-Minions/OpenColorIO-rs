@@ -24,15 +24,21 @@
 
 use ocio_ops::exception::{Exception, ExceptionKind, Result};
 use ocio_ops::logging::log_warning;
-use ocio_ops::open_color_types::{ViewTransformDirection, ViewType};
+use ocio_ops::open_color_types::{
+    ColorSpaceVisibility, ReferenceSpaceType, SearchReferenceSpaceType, ViewTransformDirection,
+    ViewType,
+};
 use ocio_ops::platform::strcasecmp;
-use ocio_ops::utils::string_utils::{StringVec, contain, join, remove, split, trim, trim_vec};
+use ocio_ops::utils::string_utils::{
+    StringVec, contain, find, join, remove, replace, split, trim, trim_vec,
+};
 
 use crate::apphelpers::mergeconfigs::merge_configs_helpers::{
     ConfigMergingParameters, MergeStrategies,
 };
+use crate::color_space::ColorSpace;
 use crate::config::Config;
-use crate::config_utils;
+use crate::config_utils::{self, ColorSpaceFingerprints};
 use crate::custom_keys::CustomKeysContainer;
 use crate::file_rules::FileRules;
 use crate::tokens_manager::TokensManager;
@@ -121,14 +127,22 @@ impl<'o, 'a> SectionMerger<'o, 'a> {
     ///
     /// Port of `SectionMerger::notify` (SectionMerger.cpp:62-74 @ v2.5.2).
     pub(crate) fn notify(&self, s: &[u8], must_throw: bool) -> Result<()> {
-        if !must_throw {
-            // By logging, we can see all errors.
-            log_warning(s);
-            Ok(())
-        } else {
-            // By throwing, we only get the first error on conflict, but also stop the merge.
-            Err(Exception::new(s))
-        }
+        notify(s, must_throw)
+    }
+}
+
+/// [`SectionMerger::notify`], which reads nothing of the merger: for the functions that merge
+/// into the merged config itself.
+///
+/// Port of `SectionMerger::notify` (SectionMerger.cpp:62-74 @ v2.5.2).
+fn notify(s: &[u8], must_throw: bool) -> Result<()> {
+    if !must_throw {
+        // By logging, we can see all errors.
+        log_warning(s);
+        Ok(())
+    } else {
+        // By throwing, we only get the first error on conflict, but also stop the merge.
+        Err(Exception::new(s))
     }
 }
 
@@ -2306,6 +2320,1144 @@ impl<'o, 'a> Section<'o, 'a> for LooksMerger<'o, 'a> {
             if m.input_config.look(base_name).is_none() {
                 add_look_of(m.merged_config, m.base_config, base_name)?;
             }
+        }
+        Ok(())
+    }
+}
+
+/////////////////////////////////// ColorspacesMerger ////////////////////////////////////
+
+/// Whether `cfg` has the search path `path`, ignoring case.
+///
+/// Port of `hasSearchPath` (SectionMerger.cpp:2031-2041 @ v2.5.2).
+fn has_search_path(cfg: &Config, path: &[u8]) -> bool {
+    (0..cfg.num_search_paths()).any(|i| strcasecmp(cfg.search_path_with_index(i), path).is_eq())
+}
+
+/// `s` with each `in_sep` replaced by `out_sep`.
+///
+/// Port of `replaceSeparator` (SectionMerger.cpp:2072-2078 @ v2.5.2).
+fn replace_separator(s: &[u8], in_sep: u8, out_sep: u8) -> Vec<u8> {
+    replace(s, &[in_sep], &[out_sep])
+}
+
+/// The converter of a merger's state for a color space, or upstream's error for a null one.
+///
+/// The check of `ConfigUtils::updateReferenceColorspace` (src/OpenColorIO/ConfigUtils.cpp:
+/// 1008-1013 @ v2.5.2) for the null converter of a merger that didn't set it.
+fn converter(t: &Option<Transform>) -> Result<&Transform> {
+    t.as_ref().ok_or_else(|| {
+        Exception::new("Could not update reference space, converter transform was not initialized.")
+    })
+}
+
+/// Whether `strategy` takes the input's where both configs have one: `PreferInput` or
+/// `InputOnly`.
+fn prefers_input(strategy: MergeStrategies) -> bool {
+    strategy == MergeStrategies::PreferInput || strategy == MergeStrategies::InputOnly
+}
+
+/// Merges the color spaces (scene- and display-referred, inactive ones included), the
+/// environment, the search paths, the inactive color spaces and the family separator.
+///
+/// Port of `ColorspacesMerger` (SectionMerger.h:314-421, SectionMerger.cpp:2082-3072 @
+/// v2.5.2). The header declares 15 more functions (`iterateOverColorSpaces`,
+/// `detectSpecificIndirectConflicts`, the `nameConflict...` and `handleAddCsError...` ones,
+/// `resolveConflict`, `handleErrorCodes`, `handleAssumeCommonReferenceOption`,
+/// `handleMarkedToBeDeletedColorspaces`, `isColorspaceMarked`, `addFamilyPrefix`,
+/// `replaceFamilySeparatorInFamily`) and the struct `ColorspaceNameConflict`, which OCIO 2.5.2
+/// neither defines nor uses.
+pub(crate) struct ColorspacesMerger<'o, 'a>(SectionMerger<'o, 'a>);
+
+impl<'o, 'a> ColorspacesMerger<'o, 'a> {
+    /// The merger, with the converters of the reference spaces when the parameters adjust the
+    /// input's reference space (which fails as `initializeRefSpaceConverters` does).
+    ///
+    /// Port of `ColorspacesMerger::ColorspacesMerger` (SectionMerger.h:317-335 @ v2.5.2).
+    pub(crate) fn new(options: &'o mut MergeHandlerOptions<'a>) -> Result<Self> {
+        let mut m = SectionMerger::new(options)?;
+        m.strategy = section_strategy(m.params.colorspaces(), m.params);
+
+        if m.params.is_adjust_input_reference_space() {
+            m.initialize_ref_space_converters()?;
+        }
+        Ok(ColorspacesMerger(m))
+    }
+
+    /// The search paths: the override where it isn't empty; else, with the color spaces'
+    /// strategy `PreferInput`, the input's then those of the base the input doesn't have
+    /// (ignoring case); else the base's (the merged config's) then those of the input the base
+    /// doesn't have. The input-first option isn't read.
+    ///
+    /// Port of `ColorspacesMerger::processSearchPaths` (SectionMerger.cpp:2082-2129 @ v2.5.2).
+    fn process_search_paths(&mut self) {
+        let m = &mut self.0;
+        let search_paths = m.params.search_path();
+        if !search_paths.is_empty() {
+            // Use the override.
+            m.merged_config.set_search_path(&search_paths);
+            return;
+        }
+
+        // Ignoring isInputFirst for the ordering of search paths because it seems that it
+        // really should be driven by the strategy. E.g., if both base and input have a "luts"
+        // directory, want to be looking in the right one.
+
+        // TODO: More work is needed here.  Absolute paths should be set up for input since
+        // the working dir is from the base config.
+
+        let (base, input) = (m.base_config, m.input_config);
+        if m.params.colorspaces() == MergeStrategies::PreferInput {
+            m.merged_config.clear_search_paths();
+            // Add all from input config.
+            for i in 0..input.num_search_paths() {
+                m.merged_config
+                    .add_search_path(input.search_path_with_index(i));
+            }
+
+            // Only add the new ones from the base config.
+            for i in 0..base.num_search_paths() {
+                let path = base.search_path_with_index(i);
+                if !has_search_path(input, &path) {
+                    m.merged_config.add_search_path(&path);
+                }
+            }
+        } else {
+            // NB: The m_mergedConfig is initialized with the contents of the m_baseConfig.
+
+            for i in 0..input.num_search_paths() {
+                let path = input.search_path_with_index(i);
+                if !has_search_path(base, &path) {
+                    m.merged_config.add_search_path(&path);
+                }
+            }
+        }
+    }
+
+    /// Prefixes `family` with the family prefix of its config (`from_base` or the input),
+    /// separated as the merged config's families (the prefixes are written with `/`), and
+    /// changes the separator of a family of the config that isn't preferred to the merged
+    /// config's. Nothing changes unless the color spaces' strategy is `PreferInput` or
+    /// `PreferBase`. A family without a prefix gets the prefix too.
+    ///
+    /// Port of `ColorspacesMerger::updateFamily` (SectionMerger.cpp:2131-2174 @ v2.5.2).
+    fn update_family(&self, family: &mut Vec<u8>, from_base: bool) {
+        let m = &self.0;
+        // Note that if a prefix is present, it is always added, even if the CS did not have a
+        // family.
+
+        let merged_sep = m.merged_config.family_separator();
+        let mut updated_prefix = Vec::new();
+        let strategy = m.params.colorspaces();
+        if strategy == MergeStrategies::PreferInput {
+            if from_base {
+                // If the color space is from the base config, need to update its family
+                // separator.
+                if !family.is_empty() {
+                    *family =
+                        replace_separator(family, m.base_config.family_separator(), merged_sep);
+                }
+                // Note: The family prefix argument must always use the default slash separator.
+                // TODO: Should do this just once in the initializer.
+                updated_prefix =
+                    replace_separator(&m.params.base_family_prefix(), b'/', merged_sep);
+            } else {
+                updated_prefix =
+                    replace_separator(&m.params.input_family_prefix(), b'/', merged_sep);
+            }
+        } else if strategy == MergeStrategies::PreferBase {
+            if from_base {
+                // TODO: Should do this just once in the initializer.
+                updated_prefix =
+                    replace_separator(&m.params.base_family_prefix(), b'/', merged_sep);
+            } else {
+                // If the color space is from the input config, need to update its family
+                // separator.
+                if !family.is_empty() {
+                    *family =
+                        replace_separator(family, m.input_config.family_separator(), merged_sep);
+                }
+                updated_prefix =
+                    replace_separator(&m.params.input_family_prefix(), b'/', merged_sep);
+            }
+        }
+        // Append the prefix to the family.
+        // Note that the prefix should end with a separator, if desired.  Not adding one here.
+        updated_prefix.extend_from_slice(family);
+        *family = updated_prefix;
+    }
+
+    /// Adds `alias_name` to `dupe_cs`, the base color space `input_cs` duplicates, unless
+    /// `dupe_cs` has it as its name or an alias; a name of `merge_config` (a color space, an
+    /// alias or a role) is a conflict and isn't added.
+    ///
+    /// Port of `ColorspacesMerger::attemptToAddAlias` (SectionMerger.cpp:2176-2218 @ v2.5.2).
+    fn attempt_to_add_alias(
+        &self,
+        merge_config: &Config,
+        dupe_cs: &mut ColorSpace,
+        input_cs: &ColorSpace,
+        alias_name: &[u8],
+    ) -> Result<()> {
+        // It is assumed that the base and input configs start out in a legal state,
+        // however, when adding anything from one config to another, must always
+        // check that it doesn't conflict with anything.
+
+        // It is assumed that the strategy is prefer_base when this function is called.
+
+        // It's OK if aliasName is used in the duplicate color space itself.
+        if strcasecmp(dupe_cs.name(), alias_name).is_eq() || dupe_cs.has_alias(alias_name) {
+            // It's already present, no need to add anything.
+            return Ok(());
+        }
+
+        // Check if aliasName is already a name that is used in the config.
+
+        if let Some(conflicting_cs) = merge_config.color_space(alias_name) {
+            // The conflict could be the name of a color space, an alias, or a role.
+            // But it doesn't matter, the strategy is prefer base so don't want to
+            // remove this conflict from the base config to accomodate adding an
+            // alias from the input config.
+            let os = [
+                b"Input color space '".as_slice(),
+                input_cs.name(),
+                b"'",
+                b" is a duplicate of base color space '",
+                dupe_cs.name(),
+                b"' but was unable to add alias '",
+                alias_name,
+                b"' since it conflicts with base color space '",
+                conflicting_cs.name(),
+                b"'.",
+            ]
+            .concat();
+            self.0.notify(&os, self.0.params.is_error_on_conflict())?;
+
+            return Ok(());
+        }
+
+        // No conflicts encountered, it's ok to update the alias and add it to the config.
+
+        dupe_cs.add_alias(alias_name);
+        Ok(())
+    }
+
+    /// With the option to avoid duplicates (and unless `input_cs` has the category
+    /// `allow-duplicate`), looks for a color space of the base config equivalent to `input_cs`
+    /// (`ConfigUtils::findEquivalentColorspace`). With the color spaces' strategy
+    /// `PreferInput`, `input_cs` takes its name, aliases and categories, and it is removed from
+    /// `e_base`; with `PreferBase`, it takes the name, aliases (where they don't conflict) and
+    /// categories of `input_cs`, which isn't merged. Returns whether `input_cs` is to be
+    /// merged.
+    ///
+    /// Port of `ColorspacesMerger::handleAvoidDuplicatesOption` (SectionMerger.cpp:2220-2348 @
+    /// v2.5.2).
+    fn handle_avoid_duplicates_option(
+        &self,
+        fingerprints: &ColorSpaceFingerprints,
+        e_base: &mut Config,
+        input_config: &Config,
+        input_cs: &mut ColorSpace,
+    ) -> Result<bool> {
+        let m = &self.0;
+        let mut not_duplicate = true;
+
+        if !m.params.is_avoid_duplicates() {
+            return Ok(not_duplicate);
+        }
+        // If a color space has the allow-dupes category, don't check if it's a duplicate.
+        if input_cs.has_category("allow-duplicate") {
+            return Ok(not_duplicate);
+        }
+
+        // Note: The search for duplicate color spaces only searches for color spaces with
+        // the same reference space type (i.e., scene or display), so it won't remove spaces
+        // that are otherwise equivalent (e.g., an sRGB transform).
+        //
+        // However, some configs may intentionally have duplicate color spaces (e.g., aliases
+        // from v1 configs). Since this search is only done using spaces from the input config,
+        // those duplicates in the base won't be removed. But if the input config contains
+        // duplicates, those will be condensed into one space containing aliases for all of
+        // names of the duplicates.
+        //
+        // Note: By design, inactive color spaces are included in the search for equivalents
+        // (e.g., consider the CIE-XYZ-D65 space, which is typically inactive). However,
+        // when the inactive list is regenerated to avoid listing removed color spaces,
+        // some color spaces that were inactive may become active.
+        let duplicate_in_base =
+            config_utils::find_equivalent_colorspace(fingerprints, input_config, input_cs)?
+                .to_vec();
+
+        let strategy = m.params.colorspaces();
+        if !duplicate_in_base.is_empty() {
+            if strategy == MergeStrategies::PreferInput {
+                // Add the name and aliases from the duplicate colorspace to the input
+                // colorspace.
+                //
+                // Note that the aliases added here should not have conflicts with the base
+                // config (since that's where they originated), but may cause conflicts with
+                // other color spaces in the input config, but these will be handled as the
+                // spaces get added to the merged config by the calling function.
+                //
+                // If the base config has more than one color space equivalent to inputCS, only
+                // the first is replaced.
+
+                if let Some(dupe_cs) = e_base.color_space(&duplicate_in_base) {
+                    // Note that addAlias will check the argument and won't add it if it matches
+                    // the name of the color space or one of the existing aliases.
+                    input_cs.add_alias(dupe_cs.name());
+
+                    for i in 0..dupe_cs.num_aliases() {
+                        input_cs.add_alias(dupe_cs.alias(i));
+                    }
+
+                    // TODO: This should be controlled by a merge option.
+                    for i in 0..dupe_cs.num_categories() {
+                        input_cs.add_category(dupe_cs.category(i).unwrap_or_default());
+                    }
+
+                    // Trying to merge inputCS would now give misleading notifications about
+                    // conflicts from the newly added aliases, so remove the duplicate.
+                    // If there is more than one input CS that duplicates a given base CS,
+                    // duplicateInBase will have been removed and is now an alias. Since
+                    // removeCS does not work on aliases, get the name of the color space with
+                    // that alias.
+                    let duplicate_current_name = e_base.canonical_name(&duplicate_in_base).to_vec();
+                    e_base.remove_color_space(&duplicate_current_name);
+
+                    let os = [
+                        b"Equivalent input color space '".as_slice(),
+                        input_cs.name(),
+                        b"' replaces '",
+                        &duplicate_current_name,
+                        b"' in the base config, preserving aliases.",
+                    ]
+                    .concat();
+                    m.notify(&os, m.params.is_error_on_conflict())?;
+
+                    // Still want the caller to proceed merging inputCS into the merge config.
+                    not_duplicate = true;
+                }
+            } else if strategy == MergeStrategies::PreferBase {
+                // Don't add the input color space, but add it's name and alias to the
+                // duplicate. Need to be more careful of conflicts, since the modified color
+                // space is receiving aliases from the input config and yet is not going through
+                // the mergeColorSpace checking below.
+                //
+                // If the input config has more than one CS that is equivalent to a base CS,
+                // they are all condensed into that first equivalent base CS.
+
+                if let Some(cs) = e_base.color_space(&duplicate_in_base) {
+                    let mut e_cs = cs.clone();
+
+                    self.attempt_to_add_alias(e_base, &mut e_cs, input_cs, input_cs.name())?;
+
+                    for i in 0..input_cs.num_aliases() {
+                        self.attempt_to_add_alias(e_base, &mut e_cs, input_cs, input_cs.alias(i))?;
+                    }
+
+                    for i in 0..input_cs.num_categories() {
+                        e_cs.add_category(input_cs.category(i).unwrap_or_default());
+                    }
+
+                    // Replace the color space in the merge config. (This preserves its
+                    // order in the color space list.)
+                    e_base.add_color_space(&e_cs)?;
+
+                    let os = [
+                        b"Equivalent base color space '".as_slice(),
+                        &duplicate_in_base,
+                        b"' overrides '",
+                        input_cs.name(),
+                        b"' in the input config, preserving aliases.",
+                    ]
+                    .concat();
+                    m.notify(&os, m.params.is_error_on_conflict())?;
+
+                    // The base color space is edited here, don't want to add inputCS.
+                    not_duplicate = false;
+                }
+            }
+        }
+        Ok(not_duplicate)
+    }
+
+    /// Whether the input's color space `input_cs` may be merged into `merge_config`: always
+    /// when no name of `merge_config` is its name; never when a role is; else by the color
+    /// spaces' strategy (`PreferInput` and `InputOnly` replace the color space or take the
+    /// alias of that name), each case with a message.
+    ///
+    /// Port of `ColorspacesMerger::colorSpaceMayBeMerged` (SectionMerger.cpp:2350-2448 @
+    /// v2.5.2), whose null color space can't happen with a reference.
+    fn color_space_may_be_merged(
+        &self,
+        merge_config: &Config,
+        input_cs: &ColorSpace,
+    ) -> Result<bool> {
+        let m = &self.0;
+        // This should only be called on color spaces from the input config.
+
+        // NB: This routine assumes all NamedTransforms have been removed from the mergeConfig.
+        // Not trying to handle name conflicts with NamedTransforms, color spaces have
+        // precedence.
+
+        let name = input_cs.name();
+
+        // This will compare the name against roles, color space names, and aliases.
+        let Some(existing_cs) = merge_config.color_space(name) else {
+            // No name conflicts, go ahead and add it.
+            return Ok(true);
+        };
+
+        // OK, something has this name, figure out what it is.
+
+        // Does it have the same name as a role?
+        if merge_config.has_role(name) {
+            // Don't merge it if it would override a role.
+
+            let os = [
+                b"Color space '".as_slice(),
+                name,
+                b"' was not merged as it's identical to a role name.",
+            ]
+            .concat();
+            m.notify(&os, m.params.is_error_on_conflict())?;
+
+            return Ok(false);
+        }
+
+        let strategy = m.params.colorspaces();
+
+        // Does it have the same name as another color space?
+        if strcasecmp(existing_cs.name(), name).is_eq() {
+            // The name matches a color space name in the mergeConfig.
+            // Whether to allow the merge is based on the merge strategy.
+
+            if prefers_input(strategy) {
+                // Allow the merger.
+
+                let os = [
+                    b"Color space '".as_slice(),
+                    name,
+                    b"' will replace a color space in the base config.",
+                ]
+                .concat();
+                m.notify(&os, m.params.is_error_on_conflict())?;
+
+                Ok(true)
+            } else {
+                // Don't merge since it would replace a color space from the base config.
+
+                let os = [
+                    b"Color space '".as_slice(),
+                    name,
+                    b"' was not merged as it's already present in the base config.",
+                ]
+                .concat();
+                m.notify(&os, m.params.is_error_on_conflict())?;
+
+                Ok(false)
+            }
+        } else {
+            // The name conflicts with an alias of another color space.
+            // Whether to allow the merge is based on the merge strategy.
+
+            if prefers_input(strategy) {
+                // Allow the merger.
+
+                let os = [
+                    b"The name of merged color space '".as_slice(),
+                    name,
+                    b"'",
+                    b" has a conflict with an alias in color space '",
+                    existing_cs.name(),
+                    b"'.",
+                ]
+                .concat();
+                m.notify(&os, m.params.is_error_on_conflict())?;
+
+                Ok(true)
+            } else {
+                // Don't merge it if it would replace an alias from the base config.
+
+                let os = [
+                    b"Color space '".as_slice(),
+                    name,
+                    b"' was not merged as it conflicts with an alias ",
+                    b"in color space '",
+                    existing_cs.name(),
+                    b"'.",
+                ]
+                .concat();
+                m.notify(&os, m.params.is_error_on_conflict())?;
+
+                Ok(false)
+            }
+        }
+    }
+
+    /// Adds `e_input_cs` to `merge_config`, replacing the color space of its name, taking its
+    /// name from the alias of another color space, and resolving the conflicts of its aliases
+    /// with color spaces, aliases and roles by the color spaces' strategy (each with a
+    /// message); records its name in `added_input_color_spaces`.
+    ///
+    /// Port of `ColorspacesMerger::mergeColorSpace` (SectionMerger.cpp:2450-2618 @ v2.5.2).
+    fn merge_color_space(
+        &self,
+        merge_config: &mut Config,
+        e_input_cs: &mut ColorSpace,
+        added_input_color_spaces: &mut Vec<Vec<u8>>,
+    ) -> Result<()> {
+        let m = &self.0;
+        // NB: This routine assumes all NamedTransforms have been removed from the mergeConfig.
+        // Not trying to handle name conflicts with NamedTransforms, color spaces have
+        // precedence.
+
+        // Check if mergeConfig already has a color space with the same name as the input CS.
+
+        let name = e_input_cs.name().to_vec();
+
+        if let Some(original_cs) = merge_config.color_space(&name) {
+            // Note that the color space which gets discarded and the color space being added
+            // below may not have the same reference space type (i.e., scene vs. display). This
+            // is currently allowed but log a warning.
+            if e_input_cs.reference_space_type() != original_cs.reference_space_type() {
+                let os = [
+                    b"Merged color space '".as_slice(),
+                    &name,
+                    b"' has a different reference ",
+                    b"space type than the color space it's replacing.",
+                ]
+                .concat();
+                m.notify(&os, false)?;
+            }
+
+            // If there is a color space with this name in the existing config,
+            // remove it (and any aliases it may contain). This is the case when
+            // the strategy calls for replacing an existing color space.
+            //
+            // If the eInputCS name matched an alias rather than a color space name,
+            // this does nothing (and the alias is handled below).
+            //
+            // The notification is handled in colorSpaceMayBeMerged to avoid having to determine
+            // again whether the conflict is with the name or alias of originalCS.
+
+            merge_config.remove_color_space(&name);
+        }
+
+        // Handle conflicts of the eInputCS name with aliases of other color spaces.
+
+        if let Some(existing_cs) = merge_config.color_space(&name) {
+            // Get the name of the color space that contains the alias.
+
+            // Verify that the name is actually an alias rather than some other conflict.
+            // (Should never happen.)
+            if !existing_cs.has_alias(&name) {
+                return Err(Exception::new(
+                    [b"Problem merging color space: '".as_slice(), &name, b"'."].concat(),
+                ));
+            }
+
+            // Remove the alias from that existing color space.
+            //    Note that this conflict was detected and allowed in colorSpaceMayBeMerged
+            //    based on the merge strategy, so the decision has already been made to remove
+            //    this alias from a color space in the base config.
+
+            let mut e_existing_cs = existing_cs.clone();
+            e_existing_cs.remove_alias(&name);
+            // Edit the colorspace in the copy of the merged config.
+            merge_config.add_color_space(&e_existing_cs)?;
+
+            // The notification is handled in colorSpaceMayBeMerged to avoid having to determine
+            // again whether the conflict is with the name or alias of originalCS.
+        }
+
+        let strategy = m.params.colorspaces();
+
+        //
+        // Handle conflicts of the eInputCS aliases with other color spaces or aliases.
+        //
+
+        // First initialize the list of names, since eInputCS is being edited within the loop.
+        let alias_names: Vec<Vec<u8>> = (0..e_input_cs.num_aliases())
+            .map(|i| e_input_cs.alias(i).to_vec())
+            .collect();
+
+        for alias_name in &alias_names {
+            let Some(conflicting_cs) = merge_config.color_space(alias_name) else {
+                continue;
+            };
+            let conflicting_cs = conflicting_cs.clone();
+
+            let os = if strcasecmp(conflicting_cs.name(), alias_name).is_eq() {
+                // The alias conflicts with the name of an existing color space.
+
+                let os = [
+                    b"Merged color space '".as_slice(),
+                    &name,
+                    b"'",
+                    b" has an alias '",
+                    alias_name,
+                    b"' that conflicts with color space '",
+                    conflicting_cs.name(),
+                    b"'.",
+                ]
+                .concat();
+
+                if prefers_input(strategy) {
+                    // Remove that base color space.
+                    merge_config.remove_color_space(conflicting_cs.name());
+                } else {
+                    // Remove the alias from the input color space.
+                    e_input_cs.remove_alias(alias_name);
+                }
+                os
+            } else if conflicting_cs.has_alias(alias_name) {
+                // The alias conflicts with an alias of the conflicting color space.
+
+                let os = [
+                    b"Merged color space '".as_slice(),
+                    &name,
+                    b"'",
+                    b" has a conflict with alias '",
+                    alias_name,
+                    b"' in color space '",
+                    conflicting_cs.name(),
+                    b"'.",
+                ]
+                .concat();
+
+                if prefers_input(strategy) {
+                    // Remove the alias from that base color space.
+                    let mut e_conflicting_cs = conflicting_cs.clone();
+                    e_conflicting_cs.remove_alias(alias_name);
+
+                    // Replace the colorspace in the copy of the merged config.
+                    merge_config.add_color_space(&e_conflicting_cs)?;
+                } else {
+                    // Remove the alias from the input color space.
+                    e_input_cs.remove_alias(alias_name);
+                }
+                os
+            } else if merge_config.has_role(alias_name) {
+                let os = [
+                    b"Merged color space '".as_slice(),
+                    &name,
+                    b"'",
+                    b" has an alias '",
+                    alias_name,
+                    b"' that conflicts with a role.",
+                ]
+                .concat();
+
+                // Remove the alias from the input color space.
+                e_input_cs.remove_alias(alias_name);
+                os
+            } else {
+                // (Should never happen.)
+                return Err(Exception::new(
+                    [
+                        b"Problem merging color space: '".as_slice(),
+                        &name,
+                        b"' due to its aliases.",
+                    ]
+                    .concat(),
+                ));
+            };
+
+            m.notify(&os, m.params.is_error_on_conflict())?;
+        }
+
+        // Add the color space. This will throw if a problem is found.
+        // (But all name conflicts should have been handled already.)
+        merge_config.add_color_space(e_input_cs)?;
+
+        // Keep a record that this input color space was added to allow reordering later.
+        added_input_color_spaces.push(name);
+
+        // TODO: Is it ever possible that a CS added to the list would be removed as another is
+        // merged?
+
+        // TODO: When color spaces or aliases are removed above, it's possible it could break
+        // some other part of the config that referenced them. This would include elements such
+        // as: environment, views, inactive_colorspaces, ColorSpaceTransforms, or
+        // DisplayViewTransforms.
+        Ok(())
+    }
+
+    /// The color spaces of both configs, the input's (adjusted to the base's reference spaces
+    /// with the option, without duplicates of the base's with the option) merged into a copy
+    /// of the merged config, then written in order (the input's first with the input-first
+    /// option) with their family prefixes. The named transforms are removed.
+    ///
+    /// Port of `ColorspacesMerger::addColorSpaces` (SectionMerger.cpp:2620-2758 @ v2.5.2).
+    fn add_color_spaces(&mut self) -> Result<()> {
+        // Delete all the NamedTransforms, color spaces take precedence, so don't want them
+        // interfering with merges by causing name conflicts.
+
+        // NB: This is only intended to be called for the prefer_input and prefer_base
+        // strategies.
+
+        self.0.merged_config.clear_named_transforms();
+
+        // Make a temp copy to merge the input color spaces into (will reorder them later).
+        let mut merge_config = self.0.merged_config.clone();
+
+        merge_config.clear_named_transforms();
+
+        // Loop over all active and inactive color spaces of all reference types in the input
+        // config. Merge them into the temp config (which already contains the base color
+        // spaces).
+        let mut added_input_color_spaces: Vec<Vec<u8>> = Vec::new();
+
+        let mut fingerprints = ColorSpaceFingerprints::default();
+        if self.0.params.is_avoid_duplicates() {
+            config_utils::initialize_color_space_fingerprints(
+                &mut fingerprints,
+                self.0.base_config,
+            )?;
+        }
+
+        let input = self.0.input_config;
+        for i in
+            0..input.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All)
+        {
+            let name = input.color_space_name_by_index_with(
+                SearchReferenceSpaceType::All,
+                ColorSpaceVisibility::All,
+                i,
+            );
+            let Some(cs) = input.color_space(name) else {
+                continue;
+            };
+
+            let mut e_cs = cs.clone();
+
+            if self.0.params.is_adjust_input_reference_space() {
+                if e_cs.reference_space_type() == ReferenceSpaceType::Display {
+                    let t = converter(&self.0.input_to_base_gt_display)?;
+                    config_utils::update_reference_colorspace(&mut e_cs, t)?;
+                } else {
+                    let t = converter(&self.0.input_to_base_gt_scene)?;
+                    config_utils::update_reference_colorspace(&mut e_cs, t)?;
+                }
+            }
+
+            // Doing this against the mergedConfig rather than the base config so that the most
+            // recent state of any aliases that get added or color spaces that are removed are
+            // considered by the duplicate consolidation process.
+            let not_duplicate = self.handle_avoid_duplicates_option(
+                &fingerprints,
+                &mut merge_config,
+                input,
+                &mut e_cs,
+            )?;
+
+            if not_duplicate && self.color_space_may_be_merged(&merge_config, &e_cs)? {
+                // NB: This may make changes to existing color spaces in mergeConfig
+                // to resolve name conflicts.
+                self.merge_color_space(
+                    &mut merge_config,
+                    &mut e_cs,
+                    &mut added_input_color_spaces,
+                )?;
+            }
+        }
+
+        self.0.merged_config.clear_color_spaces();
+
+        // Add the color spaces to the real merged config.
+
+        if self.0.params.is_input_first() {
+            // Add color spaces from the input config.
+            for name in &added_input_color_spaces {
+                if let Some(input_cs) = merge_config.color_space(name) {
+                    let mut e_input_cs = input_cs.clone();
+
+                    // Add family prefix.
+                    let from_base = false;
+                    let mut family = e_input_cs.family().to_vec();
+                    self.update_family(&mut family, from_base);
+                    e_input_cs.set_family(&family);
+
+                    self.0.merged_config.add_color_space(&e_input_cs)?;
+
+                    merge_config.remove_color_space(name);
+                }
+            }
+
+            // Add color spaces from the base config.
+            for i in 0..merge_config
+                .num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All)
+            {
+                // Note that during the merge process, some of the color spaces from the base
+                // config may be replaced if their aliases are edited. This should not change
+                // their order in the config, but may want to account for this, if that ever
+                // changes and they get moved to the end.
+                let name = merge_config.color_space_name_by_index_with(
+                    SearchReferenceSpaceType::All,
+                    ColorSpaceVisibility::All,
+                    i,
+                );
+                if let Some(base_cs) = merge_config.color_space(name) {
+                    let mut e_base_cs = base_cs.clone();
+
+                    // Add family prefix.
+                    let from_base = true;
+                    let mut family = e_base_cs.family().to_vec();
+                    self.update_family(&mut family, from_base);
+                    e_base_cs.set_family(&family);
+
+                    self.0.merged_config.add_color_space(&e_base_cs)?;
+                }
+            }
+        } else {
+            // The color spaces should already be in the correct order.
+            // Copy them into the real merged config and add family prefix.
+            for i in 0..merge_config
+                .num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All)
+            {
+                let name = merge_config.color_space_name_by_index_with(
+                    SearchReferenceSpaceType::All,
+                    ColorSpaceVisibility::All,
+                    i,
+                );
+                if let Some(cs) = merge_config.color_space(name) {
+                    let mut e_cs = cs.clone();
+
+                    // Add family prefix.
+                    let from_base = !added_input_color_spaces.iter().any(|n| n == name);
+                    let mut family = e_cs.family().to_vec();
+                    self.update_family(&mut family, from_base);
+                    e_cs.set_family(&family);
+
+                    self.0.merged_config.add_color_space(&e_cs)?;
+                }
+            }
+        }
+
+        // (Not cleaning up the inactive list here, it would remove named transforms, wait until
+        // after NT.)
+
+        // TODO: What if the environment contains a color space that was removed?
+        Ok(())
+    }
+
+    /// The environment variables of the overrides, replacing the merged config's, where there
+    /// are any.
+    fn set_environment_overrides(&mut self) {
+        let m = &mut self.0;
+        // Take environment variables from overrides.
+        m.merged_config.clear_environment_vars();
+        for i in 0..m.params.num_environment_vars() {
+            m.merged_config.add_environment_var(
+                m.params.environment_var(i),
+                Some(&m.params.environment_var_value(i)),
+            );
+        }
+    }
+
+    /// The inactive color spaces of the override where it isn't empty, else those of both
+    /// configs (the base's from the merged config unless the input comes first), either first,
+    /// trimmed, without duplicates (ignoring case).
+    ///
+    /// The inactive color spaces part of `ColorspacesMerger::handlePreferInput` and
+    /// `handlePreferBase` (SectionMerger.cpp:2791-2819, 2859-2887 @ v2.5.2).
+    fn merge_inactive_color_spaces(&mut self) {
+        let m = &mut self.0;
+        let inactive_cs = m.params.inactive_color_spaces();
+        if !inactive_cs.is_empty() {
+            // Take inactive colorspaces from overrides.
+            m.merged_config.set_inactive_color_spaces(&inactive_cs);
+        } else {
+            // Add inactive colorspaces from input config to base config.
+
+            let mut merged_inactive_cs = StringVec::new();
+            if m.params.is_input_first() {
+                let mut base_inactive_cs = StringVec::new();
+                split_active_list(m.base_config.inactive_color_spaces(), &mut base_inactive_cs);
+                split_active_list(
+                    m.input_config.inactive_color_spaces(),
+                    &mut merged_inactive_cs,
+                );
+
+                merge_strings_without_duplicates(&base_inactive_cs, &mut merged_inactive_cs);
+            } else {
+                let mut input_inactive_cs = StringVec::new();
+                split_active_list(
+                    m.input_config.inactive_color_spaces(),
+                    &mut input_inactive_cs,
+                );
+                split_active_list(
+                    m.merged_config.inactive_color_spaces(),
+                    &mut merged_inactive_cs,
+                );
+
+                merge_strings_without_duplicates(&input_inactive_cs, &mut merged_inactive_cs);
+            }
+            m.merged_config
+                .set_inactive_color_spaces(join(&merged_inactive_cs, b','));
+        }
+    }
+}
+
+impl<'o, 'a> Section<'o, 'a> for ColorspacesMerger<'o, 'a> {
+    fn state(&self) -> &SectionMerger<'o, 'a> {
+        &self.0
+    }
+
+    /// Port of `ColorspacesMerger::getName` (SectionMerger.h:348 @ v2.5.2).
+    fn name(&self) -> &'static str {
+        "Color Spaces"
+    }
+
+    /// The environment of both configs, the input's values where both have a variable (or the
+    /// overrides'); the search paths; the inactive color spaces; the input's family separator;
+    /// the color spaces of both, the input's where both have one.
+    ///
+    /// Port of `ColorspacesMerger::handlePreferInput` (SectionMerger.cpp:2761-2827 @ v2.5.2).
+    fn handle_prefer_input(&mut self) -> Result<()> {
+        // Set environment.
+        //     Since the environment variables are stored inside a std::map, the key are ordered
+        //     alphabetically. Therefore, there is no point to look at the option "InputFirst".
+        if self.0.params.num_environment_vars() > 0 {
+            self.set_environment_overrides();
+        } else {
+            let m = &mut self.0;
+            // Add environment variables from input config to base config.
+            for i in 0..m.input_config.num_environment_vars() {
+                let name = m.input_config.environment_var_name_by_index(i);
+                // Overwrite any existing env. variable with the same name.
+                m.merged_config
+                    .add_environment_var(name, Some(m.input_config.environment_var_default(name)));
+            }
+        }
+
+        // Set search_path.
+        self.process_search_paths();
+
+        // Set inactive_colorspaces.
+        self.merge_inactive_color_spaces();
+
+        // Set family_separator.
+        let separator = self.0.input_config.family_separator();
+        self.0.merged_config.set_family_separator(separator)?;
+
+        // Merge the color spaces.
+        self.add_color_spaces()
+    }
+
+    /// The environment of both configs (or the overrides'), the base's values where both have a
+    /// variable, one whose value is empty counting as missing (docs/improvements.md, I-435); the
+    /// search paths; the inactive color spaces; the base's family separator; the color spaces of
+    /// both, the base's where both have one.
+    ///
+    /// Port of `ColorspacesMerger::handlePreferBase` (SectionMerger.cpp:2829-2899 @ v2.5.2).
+    fn handle_prefer_base(&mut self) -> Result<()> {
+        // Set environment.
+        //     Since the environment variables are stored inside a std::map, the key are ordered
+        //     alphabetically. Therefore, there is no point to look at the option "InputFirst".
+        if self.0.params.num_environment_vars() > 0 {
+            self.set_environment_overrides();
+        } else {
+            let m = &mut self.0;
+            // Take environment variables from config.
+            for i in 0..m.input_config.num_environment_vars() {
+                let name = m.input_config.environment_var_name_by_index(i);
+                // If the var's default value is empty, it doesn't exist, so nothing to
+                // overwrite.
+                let var_does_not_exist = m.merged_config.environment_var_default(name).is_empty();
+                if var_does_not_exist {
+                    m.merged_config.add_environment_var(
+                        name,
+                        Some(m.input_config.environment_var_default(name)),
+                    );
+                }
+            }
+        }
+
+        // Set search_path.
+        self.process_search_paths();
+
+        // Set inactive_colorspaces.
+        self.merge_inactive_color_spaces();
+
+        // Set family_separator.
+        let separator = self.0.base_config.family_separator();
+        self.0.merged_config.set_family_separator(separator)?;
+
+        // Merge the color spaces.
+        self.add_color_spaces()
+    }
+
+    /// The input's environment (or the overrides'), search paths (or the override), inactive
+    /// color spaces (or the override), family separator and color spaces; no named transforms.
+    ///
+    /// Port of `ColorspacesMerger::handleInputOnly` (SectionMerger.cpp:2901-2973 @ v2.5.2).
+    fn handle_input_only(&mut self) -> Result<()> {
+        // Set environment.
+        if self.0.params.num_environment_vars() > 0 {
+            self.set_environment_overrides();
+        } else {
+            let m = &mut self.0;
+            // Take environment variables from config.
+            m.merged_config.clear_environment_vars();
+            for i in 0..m.input_config.num_environment_vars() {
+                let name = m.input_config.environment_var_name_by_index(i);
+                m.merged_config
+                    .add_environment_var(name, Some(m.input_config.environment_var_default(name)));
+            }
+        }
+
+        let m = &mut self.0;
+        let input = m.input_config;
+
+        // Set search_path.
+        let search_paths = m.params.search_path();
+        if !search_paths.is_empty() {
+            // Use the override.
+            m.merged_config.set_search_path(&search_paths);
+        } else {
+            m.merged_config.set_search_path(input.search_path());
+        }
+
+        // Set inactive_colorspaces.
+        let inactive_cs = m.params.inactive_color_spaces();
+        if !inactive_cs.is_empty() {
+            // Take inactive color spaces from overrides.
+            m.merged_config.set_inactive_color_spaces(&inactive_cs);
+        } else {
+            // Take inactive color spaces from config.
+            m.merged_config
+                .set_inactive_color_spaces(input.inactive_color_spaces());
+        }
+
+        // Set family_separator.
+        m.merged_config
+            .set_family_separator(input.family_separator())?;
+
+        // Remove all color spaces from base config.
+        m.merged_config.clear_color_spaces();
+
+        // Take color spaces from input config.
+        // No error expected as it only adds the color spaces from the input config.
+
+        // Avoid any conflicts with named transforms from the base config.
+        m.merged_config.clear_named_transforms();
+
+        // Merge the color spaces.
+        let num_cs =
+            input.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All);
+        for i in 0..num_cs {
+            let name = input.color_space_name_by_index_with(
+                SearchReferenceSpaceType::All,
+                ColorSpaceVisibility::All,
+                i,
+            );
+            let cs = input
+                .color_space(name)
+                .expect("a color space the config lists");
+            m.merged_config.add_color_space(cs)?;
+        }
+        Ok(())
+    }
+
+    /// The base's, with the overrides of the search paths, the environment and the inactive
+    /// color spaces where they are set.
+    ///
+    /// Port of `ColorspacesMerger::handleBaseOnly` (SectionMerger.cpp:2975-3011 @ v2.5.2).
+    fn handle_base_only(&mut self) -> Result<()> {
+        // Process the overrides only since the merged config is initialized to
+        // the base config.
+
+        // Do search_path override.
+        let search_paths = self.0.params.search_path();
+        if !search_paths.is_empty() {
+            // Use the override.
+            self.0.merged_config.set_search_path(&search_paths);
+        }
+
+        // Do environment override.
+        if self.0.params.num_environment_vars() > 0 {
+            self.set_environment_overrides();
+        }
+
+        // Do inactive_colorspaces override.
+        let inactive_cs = self.0.params.inactive_color_spaces();
+        if !inactive_cs.is_empty() {
+            self.0.merged_config.set_inactive_color_spaces(&inactive_cs);
+        }
+
+        // Nothing to do for display_colorspaces and colorspaces as the merged config
+        // is initialized to the base config.
+
+        // TODO: Avoid conflicts if roles are added from input config?
+        Ok(())
+    }
+
+    /// The base's environment variables, search paths, inactive color spaces and color spaces
+    /// without the input's: a variable the input has (whose value isn't empty, I-435), a search
+    /// path found in the input's joined search path (docs/improvements.md, I-434), an inactive
+    /// color space the input lists (ignoring case) and a color space of the input's name.
+    ///
+    /// Port of `ColorspacesMerger::handleRemove` (SectionMerger.cpp:3013-3072 @ v2.5.2).
+    fn handle_remove(&mut self) -> Result<()> {
+        let m = &mut self.0;
+        let (base, input) = (m.base_config, m.input_config);
+        // Handle environment.
+        //     If an environment variable is used somewhere and got removed, validating the
+        //     config will return an error.
+        for i in 0..input.num_environment_vars() {
+            let name = input.environment_var_name_by_index(i);
+            let exists = !m.merged_config.environment_var_default(name).is_empty();
+            if exists {
+                m.merged_config.add_environment_var(name, None);
+            }
+        }
+
+        // Handle search_path.
+        m.merged_config.clear_search_paths();
+        let input_search_path = input.search_path();
+        for i in 0..base.num_search_paths() {
+            let path = base.search_path_with_index(i);
+            let found = find(&input_search_path, &path);
+            if found.is_none() {
+                m.merged_config.add_search_path(&path);
+            }
+        }
+
+        // Handle inactive_colorspaces.
+        let mut base_inactive_cs = StringVec::new();
+        let mut input_inactive_cs = StringVec::new();
+        let mut merged_inactive_cs = StringVec::new();
+        split_active_list(base.inactive_color_spaces(), &mut base_inactive_cs);
+        split_active_list(input.inactive_color_spaces(), &mut input_inactive_cs);
+        trim_vec(&mut input_inactive_cs);
+        for name in &base_inactive_cs {
+            let trimmed_name = trim(name);
+            if !trimmed_name.is_empty() && !contain(&input_inactive_cs, trimmed_name) {
+                merged_inactive_cs.push(trimmed_name.to_vec());
+            }
+        }
+        m.merged_config
+            .set_inactive_color_spaces(join(&merged_inactive_cs, b','));
+
+        // The family_separator never gets removed.
+
+        // Handle display_colorspaces and colorspaces.
+        //   This could obviously break any other part of the base config that references the
+        //   removed color space, so it is up to the user to know what they are doing.
+
+        let num_cs =
+            input.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All);
+        for i in 0..num_cs {
+            let name = input.color_space_name_by_index_with(
+                SearchReferenceSpaceType::All,
+                ColorSpaceVisibility::All,
+                i,
+            );
+            // Note: The remove does nothing if the color space is not present.
+            m.merged_config.remove_color_space(name);
         }
         Ok(())
     }

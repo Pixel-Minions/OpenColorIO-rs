@@ -12,9 +12,10 @@
 //! these.
 //!
 //! From 9.2e on, whole merges are compared too (the displays and views from 9.2f, the view
-//! transforms from 9.2g): with the sections not ported yet keeping the base's (whose `BaseOnly`
-//! handlers change nothing that configs without named transforms or inactive color spaces
-//! have), the merged config's `serialize()` byte for byte, the whole log, or the exception.
+//! transforms from 9.2g, the color spaces from 9.2h): with the sections not ported yet keeping
+//! the base's (whose `BaseOnly` handlers change nothing that configs without named transforms
+//! or inactive color spaces have), the merged config's `serialize()` byte for byte, the whole
+//! log, or the exception.
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -435,8 +436,11 @@ fn general_and_roles_match_the_wheel() {
 /// transforms of both and of one, with names differing in case, of either reference space type,
 /// that differ in a transform, a direction or the reference space type, the default view
 /// transforms, and input configs whose reference spaces the converters change or can't find
-/// (9.2g). No named transforms or inactive color spaces, which the sections not ported yet would
-/// change.
+/// (9.2g); color spaces of both and of one, named as a role, an alias or a color space of the
+/// other config, with aliases that are one, of either reference space type, families with
+/// other separators, environment variables, search paths that differ in case or contain one
+/// another, v1 configs (9.2h). No named transforms or inactive color spaces, which the sections
+/// not ported yet would change.
 const WHOLE_PAIRS: &[Pair] = &[
     Pair {
         label: "rules and looks",
@@ -959,6 +963,185 @@ colorspaces:
     to_scene_reference: !<ExponentTransform> {value: [3, 3, 3, 1]}
 "#,
     },
+    Pair {
+        label: "color spaces",
+        base: r##"ocio_profile_version: 2
+
+environment:
+  test: value
+  test1: value1
+  test4: ""
+
+search_path:
+  - .
+  - abc
+  - luts
+
+family_separator: "#"
+
+roles:
+  default: ACEScg
+  rendering: ACEScg
+  texture_paint: sRGB - Texture
+
+displays:
+  MyDisplay:
+    - !<View> {name: MyDisplayView, colorspace: sRGB - Display}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: sRGB - Display
+    aliases: [srgb_display]
+    family: Display#Basic
+    description: from base
+    from_display_reference: !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1], direction: inverse}
+
+colorspaces:
+  - !<ColorSpace>
+    name: ACEScg
+    aliases: [aces]
+    family: ACES#Linear
+    description: from base
+    to_scene_reference: !<MatrixTransform> {matrix: [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: sRGB - Texture
+    family: Texture
+    aliases: [srgb, srgb_tx]
+    categories: [file-io]
+    description: from base
+    from_scene_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1], direction: inverse}
+
+  - !<ColorSpace>
+    name: look
+    description: from base
+    from_scene_reference: !<ColorSpaceTransform> {src: ACEScg, dst: sRGB - Texture}
+
+  - !<ColorSpace>
+    name: Linear
+    aliases: [lin, Shared Alias]
+    family: ""
+    to_scene_reference: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}
+"##,
+        input: r##"ocio_profile_version: 2.1
+
+environment:
+  test: differentValue
+  test3: value3
+  test4: from input
+
+search_path:
+  - .
+  - def
+  - ABC
+  - luts2
+
+family_separator: "~"
+
+roles:
+  default: ACES2065-1
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: sRGB - Display
+    aliases: [srgb_display]
+    family: Display~Standard
+    description: from input
+    from_display_reference: !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+
+  - !<ColorSpace>
+    name: look
+    aliases: [look1]
+    family: Display~Standard
+    description: from input
+    from_display_reference: !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}
+
+colorspaces:
+  - !<ColorSpace>
+    name: ACES2065-1
+    aliases: [aces]
+    family: ACES~Linear
+    description: from input
+    to_scene_reference: !<MatrixTransform> {matrix: [0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: sRGB
+    aliases: [my_srgb]
+    family: Texture~
+    description: from input
+    to_scene_reference: !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055}
+
+  - !<ColorSpace>
+    name: Rendering
+    description: named as a base role
+    to_scene_reference: !<MatrixTransform> {offset: [0.2, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: Other Linear
+    aliases: [LIN, texture_paint, other]
+    family: Linear~Other
+    to_scene_reference: !<MatrixTransform> {offset: [0.3, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: shared alias
+    family: ""
+    to_scene_reference: !<MatrixTransform> {offset: [0.4, 0, 0, 0]}
+
+  - !<ColorSpace>
+    name: Takes a name
+    aliases: [linear]
+    to_scene_reference: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}
+"##,
+    },
+    Pair {
+        label: "color spaces of v1 configs",
+        base: r#"ocio_profile_version: 1
+
+search_path: luts:shared
+
+roles:
+  default: raw
+  reference: lin
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: raw
+    isdata: true
+  - !<ColorSpace>
+    name: lin
+    family: linear/scene
+  - !<ColorSpace>
+    name: Gamma
+    family: display/gamma
+    from_reference: !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1]}
+"#,
+        input: r#"ocio_profile_version: 1
+
+search_path: SHARED:other
+
+roles:
+  default: raw
+  reference: lin
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: raw
+    isdata: true
+  - !<ColorSpace>
+    name: lin
+    family: linear/scene
+  - !<ColorSpace>
+    name: gamma
+    family: display/gamma
+    from_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1]}
+  - !<ColorSpace>
+    name: log
+    family: log
+    to_reference: !<LogTransform> {base: 2, direction: inverse}
+"#,
+    },
 ];
 
 /// The index in [`WHOLE_PAIRS`] of the first pair with displays: the displays and views section
@@ -970,19 +1153,47 @@ const FIRST_DISPLAY_PAIR: usize = 3;
 /// reference space.
 const FIRST_VIEW_TRANSFORMS_PAIR: usize = 6;
 
+/// The index in [`WHOLE_PAIRS`] of the first pair with color spaces the merge changes: the
+/// color spaces section takes every strategy over these, with and without the overrides of the
+/// search path and the environment, and with and without family prefixes.
+const FIRST_COLORSPACES_PAIR: usize = 9;
+
 /// The active displays and views the overrides set, when a case sets them.
 const ACTIVE_DISPLAYS_OVERRIDE: &str = "DISP_2, A";
 const ACTIVE_VIEWS_OVERRIDE: &str = "VIEW_2, v";
 
+/// The search path and environment the overrides set, when a case sets them.
+const SEARCH_PATH_OVERRIDE: &str = "ovr1:OVR2";
+const ENVIRONMENT_OVERRIDE: &[(&str, &str)] = &[("test", "ovr value"), ("OVR2", "VALUE2")];
+
+/// The family prefixes a case sets, when it sets them.
+const INPUT_FAMILY_PREFIX: &str = "Input/";
+const BASE_FAMILY_PREFIX: &str = "Base/Prefix/";
+
+/// Fragments of the messages of the color spaces section (SectionMerger.cpp:2350-2618 @ v2.5.2)
+/// that the merges of the color space pairs must log.
+const COLORSPACES_MESSAGES: &[&str] = &[
+    "' was not merged as it's identical to a role name.",
+    "' will replace a color space in the base config.",
+    "' was not merged as it's already present in the base config.",
+    "' has a conflict with an alias in color space '",
+    "' was not merged as it conflicts with an alias in color space '",
+    "' has a different reference space type than the color space it's replacing.",
+    "' that conflicts with color space '",
+    "' in color space '",
+    "' that conflicts with a role.",
+];
+
 /// The setters of the sections the whole merges keep the base's: the sections not ported yet.
-const NOT_PORTED_SECTIONS: &[&str] = &["setColorspaces", "setNamedTransforms"];
+const NOT_PORTED_SECTIONS: &[&str] = &["setNamedTransforms"];
 
 /// One whole merge: a pair of [`WHOLE_PAIRS`], the default strategy (which the general and
-/// roles sections take), the file rules', the displays and views', the view transforms' and the
-/// looks' (indices into [`STRATEGIES`]), the input-first and error-on-conflict options, whether
-/// the active displays and views are overridden, and whether the input's reference space is
-/// adjusted to the base's.
-#[derive(Debug, Clone, Copy)]
+/// roles sections take), the file rules', the displays and views', the view transforms', the
+/// looks' and the color spaces' (indices into [`STRATEGIES`]), the input-first and
+/// error-on-conflict options, whether the active displays and views are overridden, whether
+/// the input's reference space is adjusted to the base's, whether the search path and the
+/// environment are overridden, and whether the families get prefixes.
+#[derive(Debug, Clone, Copy, Default)]
 struct WholeCase {
     pair: usize,
     default: usize,
@@ -990,59 +1201,80 @@ struct WholeCase {
     display_views: usize,
     view_transforms: usize,
     looks: usize,
+    colorspaces: usize,
     input_first: bool,
     error_on_conflict: bool,
     active_overrides: bool,
     adjust_reference: bool,
+    colorspaces_overrides: bool,
+    family_prefixes: bool,
 }
 
 /// Every pair with every default strategy but `STRATEGY_UNSPECIFIED` (none set is the default
 /// default, `PreferInput`) and both options: the pairs without displays with every file rules
 /// and looks strategy, those with displays with every displays and views strategy, with and
-/// without the overrides of the active lists, and those with view transforms with every view
-/// transforms strategy, with and without the adjustment of the reference space. Unset
-/// strategies follow the default.
+/// without the overrides of the active lists, those with view transforms with every view
+/// transforms strategy, with and without the adjustment of the reference space, and those with
+/// color spaces with every color spaces strategy, with and without the overrides of the search
+/// path and the environment and the family prefixes. Unset strategies follow the default.
 fn whole_cases() -> Vec<WholeCase> {
     let mut cases = Vec::new();
     for pair in 0..WHOLE_PAIRS.len() {
         for default in 0..STRATEGIES.len() - 1 {
-            // (file rules, display views, view transforms, looks, active overrides, adjust)
             let mut sections = Vec::new();
             if pair < FIRST_DISPLAY_PAIR {
                 for file_rules in 0..STRATEGIES.len() {
                     for looks in 0..STRATEGIES.len() {
-                        sections.push((file_rules, 0, 0, looks, false, false));
+                        sections.push(WholeCase {
+                            file_rules,
+                            looks,
+                            ..WholeCase::default()
+                        });
                     }
                 }
             } else if pair < FIRST_VIEW_TRANSFORMS_PAIR {
                 for display_views in 0..STRATEGIES.len() {
                     for active_overrides in [false, true] {
-                        sections.push((0, display_views, 0, 0, active_overrides, false));
+                        sections.push(WholeCase {
+                            display_views,
+                            active_overrides,
+                            ..WholeCase::default()
+                        });
+                    }
+                }
+            } else if pair < FIRST_COLORSPACES_PAIR {
+                for view_transforms in 0..STRATEGIES.len() {
+                    for adjust_reference in [false, true] {
+                        sections.push(WholeCase {
+                            view_transforms,
+                            adjust_reference,
+                            ..WholeCase::default()
+                        });
                     }
                 }
             } else {
-                for view_transforms in 0..STRATEGIES.len() {
-                    for adjust_reference in [false, true] {
-                        sections.push((0, 0, view_transforms, 0, false, adjust_reference));
+                for colorspaces in 0..STRATEGIES.len() {
+                    for (colorspaces_overrides, family_prefixes) in
+                        [(false, false), (true, false), (false, true), (true, true)]
+                    {
+                        sections.push(WholeCase {
+                            colorspaces,
+                            colorspaces_overrides,
+                            family_prefixes,
+                            ..WholeCase::default()
+                        });
                     }
                 }
             }
-            for (file_rules, display_views, view_transforms, looks, active_overrides, adjust) in
-                sections
-            {
+            for section in sections {
                 for input_first in [true, false] {
                     for error_on_conflict in [false, true] {
                         cases.push(WholeCase {
                             pair,
                             default,
-                            file_rules,
-                            display_views,
-                            view_transforms,
-                            looks,
                             input_first,
                             error_on_conflict,
-                            active_overrides,
-                            adjust_reference: adjust,
+                            ..section
                         });
                     }
                 }
@@ -1078,6 +1310,18 @@ fn whole_calls(case: &WholeCase) -> Vec<Value> {
         );
         calls.push(json!({"call": "setActiveViews", "on": "p", "args": [ACTIVE_VIEWS_OVERRIDE]}));
     }
+    if case.colorspaces_overrides {
+        calls.push(json!({"call": "setSearchPath", "on": "p", "args": [SEARCH_PATH_OVERRIDE]}));
+        for (name, value) in ENVIRONMENT_OVERRIDE {
+            calls.push(json!({"call": "addEnvironmentVar", "on": "p", "args": [name, value]}));
+        }
+    }
+    if case.family_prefixes {
+        calls.push(
+            json!({"call": "setInputFamilyPrefix", "on": "p", "args": [INPUT_FAMILY_PREFIX]}),
+        );
+        calls.push(json!({"call": "setBaseFamilyPrefix", "on": "p", "args": [BASE_FAMILY_PREFIX]}));
+    }
     for setter in NOT_PORTED_SECTIONS {
         calls
             .push(json!({"call": setter, "on": "p", "args": [strategy_arg("STRATEGY_BASE_ONLY")]}));
@@ -1088,6 +1332,7 @@ fn whole_calls(case: &WholeCase) -> Vec<Value> {
         ("setDisplayViews", case.display_views),
         ("setViewTransforms", case.view_transforms),
         ("setLooks", case.looks),
+        ("setColorspaces", case.colorspaces),
     ] {
         if let Some(name) = STRATEGIES[index].0 {
             calls.push(json!({"call": setter, "on": "p", "args": [strategy_arg(name)]}));
@@ -1128,14 +1373,21 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
             .set_active_views(ACTIVE_VIEWS_OVERRIDE)
             .expect("setActiveViews");
     }
-    let not_ported: [StrategySetter; 2] = [
-        ConfigMergingParameters::set_colorspaces,
-        ConfigMergingParameters::set_named_transforms,
-    ];
+    if case.colorspaces_overrides {
+        params.set_search_path(SEARCH_PATH_OVERRIDE);
+        for (name, value) in ENVIRONMENT_OVERRIDE {
+            params.add_environment_var(name, Some(value.as_bytes()));
+        }
+    }
+    if case.family_prefixes {
+        params.set_input_family_prefix(INPUT_FAMILY_PREFIX);
+        params.set_base_family_prefix(BASE_FAMILY_PREFIX);
+    }
+    let not_ported: [StrategySetter; 1] = [ConfigMergingParameters::set_named_transforms];
     for setter in not_ported {
         setter(&params, MergeStrategies::BaseOnly);
     }
-    let ported: [(StrategySetter, usize); 5] = [
+    let ported: [(StrategySetter, usize); 6] = [
         (ConfigMergingParameters::set_default_strategy, case.default),
         (ConfigMergingParameters::set_file_rules, case.file_rules),
         (
@@ -1147,6 +1399,7 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
             case.view_transforms,
         ),
         (ConfigMergingParameters::set_looks, case.looks),
+        (ConfigMergingParameters::set_colorspaces, case.colorspaces),
     ];
     for (setter, index) in ported {
         if STRATEGIES[index].0.is_some() {
@@ -1166,7 +1419,8 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
         FileRulesMerger::new(&mut options).and_then(|mut m| m.merge())?;
         DisplayViewMerger::new(&mut options).and_then(|mut m| m.merge())?;
         ViewTransformsMerger::new(&mut options).and_then(|mut m| m.merge())?;
-        LooksMerger::new(&mut options).and_then(|mut m| m.merge())
+        LooksMerger::new(&mut options).and_then(|mut m| m.merge())?;
+        ColorspacesMerger::new(&mut options).and_then(|mut m| m.merge())
     });
     (
         result.and_then(|()| merged.serialize()),
@@ -1201,6 +1455,8 @@ fn whole_merges_match_the_wheel() {
     let mut texts = std::collections::BTreeSet::new();
     let mut display_texts = std::collections::BTreeSet::new();
     let mut view_transform_texts = std::collections::BTreeSet::new();
+    let mut colorspace_texts = std::collections::BTreeSet::new();
+    let mut colorspaces_messages = [0; COLORSPACES_MESSAGES.len()];
     let mut adjusted_raised = 0;
     let mut adjusted_texts = std::collections::BTreeSet::new();
     let mut mismatches = Vec::new();
@@ -1214,6 +1470,16 @@ fn whole_merges_match_the_wheel() {
         let merge = &calls[calls.len() - 2];
         let serialize = &calls[calls.len() - 1];
         let wheel_log = log(&merge["log"]).concat();
+        if case.pair >= FIRST_COLORSPACES_PAIR {
+            for (i, fragment) in COLORSPACES_MESSAGES.iter().enumerate() {
+                if wheel_log
+                    .windows(fragment.len())
+                    .any(|w| w == fragment.as_bytes())
+                {
+                    colorspaces_messages[i] += 1;
+                }
+            }
+        }
 
         let (result, port_log, port_load_log) = port_whole_merge(case);
         let wheel_load_log = [log(&calls[1]["log"]), log(&calls[2]["log"])]
@@ -1255,7 +1521,9 @@ fn whole_merges_match_the_wheel() {
                         String::from_utf8_lossy(&text)
                     ));
                 }
-                if case.pair >= FIRST_VIEW_TRANSFORMS_PAIR {
+                if case.pair >= FIRST_COLORSPACES_PAIR {
+                    colorspace_texts.insert(text.clone());
+                } else if case.pair >= FIRST_VIEW_TRANSFORMS_PAIR {
                     // (The base configs of these pairs have no group transforms: the input's
                     // view transforms with the reference space converters do.)
                     if case.adjust_reference && text.windows(17).any(|w| w == b"!<GroupTransform>")
@@ -1311,4 +1579,13 @@ fn whole_merges_match_the_wheel() {
         adjusted_raised >= 150,
         "{adjusted_raised} merges adjusting the reference space raised"
     );
+    assert!(
+        colorspace_texts.len() >= 80,
+        "{} different merged configs with color spaces",
+        colorspace_texts.len()
+    );
+    // Each kind of color space conflict is logged.
+    for (fragment, count) in COLORSPACES_MESSAGES.iter().zip(colorspaces_messages) {
+        assert!(count >= 10, "{count} merges logged \"{fragment}\"");
+    }
 }

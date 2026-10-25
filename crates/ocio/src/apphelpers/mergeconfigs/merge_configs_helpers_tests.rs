@@ -6,15 +6,19 @@
 
 use super::*;
 use crate::apphelpers::mergeconfigs::section_merger::{
-    DisplayViewMerger, FileRulesMerger, GeneralMerger, LooksMerger, MergeHandlerOptions,
-    RolesMerger, Section, ViewTransformsMerger,
+    ColorspacesMerger, DisplayViewMerger, FileRulesMerger, GeneralMerger, LooksMerger,
+    MergeHandlerOptions, RolesMerger, Section, ViewTransformsMerger,
 };
+use crate::color_space::ColorSpace;
 use crate::file_rules::FileRules;
 use crate::fileformats::test_utils::get_test_files_dir;
-use crate::transform::Transform;
+use crate::transform::{Transform, TransformType};
 use crate::viewing_rules::ViewingRules;
 use ocio_ops::logging::{get_logging_level, set_logging_level};
-use ocio_ops::open_color_types::{LoggingLevel, ViewTransformDirection, ViewType};
+use ocio_ops::open_color_types::{
+    ColorSpaceDirection, ColorSpaceVisibility, LoggingLevel, SearchReferenceSpaceType,
+    ViewTransformDirection, ViewType,
+};
 use ocio_ops::std_regex::{Regex, regex_replace};
 use ocio_ops::utils::pystring::os_path;
 use ocio_testkit::upstream::check_close;
@@ -3467,4 +3471,1094 @@ fn view_transforms_section() {
             );
         }
     }
+}
+
+/// Port of `getConfig` (MergeConfigsHelpers_tests.cpp:42-52 @ v2.5.2).
+fn get_config(filename: &str) -> Result<Arc<Config>> {
+    Config::create_from_file(merge_test_file(filename))
+}
+
+/// Port of `compareEnvironmentVar` (MergeConfigsHelpers_tests.cpp:54-67 @ v2.5.2).
+#[track_caller]
+fn compare_environment_var(
+    merged_config: &Config,
+    expected_names: &[&str],
+    expected_values: &[&str],
+) {
+    for i in 0..merged_config.num_environment_vars() {
+        let name = merged_config.environment_var_name_by_index(i);
+        assert_eq!(name, expected_names[i as usize].as_bytes());
+        assert_eq!(
+            merged_config.environment_var_default(name),
+            expected_values[i as usize].as_bytes()
+        );
+    }
+}
+
+/// Port of `checkColorSpace` (MergeConfigsHelpers_tests.cpp:69-81 @ v2.5.2).
+#[track_caller]
+fn check_color_space<'c>(
+    merged_config: &'c Config,
+    ref_name: &str,
+    index: i32,
+    ref_type: SearchReferenceSpaceType,
+) -> &'c ColorSpace {
+    let name =
+        merged_config.color_space_name_by_index_with(ref_type, ColorSpaceVisibility::All, index);
+    assert_eq!(name, ref_name.as_bytes());
+    merged_config
+        .color_space(ref_name)
+        .unwrap_or_else(|| panic!("no color space {ref_name}"))
+}
+
+const SEARCH_DISPLAY: SearchReferenceSpaceType = SearchReferenceSpaceType::Display;
+const SEARCH_SCENE: SearchReferenceSpaceType = SearchReferenceSpaceType::Scene;
+
+/// The number of color spaces of `config`, all reference space types, inactive ones included.
+fn num_all_color_spaces(config: &Config) -> i32 {
+    config.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All)
+}
+
+/// Upstream's `setupBasics` of the overrides test: a merger with new parameters, whose
+/// displays and views and color spaces strategies are `strategy`, with every override set.
+fn setup_overrides_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    let p = merger.params(0).unwrap();
+    p.set_display_views(strategy);
+    p.set_colorspaces(strategy);
+    // Not looking for duplicates as this test does not test that.
+    p.set_avoid_duplicates(false);
+
+    // Set the overrides.
+    p.set_name("OVR Name");
+    p.set_description("OVR Desc");
+    p.set_search_path("OVR1,OVR2");
+    p.add_environment_var("OVR1", Some(b"VALUE1".as_slice()));
+    p.add_environment_var("OVR2", Some(b"VALUE2".as_slice()));
+    p.set_active_displays("OVR DISP 1,OVR DISP 2").unwrap();
+    p.set_active_views("OVR VIEW 1,OVR VIEW 2").unwrap();
+    p.set_inactive_color_spaces("view_1, ACES2065-1");
+
+    params
+}
+
+/// Upstream's `doTests` of the overrides test.
+#[track_caller]
+fn check_overrides(merged_config: &Config) {
+    assert_eq!(merged_config.name(), b"OVR Name");
+    assert_eq!(merged_config.description(), b"OVR Desc");
+
+    assert_eq!(merged_config.search_path(), b"OVR1,OVR2");
+
+    let expected_names = ["OVR1", "OVR2"];
+    let expected_values = ["VALUE1", "VALUE2"];
+    assert_eq!(merged_config.num_environment_vars(), 2);
+    compare_environment_var(merged_config, &expected_names, &expected_values);
+
+    assert_eq!(merged_config.active_displays(), b"OVR DISP 1, OVR DISP 2");
+    assert_eq!(merged_config.active_views(), b"OVR VIEW 1, OVR VIEW 2");
+
+    assert_eq!(merged_config.inactive_color_spaces(), b"view_1, ACES2065-1");
+}
+
+/// The general, displays and views and color spaces mergers of the overrides test, in order.
+fn merge_overrides_sections(
+    base_config: &Config,
+    input_config: &Config,
+    params: &ConfigMergingParameters,
+    merged_config: &mut Config,
+) -> Result<()> {
+    // Merge name and description.
+    merge_section!(
+        GeneralMerger,
+        base_config,
+        input_config,
+        params,
+        merged_config
+    )?;
+    // Merge active_display, active_views.
+    merge_section!(
+        DisplayViewMerger,
+        base_config,
+        input_config,
+        params,
+        merged_config
+    )?;
+    // Merge inactive_colorspaces, environment and search_path.
+    merge_section!(
+        ColorspacesMerger,
+        base_config,
+        input_config,
+        params,
+        merged_config
+    )
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, overrides)` @ v2.5.2.
+#[test]
+fn overrides() {
+    let base_config = get_base_config().unwrap();
+    let input_config = get_input_config().unwrap();
+
+    // Test that the overrides options are taken into account in the merging process.
+
+    let setup_basics = setup_overrides_basics;
+    let do_tests = check_overrides;
+
+    // Test sections with strategy = PreferInput
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || merge_overrides_sections(&base_config, &input_config, &params, &mut merged_config),
+            &[
+                "The Input config contains a value that would override the Base config: shared_views: SHARED_1",
+                "The Input config contains a value that would override the Base config: display: DISP_1, view: VIEW_1",
+                "The Input config contains a value that would override the Base config: viewing_rules: RULE_1",
+                "Color space 'ACES2065-1' will replace a color space in the base config.",
+                "Color space 'view_1' will replace a color space in the base config.",
+            ],
+        );
+        do_tests(&merged_config);
+    }
+
+    // Test sections with strategy = PreferBase.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || merge_overrides_sections(&base_config, &input_config, &params, &mut merged_config),
+            &[
+                "The Input config contains a value that would override the Base config: shared_views: SHARED_1",
+                "The Input config contains a value that would override the Base config: display: DISP_1, view: VIEW_1",
+                "The Input config contains a value that would override the Base config: viewing_rules: RULE_1",
+                "Color space 'ACES2065-1' was not merged as it's already present in the base config.",
+                "Color space 'view_1' was not merged as it's already present in the base config.",
+            ],
+        );
+        do_tests(&merged_config);
+    }
+
+    // Test sections with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_overrides_sections(&base_config, &input_config, &params, &mut merged_config).unwrap();
+        do_tests(&merged_config);
+    }
+
+    // Test sections with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+        let mut merged_config = (*base_config).clone();
+        merge_overrides_sections(&base_config, &input_config, &params, &mut merged_config).unwrap();
+        do_tests(&merged_config);
+    }
+
+    // Strategy Remove is not tested as the overrides do not affect that strategy.
+}
+
+/// Upstream's `setupBasics` of the color spaces section's test: a merger with new parameters,
+/// whose color spaces and default strategies are `strategy`, with family prefixes, without the
+/// reference space adjustment and the duplicate search.
+fn setup_colorspaces_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    let p = merger.params(0).unwrap();
+    p.set_colorspaces(strategy);
+    p.set_default_strategy(strategy);
+
+    p.set_input_family_prefix("Input/");
+    p.set_base_family_prefix("Base/");
+
+    p.set_adjust_input_reference_space(false);
+    p.set_avoid_duplicates(false);
+
+    params
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, colorspaces_section)` @ v2.5.2.
+#[test]
+fn colorspaces_section() {
+    let base_config = get_config("base_colorspaces_config.yaml").unwrap();
+    let input_config = get_config("input_colorspaces_config.yaml").unwrap();
+
+    let setup_basics = setup_colorspaces_basics;
+
+    // Test that the default strategy is used as a fallback if the section strategy was not defined.
+    {
+        let mut merger = ConfigMerger::new();
+
+        // Using STRATEGY_UNSPECIFIED as this simulates that the section is missing from the OCIOM file.
+        let params = setup_basics(&mut merger, MergeStrategies::Unspecified);
+        // Simulate settings from OCIOM file.
+        merger
+            .params(0)
+            .unwrap()
+            .set_default_strategy(MergeStrategies::InputOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ColorspacesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.family_separator(), b'~');
+
+        let expected_names = ["test", "test3"];
+        let expected_values = ["differentValue", "value3"];
+        compare_environment_var(&merged_config, &expected_names, &expected_values);
+
+        assert_eq!(merged_config.search_path(), b".:def");
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"ACES2065-1, sRGB - Display"
+        );
+    }
+
+    // Test Colorspaces with strategy = PreferInput, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Color space 'sRGB - Display' will replace a color space in the base config",
+                "Color space 'look' will replace a color space in the base config",
+                "Merged color space 'look' has a different reference space type than the color space it's replacing",
+                "Merged color space 'ACES2065-1' has a conflict with alias 'aces' in color space 'ACEScg'",
+                "The name of merged color space 'sRGB' has a conflict with an alias in color space 'sRGB - Texture'",
+            ],
+        );
+
+        assert_eq!(merged_config.family_separator(), b'~');
+
+        // Note that the environment vars are always written in alphabetical order,
+        // so the InputFirst directive doesn't apply to this specific element.
+        let expected_names = ["test", "test1", "test3"];
+        let expected_values = ["differentValue", "value1", "value3"];
+        compare_environment_var(&merged_config, &expected_names, &expected_values);
+
+        assert_eq!(merged_config.search_path(), b".:def:abc");
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"ACES2065-1, sRGB - Display, sRGB - Texture, ACEScg"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 6);
+
+        // Display colorspaces.
+
+        let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+        assert_eq!(cs.num_aliases(), 1);
+        assert_eq!(cs.alias(0), b"srgb_display");
+        assert_eq!(cs.family(), b"Input~Display~Standard");
+        assert_eq!(cs.description(), b"from input");
+
+        let cs = check_color_space(&merged_config, "look", 1, SEARCH_DISPLAY);
+        assert_eq!(cs.num_aliases(), 1);
+        assert_eq!(cs.alias(0), b"look1");
+        assert_eq!(cs.description(), b"from input");
+
+        // Scene colorspaces.
+
+        let cs = check_color_space(&merged_config, "ACES2065-1", 0, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 1);
+        assert_eq!(cs.alias(0), b"aces");
+        assert_eq!(cs.family(), b"Input~ACES~Linear");
+
+        let cs = check_color_space(&merged_config, "sRGB", 1, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 1);
+        assert_eq!(cs.alias(0), b"my_srgb");
+        assert_eq!(cs.family(), b"Input~Texture~");
+
+        let cs = check_color_space(&merged_config, "ACEScg", 2, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 0);
+        assert_eq!(cs.family(), b"Base~ACES~Linear");
+
+        let cs = check_color_space(&merged_config, "sRGB - Texture", 3, SEARCH_SCENE);
+        // Note "srgb" is removed as an alias since it is a color space name in the input config.
+        assert_eq!(cs.num_aliases(), 1);
+        assert_eq!(cs.alias(0), b"srgb_tx");
+        assert_eq!(cs.family(), b"Base~Texture");
+        assert_eq!(cs.description(), b"from base");
+
+        // Note that the "look" scene color space is not merged since there is already a display color space
+        // with that name.
+    }
+
+    // Test Colorspaces with strategy=PreferInput, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(false);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Color space 'sRGB - Display' will replace a color space in the base config",
+                "Color space 'look' will replace a color space in the base config",
+                "Merged color space 'look' has a different reference space type than the color space it's replacing",
+                "Merged color space 'ACES2065-1' has a conflict with alias 'aces' in color space 'ACEScg'",
+                "The name of merged color space 'sRGB' has a conflict with an alias in color space 'sRGB - Texture'",
+            ],
+        );
+
+        assert_eq!(merged_config.family_separator(), b'~');
+
+        let expected_names = ["test", "test1", "test3"];
+        let expected_values = ["differentValue", "value1", "value3"];
+        compare_environment_var(&merged_config, &expected_names, &expected_values);
+
+        // Note that the search path ignores InputFirst, it works based on the strategy only.
+        assert_eq!(merged_config.search_path(), b".:def:abc");
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"sRGB - Texture, sRGB - Display, ACEScg, ACES2065-1"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 6);
+
+        // Display colorspaces.
+
+        let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+        assert_eq!(cs.alias(0), b"srgb_display");
+        assert_eq!(cs.family(), b"Input~Display~Standard");
+        assert_eq!(cs.description(), b"from input");
+
+        let cs = check_color_space(&merged_config, "look", 1, SEARCH_DISPLAY);
+        assert_eq!(cs.alias(0), b"look1");
+        assert_eq!(cs.description(), b"from input");
+
+        // Scene colorspaces.
+
+        let cs = check_color_space(&merged_config, "ACEScg", 0, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 0);
+        assert_eq!(cs.family(), b"Base~ACES~Linear");
+
+        let cs = check_color_space(&merged_config, "sRGB - Texture", 1, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 1);
+        assert_eq!(cs.alias(0), b"srgb_tx");
+        assert_eq!(cs.family(), b"Base~Texture");
+        assert_eq!(cs.description(), b"from base");
+
+        let cs = check_color_space(&merged_config, "ACES2065-1", 2, SEARCH_SCENE);
+        assert_eq!(cs.alias(0), b"aces");
+        assert_eq!(cs.family(), b"Input~ACES~Linear");
+
+        let cs = check_color_space(&merged_config, "sRGB", 3, SEARCH_SCENE);
+        assert_eq!(cs.alias(0), b"my_srgb");
+        assert_eq!(cs.family(), b"Input~Texture~");
+    }
+
+    // Test Colorspaces with strategy = PreferBase, options InputFirst = true.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Color space 'sRGB - Display' was not merged as it's already present in the base config",
+                "Color space 'look' was not merged as it's already present in the base config",
+                "Merged color space 'ACES2065-1' has a conflict with alias 'aces' in color space 'ACEScg'",
+                "Color space 'sRGB' was not merged as it conflicts with an alias in color space 'sRGB - Texture'",
+            ],
+        );
+
+        assert_eq!(merged_config.family_separator(), b'#');
+
+        let expected_names = ["test", "test1", "test3"];
+        let expected_values = ["value", "value1", "value3"];
+        compare_environment_var(&merged_config, &expected_names, &expected_values);
+
+        // Note that the search path ignores InputFirst, it works based on the strategy only.
+        assert_eq!(merged_config.search_path(), b".:abc:def");
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"ACES2065-1, sRGB - Display, sRGB - Texture, ACEScg"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 5);
+
+        // Display colorspaces.
+
+        let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+        assert_eq!(cs.alias(0), b"srgb_display");
+        assert_eq!(cs.family(), b"Base#Display#Basic");
+        assert_eq!(cs.description(), b"from base");
+
+        // Scene colorspaces.
+
+        let cs = check_color_space(&merged_config, "ACES2065-1", 0, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 0);
+        assert_eq!(cs.family(), b"Input#ACES#Linear");
+        assert_eq!(cs.description(), b"from input");
+
+        let cs = check_color_space(&merged_config, "ACEScg", 1, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 1);
+        assert_eq!(cs.alias(0), b"aces");
+        assert_eq!(cs.family(), b"Base#ACES#Linear");
+
+        let cs = check_color_space(&merged_config, "sRGB - Texture", 2, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 2);
+        assert_eq!(cs.alias(0), b"srgb");
+        assert_eq!(cs.alias(1), b"srgb_tx");
+        assert_eq!(cs.family(), b"Base#Texture");
+        assert_eq!(cs.description(), b"from base");
+
+        let cs = check_color_space(&merged_config, "look", 3, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 0);
+        assert_eq!(cs.description(), b"from base");
+    }
+
+    // Test Colorspaces with strategy = PreferBase, options InputFirst = false.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(false);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || {
+                merge_section!(
+                    ColorspacesMerger,
+                    &base_config,
+                    &input_config,
+                    &params,
+                    &mut merged_config
+                )
+            },
+            &[
+                "Color space 'sRGB - Display' was not merged as it's already present in the base config",
+                "Color space 'look' was not merged as it's already present in the base config",
+                "Merged color space 'ACES2065-1' has a conflict with alias 'aces' in color space 'ACEScg'",
+                "Color space 'sRGB' was not merged as it conflicts with an alias in color space 'sRGB - Texture'",
+            ],
+        );
+
+        assert_eq!(merged_config.family_separator(), b'#');
+
+        let expected_names = ["test", "test1", "test3"];
+        let expected_values = ["value", "value1", "value3"];
+        compare_environment_var(&merged_config, &expected_names, &expected_values);
+
+        assert_eq!(merged_config.search_path(), b".:abc:def");
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"sRGB - Texture, sRGB - Display, ACEScg, ACES2065-1"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 5);
+
+        // Display colorspaces.
+
+        let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+        assert_eq!(cs.alias(0), b"srgb_display");
+        assert_eq!(cs.family(), b"Base#Display#Basic");
+        assert_eq!(cs.description(), b"from base");
+
+        // Scene colorspaces.
+
+        let cs = check_color_space(&merged_config, "ACEScg", 0, SEARCH_SCENE);
+        assert_eq!(cs.alias(0), b"aces");
+
+        let cs = check_color_space(&merged_config, "sRGB - Texture", 1, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 2);
+        assert_eq!(cs.alias(0), b"srgb");
+        assert_eq!(cs.alias(1), b"srgb_tx");
+        assert_eq!(cs.family(), b"Base#Texture");
+
+        let cs = check_color_space(&merged_config, "look", 2, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 0);
+        assert_eq!(cs.description(), b"from base");
+
+        let cs = check_color_space(&merged_config, "ACES2065-1", 3, SEARCH_SCENE);
+        assert_eq!(cs.num_aliases(), 0);
+    }
+
+    // Test Colorspaces with strategy = BaseOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::BaseOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ColorspacesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.family_separator(), b'#');
+
+        let expected_names = ["test", "test1"];
+        let expected_values = ["value", "value1"];
+        compare_environment_var(&merged_config, &expected_names, &expected_values);
+
+        assert_eq!(merged_config.search_path(), b".:abc");
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"sRGB - Texture, sRGB - Display, ACEScg"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 4);
+
+        let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+        assert_eq!(cs.family(), b"Display#Basic");
+
+        let cs = check_color_space(&merged_config, "ACEScg", 0, SEARCH_SCENE);
+        assert_eq!(cs.family(), b"ACES#Linear");
+
+        let cs = check_color_space(&merged_config, "sRGB - Texture", 1, SEARCH_SCENE);
+        assert_eq!(cs.family(), b"Texture");
+
+        let cs = check_color_space(&merged_config, "look", 2, SEARCH_SCENE);
+        assert_eq!(cs.family(), b"");
+    }
+
+    // Test Colorspaces with strategy = InputOnly.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::InputOnly);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ColorspacesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.family_separator(), b'~');
+
+        let expected_names = ["test", "test3"];
+        let expected_values = ["differentValue", "value3"];
+        compare_environment_var(&merged_config, &expected_names, &expected_values);
+
+        assert_eq!(merged_config.search_path(), b".:def");
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"ACES2065-1, sRGB - Display"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 4);
+
+        let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+        assert_eq!(cs.family(), b"Display~Standard");
+
+        let cs = check_color_space(&merged_config, "look", 1, SEARCH_DISPLAY);
+        assert_eq!(cs.family(), b"Display~Standard");
+
+        let cs = check_color_space(&merged_config, "ACES2065-1", 0, SEARCH_SCENE);
+        assert_eq!(cs.family(), b"ACES~Linear");
+
+        let cs = check_color_space(&merged_config, "sRGB", 1, SEARCH_SCENE);
+        assert_eq!(cs.family(), b"Texture~");
+    }
+
+    // Test Colorspaces with strategy = Remove
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::Remove);
+
+        let mut merged_config = (*base_config).clone();
+        merge_section!(
+            ColorspacesMerger,
+            &base_config,
+            &input_config,
+            &params,
+            &mut merged_config
+        )
+        .unwrap();
+
+        assert_eq!(merged_config.family_separator(), b'#');
+
+        let expected_names = ["test1"];
+        let expected_values = ["value1"];
+        compare_environment_var(&merged_config, &expected_names, &expected_values);
+
+        assert_eq!(merged_config.search_path(), b"abc");
+        assert_eq!(
+            merged_config.inactive_color_spaces(),
+            b"sRGB - Texture, ACEScg"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 2);
+
+        let cs = check_color_space(&merged_config, "ACEScg", 0, SEARCH_SCENE);
+        assert_eq!(cs.family(), b"ACES#Linear");
+
+        let cs = check_color_space(&merged_config, "sRGB - Texture", 1, SEARCH_SCENE);
+        assert_eq!(cs.family(), b"Texture");
+    }
+}
+
+/// Upstream's checks of a transform that must be a group of transforms of `types`, in order:
+/// `getTransformType() == TRANSFORM_TYPE_GROUP`, the cast, `getNumTransforms()` and each child's
+/// `getTransformType()`.
+#[track_caller]
+fn check_group_types(t: &Transform, types: &[TransformType]) {
+    assert_eq!(t.transform_type(), TransformType::Group);
+    let Transform::Group(gtx) = t else {
+        panic!("not a GroupTransform");
+    };
+    assert_eq!(gtx.num_transforms() as usize, types.len());
+    for (i, ty) in types.iter().enumerate() {
+        assert_eq!(gtx.transform(i as i32).unwrap().transform_type(), *ty);
+    }
+}
+
+/// Upstream's `setupBasics` of the common reference and duplicates test: a merger with new
+/// parameters, whose color spaces and default strategies are `strategy`, with family prefixes,
+/// the reference space adjustment and the duplicate search.
+fn setup_common_reference_basics(
+    merger: &mut ConfigMerger,
+    strategy: MergeStrategies,
+) -> ConfigMergingParameters {
+    let params = ConfigMergingParameters::new().unwrap();
+    merger.add_params(Some(params.clone()));
+    let p = merger.params(0).unwrap();
+    p.set_colorspaces(strategy);
+    p.set_default_strategy(strategy);
+
+    p.set_input_family_prefix("Input/");
+    p.set_base_family_prefix("Base/");
+
+    p.set_adjust_input_reference_space(true);
+    p.set_avoid_duplicates(true);
+
+    params
+}
+
+/// The roles, displays and views, view transforms and color spaces mergers, in order.
+fn merge_roles_to_colorspaces(
+    base_config: &Config,
+    input_config: &Config,
+    params: &ConfigMergingParameters,
+    merged_config: &mut Config,
+) -> Result<()> {
+    merge_section!(
+        RolesMerger,
+        base_config,
+        input_config,
+        params,
+        merged_config
+    )?;
+    merge_section!(
+        DisplayViewMerger,
+        base_config,
+        input_config,
+        params,
+        merged_config
+    )?;
+    merge_section!(
+        ViewTransformsMerger,
+        base_config,
+        input_config,
+        params,
+        merged_config
+    )?;
+    merge_section!(
+        ColorspacesMerger,
+        base_config,
+        input_config,
+        params,
+        merged_config
+    )
+}
+
+/// Port of `OCIO_ADD_TEST(MergeConfigs, colorspaces_section_common_reference_and_duplicates)` @ v2.5.2.
+#[test]
+fn colorspaces_section_common_reference_and_duplicates() {
+    // Base config display ref space: CIE-XYZ-D65, scene ref space: ACES2065-1.
+    // Input config display ref space: linear Rec.709, scene ref space: linear Rec.709
+    //
+    // Both configs have the role: cie_xyz_d65_interchange: CIE-XYZ-D65
+    // but not the aces_interchange role, so heuristics will be used for that.
+    //
+    // The merged configs will contain color spaces from the input config where
+    // the reference space has been converted to that of the base config.
+    // The base reference spaces are always used, regardless of strategy.
+    //
+    // Duplicates are removed, even though they use different reference spaces.
+
+    let base_path = merge_test_file("merged1/base1.ocio");
+    let input_path = merge_test_file("merged1/input1.ocio");
+
+    let base_config = Config::create_from_file(&base_path).unwrap();
+    let input_config = Config::create_from_file(&input_path).unwrap();
+
+    let setup_basics = setup_common_reference_basics;
+
+    // PreferInput, Input first.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferInput);
+        merger.params(0).unwrap().set_input_first(true);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || merge_roles_to_colorspaces(&base_config, &input_config, &params, &mut merged_config),
+            &[
+                "Equivalent input color space 'sRGB - Display' replaces 'sRGB - Display' in the base config, preserving aliases.",
+                "Equivalent input color space 'CIE-XYZ-D65' replaces 'CIE-XYZ-D65' in the base config, preserving aliases.",
+                "Equivalent input color space 'ACES2065-1' replaces 'ap0' in the base config, preserving aliases.",
+                "Equivalent input color space 'sRGB' replaces 'sRGB - Texture' in the base config, preserving aliases.",
+                "Merged color space 'ACES2065-1' has a conflict with alias 'aces' in color space 'ACEScg'",
+            ],
+        );
+
+        assert_eq!(merged_config.num_roles(), 1);
+        assert_eq!(
+            merged_config.role_color_space("cie_xyz_d65_interchange"),
+            b"CIE-XYZ-D65"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 7);
+
+        // Display-referred spaces.
+        {
+            // This is a duplicate.
+            let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+            assert_eq!(cs.num_aliases(), 1);
+            // Check for alias srgb_display (added from base config).
+            assert_eq!(cs.alias(0), b"srgb_display");
+            assert_eq!(cs.description(), b"from input");
+            assert_eq!(cs.encoding(), b"sdr-video");
+            // Check categories were copied.
+            assert_eq!(cs.num_categories(), 3);
+            assert!(cs.has_category("file-io"));
+            assert!(cs.has_category("texture"));
+            assert!(cs.has_category("display"));
+
+            // Check that the input config reference space was converted to the base reference space.
+            // See ConfigUtils_tests.cpp for more detailed testing of the reference space conversion.
+            {
+                assert!(cs.transform(ColorSpaceDirection::ToReference).is_none());
+                let t = cs.transform(ColorSpaceDirection::FromReference).unwrap();
+                check_group_types(
+                    t,
+                    &[TransformType::Matrix, TransformType::ExponentWithLinear],
+                );
+            }
+
+            let cs1 = check_color_space(&merged_config, "CIE-XYZ-D65", 1, SEARCH_DISPLAY);
+            assert_eq!(cs1.num_aliases(), 1);
+            assert_eq!(cs1.alias(0), b"cie_xyz_d65");
+            {
+                assert!(cs1.transform(ColorSpaceDirection::ToReference).is_none());
+                let t = cs1.transform(ColorSpaceDirection::FromReference).unwrap();
+                check_group_types(t, &[TransformType::Matrix, TransformType::Matrix]);
+            }
+        }
+
+        // Scene-referred spaces.
+        {
+            // This is recognized as a duplicate, even though the name is different in the two configs.
+            let cs = check_color_space(&merged_config, "ACES2065-1", 0, SEARCH_SCENE);
+            assert_eq!(cs.num_aliases(), 2);
+            assert_eq!(cs.alias(0), b"aces");
+            // Check for alias ap0 (added from base config).
+            assert_eq!(cs.alias(1), b"ap0");
+            // Check categories were copied.
+            assert_eq!(cs.num_categories(), 2);
+            assert!(cs.has_category("file-io"));
+            assert!(cs.has_category("texture"));
+            assert_eq!(cs.encoding(), b"scene-linear");
+            {
+                assert!(cs.transform(ColorSpaceDirection::FromReference).is_none());
+                let t = cs.transform(ColorSpaceDirection::ToReference).unwrap();
+                check_group_types(t, &[TransformType::Matrix, TransformType::Matrix]);
+            }
+
+            // This is recognized as a duplicate, even though the name is different in the two configs.
+            let cs1 = check_color_space(&merged_config, "sRGB", 1, SEARCH_SCENE);
+            assert_eq!(cs1.num_aliases(), 2);
+            // Check for alias sRGB - Texture (added from base config colorspace name).
+            assert_eq!(cs1.alias(0), b"sRGB - Texture");
+            // Check for alias srgb_tx (added from base config).
+            assert_eq!(cs1.alias(1), b"srgb_tx");
+            // Check categories were copied.
+            assert_eq!(cs1.num_categories(), 2);
+            assert!(cs1.has_category("file-io"));
+            assert!(cs1.has_category("texture"));
+            {
+                assert!(cs1.transform(ColorSpaceDirection::FromReference).is_none());
+                let t = cs1.transform(ColorSpaceDirection::ToReference).unwrap();
+                check_group_types(
+                    t,
+                    &[TransformType::ExponentWithLinear, TransformType::Matrix],
+                );
+            }
+
+            let cs2 = check_color_space(&merged_config, "rec709", 2, SEARCH_SCENE);
+            assert_eq!(cs2.num_categories(), 1);
+            assert!(cs2.has_category("texture"));
+            {
+                assert!(cs2.transform(ColorSpaceDirection::FromReference).is_none());
+                let t = cs2.transform(ColorSpaceDirection::ToReference).unwrap();
+                check_group_types(t, &[TransformType::Matrix]);
+            }
+
+            let cs3 = check_color_space(&merged_config, "Raw", 3, SEARCH_SCENE);
+            assert_eq!(cs3.num_aliases(), 1);
+            assert_eq!(cs3.alias(0), b"Utility - Raw");
+            assert!(cs3.is_data());
+            {
+                assert!(cs3.transform(ColorSpaceDirection::ToReference).is_none());
+                assert!(cs3.transform(ColorSpaceDirection::FromReference).is_none());
+            }
+
+            let cs4 = check_color_space(&merged_config, "ACEScg", 4, SEARCH_SCENE);
+            assert_eq!(cs4.num_aliases(), 0);
+            assert_eq!(cs4.num_categories(), 0);
+            {
+                assert!(cs4.transform(ColorSpaceDirection::FromReference).is_none());
+                let t = cs4.transform(ColorSpaceDirection::ToReference).unwrap();
+                assert_eq!(t.transform_type(), TransformType::Builtin);
+            }
+        }
+
+        // View transforms.
+        {
+            assert_eq!(merged_config.num_view_transforms(), 2);
+            assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+            assert_eq!(
+                merged_config
+                    .view_transform("SDR Video")
+                    .unwrap()
+                    .description(),
+                b"from input"
+            );
+            let tf = merged_config
+                .view_transform("SDR Video")
+                .unwrap()
+                .transform(ViewTransformDirection::FromReference)
+                .unwrap();
+
+            // Validate the reference space conversion was added to the transform from the input config.
+            check_group_types(
+                tf,
+                &[
+                    TransformType::Matrix,
+                    TransformType::Builtin,
+                    TransformType::Matrix,
+                ],
+            );
+
+            assert_eq!(merged_config.view_transform_name_by_index(1), b"vt2");
+            let tf = merged_config
+                .view_transform("vt2")
+                .unwrap()
+                .transform(ViewTransformDirection::ToReference)
+                .unwrap();
+
+            // Validate the reference space conversion was not added to the transform from the base config.
+            assert_eq!(tf.transform_type(), TransformType::ExponentWithLinear);
+        }
+    }
+
+    // PreferBase, Input first.
+    {
+        let mut merger = ConfigMerger::new();
+        let params = setup_basics(&mut merger, MergeStrategies::PreferBase);
+        merger.params(0).unwrap().set_input_first(true);
+
+        let mut merged_config = (*base_config).clone();
+        check_for_log_or_exception(
+            LogType::Warning,
+            || merge_roles_to_colorspaces(&base_config, &input_config, &params, &mut merged_config),
+            &[
+                "Equivalent base color space 'sRGB - Display' overrides 'sRGB - Display' in the input config, preserving aliases.",
+                "Equivalent base color space 'CIE-XYZ-D65' overrides 'CIE-XYZ-D65' in the input config, preserving aliases.",
+                "Equivalent base color space 'ap0' overrides 'ACES2065-1' in the input config, preserving aliases.",
+                "Equivalent base color space 'sRGB - Texture' overrides 'sRGB' in the input config, preserving aliases.",
+                concat!(
+                    "Input color space 'ACES2065-1' is a duplicate of base color space 'ap0' but was ",
+                    "unable to add alias 'aces' since it conflicts with base color space 'ACEScg'."
+                ),
+            ],
+        );
+
+        assert_eq!(merged_config.num_roles(), 1);
+        assert_eq!(
+            merged_config.role_color_space("cie_xyz_d65_interchange"),
+            b"CIE-XYZ-D65"
+        );
+
+        assert_eq!(num_all_color_spaces(&merged_config), 7);
+
+        // Display-referred spaces.
+        {
+            let cs = check_color_space(&merged_config, "sRGB - Display", 0, SEARCH_DISPLAY);
+            assert_eq!(cs.num_aliases(), 1);
+            assert_eq!(cs.alias(0), b"srgb_display");
+            assert_eq!(cs.description(), b"from base");
+            assert_eq!(cs.encoding(), b"");
+            // Check categories were copied.
+            assert_eq!(cs.num_categories(), 3);
+            assert!(cs.has_category("file-io"));
+            assert!(cs.has_category("texture"));
+            assert!(cs.has_category("display"));
+            {
+                assert!(cs.transform(ColorSpaceDirection::ToReference).is_none());
+                let t = cs.transform(ColorSpaceDirection::FromReference).unwrap();
+                assert_eq!(t.transform_type(), TransformType::Builtin);
+            }
+
+            let cs1 = check_color_space(&merged_config, "CIE-XYZ-D65", 1, SEARCH_DISPLAY);
+            assert_eq!(cs1.num_aliases(), 1);
+            assert_eq!(cs1.alias(0), b"cie_xyz_d65");
+            {
+                assert!(cs1.transform(ColorSpaceDirection::ToReference).is_none());
+                assert!(cs1.transform(ColorSpaceDirection::FromReference).is_none());
+            }
+        }
+
+        // Scene-referred spaces.
+        {
+            let cs = check_color_space(&merged_config, "rec709", 0, SEARCH_SCENE);
+            assert_eq!(cs.num_categories(), 1);
+            assert!(cs.has_category("texture"));
+            {
+                assert!(cs.transform(ColorSpaceDirection::FromReference).is_none());
+                let t = cs.transform(ColorSpaceDirection::ToReference).unwrap();
+                check_group_types(t, &[TransformType::Matrix]);
+            }
+
+            let cs1 = check_color_space(&merged_config, "Raw", 1, SEARCH_SCENE);
+            assert_eq!(cs1.num_aliases(), 1);
+            assert_eq!(cs1.alias(0), b"Utility - Raw");
+            assert!(cs1.is_data());
+            {
+                assert!(cs1.transform(ColorSpaceDirection::ToReference).is_none());
+                assert!(cs1.transform(ColorSpaceDirection::FromReference).is_none());
+            }
+
+            let cs2 = check_color_space(&merged_config, "ACEScg", 2, SEARCH_SCENE);
+            assert_eq!(cs2.num_aliases(), 1);
+            assert_eq!(cs2.alias(0), b"aces");
+            {
+                assert!(cs2.transform(ColorSpaceDirection::FromReference).is_none());
+                let t = cs2.transform(ColorSpaceDirection::ToReference).unwrap();
+                assert_eq!(t.transform_type(), TransformType::Builtin);
+            }
+
+            let cs3 = check_color_space(&merged_config, "ap0", 3, SEARCH_SCENE);
+            assert_eq!(cs3.num_aliases(), 1);
+            assert_eq!(cs3.alias(0), b"ACES2065-1");
+            assert!(!(cs3.is_data()));
+            // Check categories were copied.
+            assert_eq!(cs3.num_categories(), 2);
+            assert!(cs3.has_category("file-io"));
+            assert!(cs3.has_category("texture"));
+            assert_eq!(cs3.encoding(), b"");
+            {
+                assert!(cs3.transform(ColorSpaceDirection::ToReference).is_none());
+                assert!(cs3.transform(ColorSpaceDirection::FromReference).is_none());
+            }
+
+            let cs4 = check_color_space(&merged_config, "sRGB - Texture", 4, SEARCH_SCENE);
+            assert_eq!(cs4.num_aliases(), 2);
+            assert_eq!(cs4.alias(0), b"srgb");
+            assert_eq!(cs4.alias(1), b"srgb_tx");
+            assert_eq!(cs4.num_categories(), 2);
+            {
+                assert!(cs4.transform(ColorSpaceDirection::ToReference).is_none());
+                let t = cs4.transform(ColorSpaceDirection::FromReference).unwrap();
+                check_group_types(
+                    t,
+                    &[TransformType::Matrix, TransformType::ExponentWithLinear],
+                );
+            }
+        }
+
+        // View transforms.
+        {
+            assert_eq!(merged_config.num_view_transforms(), 2);
+            assert_eq!(merged_config.view_transform_name_by_index(0), b"SDR Video");
+            assert_eq!(
+                merged_config
+                    .view_transform("SDR Video")
+                    .unwrap()
+                    .description(),
+                b"from base"
+            );
+            let tf = merged_config
+                .view_transform("SDR Video")
+                .unwrap()
+                .transform(ViewTransformDirection::FromReference)
+                .unwrap();
+
+            // Validate that no reference space conversion was added, since the base transform was used.
+            assert_eq!(tf.transform_type(), TransformType::Builtin);
+
+            assert_eq!(merged_config.view_transform_name_by_index(1), b"vt2");
+            let tf = merged_config
+                .view_transform("vt2")
+                .unwrap()
+                .transform(ViewTransformDirection::ToReference)
+                .unwrap();
+
+            // Validate the reference space conversion was not added to the transform from the base config.
+            assert_eq!(tf.transform_type(), TransformType::ExponentWithLinear);
+        }
+    }
+
+    // Nothing special to test for Input only and Base only.
 }

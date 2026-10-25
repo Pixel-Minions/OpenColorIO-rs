@@ -4113,6 +4113,33 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`, the "view transforms in
   other reference spaces" and "view transforms of an unknown reference space" configs).
 
+### I-434. The Remove strategy removes base search paths that are part of an input search path
+
+- **Upstream:** with the color spaces strategy `Remove`, the merge keeps a search path of the
+  base only when it isn't found, as a substring and with case, in the input's search paths
+  joined with `:` (`StringUtils::Find(m_inputConfig->getSearchPath(), ...)`,
+  `SectionMerger.cpp:3027-3036` @ v2.5.2). A base path `luts` is removed when the input has
+  `luts2`, and `.` whenever an input path holds a dot; `LUTS` stays when the input has `luts`,
+  though the other strategies compare search paths ignoring case. Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** merges that remove the input's search paths from a base config.
+- **A fix:** compare whole search paths, as `hasSearchPath` does for the other strategies.
+- **Status:** matched in `p9-merge-3` (9.2h, `apphelpers/mergeconfigs/section_merger.rs`,
+  `ColorspacesMerger::handle_remove`); `section_merger_oracle_tests.rs`
+  (`whole_merges_match_the_wheel`, the "color spaces" configs).
+
+### I-435. An environment variable whose default value is empty counts as missing
+
+- **Upstream:** the color spaces section tells whether the merged config has an environment
+  variable by its default value being empty (`SectionMerger.cpp:2852-2857, 3020-3025` @
+  v2.5.2). With `PreferBase`, an input variable overrides a base variable whose value is empty;
+  with `Remove`, a base variable whose value is empty isn't removed. Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** configs that declare environment variables with empty defaults.
+- **A fix:** look the name up in the config's list of variables.
+- **Status:** matched in `p9-merge-3` (9.2h, `section_merger.rs`, `ColorspacesMerger`);
+  `section_merger_oracle_tests.rs` (the "color spaces" configs).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
