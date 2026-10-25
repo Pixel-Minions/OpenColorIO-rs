@@ -16,7 +16,8 @@
 pub(crate) mod processors;
 pub(crate) mod script;
 
-use std::sync::{Once, OnceLock};
+use std::sync::{Condvar, Mutex, Once, OnceLock};
+use std::time::{Duration, Instant};
 
 use ocio_testkit::{Oracle, paths};
 use pyo3::prelude::*;
@@ -107,10 +108,69 @@ fn site_packages() -> Option<String> {
     Some(String::from_utf8(out.stdout).ok()?.trim().to_string())
 }
 
+/// Whether the [`Turn`] is held.
+static TURN: Mutex<bool> = Mutex::new(false);
+static TURN_FREE: Condvar = Condvar::new();
+
+/// How long [`turn`] waits for another test's turn to end (a turn takes seconds).
+const TURN_LIMIT: Duration = Duration::from_secs(600);
+
+/// The turn of one Python run of the port's library at a time in this test binary, held until
+/// it drops ([`turn`]).
+///
+/// The wheel runs each script in a process of its own (the oracle's py_eval); the port's
+/// scripts share their test binary's process, whose tests run on threads of their own. What a
+/// script changes or reads of the process's state would meet another test's run meanwhile: the
+/// logging function (`py_eval_steps.run` sets it for its script, and a message another test
+/// logs meanwhile, such as the first current config's "Color management disabled.", would be
+/// the log of this script's step), the logging level, the current config, and the library's
+/// file cache (another test's `ClearAllCaches` makes a processor read its LUT again).
+#[must_use]
+pub(crate) struct Turn(());
+
+impl Drop for Turn {
+    fn drop(&mut self) {
+        *TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = false;
+        TURN_FREE.notify_one();
+    }
+}
+
+/// Waits for the [`Turn`] and takes it. It waits with the GIL released when this thread holds
+/// it, since the turn's holder may need it. [`port`] runs each script in its turn; a test whose
+/// own Python code changes or reads the process's state that scripts share (the logging level,
+/// the current config, the file cache) holds it too. Never on a thread that holds the turn
+/// already: it would wait for itself.
+pub(crate) fn turn() -> Turn {
+    start_python();
+    let wait = || {
+        let deadline = Instant::now() + TURN_LIMIT;
+        let mut held = TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *held {
+            let left = deadline.saturating_duration_since(Instant::now());
+            assert!(
+                !left.is_zero(),
+                "no turn within {TURN_LIMIT:?}: another test's Python run never ended"
+            );
+            held = TURN_FREE
+                .wait_timeout(held, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        *held = true;
+        Turn(())
+    };
+    Python::attach(|py| py.detach(wait))
+}
+
 /// The report of `script` ({"steps": [...]}) against the port's module, as
 /// `py_eval_steps.run` makes it, without its "interpreter" flags (an embedded interpreter's).
+/// It runs in its [`turn`].
 pub(crate) fn port(script: &Value) -> Value {
-    start_python();
+    let _turn = turn();
     Python::attach(|py| {
         let json = py.import("json").unwrap();
         let steps = py.import("py_eval_steps").unwrap();

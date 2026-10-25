@@ -1248,7 +1248,7 @@ fn iterators_as_the_wheels() {
     compare(&[iterators_script()]);
 }
 
-/// The current config, as the wheel's (the only test of this binary that sets it).
+/// The current config, as the wheel's (the only script of this binary that sets it).
 #[test]
 fn the_current_config_as_the_wheels() {
     compare(&[current_config_script()]);
@@ -1256,9 +1256,11 @@ fn the_current_config_as_the_wheels() {
 
 /// Where the wheel dereferences a null pointer or makes a `std::string` of it, the port's
 /// error (U-123, U-124: the wheel's process dies, probed in subprocesses); the controls run.
+/// In a turn of its own ([`common::turn`]): the controls set the current config, which
+/// [`the_current_config_as_the_wheels`]'s script sets and reads.
 #[test]
 fn where_the_wheels_process_dies_the_port_raises() {
-    common::start_python();
+    let _turn = common::turn();
     Python::attach(|py| {
         for (code, entry) in [
             ("c.addColorSpace(None)", "U-124"),

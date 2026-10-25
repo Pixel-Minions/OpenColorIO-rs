@@ -1395,10 +1395,17 @@ fn assert_py_eq(
 /// it reads (`LegacyViewingPipelineImpl::getProcessor` takes no lock), and so does the port's,
 /// in this thread and in another one while the loader waits for it. The values read are the
 /// test's own.
+///
+/// The pipeline reads its LUT once, as in the wheel's process: its linear CC's processor
+/// (LegacyViewingPipeline.cpp:264) puts it in the library's file cache, from which the
+/// pipeline's processor (:380) has it. The test runs in its turn ([`common::turn`]): another
+/// test's script clearing that cache (`proxy_of`'s `ClearAllCaches`) between the two makes the
+/// second read the file again.
 #[test]
 fn a_callback_reads_the_pipeline_that_makes_a_processor() {
     guarded(|| {
         start();
+        let _turn = common::turn();
         Python::attach(|py| {
             let globals = helper_globals(py);
             let got = eval_in(&globals, c"pipeline_reads()");
@@ -1417,11 +1424,12 @@ fn a_callback_reads_the_pipeline_that_makes_a_processor() {
 /// As [`a_callback_reads_the_pipeline_that_makes_a_processor`], for a mixing manager whose
 /// color picking role's color space reads a LUT (`MixingColorSpaceManagerImpl::getProcessor`):
 /// the encoding the test selected, the slider, and one mixing space, the color picking role's
-/// (MixingHelpers.cpp:150-154 @ v2.5.2).
+/// (MixingHelpers.cpp:150-154 @ v2.5.2). In its turn too ([`common::turn`]).
 #[test]
 fn a_callback_reads_the_manager_that_makes_a_processor() {
     guarded(|| {
         start();
+        let _turn = common::turn();
         Python::attach(|py| {
             let globals = helper_globals(py);
             let got = eval_in(&globals, c"manager_reads()");

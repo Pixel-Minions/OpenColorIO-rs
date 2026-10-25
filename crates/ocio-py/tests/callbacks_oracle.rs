@@ -1337,10 +1337,11 @@ fn menu_logging_script() -> Script {
 }
 
 /// Where the wheel's process dies (U-123, U-124) or it keeps a level outside the enumerators
-/// (U-112), the port's error; the controls run.
+/// (U-112), the port's error; the controls run. In a turn of its own ([`common::turn`]): the
+/// controls read and set the logging level, which this binary's scripts set too.
 #[test]
 fn where_the_wheel_fails_the_port_raises() {
-    common::start_python();
+    let _turn = common::turn();
     Python::attach(|py| {
         for (code, entry) in [
             ("OCIO.Config.CreateFromConfigIOProxy(None)", "U-124"),

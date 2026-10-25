@@ -757,6 +757,50 @@ fn the_classes_behave_as_the_wheels() {
     ]);
 }
 
+/// The port's scripts of two threads run one after the other (`common::turn`), as the wheel's
+/// run in processes of their own: each script's steps log only its own messages, though each
+/// waits between them while the other thread's script is ready to run. (Run at once, the
+/// second script's logging function would take the first one's later message, as the first
+/// current config's message reached a step of [`the_classes_behave_as_the_wheels`] in a land's
+/// gate.)
+#[test]
+fn scripts_of_two_threads_log_only_their_own_messages() {
+    fn script(tag: &str) -> Script {
+        let mut sc = Script::new();
+        let warning = n("OCIO.LOGGING_LEVEL_WARNING");
+        sc.call(
+            n("OCIO.LogMessage"),
+            vec![warning.clone(), s(&format!("{tag}, first"))],
+        );
+        let event = sc.call(n("threading.Event"), vec![]);
+        sc.call(ra(event, "wait"), vec![f(0.25)]);
+        sc.call(
+            n("OCIO.LogMessage"),
+            vec![warning, s(&format!("{tag}, second"))],
+        );
+        sc
+    }
+    let scripts = [script("script a"), script("script b")];
+    let json: Vec<Value> = scripts.iter().map(Script::json).collect();
+    let theirs = common::wheel(&json);
+    // Each message is the log of its own step in the wheel: the comparison isn't of empty logs.
+    for report in &theirs {
+        for k in [0, 3] {
+            assert_eq!(
+                report["steps"][k]["log"].as_array().unwrap().len(),
+                1,
+                "{report}"
+            );
+        }
+    }
+    let threads: Vec<_> = json
+        .into_iter()
+        .map(|j| std::thread::spawn(move || common::port(&j)))
+        .collect();
+    let ours: Vec<Value> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+    common::script::compare_reports(&scripts, &ours, &theirs);
+}
+
 /// `common`, numbers outside an enum's values that both wheels make an enum of, and the first
 /// `n` of those only this platform's wheel makes one of (I-225): the `int`'s most negative,
 /// -12345, -10 and -1 in the Windows wheel; in the Linux one, the `unsigned int`'s that are
