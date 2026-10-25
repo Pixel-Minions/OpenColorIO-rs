@@ -16,7 +16,9 @@
 //!   it doesn't hold, its copy);
 //! - and where the wheel stores a dimension or an interpolation outside the enumerators, or a
 //!   language, the port's error (U-112), the wheel running the same steps; where the wheel
-//!   reads past a buffer (a reversed view), the port's error (U-148).
+//!   reads past a buffer (a reversed view), the port's error (U-148);
+//! - textures read on other threads while a shader is extracted into their description (no
+//!   error, the texture's values), within a time limit.
 #![cfg(feature = "python")]
 
 mod common;
@@ -1109,4 +1111,243 @@ fn a_language_inside_the_enums_values_is_d15() {
         assert_eq!(theirs[k]["value"]["enum"][1], json!(v), "{}", theirs[k]);
         assert_ne!(ours[k]["value"]["enum"][1], json!(v), "{}", ours[k]);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Textures read on other threads while a shader is extracted into their description (verifier
+// 6.3h, round 2)
+
+/// The time a threaded script gets before the test calls it stuck.
+const THREADED_LIMIT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// The port's report of `script`, run on a thread of its own: a panic if it doesn't end within
+/// [`THREADED_LIMIT`].
+fn port_within_limit(script: Value) -> Value {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(|| common::port(&script));
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(THREADED_LIMIT) {
+        Ok(Ok(report)) => report,
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(_) => panic!("no end within {THREADED_LIMIT:?}"),
+    }
+}
+
+/// The rounds of [`texture_readers_script`], and the extractions in each.
+const READER_ROUNDS: usize = 200;
+const EXTRACTIONS_PER_ROUND: i128 = 10;
+
+/// The verifier's reproduction as a script, in [`READER_ROUNDS`] rounds. In each, a new
+/// description holds a 2D texture (256 x 256 RGB texels) and a 3D one (48 texels a side), whose
+/// copies take long enough for the other threads to wait for the port's description; three
+/// threads read the 2D texture's values and two the 3D one's, in loops (`zip` of `iter(done.is_set, True)`
+/// and the values' sixth float, `itemgetter(5)`, of each `getValues` call, into a `deque` that
+/// keeps the last) that end when the round's event `done` is set; meanwhile the main thread
+/// extracts a GPU processor without LUTs (it adds no texture) into the description
+/// [`EXTRACTIONS_PER_ROUND`] times, through `json.dumps(..., indent=1,
+/// default=extractGpuShaderInfo)` over a list of the description: the pure-Python encoder that
+/// `indent` selects is a bytecode loop, so the interpreter switches threads between extractions
+/// (every 10 us, `setswitchinterval`), as in the verifier's `for` loop. Each `getValues`
+/// releases the GIL. A reader's exception goes to `threading.excepthook`, here a list's
+/// `append`. The process's switch interval and excepthook are restored last (the port's
+/// scripts share their test binary's interpreter). The script, the step that reads the errors'
+/// count, and the steps that read the last round's readers' last values, each with the step
+/// that made its texture's values.
+///
+/// The race is timing's: the port's readers that locked the description (before this fix)
+/// failed in some rounds' first extractions. Measured on this machine (2026-10-25) with that
+/// code put back in one reader kind at a time: the 2D texture's, 3 runs of the test failed out
+/// of 4 (the readers' errors counted, 34 in one); the 3D texture's, 4 of 4.
+fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>) {
+    let mut sc = Script::new();
+    let modules = n("threading._sys.modules");
+    let module = |sc: &mut Script, name: &str| {
+        sc.call(n("operator.getitem"), vec![modules.clone(), s(name)])
+    };
+    let itertools = module(&mut sc, "itertools");
+    let collections = module(&mut sc, "collections");
+    let json_module = module(&mut sc, "json");
+    let interval = sc.call(n("threading._sys.getswitchinterval"), vec![]);
+    sc.call(n("threading._sys.setswitchinterval"), vec![f(1e-5)]);
+    let errors = sc.call(n("list"), vec![]);
+    sc.step(
+        json!({ "setattr": n("threading"), "name": "excepthook", "value": ra(errors, "append") }),
+        Expect::Value,
+    );
+
+    let cfg = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    let m = sc.call_kw(
+        n("OCIO.MatrixTransform"),
+        vec![],
+        vec![("offset", l(vec![f(0.01), f(0.0), f(0.0), f(0.0)]))],
+        Expect::Value,
+    );
+    let e = sc.call(
+        n("OCIO.ExponentTransform"),
+        vec![l(vec![f(1.1), f(1.2), f(1.3), f(1.0)])],
+    );
+    let lg = sc.call(n("OCIO.LogTransform"), vec![f(2.0)]);
+    let g = sc.call(n("OCIO.GroupTransform"), vec![l(vec![r(m), r(e), r(lg)])]);
+    let p = sc.call(
+        ra(cfg, "getProcessor"),
+        vec![r(g), n("OCIO.TRANSFORM_DIR_FORWARD")],
+    );
+    let gpu = sc.call(
+        ra(p, "getOptimizedGPUProcessor"),
+        vec![n("OCIO.OPTIMIZATION_NONE")],
+    );
+    let values = |sc: &mut Script, count: i128| {
+        sc.call_kw(
+            n("numpy.arange"),
+            vec![i(count)],
+            vec![("dtype", s("float32"))],
+            Expect::Value,
+        )
+    };
+    let buf = values(&mut sc, 256 * 256 * 3);
+    let cube = values(&mut sc, 48 * 48 * 48 * 3);
+    let no_args = sc.call(ra(itertools, "repeat"), vec![common::script::t(vec![])]);
+    sc.unrepr(no_args);
+    let sixth = sc.call(n("operator.itemgetter"), vec![i(5)]);
+
+    let mut lasts = Vec::new();
+    for _ in 0..READER_ROUNDS {
+        let d = sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![]);
+        sc.call(
+            ra(d, "addTexture"),
+            vec![
+                s("t"),
+                s("s"),
+                i(256),
+                i(256),
+                n("OCIO.GpuShaderDesc.TEXTURE_RGB_CHANNEL"),
+                n("OCIO.GpuShaderDesc.TEXTURE_2D"),
+                n("OCIO.INTERP_LINEAR"),
+                r(buf),
+            ],
+        );
+        sc.call(
+            ra(d, "add3DTexture"),
+            vec![
+                s("t3"),
+                s("s3"),
+                i(48),
+                n("OCIO.INTERP_TETRAHEDRAL"),
+                r(cube),
+            ],
+        );
+        let textures = sc.call(ra(d, "getTextures"), vec![]);
+        let tex = sc.call(n("operator.getitem"), vec![r(textures), i(0)]);
+        let textures_3d = sc.call(ra(d, "get3DTextures"), vec![]);
+        let tex3 = sc.call(n("operator.getitem"), vec![r(textures_3d), i(0)]);
+
+        let done = sc.call(n("threading.Event"), vec![]);
+        sc.unrepr(done);
+        lasts.clear();
+        let mut threads = Vec::new();
+        for texture in [tex, tex, tex, tex3, tex3] {
+            let running = sc.call(n("iter"), vec![ra(done, "is_set"), b(true)]);
+            sc.unrepr(running);
+            let reads = sc.call(
+                ra(itertools, "starmap"),
+                vec![ra(texture, "getValues"), r(no_args)],
+            );
+            sc.unrepr(reads);
+            let each = sc.call(n("zip"), vec![r(reads)]);
+            sc.unrepr(each);
+            let floats = sc.call(ra(itertools, "starmap"), vec![r(sixth), r(each)]);
+            sc.unrepr(floats);
+            let reading = sc.call(n("zip"), vec![r(running), r(floats)]);
+            sc.unrepr(reading);
+            let last = sc.call_kw(
+                ra(collections, "deque"),
+                vec![],
+                vec![("maxlen", i(1))],
+                Expect::Value,
+            );
+            let thread = sc.call_kw(
+                n("threading.Thread"),
+                vec![],
+                vec![
+                    ("target", ra(last, "extend")),
+                    ("args", common::script::t(vec![r(reading)])),
+                ],
+                Expect::Value,
+            );
+            sc.unrepr(thread);
+            lasts.push(last);
+            threads.push(thread);
+        }
+        for &thread in &threads {
+            sc.call(ra(thread, "start"), vec![]);
+        }
+        let descs = sc.call(
+            n("operator.mul"),
+            vec![l(vec![r(d)]), i(EXTRACTIONS_PER_ROUND)],
+        );
+        sc.call_kw(
+            ra(json_module, "dumps"),
+            vec![r(descs)],
+            vec![
+                ("indent", i(1)),
+                ("default", ra(gpu, "extractGpuShaderInfo")),
+            ],
+            Expect::Value,
+        );
+        sc.call(ra(done, "set"), vec![]);
+        for &thread in &threads {
+            sc.call(ra(thread, "join"), vec![]);
+        }
+    }
+    sc.step(
+        json!({
+            "setattr": n("threading"),
+            "name": "excepthook",
+            "value": n("threading.__excepthook__"),
+        }),
+        Expect::Value,
+    );
+    sc.call(n("threading._sys.setswitchinterval"), vec![r(interval)]);
+    let count = sc.call(n("len"), vec![r(errors)]);
+    let read: Vec<(usize, usize)> = lasts
+        .iter()
+        .zip([buf, buf, buf, cube, cube])
+        .map(|(&last, values)| (sc.call(n("list"), vec![r(last)]), values))
+        .collect();
+    (sc, count, read)
+}
+
+/// Upstream's `Texture.getValues` and `Texture3D.getValues` read the description with the GIL
+/// released (PyGpuShaderDesc.cpp:259-285, 336-349 @ v2.5.2), while the main thread extracts a
+/// shader into it; they read only its textures, which that extraction doesn't touch, and the
+/// wheel's reads all succeed. The port's extraction holds the description outside its lock for
+/// the call (so that a logging function can read it, H1 of round 1), and its readers, which
+/// locked the description, saw an empty one: "1D LUT access error: index = 0 where size = 0".
+/// Now each texture keeps its values. The same script on both sides, within a time limit: no
+/// reader's error, the last round's readers' last value (the texture's sixth float).
+#[test]
+fn textures_read_during_an_extraction_are_the_wheels() {
+    let (sc, count, read) = texture_readers_script();
+    let theirs = common::wheel(&[sc.json()]).remove(0);
+    let steps = theirs["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), sc.steps.len(), "{theirs}");
+    assert_eq!(steps[count]["value"]["int"], "0", "{}", steps[count]);
+    assert_eq!(read.len(), 5);
+    for &(k, values) in &read {
+        // `[(False, x)]`, x the sixth float of the values the texture was given: each reader
+        // read at least once, the texture's values.
+        let items = steps[k]["value"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "step {k}: {}", steps[k]);
+        let given = steps[values]["value"]["array"]["bytes"].as_str().unwrap();
+        assert_eq!(
+            items[0]["items"][1]["scalar"]["bytes"],
+            given[40..48],
+            "step {k}: {}",
+            steps[k]
+        );
+    }
+    let ours = port_within_limit(sc.json());
+    common::script::compare_reports(std::slice::from_ref(&sc), &[ours], &[theirs]);
 }

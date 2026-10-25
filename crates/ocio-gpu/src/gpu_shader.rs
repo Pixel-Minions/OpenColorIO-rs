@@ -204,8 +204,9 @@ struct TextureData {
     interpolation: u8,
     /// `m_textureShaderBindingIndex`, before the description's binding start is added.
     binding_index: u32,
-    /// `m_values`.
-    values: Vec<f32>,
+    /// `m_values`. Never changed once the texture is added (upstream gives no way to), so a
+    /// reader may keep it ([`Texture::shared_values`]).
+    values: Arc<[f32]>,
 }
 
 /// The enumerator of an interpolation's value, `Unknown` for a value that is none.
@@ -286,7 +287,7 @@ impl TextureData {
             dimensions,
             interpolation,
             binding_index,
-            values: values[..size].to_vec(),
+            values: Arc::from(&values[..size]),
         })
     }
 }
@@ -374,6 +375,13 @@ impl Texture {
     pub fn values(&self) -> &[f32] {
         &self.0.values
     }
+
+    /// The values, shared: what upstream's `getTextureValues` points to, which stays as it is
+    /// while the description lives (the textures are only ever added to).
+    #[doc(hidden)]
+    pub fn shared_values(&self) -> Arc<[f32]> {
+        self.0.values.clone()
+    }
 }
 
 /// A 3D LUT's texture: RGB, `edge_len` texels a side.
@@ -422,6 +430,13 @@ impl Texture3D {
     /// The values, `edge_len^3` RGB texels.
     pub fn values(&self) -> &[f32] {
         &self.0.values
+    }
+
+    /// The values, shared: what upstream's `get3DTextureValues` points to, which stays as it is
+    /// while the description lives (the textures are only ever added to).
+    #[doc(hidden)]
+    pub fn shared_values(&self) -> Arc<[f32]> {
+        self.0.values.clone()
     }
 }
 

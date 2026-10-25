@@ -13,8 +13,11 @@
 //! Python may set (the getters don't follow). The wheel's getters read the property through a
 //! raw pointer: once nothing holds the property (its description is gone, and no
 //! `DynamicProperty` object of it lives; a clone of the description holds none), a call reads
-//! freed memory, where the port raises its own error (docs/improvements.md, U-196). A `Texture` holds the description and its index, and
-//! reads the values from the description when asked (`getValues`).
+//! freed memory, where the port raises its own error (docs/improvements.md, U-196). A
+//! `Texture` holds the description, as upstream's, and the values its index has there, which
+//! never change once added (`getValues` reads them).
+
+use std::sync::Arc;
 
 use numpy::PyArray1;
 use ocio_gpu::gpu_shader::{TextureType, UniformData};
@@ -105,7 +108,15 @@ impl UniformValue {
 }
 
 /// The `Texture` struct of PyGpuShaderDesc.cpp:23-35 @ v2.5.2: what `getTexture` gave, and
-/// the description and index `getValues` reads from.
+/// the description (`m_shaderDesc`, which the texture keeps alive) and the values at the
+/// texture's index (`m_index`) that `getValues` reads.
+///
+/// Upstream's `getValues` reads the description with the GIL released, while another thread may
+/// extract a shader into it; it reads only the textures, which are only ever added to, so it
+/// sees the texture's values as they were added. The values are kept here, shared with the
+/// description's texture, so that a read never waits for the description, nor sees it while an
+/// extraction holds it outside its lock (`crate::py_gpu_shader_creator::with_desc_unlocked`;
+/// verifier 6.3h, round 2).
 #[derive(Debug, Clone)]
 struct TextureValue {
     texture_name: Vec<u8>,
@@ -116,11 +127,12 @@ struct TextureValue {
     dimensions: i64,
     interpolation: i64,
     binding_index: u32,
-    desc: DescRc,
-    index: i32,
+    _desc: DescRc,
+    values: Arc<[f32]>,
 }
 
-/// The `Texture3D` struct of PyGpuShaderDesc.cpp:37-46 @ v2.5.2.
+/// The `Texture3D` struct of PyGpuShaderDesc.cpp:37-46 @ v2.5.2, its values kept as
+/// [`TextureValue`]'s are.
 #[derive(Debug, Clone)]
 struct Texture3DValue {
     texture_name: Vec<u8>,
@@ -128,8 +140,8 @@ struct Texture3DValue {
     edge_len: u32,
     interpolation: i64,
     binding_index: u32,
-    desc: DescRc,
-    index: i32,
+    _desc: DescRc,
+    values: Arc<[f32]>,
 }
 
 /// The value of `self`, an instance of the class its parameter's type names, or the next
@@ -731,8 +743,8 @@ fn texture_item(py: Python<'_>, rc: &DescRc, i: i32) -> Out {
             dimensions: i64::from(dimensions),
             interpolation: i64::from(t.raw_interpolation()),
             binding_index,
-            desc: rc.clone(),
-            index: i,
+            _desc: rc.clone(),
+            values: t.shared_values(),
         }
     };
     out(py, TEXTURE, &Shared::new(value))
@@ -783,8 +795,8 @@ fn texture_3d_item(py: Python<'_>, rc: &DescRc, i: i32) -> Out {
             edge_len: t.edge_len(),
             interpolation: i64::from(t.raw_interpolation()),
             binding_index,
-            desc: rc.clone(),
-            index: i,
+            _desc: rc.clone(),
+            values: t.shared_values(),
         }
     };
     out(py, TEXTURE_3D, &Shared::new(value))
@@ -883,18 +895,14 @@ fn past_texture_values() -> PyErr {
 }
 
 // .def("getValues", [](Texture & self) {...}) (PyGpuShaderDesc.cpp:259-285 @ v2.5.2): the
-// GIL released, the texture's values from the description, the channel's count of floats
-// (or upstream's error); then a new float32 array of `m_height * m_width * numChannels`
-// values.
+// GIL released, the texture's values (from the description upstream, the texture's own here,
+// [`TextureValue`]), the channel's count of floats (or upstream's error); then a new float32
+// array of `m_height * m_width * numChannels` values.
 static TX_GET_VALUES: Function =
     method_def!("getValues", [TX_SELF], "numpy.ndarray", |py, o, a, _| {
         let rc = this_value!(o, a, TextureValue);
         let v = rc.lock().clone();
-        let values = py.detach(|| {
-            let desc = v.desc.lock();
-            desc.texture(v.index as u32).map(|t| t.values().to_vec())
-        });
-        let values = py_result(py, values)?;
+        let values = py.detach(|| v.values.clone());
         let (num_channels, _) = num_channels(py, v.channel)?;
         let count = (v.height.wrapping_mul(v.width) as u64) * num_channels as u64;
         let values = usize::try_from(count)
@@ -932,17 +940,13 @@ readonly!(
 );
 
 // .def("getValues", [](Texture3D & self) {...}) (PyGpuShaderDesc.cpp:336-349 @ v2.5.2): the
-// GIL released, the texture's values; a new float32 array of `edgelen^3 * 3` (in `unsigned`)
-// values, the texture's count.
+// GIL released, the texture's values (its own, as [`TextureValue`]'s); a new float32 array of
+// `edgelen^3 * 3` (in `unsigned`) values, the texture's count.
 static T3_GET_VALUES: Function =
     method_def!("getValues", [T3_SELF], "numpy.ndarray", |py, o, a, _| {
         let rc = this_value!(o, a, Texture3DValue);
         let v = rc.lock().clone();
-        let values = py.detach(|| {
-            let desc = v.desc.lock();
-            desc.texture_3d(v.index as u32).map(|t| t.values().to_vec())
-        });
-        let values = py_result(py, values)?;
+        let values = py.detach(|| v.values.clone());
         let count = v
             .edge_len
             .wrapping_mul(v.edge_len)
