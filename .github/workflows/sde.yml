@@ -40,6 +40,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # The oracle's response cache is off in every job: each test asks the wheel, so that an
+  # answer cached under a key that missed a change of the oracle (oracle_scope.rs) can never
+  # pass CI. rust-cache may restore parts of target/, where that cache lives; scripts/rocky9.sh
+  # passes this variable into the container. `cargo xtask guards` checks both.
+  OCIO_RS_ORACLE_NO_CACHE: "1"
   # The battery's quick tier: SDE checks which kernels are dispatched; full is too slow emulated.
   OCIO_RS_TIER: quick
   # Two tests of the API format sweep (crates/ocio/tests/api_formats_oracle.rs) run for hours

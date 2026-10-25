@@ -13,6 +13,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # The oracle's response cache is off in every job: each test asks the wheel, so that an
+  # answer cached under a key that missed a change of the oracle (oracle_scope.rs) can never
+  # pass CI. rust-cache may restore parts of target/, where that cache lives; scripts/rocky9.sh
+  # passes this variable into the container. `cargo xtask guards` checks both.
+  OCIO_RS_ORACLE_NO_CACHE: "1"
 
 # `cargo xtask ci` runs in branch mode (ported tests at least the base's docs/ratchet.toml)
 # except on `main`, and on a pull request whose head is a land commit (`cargo xtask land`'s

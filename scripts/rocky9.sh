@@ -15,8 +15,8 @@
 # submodule's relative .git file points inside the container, so that `cargo xtask guards` can
 # read the submodule's commit there too.
 #
-# OCIO_RS_TIER (the test tier) and RUST_TEST_THREADS pass through to the container when they are
-# set here.
+# OCIO_RS_TIER (the test tier), RUST_TEST_THREADS and OCIO_RS_ORACLE_NO_CACHE (no oracle response
+# cache: CI sets it) pass through to the container when they are set here.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="ocio-rs-rocky9:1"
@@ -98,4 +98,5 @@ docker run --rm -i $tty_flag \
     -e CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-auto}" \
     -e OCIO_RS_TIER \
     -e RUST_TEST_THREADS \
+    -e OCIO_RS_ORACLE_NO_CACHE \
     "$image" "$@"
