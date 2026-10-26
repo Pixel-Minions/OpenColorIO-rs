@@ -11,8 +11,8 @@ from Rust and, later, from Python.
 > **Status: under development, about 80% done.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker) and M3 (dynamic properties,
-> grading and app helpers) are complete: all of it is merged and matches the official library on
-> the CPU and the GPU. Next: the Python module (M4). See [Progress](#progress).
+> grading and app helpers) are complete: their CPU results and generated GPU shaders match
+> the official library. Next: the Python module (M4). See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -86,8 +86,8 @@ one.
 
 ## Progress
 
-Status as of 2026-10-25 (evening): **milestones M0, M1, M2 and M3 are complete**, about 80% of the
-planned work (1,158 of 1,191 upstream C++ tests ported; 375 of 384 upstream Python tests pass
+Status as of 2026-10-26: **milestones M0, M1, M2 and M3 are complete**, about 80% of the
+planned work (1,174 of 1,191 upstream C++ tests ported; 375 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
 test configs): the grading values (GradingPrimary, GradingTone,
@@ -95,8 +95,8 @@ GradingHueCurve) with their dynamic properties; the ExposureContrast, GradingPri
 GradingTone and GradingHueCurve op families, CPU and GPU; the ExposureContrast and grading
 transforms, with their builders, their YAML and their CLF/CTF elements; dynamic properties end to
 end; and every app helper (color space menus, display/view helpers, `LegacyViewingPipeline`,
-the mixing helpers). Phase 9 in main: ConfigUtils and the first part of config merging (the
-OCIOM reader and `ConfigMerger::CreateFromFile`). Phase 6 (M4) in main: the
+the mixing helpers). Phase 9 in main: ConfigUtils and complete config merging, including every
+section, OCIOM chains, whole-config merges and single-color-space merges. Phase 6 (M4) in main: the
 `PyOpenColorIO` module's foundation (the module and its build, upstream's Python suite runner,
 pybind11's dispatcher, casters, classes and enums as the wheel shows them, every enum, constant
 and string conversion), every transform class, and the objects the config holds (context,
@@ -111,7 +111,7 @@ files, and the CLF/CTF writer; the baker, in every format the official library b
 CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
 4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
 ops in M3. Next: the rest of Phase 6 (M4: the config-merging and ConfigUtils bindings and the remaining Python
-tests) and Phase 9 (the rest of config merging and the remaining library surface).
+tests) and Phase 9 (monitor support and the remaining library tests).
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
