@@ -3992,6 +3992,185 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p9-merge-1` (9.2c, `ociom_yaml.rs`, `load`);
   `ociom_yaml_oracle_tests.rs`.
 
+### I-426. A merged config's name and description can be empty while the other config has them
+
+- **Upstream:** the general section of a merge takes the name and the description of the
+  overrides, else of one config only, by the default strategy: the input's for `PreferInput`
+  and `InputOnly`, the base's for `PreferBase` and `BaseOnly` (`SectionMerger.cpp:114-276` @
+  v2.5.2, with upstream's TODOs "If empty, take it from the other config?"). When that config
+  has none, the merged config has none either, though the other config has one. The luma
+  coefficients come from the same config.
+- **Who notices:** whoever merges into a base config without a name or description and
+  prefers the base (a v1 base, which has none).
+- **A fix:** upstream's TODO: take the other config's name and description when the preferred
+  one's are empty.
+- **Status:** matched in `p9-merge-2` (9.2d, `apphelpers/mergeconfigs/section_merger.rs`,
+  `GeneralMerger`); `MergeConfigs/general_section` (a v1 base) and
+  `section_merger_oracle_tests.rs`.
+
+### I-427. A merge takes file rules that differ only in case as the same rule
+
+- **Upstream:** the file rules section compares two rules of the same name by their color
+  space, pattern, regular expression, extension and custom key values, all ignoring case
+  (`fileRulesAreEqual`, `SectionMerger.cpp:425-472` @ v2.5.2). Rules whose regular expressions
+  (`a` and `A`), patterns or extensions differ only in case match different files, yet the merge
+  sees no conflict: it reports none, even with `error_on_conflict`, and keeps the rule of the
+  config that comes first. The viewing rules compare their custom key values ignoring case too
+  (`viewingRulesAreEqual`, `SectionMerger.cpp:731-810`). Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** merges of configs whose rules tell files apart by case (on case-sensitive
+  file systems), or whose custom keys differ in case.
+- **A fix:** compare the patterns, expressions, extensions and custom key values exactly (the
+  color space names may stay case-insensitive, as the config's own lookups are).
+- **Status:** matched in `p9-merge-2` (9.2e, `apphelpers/mergeconfigs/section_merger.rs`,
+  `file_rules_are_equal`; 9.2f, `viewing_rules_are_equal`); `section_merger_oracle_tests.rs`
+  (`whole_merges_match_the_wheel`).
+
+### I-428. A merge drops the custom keys of the path search rule it copies
+
+- **Upstream:** when a merge copies the `ColorSpaceNamePathSearch` rule from one config into the
+  other's rules (the other has none), `copyRule` inserts a new path search rule and returns
+  before it copies the rule's custom keys (`SectionMerger.cpp:481-486` @ v2.5.2), which the other
+  rules keep. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** applications that read custom keys of the path search rule from a merged
+  config.
+- **A fix:** copy the custom keys for the path search rule too.
+- **Status:** matched in `p9-merge-2` (9.2e, `section_merger.rs`, `copy_rule`);
+  `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`).
+
+### I-429. Looks of the same name merge without a conflict
+
+- **Upstream:** the looks section replaces or keeps a look of the same name by its strategy
+  without comparing the two looks and without a message (`LooksMerger`, `SectionMerger.cpp:
+  1919-2022` @ v2.5.2), while the other sections report the input overriding the base, as a
+  warning or, with `error_on_conflict`, as an error. A merge with `error_on_conflict` set still
+  replaces a base look silently. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** whoever relies on `error_on_conflict` to stop a merge that changes the
+  base's looks.
+- **A fix:** compare looks of the same name (process space, transforms, description) and
+  report a conflict as the other sections do.
+- **Status:** matched in `p9-merge-2` (9.2e, `section_merger.rs`, `LooksMerger`);
+  `MergeConfigs/looks_section` and `section_merger_oracle_tests.rs`.
+
+### I-430. The Remove strategy keeps most of the input's active displays and views
+
+- **Upstream:** with the displays and views strategy `Remove`, the merge splits the base's and
+  the input's active displays (and views) at each comma, without trimming, and removes from the
+  base's list each entry of the input's that matches one ignoring case
+  (`SectionMerger.cpp:1631-1653` @ v2.5.2). The lists come from `getActiveDisplays`, which
+  writes `, ` between the names, so every entry but the first starts with a space: an entry is
+  removed only when it is first in both lists or past the first in both. Base `[A, B]` and input
+  `[B, A]` remove nothing. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** merges that remove displays or views with `Remove`.
+- **A fix:** trim the entries before comparing them, as the other strategies do
+  (`mergeStringsWithoutDuplicates`).
+- **Status:** matched in `p9-merge-2` (9.2f, `apphelpers/mergeconfigs/section_merger.rs`,
+  `DisplayViewMerger::handle_remove`); `section_merger_oracle_tests.rs`
+  (`whole_merges_match_the_wheel`, the "active lists" configs).
+
+### I-431. A merge splits an active display or view whose name holds a comma
+
+- **Upstream:** the displays and views section splits the active lists at every comma, with a
+  TODO saying that quoted names aren't handled (`splitActiveList`, `SectionMerger.cpp:31-38` @
+  v2.5.2), although `getActiveDisplays` quotes a name that holds a comma. The merged list then
+  joins the pieces again: the strategies that trim the entries give the name back, while
+  `Remove` writes `"x,  y"` for a display `x, y`, which then names another display. Probed on
+  the Windows wheel (2026-10-25).
+- **Who notices:** configs with display or view names that hold a comma.
+- **A fix:** split the lists as the config reads them (`Config::setActiveDisplays`), quotes
+  respected.
+- **Status:** matched in `p9-merge-2` (9.2f, `section_merger.rs`, `split_active_list`);
+  `section_merger_oracle_tests.rs` (the "active lists" configs).
+
+### I-432. View transforms that differ in their categories merge without a conflict
+
+- **Upstream:** the view transforms section compares two view transforms of the same name by
+  their reference space type and the text of their transforms only, with a TODO "Check
+  categories." (`viewTransformsAreEqual`, `SectionMerger.cpp:1686-1749` @ v2.5.2). View
+  transforms that differ in their categories (or family and description, which upstream calls
+  not functional) are no conflict: no message, even with `error_on_conflict`, and the merge
+  keeps the one of the preferred config. Probed on the Windows wheel (2026-10-25).
+- **Who notices:** applications that filter view transforms by category in their menus, merging
+  configs whose view transforms carry different categories.
+- **A fix:** upstream's TODO: compare the categories too.
+- **Status:** matched in `p9-merge-3` (9.2g, `apphelpers/mergeconfigs/section_merger.rs`,
+  `view_transforms_are_equal`); `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`,
+  the "view transforms" configs).
+
+### I-433. A default view transform that only one config has is reported as a conflict
+
+- **Upstream:** the view transforms section reports "The Input config contains a value that
+  would override the Base config: default_view_transform: <input's>" whenever the two configs'
+  default view transforms differ ignoring case (`SectionMerger.cpp:1834-1840, 1862-1868` @
+  v2.5.2), also when either config has none: an input without one gives the message with an
+  empty name, though the base's is kept, and a base without one gives it though nothing is
+  overridden. With `error_on_conflict` the merge stops there. Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** merges with `error_on_conflict` of a config that sets no default view
+  transform, which is optional.
+- **A fix:** report the conflict only when both configs name a default view transform.
+- **Status:** matched in `p9-merge-3` (9.2g, `section_merger.rs`, `ViewTransformsMerger`);
+  `section_merger_oracle_tests.rs` (`whole_merges_match_the_wheel`, the "view transforms in
+  other reference spaces" and "view transforms of an unknown reference space" configs).
+
+### I-434. The Remove strategy removes base search paths that are part of an input search path
+
+- **Upstream:** with the color spaces strategy `Remove`, the merge keeps a search path of the
+  base only when it isn't found, as a substring and with case, in the input's search paths
+  joined with `:` (`StringUtils::Find(m_inputConfig->getSearchPath(), ...)`,
+  `SectionMerger.cpp:3027-3036` @ v2.5.2). A base path `luts` is removed when the input has
+  `luts2`, and `.` whenever an input path holds a dot; `LUTS` stays when the input has `luts`,
+  though the other strategies compare search paths ignoring case. Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** merges that remove the input's search paths from a base config.
+- **A fix:** compare whole search paths, as `hasSearchPath` does for the other strategies.
+- **Status:** matched in `p9-merge-3` (9.2h, `apphelpers/mergeconfigs/section_merger.rs`,
+  `ColorspacesMerger::handle_remove`); `section_merger_oracle_tests.rs`
+  (`whole_merges_match_the_wheel`, the "color spaces" configs).
+
+### I-435. An environment variable whose default value is empty counts as missing
+
+- **Upstream:** the color spaces section tells whether the merged config has an environment
+  variable by its default value being empty (`SectionMerger.cpp:2852-2857, 3020-3025` @
+  v2.5.2). With `PreferBase`, an input variable overrides a base variable whose value is empty;
+  with `Remove`, a base variable whose value is empty isn't removed. Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** configs that declare environment variables with empty defaults.
+- **A fix:** look the name up in the config's list of variables.
+- **Status:** matched in `p9-merge-3` (9.2h, `section_merger.rs`, `ColorspacesMerger`);
+  `section_merger_oracle_tests.rs` (the "color spaces" configs).
+
+### I-436. Named transforms get their family prefixes by the color spaces' strategy
+
+- **Upstream:** the named transforms section prefixes the families of the merged named
+  transforms, and changes their family separators, by the color spaces' strategy
+  (`m_params->getColorspaces()` in `NamedTransformsMerger::updateFamily`,
+  `SectionMerger.cpp:3078-3121` @ v2.5.2, a copy of the color spaces section's function), not
+  by the named transforms' own. With `PreferInput` named transforms and `BaseOnly` color
+  spaces, they get no prefix; with `PreferBase` color spaces, a base named transform gets the
+  base prefix though the named transforms prefer the input. Probed on the Windows wheel
+  (2026-10-25).
+- **Who notices:** merges with family prefixes whose color spaces and named transforms use
+  different strategies.
+- **A fix:** read `getNamedTransforms()` in `NamedTransformsMerger::updateFamily`.
+- **Status:** matched in `p9-merge-3` (9.2i, `apphelpers/mergeconfigs/section_merger.rs`,
+  `NamedTransformsMerger::update_family`); `section_merger_oracle_tests.rs`
+  (`whole_merges_match_the_wheel`, the "named transforms" configs).
+
+### I-437. A merge reports a missing file as a plain exception
+
+- **Upstream:** `ConfigMerger::mergeConfigs`, `ConfigMergingHelpers::MergeConfigs` and
+  `MergeColorSpace` catch the mergers' errors as `const Exception &` and rethrow them with
+  `throw(e)` (`MergeConfigsHelpers.cpp:713-716, 759-762, 794-797` @ v2.5.2), which throws a
+  copy of the static type: an `ExceptionMissingFile` (a LUT file the reference space
+  converters can't find) comes out as an `Exception`, and Python gets `Exception` rather than
+  `ExceptionMissingFile`. The message is kept.
+- **Who notices:** callers that catch `ExceptionMissingFile` around a merge.
+- **A fix:** rethrow with `throw;`, or let the error through.
+- **Status:** matched in `p9-merge-3` (9.2j, `apphelpers/mergeconfigs/merge_configs_helpers.rs`,
+  `rethrown`); `crates/ocio/tests/merge_configs_oracle.rs`
+  (`a_missing_file_in_a_merge_is_a_plain_exception`, probed on the Windows wheel, 2026-10-25).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

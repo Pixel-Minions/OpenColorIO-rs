@@ -19,7 +19,7 @@ path = "include/OpenColorIO/OpenColorAppHelpers.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio/src/apphelpers/color_space_helpers.rs", "crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs", "crates/ocio/src/apphelpers/display_view_helpers.rs", "crates/ocio/src/apphelpers/mergeconfigs/merge_configs_helpers.rs"]
 status = "partial"
-note = "p5-helpers-1 5.7b: ColorSpaceMenuParameters, ColorSpaceMenuHelper and ColorSpaceHelpers::AddColorSpace (15-293) in apphelpers/color_space_helpers.rs, re-exported by lib.rs (operator<< as to_bytes); p5-helpers-2 5.7d: LegacyViewingPipeline (350-432) in apphelpers/legacy_viewing_pipeline.rs, re-exported by lib.rs (operator<< as to_bytes and Display; getProcessor overloads as processor(config, Option<&Context>), owner decision 2026-10-22); p5-helpers-2 5.7c: DisplayViewHelpers (295-348) as the module apphelpers/display_view_helpers.rs (processor with context: Option<&Context>, identity_processor, add_display_view, remove_display_view), re-exported by lib.rs; p9-merge-1 9.2a: ConfigMergingParameters (536-709) in apphelpers/mergeconfigs/merge_configs_helpers.rs, re-exported by lib.rs with MergeStrategies (a shared handle, owner decision P9-2; operator<< as to_bytes); 9.2b: ConfigMerger (711-853) there, re-exported by lib.rs (a value; add_params and params with Option, serialize as Result; from_file in 9.2c)"
+note = "p5-helpers-1 5.7b: ColorSpaceMenuParameters, ColorSpaceMenuHelper and ColorSpaceHelpers::AddColorSpace (15-293) in apphelpers/color_space_helpers.rs, re-exported by lib.rs (operator<< as to_bytes); p5-helpers-2 5.7d: LegacyViewingPipeline (350-432) in apphelpers/legacy_viewing_pipeline.rs, re-exported by lib.rs (operator<< as to_bytes and Display; getProcessor overloads as processor(config, Option<&Context>), owner decision 2026-10-22); p5-helpers-2 5.7c: DisplayViewHelpers (295-348) as the module apphelpers/display_view_helpers.rs (processor with context: Option<&Context>, identity_processor, add_display_view, remove_display_view), re-exported by lib.rs; p9-merge-1 9.2a: ConfigMergingParameters (536-709) in apphelpers/mergeconfigs/merge_configs_helpers.rs, re-exported by lib.rs with MergeStrategies (a shared handle, owner decision P9-2; operator<< as to_bytes); 9.2b: ConfigMerger (711-853) there, re-exported by lib.rs (a value; add_params and params with Option, serialize as Result; from_file in 9.2c); p9-merge-3 9.2j: ConfigMerger::mergeConfigs, and ConfigMergingHelpers (855-886) as the module config_merging_helpers, re-exported by lib.rs (merge_configs with Option params and configs, merge_color_space with a params reference, U-176)"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
@@ -218,8 +218,8 @@ note = "p3-context 3.5d: EnvMapKey, EnvMap, UsedEnvs and the declarations; the C
 path = "src/OpenColorIO/CustomKeys.h"
 kind = "src"
 target = ["crates/ocio/src/custom_keys.rs"]
-status = "partial"
-note = "p3-rules 3.9e: CustomKeysContainer's getSize, getName, getValue, set, validateIndex; hasKey and getValueForKey have no caller in OCIO 2.5.2"
+status = "done"
+note = "p3-rules 3.9e: CustomKeysContainer's getSize, getName, getValue, set, validateIndex; p9-merge-2 9.2e: hasKey, getValueForKey (their callers are the merge's rule comparisons)"
 
 [[file]]
 path = "src/OpenColorIO/Display.cpp"
@@ -709,8 +709,8 @@ status = "done"
 path = "src/OpenColorIO/apphelpers/mergeconfigs/MergeConfigsHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/merge_configs_helpers.rs"]
-status = "partial"
-note = "p9-merge-1 9.2a: ConfigMergingParameters (22-405); 9.2b: ConfigMerger (449-680, loadConfig, Create, createEditableCopy, search paths, working dir, params, serialize, versions, merged configs); 9.2c: CreateFromFile and Impl::Read (413-447, 537-558); mergeConfigs and ConfigMergingHelpers in 9.2j (p9-merge-3)"
+status = "done"
+note = "p9-merge-1 9.2a: ConfigMergingParameters (22-405); 9.2b: ConfigMerger (449-680, loadConfig, Create, createEditableCopy, search paths, working dir, params, serialize, versions, merged configs); 9.2c: CreateFromFile and Impl::Read (413-447, 537-558); p9-merge-3 9.2j: mergeConfigs (681-729), ConfigMergingHelpers::MergeConfigs and MergeColorSpace (731-802)"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/mergeconfigs/MergeConfigsHelpers.h"
@@ -737,13 +737,15 @@ note = "p9-merge-1 9.2c"
 path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs"]
-status = "todo"
+status = "done"
+note = "p9-merge-2 9.2d: SectionMerger (notify, merge), setMergedConfigVersion, GeneralMerger, RolesMerger; 9.2e: fileRulesAreEqual, copyRule, FileRulesMerger, LooksMerger; 9.2f: splitActiveList, mergeStringsWithoutDuplicates, viewingRulesAreEqual, copyViewingRule, addUniqueViewingRules, DisplayViewMerger; p9-merge-3 9.2g: viewTransformsAreEqual, ViewTransformsMerger; 9.2h: hasSearchPath, replaceSeparator, ColorspacesMerger; 9.2i: cleanUpInactiveList, NamedTransformsMerger"
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.h"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs"]
-status = "todo"
+status = "done"
+note = "p9-merge-2 9.2d: MergeHandlerOptions, SectionMerger, GeneralMerger, RolesMerger (mergeStringVecWithoutDuplicate and inputFirstMergeStringVec are declared, never defined); 9.2e: FileRulesMerger, LooksMerger; 9.2f: DisplayViewMerger; p9-merge-3 9.2g: ViewTransformsMerger (with m_inputToBaseGtScene/Display); 9.2h: ColorspacesMerger (15 declared functions and ColorspaceNameConflict are never defined or used); 9.2i: NamedTransformsMerger (13 declared functions are never defined)"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.cpp"
@@ -4659,8 +4661,8 @@ status = "done"
 path = "tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/merge_configs_helpers_tests.rs"]
-status = "partial"
-note = "p9-merge-1 9.2c: ociom_parser, params_serialization, ociom_serialization, ociom_parser_no_overrides; the section tests with 9.2d-9.2i, the merges with 9.2j"
+status = "done"
+note = "p9-merge-1 9.2c: ociom_parser, params_serialization, ociom_serialization, ociom_parser_no_overrides; p9-merge-2 9.2d: general_section, roles_section; 9.2e: file_rules_section, looks_section; 9.2f: displays_views_section; p9-merge-3 9.2g: view_transforms_section; 9.2h: overrides, colorspaces_section, colorspaces_section_common_reference_and_duplicates; 9.2i: colorspaces_section_errors, named_transform_section, named_transform_section_errors; 9.2j: merges_with_ociom_file, merges_with_ocioz_file, merge_in_memory_configs, merge_single_colorspace (all 20 tests)"
 
 [[file]]
 path = "tests/cpu/apphelpers/MixingHelpers_tests.cpp"

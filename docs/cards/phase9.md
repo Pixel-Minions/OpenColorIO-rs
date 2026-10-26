@@ -92,7 +92,7 @@ mutation testing. What changes in Phase 9:
 | 9.1c | `ConfigUtils.cpp:844-1482` (449): `simplifyTransform`, `invertTransform`, `getTransformForDir`, `getRefSpaceConverter`, `transformIsEmpty`, `updateReferenceColorspace`, `updateReferenceView`, `hasColorSpaceRefType`, `initializeRefSpaceConverters`, `calcColorSpaceFingerprint`, `initializeTestVals`, `initializeColorSpaceFingerprints`, `findEquivalentColorspace` | `config_utils.rs` | `ConfigUtils_tests.cpp` `MergeConfigs/config_utils_update_reference`, `MergeConfigs/config_utils_find_equivalent_colorspace` |
 
 - `Processor::Impl::setColorSpaceConversion` (`Processor.cpp:598-621`) has no caller in OCIO
-  2.5.2: the map says so, as for `CustomKeys` `hasKey`.
+  2.5.2: the map says so.
 - `SuspendCacheGuard` turns a shared config's processor cache off and back on through a const
   pointer (`setProcessorCacheFlags` is `const noexcept`). Upstream's flags are a plain member,
   so another thread using the config meanwhile races with the guard (undefined behaviour: a
@@ -157,7 +157,7 @@ mutation testing. What changes in Phase 9:
 
 | Chunk | What |
 |---|---|
-| 9.5a | **Audit.** Every `todo` and `partial` entry of `upstream-map.toml` outside the bindings (Phase 6), the tools (Phase 10) and the GPU suite (Phase 7), read against upstream: each function ported, ported elsewhere, without a caller in 2.5.2, or `n/a` with its reason. The entries left: the headers no chunk claimed (`Mutex.h`, `PrivateTypes.h`, `TransformBuilder.h`, `OCIOYaml.h`), the test support (`UnitTestOptimFlags.cpp/.h`, `UnitTestMain.cpp`, `tests/testutils/UnitTest.cpp`, `tests/utils/UnitTestMain.cpp`), functions without a caller (`CustomKeys` `hasKey` and `getValueForKey`, `setColorSpaceConversion`), and every `partial` whose note ends at "comes with its card" or "not yet". Each finding is either closed in the map or listed with the phase it waits for |
+| 9.5a | **Audit.** Every `todo` and `partial` entry of `upstream-map.toml` outside the bindings (Phase 6), the tools (Phase 10) and the GPU suite (Phase 7), read against upstream: each function ported, ported elsewhere, without a caller in 2.5.2, or `n/a` with its reason. The entries left: the headers no chunk claimed (`Mutex.h`, `PrivateTypes.h`, `TransformBuilder.h`, `OCIOYaml.h`), the test support (`UnitTestOptimFlags.cpp/.h`, `UnitTestMain.cpp`, `tests/testutils/UnitTest.cpp`, `tests/utils/UnitTestMain.cpp`), functions without a caller (`setColorSpaceConversion`; `CustomKeys` `hasKey` and `getValueForKey` have one, the merge's rule comparisons, ported in 9.2e), and every `partial` whose note ends at "comes with its card" or "not yet". Each finding is either closed in the map or listed with the phase it waits for |
 | 9.5b– | One chunk per piece 9.5a finds unported (sized as it finds them), each with its tests |
 
 - `p9-dashboard` runs last: after Phases 5, 7 and 8 have landed, while Phase 6 and 10 entries
