@@ -1,0 +1,24 @@
+[package]
+name = "ocio-gpu-exec"
+description = "Test-only port of OpenColorIO's headless OpenGL GPU harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ocio-gpu.workspace = true
+ocio-ops.workspace = true
+glow.workspace = true
+khronos-egl.workspace = true
+# Pin the dynamic loader used by khronos-egl as approved in P7-2.
+libloading.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+ocio-testkit.workspace = true
+
+[lints]
+workspace = true

@@ -402,10 +402,14 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
 
 - **Text and texture parity for all 10 targets.** If our shaders are identical to upstream's, they inherit upstream's validation on real GPUs.
 - **Compile checks:**
-  - glslang for GLSL;
-  - DXC for HLSL, on Windows;
-  - naga for Vulkan GLSL.
-- **Execution:** headless wgpu on software GPU adapters, replaying upstream's 264 GPU test cases.
+  - glslang for the six GLSL languages, including Vulkan GLSL (`-V`), in Rocky Linux 9;
+  - Windows SDK fxc (ps_5_0) and dxc (ps_6_0) for HLSL;
+  - MSL, OSL and Cg: text parity only (no compiler on either reference platform).
+- **Execution:** upstream's EGL/OpenGL compatibility harness on Mesa llvmpipe in Rocky
+  Linux 9, replaying upstream's 264 GPU test cases with upstream's own tolerances against
+  the wheel's CPU output. Windows checks text, uniforms, textures and HLSL compilation.
+  `ocio-gpu-exec` is a test-only crate: only `oglapp.rs` and `glsl.rs` allow unsafe code
+  (owner decisions P7-2 through P7-5, 2026-10-25, docs/cards/phase7.md).
 
 ### Robustness and performance
 
@@ -444,6 +448,7 @@ OpenColorIO-rs/
 │   ├── ocio-ops/           op data, CPU kernels (numeric profiles), optimizer, pixel formats, CPUInfo
 │   ├── ocio-formats/       LUT and transform file readers/writers
 │   ├── ocio-gpu/           shader generation per language, textures, uniforms
+│   ├── ocio-gpu-exec/      test-only EGL/OpenGL harness and GPU suite on Rocky llvmpipe
 │   ├── ocio/               public API: transforms, Config (YAML), Context, processors, built-ins,
 │   │                       baker, .ocioz, app helpers, config merging
 │   ├── ocio-py/            PyO3 module "PyOpenColorIO": a wheel, also embeddable in Rust apps
@@ -523,7 +528,7 @@ print(OCIO.__version__)                       # "2.5.2"
 | Regex | `regex`, `fancy-regex` | — |
 | ICC | The subset of SampleICC 1.2.6 OCIO uses, translated, with its notice | OCIO reads only matrix/TRC profiles (P4-4, decided 2026-10-07) |
 | Python | `pyo3` 0.29 and `numpy` 0.29, pinned exactly; `maturin` 1.15 for the release wheel (Phase 10) | Embedded via `append_to_inittab`; a standalone module for CPython 3.13 only (`cp313`, not `abi3`), built by `cargo xtask py-build` until the release (P6-1 to P6-5, decided 2026-10-17, `docs/cards/phase6.md`) |
-| GPU checks | naga + wgpu 30, glslang, DXC via `hassle-rs` | — |
+| GPU checks | glow 0.17 + khronos-egl 6.0 (dynamic libloading 0.8.9), Mesa llvmpipe; glslang, Windows SDK fxc/dxc | Test-only `ocio-gpu-exec`; owner decisions P7-2 through P7-5, 2026-10-25 |
 | Tests, benchmarks, CLI | `proptest`, `cargo-fuzz`, `cargo-mutants`, `criterion`, `clap` | No tolerance crates: comparisons are exact |
 
 ---
@@ -637,7 +642,9 @@ This is a parallel track for implementer B. It starts after M1, binding each par
 
 All 10 shading languages already come with each op family (Phases 1–5). This phase adds:
 - the legacy GPU path, which bakes the whole chain into one 3D LUT;
-- a GPU execution harness replaying upstream's 264 GPU tests: headless wgpu, plus glslang and DXC compile checks.
+- a GPU execution harness replaying upstream's 264 GPU tests: upstream's EGL/OpenGL path on
+  Mesa llvmpipe in Rocky Linux 9, plus glslang and Windows SDK fxc/dxc compile checks
+  (P7-2 through P7-5, 2026-10-25).
 
 ### Phase 8 — SIMD speed and threading (~6 pw)
 

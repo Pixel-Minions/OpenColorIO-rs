@@ -4240,14 +4240,16 @@ note = "build system"
 [[file]]
 path = "src/libutils/oglapphelpers/glsl.cpp"
 kind = "app"
-status = "n/a"
-note = "OpenGL/Metal/image-IO helpers for upstream's apps"
+target = ["crates/ocio-gpu-exec/src/glsl.rs"]
+status = "done"
+note = "7.2b: test-only OpenGLBuilder, textures, dynamic uniforms, GLSL compile/link and texture limit query; EGL harness on Rocky llvmpipe (P7-2/P7-3)."
 
 [[file]]
 path = "src/libutils/oglapphelpers/glsl.h"
 kind = "app"
-status = "n/a"
-note = "OpenGL/Metal/image-IO helpers for upstream's apps"
+target = ["crates/ocio-gpu-exec/src/glsl.rs"]
+status = "done"
+note = "7.2b: OpenGLBuilder and its texture/uniform state."
 
 [[file]]
 path = "src/libutils/oglapphelpers/metalapp.h"
@@ -4288,14 +4290,16 @@ note = "OpenGL/Metal/image-IO helpers for upstream's apps"
 [[file]]
 path = "src/libutils/oglapphelpers/oglapp.cpp"
 kind = "app"
-status = "n/a"
-note = "OpenGL/Metal/image-IO helpers for upstream's apps"
+target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
+status = "done"
+note = "7.2b: OglApp image/FBO/shader/quad/readback and HeadlessApp's EGL context. ScreenApp's GLUT window is n/a: headless execution only, owner P7-3."
 
 [[file]]
 path = "src/libutils/oglapphelpers/oglapp.h"
 kind = "app"
-status = "n/a"
-note = "OpenGL/Metal/image-IO helpers for upstream's apps"
+target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
+status = "done"
+note = "7.2b: HeadlessApp/OglApp state; ScreenApp is n/a (P7-3)."
 
 [[file]]
 path = "src/utils/CMakeLists.txt"

@@ -1862,6 +1862,28 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   checked against the wheel (`crates/ocio-gpu/tests/lut1d_op_gpu_oracle.rs`, the inverse LUTs
   at `OPTIMIZATION_NONE`, and OSL in every case).
 
+### I-481. Uniform getters run in the platform's argument evaluation order
+
+- **Upstream:** `OpenGLBuilder::Uniform::use` calls the Float3 getter once for each
+  component in the arguments of `glUniform3f` (`src/libutils/oglapphelpers/glsl.cpp:249-252
+  @ v2.5.2`). C++ does not prescribe those arguments' order. The exact expression through
+  a function pointer on the Rocky reference platform's GCC, at both `-O0` and `-O2`, calls
+  blue, green, then red: a getter filling all components with an incrementing counter
+  produces `[3, 2, 1]` from three calls (platform probe, 2026-10-26).
+  The exact vector-float/int expressions (`glsl.cpp:253-262`) evaluate the vector
+  getter before the size getter, each once, on the same compiler at both optimization
+  levels (independent vector probe, 2026-10-26).
+- **Who notices:** native OpenGL helper callers with stateful uniform getters. The normal
+  OCIO dynamic-property getters are pure, and the Python wheel exposes no callback setter.
+- **A fix:** call a Float3 getter once and keep its three components, and explicitly
+  define vector getter ordering, changing stateful callers on some platforms.
+- **Status:** the Linux-only test harness preserves three calls in the observed B/G/R
+  order, uploading R/G/B. `float3_getter_calls_match_the_rocky_cpp_argument_order` pins
+  the independent platform result and call count. Vector callbacks preserve V/S order;
+  `vector_values_getter_precedes_the_size_getter_on_rocky` checks lazy state and uploaded
+  float/int values against the platform probe's inputs. Runtime/gates are pending. No C++
+  undefined-memory behavior or new buffer-policy exception is involved.
+
 ### I-501. Legacy and ordinary GPU processors share a cache keyed only by flags
 
 - **Upstream:** `getOptimizedLegacyGPUProcessor` partitions and bakes its own ops, then calls
@@ -6464,3 +6486,29 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** the binding raises ValueError naming the setter and U-221, leaving the field
   unchanged, in `p6-after-p9` (6.8a, `py_merge_configs.rs`, `null_string`); checked against the
   wheel's process exit and the port's error in `merge_configs_oracle.rs`.
+
+### U-246. OpenGL helpers consume caller buffers without their lengths
+
+- **Upstream:** `OglApp::updateImage` passes a raw image pointer to `glTexImage2D`
+  using the separately held image dimensions (`src/libutils/oglapphelpers/oglapp.cpp:73-82
+  @ v2.5.2); `OpenGLBuilder::Uniform::use` passes a vector getter's pointer and a
+  separate size getter's count to `glUniform1fv`/`glUniform1iv` (`glsl.cpp:236-270`).
+  A short caller allocation, or a size getter larger than the vector allocation,
+  makes the driver read beyond that allocation. Texture upload similarly trusts
+  the description's dimensions and pointer (`glsl.cpp:78-146`). These are source-
+  established caller-buffer preconditions; no out-of-bounds driver call is run as
+  a probe.
+- **Who notices:** callers of the OpenGL reference helpers with inconsistent
+  caller-owned buffers or uniform callbacks. The shipped Python wheel exposes
+  neither the OpenGL helpers nor these native uniform callbacks.
+- **A fix:** carry lengths into the helpers and check every native call's required
+  slice before passing its pointer to the driver.
+- **Status:** the test-only port checks image, texture and uniform vector lengths
+  before GL reads them, returning a deliberate error for inconsistent buffers;
+  `crates/ocio-gpu-exec/src/oglapp.rs` and `glsl.rs`, 7.2b.
+  Negative uniform counts are a separate, defined GL error: the raw signed-count
+  entry point records GL_INVALID_VALUE and reads no vector data. The port forwards
+  that count and preserves the pending error until a later CheckStatus, as upstream;
+  it does not treat that case as U-246 or add an immediate helper error.
+  `tests/harness.rs::short_caller_buffers_are_refused_before_gl_reads_them`
+  supplies a short image and a uniform getter whose count exceeds its values.
