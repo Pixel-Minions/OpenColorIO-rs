@@ -437,6 +437,8 @@ fn a_shared_source_changes_every_key() {
         ".python-version",
         "json.py",
         "tools/notes.txt",
+        "native/legacy_gpu.cpp",
+        "native/transport.h",
     ] {
         let before = keys(&scopes(&dir), &COMMANDS);
         std::fs::create_dir_all(dir.join(file).parent().unwrap()).unwrap();
@@ -1857,5 +1859,55 @@ fn the_analysis_of_the_oracle_follows_its_registry() {
         scoped * 4 >= registry.len() * 3,
         "{scoped} of {}",
         registry.len()
+    );
+}
+
+/// A build-only import must not poison every ordinary command. The native
+/// command still falls back conservatively, and an import-time version of the
+/// same unsupported import must retain the full-key fallback.
+#[test]
+fn native_build_imports_do_not_poison_ordinary_commands() {
+    let oracle = Oracle::get();
+    let dir = package("native-build-import");
+    // Replace the helper's small fake package with the actual oracle modules.
+    for entry in std::fs::read_dir(dir.join("ocio_oracle")).unwrap() {
+        std::fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    for entry in std::fs::read_dir(paths::oracle_dir().join("ocio_oracle")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|extension| extension == "py") {
+            std::fs::copy(
+                &path,
+                dir.join("ocio_oracle").join(path.file_name().unwrap()),
+            )
+            .unwrap();
+        }
+    }
+    let before = Scopes::compute(oracle.python(), &dir, FULL, ENV, None).unwrap();
+    let cpu = before.modules_of("cpu_apply").expect("cpu_apply is scoped");
+    assert!(!cpu.contains(&"native_build.py"), "{cpu:?}");
+    assert!(
+        before.modules_of("legacy_gpu_shader").is_none(),
+        "runtime native build/process operations keep their conservative fallback"
+    );
+
+    // Private mutation: moving Path back to module scope must poison ordinary
+    // commands again, rather than silently treating an unknown import as safe.
+    let native = dir.join("ocio_oracle/native_build.py");
+    let source = std::fs::read_to_string(&native).unwrap();
+    assert_eq!(source.matches("import hashlib").count(), 1);
+    std::fs::write(
+        &native,
+        source.replacen(
+            "import hashlib",
+            "from pathlib import Path\n\nimport hashlib",
+            1,
+        ),
+    )
+    .unwrap();
+    let after = Scopes::compute(oracle.python(), &dir, FULL, ENV, None).unwrap();
+    assert!(
+        after.modules_of("cpu_apply").is_none(),
+        "an unresolved import at process initialization must cover the whole oracle"
     );
 }

@@ -94,10 +94,12 @@ fn the_oracle_and_its_children_see_only_allowed_variables() {
 }
 
 /// The modules of the oracle that start processes, each with `subprocess.run`.
-const STARTS_PROCESSES: [&str; 8] = [
+const STARTS_PROCESSES: [&str; 10] = [
     "env_api.py",
     "file_rules_api.py",
     "foundations.py",
+    "legacy_gpu.py",
+    "native_build.py",
     "numerics_lut.py",
     "processor_cache.py",
     "py_eval_api.py",

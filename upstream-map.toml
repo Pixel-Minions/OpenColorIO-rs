@@ -5341,7 +5341,7 @@ path = "tests/gpu/CDLOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/cdl_op_test.rs"]
 status = "todo"
-note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (cdl_cases); 1.3c4 checks the shaders' text of the 11 that use a version 2 config against the wheel (crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs)"
+note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (cdl_cases); 1.3c4 checks the shaders' text of the 11 that use a version 2 config against the wheel (crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs). O7.1 follow-up: create.major_version calls the actual wheel setter before cache flags and reaches the native client, with direct-wheel version1/2 CDL contracts in create_version_oracle.rs; GPU execution remains pending."
 
 [[file]]
 path = "tests/gpu/CMakeLists.txt"
@@ -5373,7 +5373,7 @@ path = "tests/gpu/GPUUnitTest.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/gpu_unit_test.rs"]
 status = "todo"
-note = "p7-oracle O7.2: oracle/ocio_oracle/spec.py supports the harness's Config::Create with PROCESSOR_CACHE_OFF (137-142); the harness itself remains for p7-harness 7.2c"
+note = "p7-oracle O7.2: oracle/ocio_oracle/spec.py supports the harness's Config::Create with PROCESSOR_CACHE_OFF (137-142); O7.1: oracle/native/legacy_gpu.cpp calls the pinned wheel's public legacy GPU API, with exact ordinary-GPU transport proof and capped edge probes in crates/ocio-testkit/tests/legacy_gpu_oracle.rs; the harness itself remains for p7-harness 7.2c"
 
 [[file]]
 path = "tests/gpu/GPUUnitTest.h"
@@ -5386,7 +5386,7 @@ path = "tests/gpu/GammaOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/gamma_op_test.rs"]
 status = "todo"
-note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (gamma_cases); 1.3g4 checks the shaders' text of the 10 that use a version 2 config against the wheel (crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs)"
+note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (gamma_cases); 1.3g4 checks the shaders' text of the 10 that use a version 2 config against the wheel (crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs). O7.1 follow-up: create.major_version preserves Config::Create/setMajorVersion from AddExponent, with direct-wheel version1/2 native ordinary/legacy contracts in create_version_oracle.rs; GPU execution remains pending."
 
 [[file]]
 path = "tests/gpu/GradingHueCurveOp_test.cpp"

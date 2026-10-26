@@ -57,6 +57,8 @@ import struct
 import numpy as np
 import PyOpenColorIO as OCIO
 
+from .checks import check_uint
+
 
 def f64_from_bits(bits):
     """The float with these bits. Anything but an unsigned 64-bit integer is refused (a bool is
@@ -243,20 +245,26 @@ def config(spec):
     """A config from {"builtin": name}, {"yaml": text}, {"file": path}, None (raw), or
     {"create": {}} (Config::Create, exposed as Config() by PyConfig.cpp:190 @ v2.5.2).
     {"create": {"processor_cache": "off"}} also disables its processor cache, as upstream's
-    GPU test harness does (tests/gpu/GPUUnitTest.cpp:137-142 @ v2.5.2). The create form takes no
-    other keys; the only explicit processor-cache setting is "off"."""
+    GPU test harness does (tests/gpu/GPUUnitTest.cpp:137-142 @ v2.5.2). An optional
+    major_version calls setMajorVersion before the cache setting, as GammaOp_test.cpp:33-34
+    and CDLOp_test.cpp:36-37 do. The unsigned argument and resulting minor version are the
+    wheel's (Config.cpp:1285-1305); no separate minor-version override is provided.
+    The only explicit processor-cache setting is "off"."""
     if spec is None:
         return OCIO.Config.CreateRaw()
     if isinstance(spec, dict) and "create" in spec:
         create = spec["create"]
         if (set(spec) != {"create"} or not isinstance(create, dict)
-                or not set(create) <= {"processor_cache"}):
-            raise ValueError(f"a create config takes {{'create': {{'processor_cache': 'off'}}}} "
-                             f"or {{'create': {{}}}}, not {spec!r}")
+                or not set(create) <= {"processor_cache", "major_version"}):
+            raise ValueError(f"a create config takes only optional major_version and "
+                             f"processor_cache='off' settings, not {spec!r}")
         if "processor_cache" in create and create["processor_cache"] != "off":
             raise ValueError(f"a create config's processor_cache must be 'off', not "
                              f"{create['processor_cache']!r}")
         config = OCIO.Config()
+        if "major_version" in create:
+            config.setMajorVersion(check_uint("a create config's major_version",
+                                              create["major_version"]))
         if "processor_cache" in create:
             config.setProcessorCacheFlags(OCIO.PROCESSOR_CACHE_OFF)
         return config
