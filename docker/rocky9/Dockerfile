@@ -26,3 +26,25 @@ RUN curl -LsSf https://astral.sh/uv/0.11.7/install.sh | sh \
 # The checkout is mounted here; build output goes to a Linux-only target directory.
 WORKDIR /work
 ENV CARGO_TARGET_DIR=/work/target/rocky9
+
+# Phase 7, P7-2/P7-4 (owner, 2026-10-25): upstream's GLSL 1.20 harness on
+# llvmpipe, plus GLSL compile checks. Keep this last so the existing compiler,
+# Python and uv layers are reused when this image is rebuilt locally.
+# Exact NVRs from Rocky 9 AppStream (2026-10-25); do not silently upgrade the
+# renderer that defines the GPU suite's baseline.
+RUN dnf install -y --setopt=install_weak_deps=False \
+        mesa-dri-drivers-25.2.7-5.el9_8.x86_64 \
+        mesa-filesystem-25.2.7-5.el9_8.x86_64 \
+        mesa-libEGL-25.2.7-5.el9_8.x86_64 \
+        mesa-libGL-25.2.7-5.el9_8.x86_64 \
+        mesa-libgbm-25.2.7-5.el9_8.x86_64 \
+        libglvnd-1.3.4-1.el9.x86_64 \
+        libglvnd-egl-1.3.4-1.el9.x86_64 \
+        libglvnd-glx-1.3.4-1.el9.x86_64 \
+        libglvnd-opengl-1.3.4-1.el9.x86_64 \
+        glslang-16.0.0-1.el9.x86_64 \
+    && dnf clean all
+
+ENV EGL_PLATFORM=surfaceless \
+    LIBGL_ALWAYS_SOFTWARE=true \
+    GALLIUM_DRIVER=llvmpipe

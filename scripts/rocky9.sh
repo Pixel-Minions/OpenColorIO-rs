@@ -99,4 +99,7 @@ docker run --rm -i $tty_flag \
     -e OCIO_RS_TIER \
     -e RUST_TEST_THREADS \
     -e OCIO_RS_ORACLE_NO_CACHE \
+    -e EGL_PLATFORM=surfaceless \
+    -e LIBGL_ALWAYS_SOFTWARE=true \
+    -e GALLIUM_DRIVER=llvmpipe \
     "$image" "$@"

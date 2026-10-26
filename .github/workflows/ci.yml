@@ -143,6 +143,8 @@ jobs:
         run: bash scripts/ci-mode.sh >> "$GITHUB_OUTPUT"
       - name: Build the reference image
         run: docker build -t ocio-rs-rocky9:1 docker/rocky9
+      - name: Software GPU prerequisites (EGL, llvmpipe, compatibility GLSL)
+        run: scripts/rocky9.sh uv run --offline --python 3.13 --no-project python scripts/egl-probe.py
       - name: fmt, clippy, guardrails, fixtures
         run: |
           scripts/rocky9.sh bash -ec '
