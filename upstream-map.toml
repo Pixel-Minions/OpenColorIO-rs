@@ -4011,7 +4011,8 @@ status = "done"
 path = "src/bindings/python/apphelpers/PyMergeConfigs.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_merge_configs.rs"]
-status = "todo"
+status = "done"
+note = "p6-after-p9 6.8a: ConfigMergingParameters and its nested MergeStrategies enum, ConfigMerger (shared params and merged configs, editable copies, reentrant merge callbacks), ConfigMergingHelpers.MergeConfigs and MergeColorSpace; strict surface and differential behavior tests in merge_configs_oracle.rs; null string setters U-221, inherited null active lists U-123 and null params U-176"
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyMixingHelpers.cpp"

@@ -6403,3 +6403,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `crates/ocio-py/src/py_baker.rs`, `null_argument`); `baker_oracle.rs`,
   `where_the_wheels_process_dies_the_port_raises` (the wheel's process dies, its steps before
   run; the port's error).
+
+### U-221. `None` for merge parameters' raw string fields or a merger's working directory
+
+- **Upstream:** `ConfigMergingParameters.setBaseConfigName`, `setInputConfigName`,
+  `setOutputName`, `setName`, `setDescription`, `setInputFamilyPrefix`, `setBaseFamilyPrefix`
+  and `ConfigMerger.setWorkingDir` take a nullable `const char *` through the binding and
+  assign it directly to a `std::string` (`MergeConfigsHelpers.cpp:55-91, 159-162, 179-192,
+  596-599`; `src/bindings/python/apphelpers/PyMergeConfigs.cpp`, all @ v2.5.2). With `None`,
+  both reference wheels' processes die (probed on Windows and Rocky Linux 9, 2026-10-25).
+  The setters of search paths and inactive
+  color spaces accept the null pointer instead; the active-list setters delegate to Config's
+  unchecked string handling (U-123).
+- **Who notices:** Python callers passing `None` to one of these eight setters.
+- **A fix:** check the pointer before assigning the string.
+- **Status:** the binding raises ValueError naming the setter and U-221, leaving the field
+  unchanged, in `p6-after-p9` (6.8a, `py_merge_configs.rs`, `null_string`); checked against the
+  wheel's process exit and the port's error in `merge_configs_oracle.rs`.
