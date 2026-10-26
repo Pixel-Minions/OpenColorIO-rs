@@ -1862,6 +1862,50 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   checked against the wheel (`crates/ocio-gpu/tests/lut1d_op_gpu_oracle.rs`, the inverse LUTs
   at `OPTIMIZATION_NONE`, and OSL in every case).
 
+### I-501. Legacy and ordinary GPU processors share a cache keyed only by flags
+
+- **Upstream:** `getOptimizedLegacyGPUProcessor` partitions and bakes its own ops, then calls
+  the same `getGPUProcessor` as the ordinary GPU path (`src/OpenColorIO/Processor.cpp:447-523
+  @ v2.5.2`). That cache's key is only the optimization flags. An ordinary GPU processor
+  requested first is returned for a later legacy call with those flags, and the first legacy
+  edge length is retained for later legacy calls with another edge. The later call still
+  performs its bake before looking in the cache.
+- **Who notices:** callers mixing ordinary and legacy GPU requests or changing their LUT edge.
+- **A fix:** include the legacy path and edge length in the key, or use distinct caches.
+- **Status:** matched in `p7-legacy` (7.1b, `crates/ocio/src/processor.rs`).
+  `legacy_and_ordinary_gpu_calls_share_the_flags_cache` checks object sharing in both request
+  orders; the comparison of legacy shader and texture contents follows O7.1's native helper.
+
+### I-502. The legacy GPU lattice uses zero alpha while it bakes RGB
+
+- **Upstream:** `Create3DLut` value-initializes an RGBA vector, then `GenerateIdentityLut3D`
+  fills RGB only (`src/OpenColorIO/ops/noop/NoOps.cpp:184-186`,
+  `ops/lut3d/Lut3DOp.cpp:25-57 @ v2.5.2`). Every lattice op therefore receives alpha zero,
+  including matrices that mix alpha into RGB; a 3D texture cannot follow a rendered pixel's
+  alpha. Subsequent lattice ops receive the alpha produced by earlier ops.
+- **Who notices:** legacy GPU users whose baked operations mix alpha into color.
+- **A fix:** document the restriction or keep alpha-dependent operations in the analytic path.
+- **Status:** matched in `p7-legacy` (7.1a, `crates/ocio-ops/src/ops/noop/no_ops.rs`), checked
+  against the wheel's CPU output on the same zero-alpha input lattice by
+  `a_legacy_lattice_matches_the_wheels_cpu_pixels`, including a matrix with alpha terms in
+  every RGB row. The complete legacy-processor comparison follows O7.1's native oracle.
+
+### I-503. A zero-edge legacy bake is rejected only when the empty LUT is finalized
+
+- **Upstream:** `Create3DLut` constructs an empty RGBA vector at edge zero and forms
+  `&lut3D[0]` for identity generation and every op (`src/OpenColorIO/ops/noop/NoOps.cpp:175-206
+  @ v2.5.2`). Those count-zero loops access no pixel. The resulting empty Lut3D op is rejected
+  by finalization in `getOptimizedLegacyGPUProcessor` (`Processor.cpp:447-489`). Both pinned
+  wheels raise Exception "Lut3D content array issue: Array content is empty." at gpu_processor,
+  with no log or blobs (native boundary probes, 2026-10-26). An analytic-only chain skips the
+  empty bake and accepts the same edge.
+- **Who notices:** callers requesting edge zero for a legacy processor that needs a lattice.
+- **A fix:** reject the zero edge before forming an out-of-bounds vector reference.
+- **Status:** the safe port uses empty slices for the count-zero loops and preserves the
+  wheels' actual validation error, in `p7-legacy` (7.1a,
+  `crates/ocio-ops/src/ops/noop/no_ops.rs`), checked by
+  `a_zero_edge_lattice_has_the_wheels_finalization_error`. No invalid memory access is needed.
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread

@@ -12,17 +12,136 @@
 //! keeps the op class, and its state, in the data's [`NoOpKind`], since an [`Op`] is only its
 //! data (`docs/architecture.md`, "Op data and ops").
 //!
-//! Not yet ported: the legacy GPU partition (`PartitionGPUOps`, `Create3DLut` and their
-//! helpers), which needs the Lut3D op, and `dumpMetadata`, which needs the processor's
-//! metadata (WP 1.8).
+//! The legacy GPU path partitions the ops around a CPU-baked 3D LUT, retaining the allocation
+//! at the cut so that the analytic shader and the lattice use inverse mappings.
 
+use std::ffi::c_ulong;
 use std::mem::discriminant;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::exception::{Exception, Result};
 use crate::format_metadata::FormatMetadataImpl;
 use crate::op::{Op, OpVec};
 use crate::op_data::OpData;
+use crate::open_color_types::TransformDirection;
 use crate::ops::allocation::AllocationData;
+use crate::ops::allocation::allocation_op::create_allocation_ops;
+use crate::ops::lut3d::lut3d_op::{Lut3DOrder, create_lut3d_op, generate_identity_lut3d};
+use crate::ops::lut3d::lut3d_op_data::Lut3DOpData;
+
+/// Whether the op carries a GPU allocation.
+///
+/// Port of `DefinesGpuAllocation` (src/OpenColorIO/ops/noop/NoOps.cpp:94-101 @ v2.5.2).
+fn defines_gpu_allocation(op: &Op) -> bool {
+    matches!(&**op.data(), OpData::NoOp(data) if data.get_gpu_allocation().is_some())
+}
+
+/// The inclusive range that must be baked, extended back to its nearest allocation; `(-1,
+/// -1)` when every op supports the analytic legacy shader.
+///
+/// Port of `GetGpuUnsupportedIndexRange` (src/OpenColorIO/ops/noop/NoOps.cpp:121-154 @ v2.5.2).
+fn get_gpu_unsupported_index_range(ops: &OpVec) -> (isize, isize) {
+    let mut start = -1;
+    let mut end = -1;
+    for (i, op) in ops.iter().enumerate() {
+        if !op.supported_by_legacy_shader() {
+            if start < 0 {
+                start = i as isize;
+            }
+            end = i as isize;
+        }
+    }
+    while start > 0 {
+        if defines_gpu_allocation(&ops[start as usize]) {
+            break;
+        }
+        start -= 1;
+    }
+    (start, end)
+}
+
+/// The allocation carried by an allocation no-op, or none for any other op.
+///
+/// Port of `GetGpuAllocation` (src/OpenColorIO/ops/noop/NoOps.cpp:157-172 @ v2.5.2).
+fn get_gpu_allocation(op: &Op) -> Option<&AllocationData> {
+    match &**op.data() {
+        OpData::NoOp(data) => data.get_gpu_allocation(),
+        _ => None,
+    }
+}
+
+/// Bakes finalized ops with fast math off into a blue-fast 3D LUT. Its input lattice's alpha
+/// is zero, as the value-initialized RGBA vector upstream fills in RGB only.
+///
+/// Port of `Create3DLut` (src/OpenColorIO/ops/noop/NoOps.cpp:175-206 @ v2.5.2).
+pub fn create_3d_lut(ops: &OpVec, edgelen: u32) -> Result<OpVec> {
+    if ops.is_empty() {
+        return Ok(OpVec::new());
+    }
+    // Construction checks the 129-side limit before allocating the RGBA lattice, as
+    // upstream's Lut3DArray::resize does (Lut3DOpData.cpp:194-204).
+    let mut lut = Lut3DOpData::new(c_ulong::from(edgelen))?;
+    // At edge zero the count-zero loops below access no pixel. Keep the empty LUT so
+    // finalization raises the wheel's "Array content is empty" validation error.
+    let num_pixels = (edgelen * edgelen * edgelen) as usize;
+    let mut pixels = vec![0.0; num_pixels * 4];
+    generate_identity_lut3d(&mut pixels, edgelen as i32, 4, Lut3DOrder::FastBlue)?;
+    for op in ops.iter() {
+        op.apply(&mut pixels)?;
+    }
+    for (rgb, rgba) in lut
+        .get_array_mut()
+        .get_values_mut()
+        .as_chunks_mut::<3>()
+        .0
+        .iter_mut()
+        .zip(pixels.as_chunks::<4>().0)
+    {
+        rgb.copy_from_slice(&rgba[..3]);
+    }
+    let mut result = OpVec::new();
+    create_lut3d_op(&mut result, lut, TransformDirection::Forward);
+    Ok(result)
+}
+
+/// Appends the analytic prefix, the lattice ops and the analytic suffix. At an allocation,
+/// inserts the forward mapping into the prefix and its inverse into the lattice.
+///
+/// Port of `PartitionGPUOps` (src/OpenColorIO/ops/noop/NoOps.cpp:208-287 @ v2.5.2).
+pub fn partition_gpu_ops(
+    gpu_pre_ops: &mut OpVec,
+    gpu_lattice_ops: &mut OpVec,
+    gpu_post_ops: &mut OpVec,
+    ops: &OpVec,
+) -> Result<()> {
+    let (start, end) = get_gpu_unsupported_index_range(ops);
+    if start == -1 && end == -1 {
+        for op in ops.iter() {
+            gpu_pre_ops.push_back(op.clone_op()?);
+        }
+    } else {
+        for op in ops.iter().take(start.max(0) as usize) {
+            gpu_pre_ops.push_back(op.clone_op()?);
+        }
+        if start < 0 || start as usize >= ops.len() {
+            return Err(Exception::new(format!(
+                "Invalid GpuUnsupportedIndexRange: gpuLut3DOpStartIndex: {start} gpuLut3DOpEndIndex: {end} cpuOps.size: {}",
+                ops.len()
+            )));
+        }
+        if let Some(allocation) = get_gpu_allocation(&ops[start as usize]) {
+            create_allocation_ops(gpu_pre_ops, allocation, TransformDirection::Forward)?;
+            create_allocation_ops(gpu_lattice_ops, allocation, TransformDirection::Inverse)?;
+        }
+        for op in ops.iter().take(end as usize + 1).skip(start as usize) {
+            gpu_lattice_ops.push_back(op.clone_op()?);
+        }
+        for op in ops.iter().skip(end as usize + 1) {
+            gpu_post_ops.push_back(op.clone_op()?);
+        }
+    }
+    Ok(())
+}
 
 /// The data of a `FileNoOp`: the path of the file a `FileTransform` loads, and whether it is
 /// loaded. It lets the `FileTransform` of a file that references itself, directly or not, be
