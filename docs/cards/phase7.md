@@ -184,7 +184,7 @@ oracle sweep remains a separate `p7-legacy-parity` test chunk after O7.1.
 | `CDLOp_test.cpp` | 15 | 2 | — | — | 265 | 7.3b |
 | `LogOp_test.cpp` | 22 | 4 | — | — | 249 | 7.3b |
 | `Lut1DOp_test.cpp` | 29 | 8 | — | 1 | 277 | 7.3c |
-| `Lut3DOp_test.cpp` | 15 (4 disabled) | 5 | — | — | 148 | 7.3c |
+| `Lut3DOp_test.cpp` | 15 (all run on Linux) | 5 | — | — | 148 | 7.3c |
 | `Config_test.cpp` | 5 | 1 | — | — | 163 | 7.3c |
 | `FixedFunctionOp_test.cpp`, ACES 2.0 (`style_aces2_*`) | 23 | — | — | 22 | ~690 | 7.3d |
 | `FixedFunctionOp_test.cpp`, the others (ACES 1.x, Rec.2100 surround, HSV, HSY, xyY, uvY, LUV, PQ, gamma log, double log) | 36 | — | — | 18 | ~600 | 7.3e |
