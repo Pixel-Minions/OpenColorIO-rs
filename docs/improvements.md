@@ -4171,6 +4171,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `rethrown`); `crates/ocio/tests/merge_configs_oracle.rs`
   (`a_missing_file_in_a_merge_is_a_plain_exception`, probed on the Windows wheel, 2026-10-25).
 
+### I-451. One cross-config processor overload swaps the display and view keyword names
+
+- **Upstream:** the sixth `Config.GetProcessorFromConfigs` overload passes its sixth and
+  seventh arguments to C++ as `dstDisplay` and `dstView`, but declares their keyword names
+  as `dstView` and `dstDisplay` (`src/bindings/python/PyConfig.cpp:903-917 @ v2.5.2`).
+  Positional calls work normally; a keyword call must exchange the two names to mean the
+  same request. The method's signature and TypeError text have the same swapped names.
+- **Who notices:** Python callers using this overload with explicit contexts and keywords.
+- **A fix:** name both keyword arguments in the C++ parameter order.
+- **Status:** matched in `p6-after-p9` (6.8a, `py_config_utils.rs`); the full signature and the
+  keyword call's processor and pixels are compared against the wheel in
+  `config_utils_oracle.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

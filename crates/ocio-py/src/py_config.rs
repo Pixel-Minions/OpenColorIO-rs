@@ -30,10 +30,14 @@
 //!
 //! The static methods of `ConfigUtils` (`IdentifyBuiltinColorSpace`,
 //! `IdentifyInterchangeSpace`, `GetProcessorToBuiltinColorSpace`,
-//! `GetProcessorFromBuiltinColorSpace`, `GetProcessorFromConfigs`) come with chunk 6.8a.
+//! `GetProcessorFromBuiltinColorSpace`, `GetProcessorFromConfigs`) are in
+//! [`config_utils_bindings`] (chunk 6.8a).
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::ThreadId;
+
+#[path = "py_config_utils.rs"]
+mod config_utils_bindings;
 
 use ocio::builtinconfigs::builtin_config_registry::resolve_config_path;
 use ocio::{
@@ -487,7 +491,7 @@ pub(crate) fn with_config<R>(
 
 /// `f` of two configs (the same one twice, once locked; two in the order of their keys, so
 /// that two threads locking the same pair wait for each other in one order).
-fn with_two<R>(
+pub(crate) fn with_two<R>(
     a: &ConfigRc,
     b: &ConfigRc,
     f: impl FnOnce(&Config, &Config) -> PyResult<R>,
@@ -3876,7 +3880,7 @@ pub(crate) fn bind_py_config(m: &Bound<'_, PyModule>) -> PyResult<()> {
     ] {
         def(&cls, f)?;
     }
-    // IdentifyBuiltinColorSpace, IdentifyInterchangeSpace (355-384): chunk 6.8a.
+    config_utils_bindings::bind_identification(&cls)?;
     for f in [
         &SET_ROLE,
         &HAS_ROLE,
@@ -3971,8 +3975,7 @@ pub(crate) fn bind_py_config(m: &Bound<'_, PyModule>) -> PyResult<()> {
     ] {
         def(&cls, f)?;
     }
-    // GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace,
-    // GetProcessorFromConfigs (810-963): chunk 6.8a.
+    config_utils_bindings::bind_processors(&cls)?;
     for f in [
         &SET_PROCESSOR_CACHE_FLAGS,
         &CLEAR_PROCESSOR_CACHE,
