@@ -240,9 +240,26 @@ def value_object(spec, blobs=()):
 
 
 def config(spec):
-    """A config from {"builtin": name}, {"yaml": text}, {"file": path} or None (raw)."""
+    """A config from {"builtin": name}, {"yaml": text}, {"file": path}, None (raw), or
+    {"create": {}} (Config::Create, exposed as Config() by PyConfig.cpp:190 @ v2.5.2).
+    {"create": {"processor_cache": "off"}} also disables its processor cache, as upstream's
+    GPU test harness does (tests/gpu/GPUUnitTest.cpp:137-142 @ v2.5.2). The create form takes no
+    other keys; the only explicit processor-cache setting is "off"."""
     if spec is None:
         return OCIO.Config.CreateRaw()
+    if isinstance(spec, dict) and "create" in spec:
+        create = spec["create"]
+        if (set(spec) != {"create"} or not isinstance(create, dict)
+                or not set(create) <= {"processor_cache"}):
+            raise ValueError(f"a create config takes {{'create': {{'processor_cache': 'off'}}}} "
+                             f"or {{'create': {{}}}}, not {spec!r}")
+        if "processor_cache" in create and create["processor_cache"] != "off":
+            raise ValueError(f"a create config's processor_cache must be 'off', not "
+                             f"{create['processor_cache']!r}")
+        config = OCIO.Config()
+        if "processor_cache" in create:
+            config.setProcessorCacheFlags(OCIO.PROCESSOR_CACHE_OFF)
+        return config
     if "builtin" in spec:
         return OCIO.Config.CreateFromBuiltinConfig(spec["builtin"])
     if "yaml" in spec:

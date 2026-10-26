@@ -5373,6 +5373,7 @@ path = "tests/gpu/GPUUnitTest.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/gpu_unit_test.rs"]
 status = "todo"
+note = "p7-oracle O7.2: oracle/ocio_oracle/spec.py supports the harness's Config::Create with PROCESSOR_CACHE_OFF (137-142); the harness itself remains for p7-harness 7.2c"
 
 [[file]]
 path = "tests/gpu/GPUUnitTest.h"
