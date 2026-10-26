@@ -1881,7 +1881,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   order, uploading R/G/B. `float3_getter_calls_match_the_rocky_cpp_argument_order` pins
   the independent platform result and call count. Vector callbacks preserve V/S order;
   `vector_values_getter_precedes_the_size_getter_on_rocky` checks lazy state and uploaded
-  float/int values against the platform probe's inputs. Runtime/gates are pending. No C++
+  float/int values against the platform probe's inputs. The 7.2b full Windows and Rocky
+  debug/release gates passed; the Linux harness passed all 12 tests in each profile,
+  and eight independent private mutations were assertion-killed (2026-10-26). No C++
   undefined-memory behavior or new buffer-policy exception is involved.
 
 ### I-501. Legacy and ordinary GPU processors share a cache keyed only by flags

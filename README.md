@@ -6,13 +6,15 @@ that produces exactly the same output as the original, down to the last bit.**
 OpenColorIO (OCIO) is the color management library of the VFX and animation industry. This
 project ports it to Rust one upstream release at a time. The current line matches **OpenColorIO
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
-from Rust and, later, from Python.
+from Rust and Python.
 
 > **Status: under development, about 80% done.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker) and M3 (dynamic properties,
 > grading and app helpers) are complete: their CPU results and generated GPU shaders match
-> the official library. Next: the Python module (M4). See [Progress](#progress).
+> the official library. M4's complete upstream Python suite also passes: all 384 tests run
+> unmodified. Next: GPU execution, the remaining monitor support, SIMD performance, tools
+> and release work (M5). See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -87,7 +89,7 @@ one.
 ## Progress
 
 Status as of 2026-10-26: **milestones M0, M1, M2 and M3 are complete**, about 80% of the
-planned work (1,174 of 1,191 upstream C++ tests ported; 375 of 384 upstream Python tests pass
+planned work (1,177 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
 test configs): the grading values (GradingPrimary, GradingTone,
@@ -102,7 +104,11 @@ pybind11's dispatcher, casters, classes and enums as the wheel shows them, every
 and string conversion), every transform class, and the objects the config holds (context,
 file and viewing rules, color spaces and sets, looks, view and named transforms, format
 metadata), NumPy buffers with the CPU processor's apply, `Config`, the grading classes, dynamic
-properties, the app helpers, processors (CPU and GPU, shader descriptions) and the baker. Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
+properties, the app helpers, processors (CPU and GPU, shader descriptions), the baker,
+ConfigUtils statics and the parameters, merger and helpers for config merging. Phase 7 foundations
+in main: the legacy GPU API, the reference client linked to the official wheel, and headless
+OpenGL infrastructure tested on llvmpipe. The upstream GPU execution suite and the legacy
+parity sweep follow. Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
 Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pandora, Nuke
@@ -110,8 +116,9 @@ Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pa
 files, and the CLF/CTF writer; the baker, in every format the official library bakes, CLF and
 CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
 4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
-ops in M3. Next: the rest of Phase 6 (M4: the config-merging and ConfigUtils bindings and the remaining Python
-tests) and Phase 9 (monitor support and the remaining library tests).
+ops in M3. Next: GPU execution and the legacy GPU path (Phase 7), monitor support and the remaining
+library tests (Phase 9), hardware SIMD and threading (Phase 8), and developer tools and release
+work (Phase 10). The SystemMonitors Python binding follows its remaining core monitor support.
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
@@ -227,9 +234,9 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 1,022 | 1,191 |
+| C++ | 1,177 | 1,191 |
 | GPU | 0 | 264 |
-| Python | 2 | 384 |
+| Python | 384 | 384 |
 
 The live numbers are in [`docs/parity.md`](docs/parity.md). The GPU tests need a GPU to run
 on; they are ported with the pixel harness in a later phase. The shaders themselves are already
@@ -237,16 +244,16 @@ compared with the official library's, text for text.
 
 ### Milestones
 
-Each milestone is a complete section of OCIO, byte-exact on CPU and GPU:
+Each milestone completes a section of OCIO with exact oracle checks:
 
-| Milestone | Section | Status (2026-10-25) | Version |
+| Milestone | Section | Status (2026-10-26) | Version |
 |---|---|---|---|
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
-| **M4** | The `PyOpenColorIO`-compatible Python module | In progress: the module's foundation, every transform class, the config's objects, NumPy buffers, `Config`, the grading classes, the app helpers, processors and the baker are merged (375 of 384 upstream Python tests pass); config merging and the remaining ConfigUtils bindings are next | `0.5.0` |
-| **M5** | Full OCIO 2.5.2 parity | Not started | `1.0.0` |
+| **M4** | The `PyOpenColorIO`-compatible Python module | **Suite complete:** all 384 upstream Python tests pass unmodified, including ConfigUtils and config merging. The SystemMonitors surface and its parity checks follow its core monitor support before M4 closes | `0.5.0` |
+| **M5** | Full OCIO 2.5.2 parity | In progress: GPU execution, monitors, SIMD performance, tools and release checks | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
 

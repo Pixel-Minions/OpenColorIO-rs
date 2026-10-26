@@ -23,7 +23,8 @@ side and runs the shaders.
 - **GPU suite:** each of the 264 tests passes as upstream's harness defines passing (the GPU
   output within the test's own tolerance of the CPU's, NaN and infinity in the same places),
   with the CPU side computed by the wheel; or it is on the reviewed not-applicable list
-  (PLAN.md §3) or under a waiver the owner signed (P7-6, P7-7);
+  (PLAN.md §3) or under a renderer waiver the owner signed (P7-6). P7-7's four
+  inverse 3D LUT tests run on Linux with upstream's settings and thresholds;
 - **compile checks:** every shader of the suite compiles in each language P7-5 covers.
 
 GPU pixels are not in PLAN.md §3's byte-exact table: the GPU's arithmetic belongs to the
@@ -87,7 +88,7 @@ Phase 7:
 | Dynamic properties | 45 (7 with retests) | The same, with the port's dynamic properties set before each run (`addRetest`, `GPUUnitTest.cpp:702-718`) | The wheel's CPU processor after the same sets in the same order (`dynamic_apply`: set, then apply, per retest) | Upstream's, per run |
 | The legacy GPU processor | 30 | The port's `getOptimizedLegacyGPUProcessor(OPTIMIZATION_DEFAULT, edge)` shader | The wheel's default CPU processor (upstream's harness compares the legacy GPU output with the default CPU output too, `GPUUnitTest.cpp:391`) | Upstream's. The shader and its 3D texture are also compared byte for byte with the wheel's legacy processor (P7-1) |
 | Config tests (counted above: 4 default, 1 legacy) | 5 | The processor of a config read from a stream, its search path at upstream's test files | The wheel's CPU processor of the same config (`cpu_apply` with `{"yaml": ...}`) | Upstream's |
-| Disabled upstream | 4 | — (`OCIO_DISABLE_GPU_TEST`, `Lut3DOp_test.cpp`: `inv3dlut_*`) | — | P7-7 |
+| Disabled only in upstream Windows debug | 4 (included above) | Run normally on Linux (`Lut3DOp_test.cpp`: `inv3dlut_*`; disable guard is `!NDEBUG && WIN32`) | The wheel's CPU processor | P7-7: owner approved all four Linux tests, 2026-10-26 |
 | C++ tests of the legacy path | 3 | — | Upstream's own assertions, verbatim (`NoOps_tests.cpp`; `GpuShader_tests.cpp` `MetalLutTest`'s expected text) | Exact |
 | Compile checks | — | The port's shader text (first asserted equal to the wheel's) | The compiler's verdict (the platform's tool, P7-5) | Pass or fail |
 
@@ -226,12 +227,12 @@ oracle sweep remains a separate `p7-legacy-parity` test chunk after O7.1.
 
 | File | Tests | Chunks | Waits |
 |---|---:|---|---|
-| `tests/gpu/*_test.cpp` (14 files) | 264 | 7.2c, 7.3a–7.3g | 4 disabled ones: P7-7; any renderer failure: P7-6 |
+| `tests/gpu/*_test.cpp` (14 files) | 264 | 7.2c, 7.3a–7.3g | All four conditional inverse tests run on Linux (P7-7); any renderer failure: P7-6 |
 | `tests/cpu/ops/noop/NoOps_tests.cpp` | 2 of its tests | `partition_gpu_ops`, `throw` (7.1a) | — |
 | `tests/cpu/GpuShader_tests.cpp` | 1 of its tests | `MetalLutTest` (7.1b) | — |
 
-267 upstream tests land in Phase 7: 264 GPU (260 if P7-7 puts the 4 disabled ones on the
-not-applicable list) and 3 C++. The ratchet counts the GPU ones as `gpu` (`xtask/src/parity.rs`).
+267 upstream tests land in Phase 7: all 264 GPU, including the four inverse 3D LUT
+tests disabled only in upstream Windows debug, and 3 C++. The ratchet counts the GPU ones as `gpu` (`xtask/src/parity.rs`).
 
 ## Oracle support (verifier-reviewed chunks)
 
@@ -277,7 +278,7 @@ when the Rocky image is rebuilt. Licences are all in `deny.toml`'s list.
 | P7-4 | **The Rocky image** (`dependency`: a download at image build) | **Add Mesa's llvmpipe with EGL and GL, and `glslang`, from Rocky 9's repositories, exact NVRs pinned**, and rebuild the image once (7.2a). The Windows side needs nothing new |
 | P7-5 | **Compile checks: tools and languages** | **glslang for the six GLSL languages (Rocky), the Windows SDK's `fxc` (ps_5_0) and `dxc` (ps_6_0) for HLSL (Windows), as subprocesses; no `hassle-rs`, no naga.** MSL 2.0 (needs Apple's compiler), OSL 1 (`oslc` isn't packaged for Rocky 9 or Windows) and Cg (NVIDIA's toolkit is discontinued) get no compile check: text parity only, the reason in PLAN.md §8, reopened with macOS (D11). PLAN.md §8's "naga for Vulkan GLSL" becomes glslang `-V` |
 | P7-6 | **Tests that fail on the renderer with upstream's own shader** (`waiver`). Upstream tuned its thresholds on an NVIDIA GPU; llvmpipe's transcendentals, NaN rules and filtering differ | **One waiver per test and renderer (`waivers.toml` and `docs/waivers.md`), with its evidence:** the wheel's shader fails the same way (the port's GPU output equals the wheel shader's bit for bit, 7.2c) and the diff upstream's harness prints. The waived test still runs, and checks that identity and the rest of the image. Agents batch the list per card into one owner question; none is decided by an agent |
-| P7-7 | **The 4 disabled tests** (`n/a`): `Lut3DOp/inv3dlut_file_spi3d_linear`, `_tetra`, `_bizarre_linear`, `_bizarre_tetra` call `OCIO_DISABLE_GPU_TEST()` first (inverse 3D LUTs are slow in debug, `Lut3DOp_test.cpp:150-238`) | **The reviewed not-applicable list (PLAN.md §3; `waivers.toml`'s `not_applicable`, which the owner signs): upstream never runs them.** The alternative: port and enable them, a check upstream doesn't make (its thresholds untested on any GPU) |
+| P7-7 | **Four inverse 3D LUT tests**: `Lut3DOp/inv3dlut_file_spi3d_linear`, `_tetra`, `_bizarre_linear`, `_bizarre_tetra` disable only inside `#if !defined(NDEBUG) && defined(WIN32)` (`Lut3DOp_test.cpp:156-239`). Upstream runs them on Linux and Windows release | **Owner correction, 2026-10-26: run all four on Linux with upstream settings and thresholds.** This replaces the earlier exclusion approved from this card's incorrect never-runs rationale. No not-applicable entry or waiver for these four |
 | P7-8 | **The legacy API** (`api`) | **`Processor::optimized_legacy_gpu_processor(&self, o_flags: OptimizationFlags, edgelen: u32) -> Result<Arc<GpuProcessor>>`**, beside `optimized_gpu_processor` (1.8h3), sharing its cache as upstream does. No Python binding: upstream has none |
 
 ## Platforms and runners
@@ -344,7 +345,8 @@ p7-compile (7.4b now; 7.4a after 7.2a) ─────────────�
 
 Counted as they land: 10 tests with `p7-harness` (MatrixOps); 69 with `p7-suite-1` (every
 family `gpu_cases.rs` already holds); 156 with `p7-suite-4`; 215 with `p7-suite-3`; 264 with
-`p7-suite-2`, less P7-7's 4 and any P7-6 waivers. 234 of the 264 don't use the legacy
+`p7-suite-2`, including P7-7's four inverse tests. A P7-6 renderer waiver keeps
+the test running and checking same-renderer identity. 234 of the 264 don't use the legacy
 processor. No test's upstream check needs P7-1; the identity check of the 30 legacy tests
 against the wheel's shader comes with `p7-legacy-parity`, once O7.1 exists. The critical path is five chunks deep: 7.2a,
 7.2b, 7.2c, then a suite card's two.
@@ -386,7 +388,8 @@ On Windows and Rocky Linux 9 (the GPU suite where P7-3 says):
   the same errors;
 - upstream's 264 GPU tests are ported and pass on llvmpipe against the wheel's CPU output with
   upstream's tolerances, each also bit-identical to the wheel's shader on the same renderer,
-  except those on the reviewed not-applicable list (P7-7) or under a signed waiver (P7-6);
+  with all four P7-7 inverse tests included; a signed renderer waiver (P7-6) keeps
+  its test running and checking same-renderer wheel identity;
 - `NoOps/partition_gpu_ops`, `NoOps/throw` and `GpuShader/MetalLutTest` are ported and pass;
 - every suite shader compiles with glslang in the six GLSL languages and with fxc and dxc in
   HLSL (P7-5);
