@@ -4,6 +4,7 @@ members = [
     "crates/ocio-ops",
     "crates/ocio-formats",
     "crates/ocio-gpu",
+    "crates/ocio-gpu-exec",
     "crates/ocio",
     "crates/ocio-py",
     "crates/ocio-py/ffi",
@@ -15,6 +16,7 @@ default-members = [
     "crates/ocio-ops",
     "crates/ocio-formats",
     "crates/ocio-gpu",
+    "crates/ocio-gpu-exec",
     "crates/ocio",
     "crates/ocio-tools",
     "crates/ocio-testkit",
@@ -36,6 +38,7 @@ publish = false
 ocio-ops = { path = "crates/ocio-ops" }
 ocio-formats = { path = "crates/ocio-formats" }
 ocio-gpu = { path = "crates/ocio-gpu" }
+ocio-gpu-exec = { path = "crates/ocio-gpu-exec" }
 ocio = { path = "crates/ocio" }
 ocio-testkit = { path = "crates/ocio-testkit" }
 # The Python binding's C API calls that need `unsafe` (its only unsafe code, PLAN.md D8).
@@ -62,6 +65,10 @@ pyo3 = "=0.29.3"
 # version that matches pyo3 0.29, with `half` for float16 arrays. Like pybind11, it imports
 # NumPy only when an array is made. Only `ocio-py` uses it, behind its `python` feature.
 numpy = { version = "=0.29.0", features = ["half"] }
+# Test-only OpenGL harness (P7-2, owner 2026-10-25); the libraries do not use these.
+glow = "=0.17.0"
+khronos-egl = { version = "=6.0.0", features = ["dynamic"] }
+libloading = "=0.8.9"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

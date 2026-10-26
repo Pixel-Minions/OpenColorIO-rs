@@ -92,7 +92,9 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 /// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), `PyType_GetSlot` for four number
 /// slots (2026-10-21, p6-core re-check round 4), and the views of Python buffers (P6-10), each
 /// named here by its file;
-/// [`check_py_ffi`] checks that file's calls and [`PY_FFI_SHA256`] pins it. The keyword
+/// [`check_py_ffi`] checks that file's calls and [`PY_FFI_SHA256`] pins it. The test-only
+/// EGL/OpenGL harness's two exact files are also approved (owner decision P7-2, 2026-10-25,
+/// docs/cards/phase7.md). The keyword
 /// `unsafe` appears nowhere else in the workspace's Rust sources ([`unsafe_tokens`]), and these
 /// files pull in no other source ([`source_problems`]).
 fn unsafe_allowed(rel: &str) -> bool {
@@ -100,6 +102,9 @@ fn unsafe_allowed(rel: &str) -> bool {
     rel == PY_FFI
         || rel == "crates/ocio-testkit/src/crt.rs"
         || rel == "crates/ocio/src/minizip/os_windows_ffi.rs"
+        // P7-2 (owner, 2026-10-25): the test-only EGL/OpenGL harness, two files.
+        || rel == "crates/ocio-gpu-exec/src/oglapp.rs"
+        || rel == "crates/ocio-gpu-exec/src/glsl.rs"
         || rel == "crates/ocio-ops/src/sse_tests.rs"
         || (rel.starts_with("crates/ocio-ops/")
             && (rel.contains("/simd/")
@@ -2810,10 +2815,12 @@ workspace = true
             assert!(!unsafe_allowed(rel), "{rel}");
         }
         // As before p6-core's re-check round 3: the SIMD modules, the test kit's C runtime and
-        // the Windows file of minizip-ng's port.
+        // the Windows file of minizip-ng's port; P7-2 adds only the two harness files.
         for rel in [
             "crates/ocio-testkit/src/crt.rs",
             "crates/ocio/src/minizip/os_windows_ffi.rs",
+            "crates/ocio-gpu-exec/src/oglapp.rs",
+            "crates/ocio-gpu-exec/src/glsl.rs",
             "crates/ocio-ops/src/sse.rs",
             "crates/ocio-ops/src/sse2.rs",
             "crates/ocio-ops/src/avx.rs",
@@ -2832,6 +2839,18 @@ workspace = true
         for rel in [
             "crates/ocio-ops/src/lib.rs",
             "crates/ocio-gpu/src/sse2.rs",
+            "crates/ocio-gpu-exec/src/lib.rs",
+            "crates/ocio-gpu-exec/src/gpu_unit_test.rs",
+            "crates/ocio-gpu-exec/src/wheel_shader.rs",
+            "crates/ocio-gpu-exec/src/oglapp_tests.rs",
+            "crates/ocio-gpu-exec/src/glsl_tests.rs",
+            "crates/ocio-gpu-exec/src/oglapp/child.rs",
+            "crates/ocio-gpu-exec/src/simd/glsl.rs",
+            "crates/ocio-gpu-exec/src/glsl_sse2.rs",
+            "crates/ocio-gpu-exec/tests/harness.rs",
+            "crates/ocio-gpu-exec/tests/glsl.rs",
+            "crates/ocio-gpu/src/oglapp.rs",
+            "crates/ocio/src/glsl.rs",
             "crates/ocio/src/minizip/os_windows.rs",
             "crates/ocio-testkit/src/lib.rs",
             "xtask/src/guards.rs",

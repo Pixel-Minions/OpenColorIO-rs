@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
 /// for entry (transforms_oracle.rs checks them in detail).
-const COMPLETE: [&str; 59] = [
+const COMPLETE: [&str; 62] = [
     "Baker",
     "Transform",
     "GroupTransform",
@@ -45,6 +45,9 @@ const COMPLETE: [&str; 59] = [
     "FileTransform",
     "FormatMetadata",
     "Context",
+    "Config",
+    "ConfigMergingParameters",
+    "ConfigMerger",
     "ProcessorMetadata",
     "FileRules",
     "ViewingRules",
@@ -92,19 +95,9 @@ const COMPLETE: [&str; 59] = [
 /// `py::bind_vector`): each compares with the wheel's entry for entry.
 const OWN_CLASSES: [&str; 2] = ["vector_of_uint8_t", "PyConfigIOProxy"];
 
-/// The declared classes bound but for members a later card binds: each compares with the
-/// wheel's entry for entry but for those members, which are exactly these (chunk 6.8a:
-/// `ConfigUtils`).
-const PARTIAL: [(&str, &[&str]); 1] = [(
-    "Config",
-    &[
-        "IdentifyBuiltinColorSpace",
-        "IdentifyInterchangeSpace",
-        "GetProcessorToBuiltinColorSpace",
-        "GetProcessorFromBuiltinColorSpace",
-        "GetProcessorFromConfigs",
-    ],
-)];
+/// Declared classes still missing members from a later card. Config's 6.8a utilities now
+/// complete its class, so its entire surface is compared through COMPLETE above.
+const PARTIAL: [(&str, &[&str]); 0] = [];
 
 fn entry_name(e: &Value) -> String {
     String::from_utf8(bytes(&e["name"])).unwrap()

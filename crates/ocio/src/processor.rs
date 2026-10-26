@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Processors: a port of `src/OpenColorIO/Processor.h` and `Processor.cpp` @ v2.5.2, with the
-//! CPU and GPU processors it makes. The legacy GPU processor comes with the 3D LUT op (its
-//! `Create3DLut`), `setColorSpaceConversion` and `concatenate` with the config (Phase 3).
+//! CPU and GPU processors it makes, including the legacy path's allocation-aware 3D bake.
 //!
 //! A processor owns its ops and finalizes them once, in [`Processor::set_transform`]. The
 //! processors it makes ([`Processor::optimized_processor_with_bit_depths`], the CPU
@@ -22,12 +21,13 @@ use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::format_metadata::FormatMetadataImpl;
 use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::logging::log_debug;
 use ocio_ops::op::OpVec;
 use ocio_ops::op_data::OpData;
 use ocio_ops::open_color_types::{
     BitDepth, DynamicPropertyType, OptimizationFlags, TransformDirection,
 };
-use ocio_ops::ops::noop::NoOpKind;
+use ocio_ops::ops::noop::{NoOpKind, create_3d_lut, partition_gpu_ops};
 use ocio_ops::platform::getenv;
 
 use crate::caching::{ProcessorCache, std_hash_string};
@@ -490,6 +490,32 @@ impl Processor {
     #[doc(alias = "getOptimizedGPUProcessor")]
     pub fn optimized_gpu_processor(&self, o_flags: OptimizationFlags) -> Result<Arc<GpuProcessor>> {
         self.gpu_processor(&self.ops, o_flags)
+    }
+
+    /// The legacy GPU processor: analytic ops around a CPU-baked 3D LUT of `edgelen` entries
+    /// per side. The GPU cache is shared with the ordinary path and keyed only by flags, so
+    /// the first requested processor wins even when later calls choose another edge (I-501).
+    ///
+    /// Port of `Processor::Impl::getOptimizedLegacyGPUProcessor`
+    /// (src/OpenColorIO/Processor.cpp:447-489 @ v2.5.2).
+    #[doc(alias = "getOptimizedLegacyGPUProcessor")]
+    pub fn optimized_legacy_gpu_processor(
+        &self,
+        o_flags: OptimizationFlags,
+        edgelen: u32,
+    ) -> Result<Arc<GpuProcessor>> {
+        let (mut pre, mut lattice, mut post) = (OpVec::new(), OpVec::new(), OpVec::new());
+        partition_gpu_ops(&mut pre, &mut lattice, &mut post, &self.ops)?;
+        log_debug("Legacy GPU Ops: 3DLUT");
+        lattice.finalize()?;
+        let lut = create_3d_lut(&lattice, edgelen)?;
+        let mut gpu_ops = self.ops.clone();
+        gpu_ops.clear();
+        gpu_ops.append(&pre)?;
+        gpu_ops.append(&lut)?;
+        gpu_ops.append(&post)?;
+        gpu_ops.finalize()?;
+        self.gpu_processor(&gpu_ops, o_flags)
     }
 
     /// The GPU processor of `gpu_ops` for the flags (which `OCIO_OPTIMIZATION_FLAGS`

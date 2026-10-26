@@ -9,7 +9,7 @@
 
 use ocio::{
     ColorSpaceTransform, Config, DisplayViewTransform, FileTransform, GradingRgbCurveTransform,
-    GradingStyle, Interpolation, OptimizationFlags, Transform,
+    GradingStyle, Interpolation, Lut1DTransform, OptimizationFlags, Transform,
 };
 use ocio_gpu::gpu_shader::{TextureDimensions, TextureType};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
@@ -28,6 +28,143 @@ fn get_test_files_dir() -> String {
 /// The shader text of `desc`.
 fn text(desc: &GpuShaderDesc) -> &str {
     std::str::from_utf8(desc.shader_text()).expect("UTF-8")
+}
+
+#[test]
+fn legacy_and_ordinary_gpu_calls_share_the_flags_cache() {
+    // Processor.cpp:491-523 @ v2.5.2 keys getGPUProcessor by flags alone, although
+    // getOptimizedLegacyGPUProcessor may have supplied differently baked ops (I-501).
+    // This checks object sharing only; O7.1 separately checks the wheel's legacy result.
+    for legacy_first in [false, true] {
+        let config = Config::create_raw().unwrap();
+        let mut lut = Lut1DTransform::new();
+        lut.set_value(1, 0.8, 0.9, 0.7).unwrap();
+        let processor = config.processor(&Transform::from(lut)).unwrap();
+        let first = if legacy_first {
+            processor
+                .optimized_legacy_gpu_processor(OptimizationFlags::NONE, 2)
+                .unwrap()
+        } else {
+            processor
+                .optimized_gpu_processor(OptimizationFlags::NONE)
+                .unwrap()
+        };
+        let legacy = processor
+            .optimized_legacy_gpu_processor(OptimizationFlags::NONE, 3)
+            .unwrap();
+        let ordinary = processor
+            .optimized_gpu_processor(OptimizationFlags::NONE)
+            .unwrap();
+        assert!(std::sync::Arc::ptr_eq(&first, &legacy));
+        assert!(std::sync::Arc::ptr_eq(&first, &ordinary));
+    }
+}
+
+#[test]
+fn a_zero_legacy_edge_has_the_wheels_validation_error() {
+    let config = Config::create_raw().unwrap();
+    let mut lut = Lut1DTransform::new();
+    lut.set_value(1, 0.8, 0.9, 0.7).unwrap();
+    let processor = config.processor(&Transform::from(lut)).unwrap();
+    let error = processor
+        .optimized_legacy_gpu_processor(OptimizationFlags::NONE, 0)
+        .expect_err("the wheel rejects its empty baked LUT");
+    // Pinned Windows 2.5.2 wheel via the native helper, 2026-10-25:
+    // target/p7-native-boundaries-windows.json, edge_len=0, stage=gpu_processor.
+    assert_eq!(
+        error.to_string(),
+        "Lut3D content array issue: Array content is empty."
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(GpuShader, MetalLutTest)` @ v2.5.2.
+#[test]
+fn metal_lut_test() {
+    const S_FROM_SPACE: &str = "ACEScg";
+    const S_DIPLAY: &str = "AdobeRGB";
+    const S_VIEW: &str = "raw";
+
+    const CONFIG: &str = r#"ocio_profile_version: 2
+environment: {}
+search_path: "./"
+roles:
+  data: Raw
+  default: Raw
+  scene_linear: ACEScg
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  AdobeRGB:
+    - !<View> {name: Raw, colorspace: Raw}
+
+colorspaces:
+  - !<ColorSpace>
+    name: ACEScg
+    to_reference: !<MatrixTransform> {matrix: [ 0.695452241357, 0.140678696470, 0.163869062172, 0, 0.044794563372, 0.859671118456, 0.095534318172, 0, -0.005525882558, 0.004025210306, 1.001500672252, 0, 0, 0, 0, 1 ]}
+  - !<ColorSpace>
+    name: Raw
+    isdata: true"#;
+
+    {
+        let m_ocio_cfg = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        m_ocio_cfg.validate().unwrap();
+
+        let mut transform = DisplayViewTransform::new();
+        transform.set_src(S_FROM_SPACE);
+        transform.set_display(S_DIPLAY);
+        transform.set_view(S_VIEW);
+
+        let processor = m_ocio_cfg.processor(&Transform::from(transform)).unwrap();
+
+        let gpu_processor = processor
+            .optimized_legacy_gpu_processor(OptimizationFlags::ALL, 2)
+            .unwrap();
+
+        let mut shader_desc = GpuShaderDesc::default();
+
+        shader_desc.set_function_name("Display");
+        shader_desc.set_language(GpuLanguage::Msl2_0);
+
+        gpu_processor
+            .extract_gpu_shader_info(&mut shader_desc)
+            .unwrap();
+        const EXPECTED: &str = r#"
+// Declaration of class wrapper
+
+struct ocioDisplay
+{
+ocioDisplay(
+)
+{
+}
+
+
+
+// Declaration of the OCIO shader function
+
+float4 Display(float4 inPixel)
+{
+  float4 outColor = inPixel;
+
+  return outColor;
+}
+
+// Close class wrapper
+
+
+};
+float4 Display(
+  float4 inPixel)
+{
+  return ocioDisplay(
+  ).Display(inPixel);
+}
+"#;
+
+        assert_text_eq("MetalLutTest", EXPECTED, text(&shader_desc));
+    }
 }
 
 /// Port of `OCIO_ADD_TEST(GpuShader, MetalLutTest2)` @ v2.5.2.

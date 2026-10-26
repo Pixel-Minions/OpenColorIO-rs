@@ -129,6 +129,11 @@ baseline of what passes on the renderer (P7-6), and an identity check of the har
 | 7.1b | `Processor.cpp:198-202, 447-489` (`getOptimizedLegacyGPUProcessor`: the partition, the lattice's `finalize`, `Create3DLut`, the second `finalize`, then `getGPUProcessor` and its cache, `491-525`); `include/OpenColorIO/OpenColorIO.h:2736-2742` (P7-8) (~40) | `ocio/src/processor.rs` | `tests/cpu/GpuShader_tests.cpp` `MetalLutTest` |
 | 7.1c | — (the oracle sweep, after O7.1) | — | Against the wheel's legacy processor (O7.1), in the 10 languages: chains with no LUT (the analytic shader alone); a LUT alone; analytic ops, LUTs, analytic ops; several LUTs apart; allocations (`uniform`, `lg2`, with and without vars) at the cut; `FileTransform`s (the `FileNoOp` before the LUT); a dynamic op inside and outside the lattice; edge lengths 2, 3, 32, 64, 129 and the edges O7.1 probes (0, 1, large); every optimization level; the default and the legacy processor requested in both orders (the shared cache, below). Each: the shader's text, cache ID, uniforms, the 3D texture's bits, or the exception. Then the 30 legacy tests of the suite get their identity check against the wheel's shader (7.2c's runner) |
 
+7.1a and 7.1b are implemented together as one coherent legacy-processor chunk: about 150
+new non-test lines for the API and its partition/bake helpers, with all three upstream tests.
+That combined unit runs the full staged release/Rocky gate before its commit. The independent
+oracle sweep remains a separate `p7-legacy-parity` test chunk after O7.1.
+
 - **The shared GPU cache.** The legacy processor goes through `getGPUProcessor`, whose cache is
   keyed by the optimization flags only (`Processor.cpp:505-516`). With the cache on, a default
   GPU processor requested first is returned for a legacy request with the same flags, and the
@@ -137,10 +142,12 @@ baseline of what passes on the renderer (P7-6), and an identity check of the har
   the vector is zero-initialised and `GenerateIdentityLut3D` writes RGB only (`NoOps.cpp:185-186`).
   A matrix that mixes alpha into RGB bakes with alpha 0. Ported as is; an `I-` entry.
 - **Edge lengths.** `edgelen` 1 gives `1 / (edgeLen - 1)` = inf in the identity
-  (`Lut3DOp.cpp:33`); `edgelen^3` is computed in 32-bit `unsigned` (`NoOps.cpp:180`) and wraps
-  from 1626; the RGBA vector (`4 * edgelen^3` floats) is allocated before anything validates the
-  size. O7.1 probes them on both wheels; each becomes an `I-` entry (matched), or a `U-` entry
-  and a deliberate error where the wheel crashes or exhausts memory.
+  (`Lut3DOp.cpp:33`). `edgelen^3` is computed in 32-bit `unsigned` (`NoOps.cpp:180`), but
+  `Lut3DOpData` construction calls `Lut3DArray::resize` before allocating the RGBA vector and
+  rejects every edge greater than 129 (`Lut3DOpData.cpp:194-204`), so the wrapped pixel count
+  is never used. At edge zero, `&lut3D[0]` is formed on an empty vector, but count-zero loops
+  access no pixel; both wheels raise "Lut3D content array issue: Array content is empty."
+  during GPU finalization (I-503). O7.1 records the boundary cases on both wheels.
 - The CPU renderers the bake uses are `getCPUOp(false)` (`Op.h:240-244`): fast math off,
   whatever the flags. The texture's bits follow the platform's libm (D12).
 
@@ -327,7 +334,7 @@ p7-compile (7.4b now; 7.4a after 7.2a) ─────────────�
 **The fastest path to a large share of the 264.**
 1. **Decide P7-2 to P7-4 first.** The harness waits for them; P7-1 only gates 7.1c.
 2. **Wave 1 (3 implementers, in parallel):** A: `p7-harness`, the critical path
-   (7.2a → 7.2b → 7.2c). B: `p7-legacy` (two small chunks; done before 7.2c needs it), then
+   (7.2a → 7.2b → 7.2c). B: `p7-legacy` (one small implementation chunk; done before 7.2c needs it), then
    `p7-compile`'s 7.4b. C: `p7-oracle`, then `p7-legacy-parity`.
 3. **Wave 2 (up to 4 implementers, in parallel), once `p7-harness` lands:** the four
    `p7-suite-*` cards. Each is test-only and independent of the others. With 3 agents, A takes
@@ -355,7 +362,7 @@ made, without waiting for other Phase 7 cards.
 | Card | Chunks | Size | Who | Needs | Owner items |
 |---|---|---|---|---|---|
 | `p7-oracle` | O7.1, O7.2 | 2 | C | now | P7-1 (O7.1 only) |
-| `p7-legacy` | 7.1a, 7.1b | 2, ~180 and their tests | B | now | P7-8 |
+| `p7-legacy` | 7.1a + 7.1b | 1, ~180 and their tests | B | now | P7-8 |
 | `p7-legacy-parity` | 7.1c | 1 (tests) | C | `p7-oracle`, `p7-legacy`; the identity check after `p7-harness` | — |
 | `p7-harness` | 7.2a–7.2c | 3, ~1,400 | A | now (7.2c: `p7-legacy`) | P7-2, P7-3, P7-4 |
 | `p7-suite-1` | 7.3a (Range, Gamma), 7.3b (CDL, Log) | 2 (tests, 59) | any | `p7-harness` | P7-6 (renderer failures, if any) |
@@ -364,7 +371,7 @@ made, without waiting for other Phase 7 cards.
 | `p7-suite-4` | 7.3f (EC, GradingPrimary, GradingRGBCurve), 7.3g (GradingTone, GradingHueCurve) | 2 (tests, 87) | any | `p7-harness` | P7-6 |
 | `p7-compile` | 7.4a, 7.4b | 2, ~400 | B | 7.4b now; 7.4a after 7.2a | P7-5 |
 
-9 cards, 17 chunks: 7 with library or harness code (~1,800 lines), 8 test-only, 2 oracle.
+9 cards, 16 chunks: 6 with library or harness code (~1,800 lines), 8 test-only, 2 oracle.
 
 **Can start now** (once their owner items are decided): `p7-oracle`, `p7-legacy`,
 `p7-harness`, and `p7-compile`'s 7.4b.

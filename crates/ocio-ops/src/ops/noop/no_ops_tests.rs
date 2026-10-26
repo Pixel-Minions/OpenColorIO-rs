@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the no-ops, with upstream's `allocation_op`, `file_op` and `look_op` tests
-//! (tests/cpu/ops/noop/NoOps_tests.cpp @ v2.5.2). Its `throw` and `partition_gpu_ops` tests
-//! test `PartitionGPUOps`, which needs the Lut3D op.
+//! Tests of the no-ops, with all five upstream tests of
+//! tests/cpu/ops/noop/NoOps_tests.cpp @ v2.5.2.
 //!
 //! The rest checks how the ops share and copy their data, and relations upstream's code
 //! states (a look's cache ID is its name, an allocation's its data's). What the wheel shows of
@@ -16,6 +15,8 @@ use std::sync::Arc;
 use super::*;
 use crate::op_data::OpDataType;
 use crate::open_color_types::{Allocation, DynamicPropertyType, TransformDirection};
+use crate::ops::lut1d::lut1d_op::create_lut1d_op;
+use crate::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use crate::ops::matrix::matrix_op::create_scale_op;
 
 const ALL_DYNAMIC_TYPES: [DynamicPropertyType; 7] = [
@@ -288,6 +289,201 @@ fn check_clone_of_first(ops: &OpVec) {
 fn create_generic_scale_op(ops: &mut OpVec) {
     let scale4 = [1.04, 1.05, 1.06, 1.0];
     create_scale_op(ops, &scale4, TransformDirection::Forward);
+}
+
+/// Port of `CreateGenericLutOp` (tests/cpu/ops/noop/NoOps_tests.cpp:32-52 @ v2.5.2).
+fn create_generic_lut_op(ops: &mut OpVec) {
+    let size = 256;
+    let mut lut = Lut1DOpData::new(size).unwrap();
+    for i in 0..size {
+        let x = i as f32 / (size - 1) as f32;
+        let x2 = x * x;
+        for c in 0..3 {
+            lut.get_array_mut()[3 * i as usize + c] = x2;
+        }
+    }
+    create_lut1d_op(ops, lut, TransformDirection::Forward);
+}
+
+/// Port of `AssertPartitionIntegrity` (tests/cpu/ops/noop/NoOps_tests.cpp:54-93 @ v2.5.2).
+fn assert_partition_integrity(pre: &OpVec, lattice: &OpVec, post: &OpVec) -> Result<()> {
+    for op in pre.iter() {
+        if !op.supported_by_legacy_shader() {
+            return Err(Exception::new(
+                "Partition failed check. One gpuPreOps op does not support GPU.",
+            ));
+        }
+    }
+    if !lattice.is_empty() && lattice.iter().all(Op::supported_by_legacy_shader) {
+        return Err(Exception::new(
+            "Partition failed check. All gpuLatticeOps ops do support GPU.",
+        ));
+    }
+    for op in post.iter() {
+        if !op.supported_by_legacy_shader() {
+            return Err(Exception::new(
+                "Partition failed check. One gpuPostOps op does not support GPU.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Port of `OCIO_ADD_TEST(NoOps, partition_gpu_ops)` @ v2.5.2.
+#[test]
+fn partition_gpu_ops_test() {
+    // Upstream's seven setups and exact expected partition sizes, in source order
+    // (NoOps_tests.cpp:99-251). A is allocation, S scale and L the square LUT above.
+    for (setup, expected) in [
+        ("", [0, 0, 0]),
+        ("A", [1, 0, 0]),
+        ("AS", [2, 0, 0]),
+        ("ALS", [2, 4, 1]),
+        ("L", [0, 1, 0]),
+        ("LSALSA", [0, 4, 2]),
+        ("ASLSALSA", [2, 8, 2]),
+    ] {
+        let mut ops = OpVec::new();
+        for op in setup.bytes() {
+            match op {
+                b'A' => create_gpu_allocation_no_op(&mut ops, &lg2_allocation()),
+                b'S' => create_generic_scale_op(&mut ops),
+                b'L' => create_generic_lut_op(&mut ops),
+                _ => panic!("unknown upstream setup"),
+            }
+        }
+        assert_eq!(ops.len(), setup.len());
+        let (mut pre, mut lattice, mut post) = (OpVec::new(), OpVec::new(), OpVec::new());
+        partition_gpu_ops(&mut pre, &mut lattice, &mut post, &ops).unwrap();
+        assert_eq!([pre.len(), lattice.len(), post.len()], expected, "{setup}");
+        if setup == "A" {
+            assert!(ops[0].is_same_type(&pre[0]));
+        }
+        assert_partition_integrity(&pre, &lattice, &post).unwrap();
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(NoOps, throw)` @ v2.5.2.
+#[test]
+fn throw() {
+    let mut ops = OpVec::new();
+    create_gpu_allocation_no_op(&mut ops, &lg2_allocation());
+    create_generic_lut_op(&mut ops);
+    create_generic_scale_op(&mut ops);
+    let (mut pre, mut lattice, mut post) = (OpVec::new(), OpVec::new(), OpVec::new());
+    partition_gpu_ops(&mut pre, &mut lattice, &mut post, &ops).unwrap();
+    ocio_testkit::upstream::check_throw_what(
+        assert_partition_integrity(&lattice, &lattice, &post),
+        "One gpuPreOps op does not support GPU",
+    );
+    ocio_testkit::upstream::check_throw_what(
+        assert_partition_integrity(&pre, &pre, &post),
+        "All gpuLatticeOps ops do support GPU",
+    );
+    ocio_testkit::upstream::check_throw_what(
+        assert_partition_integrity(&pre, &lattice, &lattice),
+        "One gpuPostOps op does not support GPU",
+    );
+}
+
+#[test]
+fn an_empty_lattice_does_not_use_the_edge_length() {
+    // Create3DLut's early return (NoOps.cpp:177) precedes any use of the edge length.
+    assert!(create_3d_lut(&OpVec::new(), 0).unwrap().is_empty());
+    assert!(create_3d_lut(&OpVec::new(), u32::MAX).unwrap().is_empty());
+}
+
+#[test]
+fn a_zero_edge_lattice_has_the_wheels_finalization_error() {
+    let mut ops = OpVec::new();
+    create_generic_lut_op(&mut ops);
+    ops.finalize().unwrap();
+    let mut baked = create_3d_lut(&ops, 0).unwrap();
+    let error = baked.finalize().unwrap_err();
+    // Actual 2.5.2 wheels through the native legacy GPU helper on both platforms:
+    // target/p7-native-boundaries-{windows,linux}.json, edge_len=0 (I-503).
+    assert_eq!(
+        error.to_string(),
+        "Lut3D content array issue: Array content is empty."
+    );
+}
+
+#[test]
+fn a_legacy_lattice_matches_the_wheels_cpu_pixels() {
+    use crate::ops::matrix::matrix_op::create_matrix_offset_op;
+    use ocio_testkit::Oracle;
+    use ocio_testkit::compare::assert_f32_bits_eq;
+    use ocio_testkit::oracle::{BatchCall, f32_to_bytes};
+    use serde_json::json;
+
+    // Probe parameters are inputs only. In particular the RGB rows mix alpha, so an
+    // identity lattice initialized with alpha one instead of upstream's zero is detected.
+    let matrix = [
+        1.1, 0.2, -0.3, 0.7, -0.4, 0.9, 0.15, -0.2, 0.3, -0.1, 1.2, 0.5, 0.0, 0.0, 0.0, 1.0,
+    ];
+    let offset = [0.03, -0.04, 0.12, 0.25];
+    let mut ops = OpVec::new();
+    create_matrix_offset_op(&mut ops, &matrix, &offset, TransformDirection::Forward);
+    ops.finalize().unwrap();
+    let edges: &[u32] = if matches!(
+        std::env::var("OCIO_RS_TIER").as_deref(),
+        Ok("full" | "exhaustive")
+    ) {
+        &[2, 3, 5, 32, 64, 129]
+    } else {
+        &[2, 3, 5]
+    };
+    let inputs: Vec<Vec<u8>> = edges
+        .iter()
+        .map(|&edge| {
+            let mut input = vec![0.0; (edge as usize).pow(3) * 4];
+            generate_identity_lut3d(&mut input, edge as i32, 4, Lut3DOrder::FastBlue).unwrap();
+            f32_to_bytes(&input)
+        })
+        .collect();
+    let calls: Vec<BatchCall<'_>> = inputs
+        .iter()
+        .map(|input| BatchCall {
+            cmd: "cpu_apply",
+            args: json!({
+                "transform": {"class": "MatrixTransform", "args": {
+                    "matrix": matrix, "offset": offset,
+                }},
+                "optimization": "OPTIMIZATION_NONE",
+            }),
+            blobs: vec![input],
+        })
+        .collect();
+    let answers = Oracle::get().batch(&calls, false);
+    assert_eq!(answers.len(), edges.len());
+    assert!(!answers.is_empty());
+    for (&edge, answer) in edges.iter().zip(answers) {
+        let answer = answer.expect("the wheel's CPU apply");
+        assert!(
+            answer.result.get("exception").is_none(),
+            "{:?}",
+            answer.result
+        );
+        assert_eq!(answer.blobs.len(), 1);
+        let wheel = answer.blob_f32(0);
+        assert_eq!(wheel.len(), (edge as usize).pow(3) * 4);
+        let expected: Vec<f32> = wheel
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|rgba| rgba[..3].iter().copied())
+            .collect();
+        let baked = create_3d_lut(&ops, edge).unwrap();
+        assert_eq!(baked.len(), 1);
+        let OpData::Lut3D(lut) = &**baked[0].data() else {
+            panic!("Create3DLut must return a 3D LUT");
+        };
+        assert_f32_bits_eq(
+            &format!("legacy lattice edge {edge}"),
+            &expected,
+            lut.get_array().get_values(),
+        );
+    }
 }
 
 /// Port of `OCIO_ADD_TEST(NoOps, allocation_op)` @ v2.5.2.

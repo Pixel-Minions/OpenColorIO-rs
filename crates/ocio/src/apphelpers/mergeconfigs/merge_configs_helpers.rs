@@ -860,6 +860,36 @@ impl Default for ConfigMerger {
 }
 
 impl ConfigMerger {
+    /// A binding-only snapshot that shares the parameter and config pointers. Python's
+    /// holder remains available to callbacks while the snapshot executes the upstream loop.
+    ///
+    /// Port of the `ConfigMerger::Impl` pointer members (MergeConfigsHelpers.h:129-194 @
+    /// v2.5.2), without the editable-copy operation's deep copies.
+    #[doc(hidden)]
+    pub fn binding_copy(&self) -> ConfigMerger {
+        ConfigMerger {
+            search_paths: self.search_paths.clone(),
+            working_dir: self.working_dir.clone(),
+            major_version: self.major_version,
+            minor_version: self.minor_version,
+            merge_params: self.merge_params.clone(),
+            merged_configs: self.merged_configs.clone(),
+        }
+    }
+
+    /// Updates a binding snapshot with the current value of a config Python holds in place.
+    ///
+    /// Port of `ConfigMerger::Impl::m_mergedConfigs`' shared pointers
+    /// (MergeConfigsHelpers.h:187-193 @ v2.5.2).
+    #[doc(hidden)]
+    pub fn replace_merged_config_as_is(&mut self, original: &Arc<Config>, current: Arc<Config>) {
+        for config in &mut self.merged_configs {
+            if Arc::ptr_eq(config, original) {
+                *config = Arc::clone(&current);
+            }
+        }
+    }
+
     /// A merger without merges, search paths or working directory, of OCIOM version 1.0.
     ///
     /// Port of `ConfigMerger::Create` and `ConfigMerger::Impl::Impl`
@@ -1208,9 +1238,23 @@ impl ConfigMerger {
     /// Port of `ConfigMerger::mergeConfigs` (MergeConfigsHelpers.cpp:681-729 @ v2.5.2).
     #[doc(alias = "mergeConfigs")]
     pub fn merge_configs(&self) -> Result<Arc<ConfigMerger>> {
+        self.merge_configs_with_params(|i| self.merge_params.get(i).cloned())
+    }
+
+    /// The binding's upstream loop: its source holder may change during a Python logging
+    /// callback, so the size and current parameter pointer are loaded again each iteration.
+    /// `None` ends the loop; `Some(None)` is a null parameter (U-176).
+    ///
+    /// Port of `ConfigMerger::mergeConfigs` (MergeConfigsHelpers.cpp:681-729 @ v2.5.2).
+    #[doc(hidden)]
+    pub fn merge_configs_with_params(
+        &self,
+        mut next: impl FnMut(usize) -> Option<Option<ConfigMergingParameters>>,
+    ) -> Result<Arc<ConfigMerger>> {
         let mut editable_merger = self.create_editable_copy()?;
 
-        for (i, params) in self.merge_params.iter().enumerate() {
+        let mut i = 0;
+        while let Some(params) = next(i) {
             // (The copy refused parameters that are `None`, which upstream dereferences.)
             let params = params
                 .as_ref()
@@ -1238,6 +1282,7 @@ impl ConfigMerger {
             // Add new config object to m_mergedConfigs so they can be used for following
             // merges.
             editable_merger.merged_configs.push(Arc::new(merged_config));
+            i += 1;
         }
 
         Ok(Arc::new(editable_merger))

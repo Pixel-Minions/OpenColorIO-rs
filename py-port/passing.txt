@@ -77,6 +77,7 @@ ColorSpaceTest.py::ColorSpaceTest.test_interchange_attributes
 ColorSpaceTest.py::ColorSpaceTest.test_interop_id
 ColorSpaceTest.py::ColorSpaceTest.test_is_colorspace_linear
 ColorSpaceTest.py::ColorSpaceTest.test_name
+ColorSpaceTest.py::ColorSpaceTest.test_processor_to_known_colorspace
 ColorSpaceTest.py::ColorSpaceTest.test_transform
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_constructor_with_keyword
 ColorSpaceTransformTest.py::ColorSpaceTransformTest.test_constructor_with_positional
@@ -315,6 +316,14 @@ Lut3DTransformTest.py::Lut3DTransformTest.test_grid_size
 Lut3DTransformTest.py::Lut3DTransformTest.test_interpolation
 MatrixTransformTest.py::MatrixTransformTest.test_direction
 MatrixTransformTest.py::MatrixTransformTest.test_interface
+MergeConfigsTest.py::ConfigMergingHelpersTest.test_ConfigMerger_defaults
+MergeConfigsTest.py::ConfigMergingHelpersTest.test_ConfigMerger_parse
+MergeConfigsTest.py::ConfigMergingHelpersTest.test_ConfigMerger_setters
+MergeConfigsTest.py::ConfigMergingHelpersTest.test_ConfigMergingParameters_defaults
+MergeConfigsTest.py::ConfigMergingHelpersTest.test_ConfigMergingParameters_setters
+MergeConfigsTest.py::ConfigMergingHelpersTest.test_ExecuteMerger
+MergeConfigsTest.py::ConfigMergingHelpersTest.test_MergeColorSpace
+MergeConfigsTest.py::ConfigMergingHelpersTest.test_MergeConfigs
 MixingHelpersTest.py::MixingHelpersTest.test_color_picking
 MixingHelpersTest.py::MixingHelpersTest.test_encoding
 MixingHelpersTest.py::MixingHelpersTest.test_get_processor

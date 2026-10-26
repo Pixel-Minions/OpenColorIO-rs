@@ -549,7 +549,7 @@ path = "src/OpenColorIO/Processor.cpp"
 kind = "src"
 target = ["crates/ocio/src/processor.rs"]
 status = "partial"
-note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h2: createGroupTransform over every family ported so far (Allocation, CDL, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, Lut1D, Matrix, Range), the processor and its optimized processor checked against the wheel by every family's oracle test (crates/ocio/tests/common/transforms.rs, check_processors), and the optimized processors of integer and half input, whose LUTs the optimizer bakes or folds (check_optimized_processors), the format metadata createGroupTransform copies (a config per group) and the output bit depth of getOptimizedProcessor (processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). getOptimizedLegacyGPUProcessor comes with the 3D LUT op (PartitionGPUOps, Create3DLut), setColorSpaceConversion and concatenate with the config (Phase 3). p5-dynamic 5.6a: the verifier's mutant M11 (the CPU cache ignoring dynamic ops, card p1-processor verification, 2026-10-04) is killed by cache_cpu_processors and crates/ocio/tests/dynamic_properties_oracle.rs, which compares the sharing of every dynamic property type with the wheel; M36 (the fallback taking the first entry), M42 (a copy keeping the processor's cache ID) and M47 (no optimizeForBitdepth) are killed by processors_of_ops_match_the_wheel (crates/ocio/tests/processor_cache_oracle.rs, p1-tests-catchup); p9-config-utils 9.1b: concatenate (643-652), for GetProcessorFromConfigs. setColorSpaceConversion (598-621) has no caller in OCIO 2.5.2"
+note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h2: createGroupTransform over every family ported so far (Allocation, CDL, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, Lut1D, Matrix, Range), the processor and its optimized processor checked against the wheel by every family's oracle test (crates/ocio/tests/common/transforms.rs, check_processors), and the optimized processors of integer and half input, whose LUTs the optimizer bakes or folds (check_optimized_processors), the format metadata createGroupTransform copies (a config per group) and the output bit depth of getOptimizedProcessor (processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). 7.1b: getOptimizedLegacyGPUProcessor (PartitionGPUOps, Create3DLut), with the shared flags-only GPU cache (I-501); setColorSpaceConversion has no caller (Phase 9 catchup). p5-dynamic 5.6a: the verifier's mutant M11 (the CPU cache ignoring dynamic ops, card p1-processor verification, 2026-10-04) is killed by cache_cpu_processors and crates/ocio/tests/dynamic_properties_oracle.rs, which compares the sharing of every dynamic property type with the wheel; M36 (the fallback taking the first entry), M42 (a copy keeping the processor's cache ID) and M47 (no optimizeForBitdepth) are killed by processors_of_ops_match_the_wheel (crates/ocio/tests/processor_cache_oracle.rs, p1-tests-catchup); p9-config-utils 9.1b: concatenate (643-652), for GetProcessorFromConfigs. setColorSpaceConversion (598-621) has no caller in OCIO 2.5.2"
 
 [[file]]
 path = "src/OpenColorIO/Processor.h"
@@ -2107,15 +2107,15 @@ note = "see MatrixOpGPU.cpp"
 path = "src/OpenColorIO/ops/noop/NoOps.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
-status = "partial"
-note = "1.2c: FileNoOp, LookNoOp, CreateFileNoOp and CreateLookNoOp, CPU side (the op class is kept in the data, NoOpKind); 1.3n1: AllocationNoOp and CreateGpuAllocationNoOp; 1.8h1: the dumpMetadata overrides, in Processor::compute_metadata (crates/ocio/src/processor.rs); not yet: PartitionGPUOps and Create3DLut with their helpers (they need the Lut3D op)"
+status = "done"
+note = "1.2c: FileNoOp and LookNoOp; 1.3n1: AllocationNoOp; 1.8h1: dumpMetadata in Processor::compute_metadata; 7.1a: PartitionGPUOps, Create3DLut and helpers"
 
 [[file]]
 path = "src/OpenColorIO/ops/noop/NoOps.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
-status = "partial"
-note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; not yet: PartitionGPUOps and Create3DLut"
+status = "done"
+note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; 7.1a: PartitionGPUOps and Create3DLut"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"
@@ -3783,9 +3783,9 @@ note = "p6-objects 6.3e"
 [[file]]
 path = "src/bindings/python/PyConfig.cpp"
 kind = "binding"
-target = ["crates/ocio-py/src/py_config.rs"]
-status = "partial"
-note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. Later: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (6.8a)"
+target = ["crates/ocio-py/src/py_config.rs", "crates/ocio-py/src/py_config_utils.rs"]
+status = "done"
+note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs"
 
 [[file]]
 path = "src/bindings/python/PyConfigIOProxy.cpp"
@@ -4011,7 +4011,8 @@ status = "done"
 path = "src/bindings/python/apphelpers/PyMergeConfigs.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_merge_configs.rs"]
-status = "todo"
+status = "done"
+note = "p6-after-p9 6.8a: ConfigMergingParameters and its nested MergeStrategies enum, ConfigMerger (shared params and merged configs, editable copies, reentrant merge callbacks), ConfigMergingHelpers.MergeConfigs and MergeColorSpace; strict surface and differential behavior tests in merge_configs_oracle.rs; null string setters U-221, inherited null active lists U-123 and null params U-176"
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyMixingHelpers.cpp"
@@ -4239,14 +4240,16 @@ note = "build system"
 [[file]]
 path = "src/libutils/oglapphelpers/glsl.cpp"
 kind = "app"
-status = "n/a"
-note = "OpenGL/Metal/image-IO helpers for upstream's apps"
+target = ["crates/ocio-gpu-exec/src/glsl.rs"]
+status = "done"
+note = "7.2b: test-only OpenGLBuilder, textures, dynamic uniforms, GLSL compile/link and texture limit query; EGL harness on Rocky llvmpipe (P7-2/P7-3)."
 
 [[file]]
 path = "src/libutils/oglapphelpers/glsl.h"
 kind = "app"
-status = "n/a"
-note = "OpenGL/Metal/image-IO helpers for upstream's apps"
+target = ["crates/ocio-gpu-exec/src/glsl.rs"]
+status = "done"
+note = "7.2b: OpenGLBuilder and its texture/uniform state."
 
 [[file]]
 path = "src/libutils/oglapphelpers/metalapp.h"
@@ -4287,14 +4290,16 @@ note = "OpenGL/Metal/image-IO helpers for upstream's apps"
 [[file]]
 path = "src/libutils/oglapphelpers/oglapp.cpp"
 kind = "app"
-status = "n/a"
-note = "OpenGL/Metal/image-IO helpers for upstream's apps"
+target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
+status = "done"
+note = "7.2b: OglApp image/FBO/shader/quad/readback and HeadlessApp's EGL context. ScreenApp's GLUT window is n/a: headless execution only, owner P7-3."
 
 [[file]]
 path = "src/libutils/oglapphelpers/oglapp.h"
 kind = "app"
-status = "n/a"
-note = "OpenGL/Metal/image-IO helpers for upstream's apps"
+target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
+status = "done"
+note = "7.2b: HeadlessApp/OglApp state; ScreenApp is n/a (P7-3)."
 
 [[file]]
 path = "src/utils/CMakeLists.txt"
@@ -4474,7 +4479,7 @@ path = "tests/cpu/GpuShader_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-gpu/src/gpu_shader_tests.rs", "crates/ocio/tests/gpu_shader_tests.rs"]
 status = "partial"
-note = "1.7c: generic_shader (its uniform too); gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones. p4-ctf-bake 4.10b: MetalLutTest2, MetalSupport3-6 and VulkanSupport, which extract the shaders of config and LUT file processors (crates/ocio/tests/gpu_shader_tests.rs). Later: MetalLutTest uses the legacy GPU processor (Phase 7); p5-dynamic 5.6b: MetalSupport7 (an ExposureContrastTransform), MetalSupport8 (a GradingRGBCurveTransform in a config) and MetalSupport9 (a dynamic one), in crates/ocio/tests/gpu_shader_tests.rs"
+note = "1.7c: generic_shader (its uniform too); gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones. p4-ctf-bake 4.10b: MetalLutTest2, MetalSupport3-6 and VulkanSupport, which extract the shaders of config and LUT file processors (crates/ocio/tests/gpu_shader_tests.rs). 7.1b: MetalLutTest uses the legacy GPU processor; p5-dynamic 5.6b: MetalSupport7 (an ExposureContrastTransform), MetalSupport8 (a GradingRGBCurveTransform in a config) and MetalSupport9 (a dynamic one), in crates/ocio/tests/gpu_shader_tests.rs"
 
 [[file]]
 path = "tests/cpu/Logging_tests.cpp"
@@ -5138,8 +5143,8 @@ note = "create_transform is in crates/ocio/src/transforms/matrix_transform_tests
 path = "tests/cpu/ops/noop/NoOps_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/noop/no_ops_tests.rs"]
-status = "partial"
-note = "allocation_op, file_op, look_op; partition_gpu_ops and throw test PartitionGPUOps, which needs the Lut3D op (Phase 2)"
+status = "done"
+note = "all five tests: allocation_op, file_op, look_op, partition_gpu_ops and throw (7.1a)"
 
 [[file]]
 path = "tests/cpu/ops/range/RangeOpCPU_tests.cpp"
@@ -5340,7 +5345,7 @@ path = "tests/gpu/CDLOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/cdl_op_test.rs"]
 status = "todo"
-note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (cdl_cases); 1.3c4 checks the shaders' text of the 11 that use a version 2 config against the wheel (crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs)"
+note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (cdl_cases); 1.3c4 checks the shaders' text of the 11 that use a version 2 config against the wheel (crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs). O7.1 follow-up: create.major_version calls the actual wheel setter before cache flags and reaches the native client, with direct-wheel version1/2 CDL contracts in create_version_oracle.rs; GPU execution remains pending."
 
 [[file]]
 path = "tests/gpu/CMakeLists.txt"
@@ -5372,6 +5377,7 @@ path = "tests/gpu/GPUUnitTest.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/gpu_unit_test.rs"]
 status = "todo"
+note = "p7-oracle O7.2: oracle/ocio_oracle/spec.py supports the harness's Config::Create with PROCESSOR_CACHE_OFF (137-142); O7.1: oracle/native/legacy_gpu.cpp calls the pinned wheel's public legacy GPU API, with exact ordinary-GPU transport proof and capped edge probes in crates/ocio-testkit/tests/legacy_gpu_oracle.rs; the harness itself remains for p7-harness 7.2c"
 
 [[file]]
 path = "tests/gpu/GPUUnitTest.h"
@@ -5384,7 +5390,7 @@ path = "tests/gpu/GammaOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/gamma_op_test.rs"]
 status = "todo"
-note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (gamma_cases); 1.3g4 checks the shaders' text of the 10 that use a version 2 config against the wheel (crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs)"
+note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (gamma_cases); 1.3g4 checks the shaders' text of the 10 that use a version 2 config against the wheel (crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs). O7.1 follow-up: create.major_version preserves Config::Create/setMajorVersion from AddExponent, with direct-wheel version1/2 native ordinary/legacy contracts in create_version_oracle.rs; GPU execution remains pending."
 
 [[file]]
 path = "tests/gpu/GradingHueCurveOp_test.cpp"

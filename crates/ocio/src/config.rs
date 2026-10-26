@@ -6573,6 +6573,29 @@ impl Config {
         dst_config: &Config,
         dst_name: impl AsRef<[u8]>,
     ) -> Result<Arc<Processor>> {
+        Self::processor_from_configs_with_contexts_optional(
+            Some(src_context),
+            src_config,
+            src_name,
+            Some(dst_context),
+            dst_config,
+            dst_name,
+        )
+    }
+
+    /// Binding-only nullable contexts, preserving the context check at each getProcessor.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs` (Config.cpp:4898-5145 @ v2.5.2).
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_with_contexts_optional(
+        src_context: Option<&Context>,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_context: Option<&Context>,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
         let (src_name, dst_name) = (src_name.as_ref(), dst_name.as_ref());
         // Extract the appropriate interchange roles based on the reference space type of the
         // source and destination color spaces. Note that no heuristics are attempted. If these
@@ -6589,7 +6612,7 @@ impl Config {
             )));
         };
 
-        Config::processor_from_configs_with_interchange_with_contexts(
+        Config::processor_from_configs_with_interchange_with_contexts_optional(
             src_context,
             src_config,
             src_name,
@@ -6653,6 +6676,33 @@ impl Config {
         dst_name: impl AsRef<[u8]>,
         dst_interchange_name: impl AsRef<[u8]>,
     ) -> Result<Arc<Processor>> {
+        Self::processor_from_configs_with_interchange_with_contexts_optional(
+            Some(src_context),
+            src_config,
+            src_name,
+            src_interchange_name,
+            Some(dst_context),
+            dst_config,
+            dst_name,
+            dst_interchange_name,
+        )
+    }
+
+    /// Binding-only nullable contexts, preserving the context check at each getProcessor.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs` (Config.cpp:4898-5145 @ v2.5.2).
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_with_interchange_with_contexts_optional(
+        src_context: Option<&Context>,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_context: Option<&Context>,
+        dst_config: &Config,
+        dst_name: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
         let src_name = c_str(src_name.as_ref());
         let src_interchange_name = c_str(src_interchange_name.as_ref());
         let dst_name = c_str(dst_name.as_ref());
@@ -6705,13 +6755,15 @@ impl Config {
         // Upstream's checks that p1 and p2 aren't null can't fail: getProcessor returns a
         // processor or throws.
         let p1 = src_config.processor_between_color_spaces_with_context(
-            src_context,
+            src_context
+                .ok_or_else(|| Exception::new("Config::GetProcessor failed. Context is null."))?,
             Some(src_color_space),
             Some(src_ex_cs),
         )?;
 
         let p2 = dst_config.processor_between_color_spaces_with_context(
-            dst_context,
+            dst_context
+                .ok_or_else(|| Exception::new("Config::GetProcessor failed. Context is null."))?,
             Some(dst_ex_cs),
             Some(dst_color_space),
         )?;
@@ -6776,6 +6828,33 @@ impl Config {
         dst_view: impl AsRef<[u8]>,
         direction: TransformDirection,
     ) -> Result<Arc<Processor>> {
+        Self::processor_from_configs_to_display_view_with_contexts_optional(
+            Some(src_context),
+            src_config,
+            src_name,
+            Some(dst_context),
+            dst_config,
+            dst_display,
+            dst_view,
+            direction,
+        )
+    }
+
+    /// Binding-only nullable contexts, preserving the context check at each getProcessor.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs` (Config.cpp:4898-5145 @ v2.5.2).
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_to_display_view_with_contexts_optional(
+        src_context: Option<&Context>,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        dst_context: Option<&Context>,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
         let src_name = c_str(src_name.as_ref());
         let Some(src_color_space) = src_config.color_space(src_name) else {
             return Err(Exception::new(
@@ -6832,7 +6911,7 @@ impl Config {
             ));
         }
 
-        Config::processor_from_configs_to_display_view_with_interchange_with_contexts(
+        Config::processor_from_configs_to_display_view_with_interchange_with_contexts_optional(
             src_context,
             src_config,
             src_name,
@@ -6909,6 +6988,37 @@ impl Config {
         dst_interchange_name: impl AsRef<[u8]>,
         direction: TransformDirection,
     ) -> Result<Arc<Processor>> {
+        Self::processor_from_configs_to_display_view_with_interchange_with_contexts_optional(
+            Some(src_context),
+            src_config,
+            src_name,
+            src_interchange_name,
+            Some(dst_context),
+            dst_config,
+            dst_display,
+            dst_view,
+            dst_interchange_name,
+            direction,
+        )
+    }
+
+    /// Binding-only nullable contexts, preserving the context check at each getProcessor.
+    ///
+    /// Port of `Config::GetProcessorFromConfigs` (Config.cpp:4898-5145 @ v2.5.2).
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn processor_from_configs_to_display_view_with_interchange_with_contexts_optional(
+        src_context: Option<&Context>,
+        src_config: &Config,
+        src_name: impl AsRef<[u8]>,
+        src_interchange_name: impl AsRef<[u8]>,
+        dst_context: Option<&Context>,
+        dst_config: &Config,
+        dst_display: impl AsRef<[u8]>,
+        dst_view: impl AsRef<[u8]>,
+        dst_interchange_name: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
         let src_name = c_str(src_name.as_ref());
         let src_interchange_name = c_str(src_interchange_name.as_ref());
         let dst_display = c_str(dst_display.as_ref());
@@ -6943,7 +7053,8 @@ impl Config {
         // Upstream's checks that p1 and p2 aren't null can't fail: getProcessor returns a
         // processor or throws.
         let mut p1 = src_config.processor_between_color_spaces_with_context(
-            src_context,
+            src_context
+                .ok_or_else(|| Exception::new("Config::GetProcessor failed. Context is null."))?,
             Some(src_color_space),
             Some(src_ex_cs),
         )?;
@@ -6962,7 +7073,8 @@ impl Config {
         };
 
         let mut p2 = dst_config.processor_for_display_view_with_context(
-            dst_context,
+            dst_context
+                .ok_or_else(|| Exception::new("Config::GetProcessor failed. Context is null."))?,
             dst_interchange_name,
             dst_display,
             dst_view,

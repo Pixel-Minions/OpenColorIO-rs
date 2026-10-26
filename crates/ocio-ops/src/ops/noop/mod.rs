@@ -7,6 +7,6 @@
 pub mod no_ops;
 
 pub use no_ops::{
-    FileNoOpData, NoOpData, NoOpKind, create_file_no_op, create_gpu_allocation_no_op,
-    create_look_no_op,
+    FileNoOpData, NoOpData, NoOpKind, create_3d_lut, create_file_no_op,
+    create_gpu_allocation_no_op, create_look_no_op, partition_gpu_ops,
 };

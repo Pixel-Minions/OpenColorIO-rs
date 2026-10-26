@@ -1862,6 +1862,72 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   checked against the wheel (`crates/ocio-gpu/tests/lut1d_op_gpu_oracle.rs`, the inverse LUTs
   at `OPTIMIZATION_NONE`, and OSL in every case).
 
+### I-481. Uniform getters run in the platform's argument evaluation order
+
+- **Upstream:** `OpenGLBuilder::Uniform::use` calls the Float3 getter once for each
+  component in the arguments of `glUniform3f` (`src/libutils/oglapphelpers/glsl.cpp:249-252
+  @ v2.5.2`). C++ does not prescribe those arguments' order. The exact expression through
+  a function pointer on the Rocky reference platform's GCC, at both `-O0` and `-O2`, calls
+  blue, green, then red: a getter filling all components with an incrementing counter
+  produces `[3, 2, 1]` from three calls (platform probe, 2026-10-26).
+  The exact vector-float/int expressions (`glsl.cpp:253-262`) evaluate the vector
+  getter before the size getter, each once, on the same compiler at both optimization
+  levels (independent vector probe, 2026-10-26).
+- **Who notices:** native OpenGL helper callers with stateful uniform getters. The normal
+  OCIO dynamic-property getters are pure, and the Python wheel exposes no callback setter.
+- **A fix:** call a Float3 getter once and keep its three components, and explicitly
+  define vector getter ordering, changing stateful callers on some platforms.
+- **Status:** the Linux-only test harness preserves three calls in the observed B/G/R
+  order, uploading R/G/B. `float3_getter_calls_match_the_rocky_cpp_argument_order` pins
+  the independent platform result and call count. Vector callbacks preserve V/S order;
+  `vector_values_getter_precedes_the_size_getter_on_rocky` checks lazy state and uploaded
+  float/int values against the platform probe's inputs. Runtime/gates are pending. No C++
+  undefined-memory behavior or new buffer-policy exception is involved.
+
+### I-501. Legacy and ordinary GPU processors share a cache keyed only by flags
+
+- **Upstream:** `getOptimizedLegacyGPUProcessor` partitions and bakes its own ops, then calls
+  the same `getGPUProcessor` as the ordinary GPU path (`src/OpenColorIO/Processor.cpp:447-523
+  @ v2.5.2`). That cache's key is only the optimization flags. An ordinary GPU processor
+  requested first is returned for a later legacy call with those flags, and the first legacy
+  edge length is retained for later legacy calls with another edge. The later call still
+  performs its bake before looking in the cache.
+- **Who notices:** callers mixing ordinary and legacy GPU requests or changing their LUT edge.
+- **A fix:** include the legacy path and edge length in the key, or use distinct caches.
+- **Status:** matched in `p7-legacy` (7.1b, `crates/ocio/src/processor.rs`).
+  `legacy_and_ordinary_gpu_calls_share_the_flags_cache` checks object sharing in both request
+  orders; the comparison of legacy shader and texture contents follows O7.1's native helper.
+
+### I-502. The legacy GPU lattice uses zero alpha while it bakes RGB
+
+- **Upstream:** `Create3DLut` value-initializes an RGBA vector, then `GenerateIdentityLut3D`
+  fills RGB only (`src/OpenColorIO/ops/noop/NoOps.cpp:184-186`,
+  `ops/lut3d/Lut3DOp.cpp:25-57 @ v2.5.2`). Every lattice op therefore receives alpha zero,
+  including matrices that mix alpha into RGB; a 3D texture cannot follow a rendered pixel's
+  alpha. Subsequent lattice ops receive the alpha produced by earlier ops.
+- **Who notices:** legacy GPU users whose baked operations mix alpha into color.
+- **A fix:** document the restriction or keep alpha-dependent operations in the analytic path.
+- **Status:** matched in `p7-legacy` (7.1a, `crates/ocio-ops/src/ops/noop/no_ops.rs`), checked
+  against the wheel's CPU output on the same zero-alpha input lattice by
+  `a_legacy_lattice_matches_the_wheels_cpu_pixels`, including a matrix with alpha terms in
+  every RGB row. The complete legacy-processor comparison follows O7.1's native oracle.
+
+### I-503. A zero-edge legacy bake is rejected only when the empty LUT is finalized
+
+- **Upstream:** `Create3DLut` constructs an empty RGBA vector at edge zero and forms
+  `&lut3D[0]` for identity generation and every op (`src/OpenColorIO/ops/noop/NoOps.cpp:175-206
+  @ v2.5.2`). Those count-zero loops access no pixel. The resulting empty Lut3D op is rejected
+  by finalization in `getOptimizedLegacyGPUProcessor` (`Processor.cpp:447-489`). Both pinned
+  wheels raise Exception "Lut3D content array issue: Array content is empty." at gpu_processor,
+  with no log or blobs (native boundary probes, 2026-10-26). An analytic-only chain skips the
+  empty bake and accepts the same edge.
+- **Who notices:** callers requesting edge zero for a legacy processor that needs a lattice.
+- **A fix:** reject the zero edge before forming an out-of-bounds vector reference.
+- **Status:** the safe port uses empty slices for the count-zero loops and preserves the
+  wheels' actual validation error, in `p7-legacy` (7.1a,
+  `crates/ocio-ops/src/ops/noop/no_ops.rs`), checked by
+  `a_zero_edge_lattice_has_the_wheels_finalization_error`. No invalid memory access is needed.
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
@@ -4171,6 +4237,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `rethrown`); `crates/ocio/tests/merge_configs_oracle.rs`
   (`a_missing_file_in_a_merge_is_a_plain_exception`, probed on the Windows wheel, 2026-10-25).
 
+### I-451. One cross-config processor overload swaps the display and view keyword names
+
+- **Upstream:** the sixth `Config.GetProcessorFromConfigs` overload passes its sixth and
+  seventh arguments to C++ as `dstDisplay` and `dstView`, but declares their keyword names
+  as `dstView` and `dstDisplay` (`src/bindings/python/PyConfig.cpp:903-917 @ v2.5.2`).
+  Positional calls work normally; a keyword call must exchange the two names to mean the
+  same request. The method's signature and TypeError text have the same swapped names.
+- **Who notices:** Python callers using this overload with explicit contexts and keywords.
+- **A fix:** name both keyword arguments in the C++ parameter order.
+- **Status:** matched in `p6-after-p9` (6.8a, `py_config_utils.rs`); the full signature and the
+  keyword call's processor and pixels are compared against the wheel in
+  `config_utils_oracle.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -6390,3 +6469,46 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `crates/ocio-py/src/py_baker.rs`, `null_argument`); `baker_oracle.rs`,
   `where_the_wheels_process_dies_the_port_raises` (the wheel's process dies, its steps before
   run; the port's error).
+
+### U-221. `None` for merge parameters' raw string fields or a merger's working directory
+
+- **Upstream:** `ConfigMergingParameters.setBaseConfigName`, `setInputConfigName`,
+  `setOutputName`, `setName`, `setDescription`, `setInputFamilyPrefix`, `setBaseFamilyPrefix`
+  and `ConfigMerger.setWorkingDir` take a nullable `const char *` through the binding and
+  assign it directly to a `std::string` (`MergeConfigsHelpers.cpp:55-91, 159-162, 179-192,
+  596-599`; `src/bindings/python/apphelpers/PyMergeConfigs.cpp`, all @ v2.5.2). With `None`,
+  both reference wheels' processes die (probed on Windows and Rocky Linux 9, 2026-10-25).
+  The setters of search paths and inactive
+  color spaces accept the null pointer instead; the active-list setters delegate to Config's
+  unchecked string handling (U-123).
+- **Who notices:** Python callers passing `None` to one of these eight setters.
+- **A fix:** check the pointer before assigning the string.
+- **Status:** the binding raises ValueError naming the setter and U-221, leaving the field
+  unchanged, in `p6-after-p9` (6.8a, `py_merge_configs.rs`, `null_string`); checked against the
+  wheel's process exit and the port's error in `merge_configs_oracle.rs`.
+
+### U-246. OpenGL helpers consume caller buffers without their lengths
+
+- **Upstream:** `OglApp::updateImage` passes a raw image pointer to `glTexImage2D`
+  using the separately held image dimensions (`src/libutils/oglapphelpers/oglapp.cpp:73-82
+  @ v2.5.2); `OpenGLBuilder::Uniform::use` passes a vector getter's pointer and a
+  separate size getter's count to `glUniform1fv`/`glUniform1iv` (`glsl.cpp:236-270`).
+  A short caller allocation, or a size getter larger than the vector allocation,
+  makes the driver read beyond that allocation. Texture upload similarly trusts
+  the description's dimensions and pointer (`glsl.cpp:78-146`). These are source-
+  established caller-buffer preconditions; no out-of-bounds driver call is run as
+  a probe.
+- **Who notices:** callers of the OpenGL reference helpers with inconsistent
+  caller-owned buffers or uniform callbacks. The shipped Python wheel exposes
+  neither the OpenGL helpers nor these native uniform callbacks.
+- **A fix:** carry lengths into the helpers and check every native call's required
+  slice before passing its pointer to the driver.
+- **Status:** the test-only port checks image, texture and uniform vector lengths
+  before GL reads them, returning a deliberate error for inconsistent buffers;
+  `crates/ocio-gpu-exec/src/oglapp.rs` and `glsl.rs`, 7.2b.
+  Negative uniform counts are a separate, defined GL error: the raw signed-count
+  entry point records GL_INVALID_VALUE and reads no vector data. The port forwards
+  that count and preserves the pending error until a later CheckStatus, as upstream;
+  it does not treat that case as U-246 or add an immediate helper error.
+  `tests/harness.rs::short_caller_buffers_are_refused_before_gl_reads_them`
+  supplies a short image and a uniform getter whose count exceeds its values.
