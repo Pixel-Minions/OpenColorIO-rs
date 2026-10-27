@@ -8,7 +8,7 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and Python.
 
-> **Status: under development, about 80% done.** Milestones M0 (the op engine and the analytic
+> **Status: under development, about 83% done.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker) and M3 (dynamic properties,
 > grading and app helpers) are complete: their CPU results and generated GPU shaders match
@@ -88,7 +88,7 @@ one.
 
 ## Progress
 
-Status as of 2026-10-26: **milestones M0, M1, M2 and M3 are complete**, about 80% of the
+Status as of 2026-10-27: **milestones M0, M1, M2 and M3 are complete**, about 83% of the
 planned work (1,177 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
