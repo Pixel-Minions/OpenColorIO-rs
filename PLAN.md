@@ -227,7 +227,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **D5** | Existing port (`doubleailes/ocio-rs`) | Skip the audit for now and port independently. Note that it is MIT-licensed although derived from BSD-3 code | Decided (skipped for now) |
 | **D6** | Distribution | Not published to crates.io; consumed as a git dependency. The GitHub repository is public, which is fine for now | Decided |
 | **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`; edition 2024; `rust-version = "1.98"` | Decided (Phase 0) |
-| **D8** | `unsafe` policy | `#![forbid(unsafe_code)]` everywhere except the SIMD and Python-binding modules | Proposed |
+| **D8** | `unsafe` policy | `#![forbid(unsafe_code)]` everywhere except the SIMD and Python-binding modules; P9-3 permits the single Windows monitor FFI file `crates/ocio/src/system_monitor_windows_ffi.rs`, as the existing minizip Windows FFI exception | Proposed; monitor exception approved 2026-10-23 (P9-3) |
 | **D9** | License | BSD-3-Clause, keeping upstream's notice ("Copyright Contributors to the OpenColorIO Project") | Required (the port is a derivative work) |
 | **D10** | Versioning | Our own semver; the matched OCIO version goes in build metadata (`1.0.0+ocio.2.5.2`) and in the release notes; tags `v1.0.0` (§2) | Decided |
 | **D11** | Platforms | Windows x86-64 and Linux x86-64 (Rocky Linux 9, glibc 2.34), both bit-exact reference platforms from Phase 0. ARM and macOS come later | Decided |

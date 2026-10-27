@@ -3530,23 +3530,23 @@ impl Config {
         self.reset_cache_ids();
     }
 
-    /// Makes a display from the virtual display for the monitor `monitor_name`. Its ICC
-    /// profile is found by `SystemMonitor` (Phase 9), not ported yet: past the check of the
-    /// name, an error.
+    /// Makes a display from the virtual display for the monitor `monitor_name`, using its
+    /// operating-system ICC profile and that profile's description.
     ///
     /// Port of `Config::instantiateDisplayFromMonitorName` (src/OpenColorIO/Config.cpp:
-    /// 4104-4118 @ v2.5.2), in part.
+    /// 4104-4118 @ v2.5.2).
     #[doc(alias = "instantiateDisplayFromMonitorName")]
     pub fn instantiate_display_from_monitor_name(
         &mut self,
         monitor_name: impl AsRef<[u8]>,
     ) -> Result<i32> {
-        if c_str(monitor_name.as_ref()).is_empty() {
+        let monitor_name = c_str(monitor_name.as_ref());
+        if monitor_name.is_empty() {
             return Err(Exception::new("The system monitor name cannot be null."));
         }
-        Err(Exception::new(
-            "Config::instantiateDisplayFromMonitorName: the system monitors are not ported yet.",
-        ))
+        let profile = crate::SystemMonitors::icc_profile_from_monitor_name(monitor_name)?;
+        let description = get_profile_description_from_icc_profile(profile)?;
+        self.instantiate_display(monitor_name, &description, profile)
     }
 
     /// Makes a display from the virtual display for the ICC profile `icc_profile_filepath`,
@@ -7252,6 +7252,10 @@ impl Config {
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "config_monitor_tests.rs"]
+mod monitor_tests;
 
 #[cfg(test)]
 mod python_identity_tests {

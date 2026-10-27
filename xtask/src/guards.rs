@@ -87,7 +87,8 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 /// them, `sse_tests.rs`, coordinator's decision 2026-10-21), the test kit's FFI to the
 /// platform C runtime (the reference for C formatting and parsing), the one file that calls
 /// `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as minizip-ng does (owner
-/// decisions 2026-10-17), and, for the Python binding, the crate `ocio-py-ffi`, one file that
+/// decisions 2026-10-17), the one Windows monitor FFI file (P9-3, owner2026-10-23), and,
+/// for the Python binding, the crate `ocio-py-ffi`, one file that
 /// calls `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
 /// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), `PyType_GetSlot` for four number
 /// slots (2026-10-21, p6-core re-check round 4), and the views of Python buffers (P6-10), each
@@ -102,6 +103,7 @@ fn unsafe_allowed(rel: &str) -> bool {
     rel == PY_FFI
         || rel == "crates/ocio-testkit/src/crt.rs"
         || rel == "crates/ocio/src/minizip/os_windows_ffi.rs"
+        || rel == "crates/ocio/src/system_monitor_windows_ffi.rs"
         // P7-2 (owner, 2026-10-25): the test-only EGL/OpenGL harness, two files.
         || rel == "crates/ocio-gpu-exec/src/oglapp.rs"
         || rel == "crates/ocio-gpu-exec/src/glsl.rs"

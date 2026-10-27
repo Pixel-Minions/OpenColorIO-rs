@@ -4252,6 +4252,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   keyword call's processor and pixels are compared against the wheel in
   `config_utils_oracle.rs`.
 
+## System monitors
+
+### I-541. Windows monitor friendly names follow a different list's index
+
+- **Upstream:** `getAllMonitorsWithQueryDisplayConfig` collects successful active-path target
+  queries in QueryDisplayConfig order, but `getAllMonitors` looks their friendly names up by
+  EnumDisplayDevices' adapter number (`SystemMonitor_windows.cpp:26-85,135-149 @ v2.5.2`).
+  The lists need not have the same entries or order. An existing entry can therefore label
+  another adapter; a missing or empty entry falls back to that adapter's DeviceString.
+- **Who notices:** Windows users with differing display-path and adapter enumeration orders,
+  inactive adapters, or a failed target-device query.
+- **A fix:** associate names through the adapter/target identity rather than unrelated list
+  positions; this changes reported monitor names and displays instantiated from those names.
+- **Status:** matched in p9-monitors (9.3a), `system_monitor_windows.rs`, including the fallback;
+  same-machine monitor-list and instantiated-config checks in `config_monitor_tests.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -6514,3 +6530,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   it does not treat that case as U-246 or add an immediate helper error.
   `tests/harness.rs::short_caller_buffers_are_refused_before_gl_reads_them`
   supplies a short image and a uniform getter whose count exceeds its values.
+
+### U-306. A failed Windows display-size query leaves uninitialized counts
+
+- **Upstream:** `getAllMonitorsWithQueryDisplayConfig` declares pathCount/modeCount without
+  initializing them, ignores a failure from GetDisplayConfigBufferSizes, and immediately
+  resizes both vectors from those counts (`SystemMonitor_windows.cpp:38-50 @ v2.5.2`). The
+  platform does not promise output counts on failure, so the library may use indeterminate
+  counts for allocations and the following QueryDisplayConfig call.
+- **Who notices:** Windows callers when the OS refuses the display-configuration size query,
+  for example in an unsupported session. The ordinary successful path is unaffected.
+- **A fix:** check the result before using either count.
+- **Status:** p9-monitors (9.3a) returns the deliberate error "Problem obtaining monitor profile
+  information from operating system."; SystemMonitors::get catches and debug-logs it while
+  keeping its empty list, as upstream's exception boundary does. No uninitialized storage is
+  read (`system_monitor_windows_ffi.rs`, `system_monitor_windows.rs`).
