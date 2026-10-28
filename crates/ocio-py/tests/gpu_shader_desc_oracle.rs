@@ -14,6 +14,7 @@
 //!   read from its first item (I-328), the library's errors, the iterators, the `Texture`
 //!   values and `getValues`), `UniformData` made in Python (its readwrite members, the getters
 //!   it doesn't hold, its copy);
+//! - a real Float3 uniform's getter before and after changing its retained GPU grading property;
 //! - and where the wheel stores a dimension or an interpolation outside the enumerators, or a
 //!   language, the port's error (U-112), the wheel running the same steps; where the wheel
 //!   reads past a buffer (a reversed view), the port's error (U-148);
@@ -664,6 +665,111 @@ fn uniform_data_script() -> Script {
 #[test]
 fn the_classes_behave_as_the_wheels() {
     compare(&[creator_script(), textures_script(), uniform_data_script()]);
+}
+
+/// A real Float3 getter reads its shader description's live property. GradingPrimary's LOG
+/// shader adds brightness, contrast and gamma Float3 uniforms first, then six double uniforms
+/// and its bypass bool (GradingPrimaryOpGPU.cpp:107-137 @ v2.5.2). The asymmetric brightness
+/// input is GPTest1::brightness (tests/gpu/GradingPrimaryOp_test.cpp:10-13 @ v2.5.2); every
+/// expected getter value still comes from the wheel, not from the port's computed values.
+#[test]
+fn a_float3_uniform_reads_the_live_property() {
+    let checkpoint = |script: &Script| {
+        let theirs = common::wheel(&[script.json()]);
+        common::script::compare_with(std::slice::from_ref(script), &theirs);
+        theirs[0]["steps"].clone()
+    };
+    let mut sc = Script::new();
+    let cfg = sc.call(n("OCIO.Config.CreateRaw"), vec![]);
+    let tr = sc.call_kw(
+        n("OCIO.GradingPrimaryTransform"),
+        vec![n("OCIO.GRADING_LOG")],
+        vec![("dynamic", b(true))],
+        Expect::Value,
+    );
+    let desc = sc.call(n("OCIO.GpuShaderDesc.CreateShaderDesc"), vec![]);
+    // Compare the constructors before any step needs their returned objects.
+    checkpoint(&sc);
+    let processor = sc.call(ra(cfg, "getProcessor"), vec![r(tr)]);
+    let gpu = sc.call(ra(processor, "getDefaultGPUProcessor"), vec![]);
+    sc.call(ra(gpu, "extractGpuShaderInfo"), vec![r(desc)]);
+    sc.eval(r(desc), &STATE);
+    let text_before = sc.call(ra(desc, "getShaderText"), vec![]);
+    let cache_before = sc.call(ra(desc, "getCacheID"), vec![]);
+    let layout_before = sc.call(ra(desc, "getUniformBufferSize"), vec![]);
+    sc.call(ra(desc, "getNextResourceIndex"), vec![]);
+    let uniforms = sc.call(ra(desc, "getUniforms"), vec![]);
+    let count_before = sc.call(n("len"), vec![r(uniforms)]);
+    let setup = checkpoint(&sc);
+    // Ten additions in AddGPLogProperties: three Float3, six double and one bool.
+    assert_eq!(setup[count_before]["value"]["int"], "10");
+
+    let first = sc.call(ra(uniforms, "__getitem__"), vec![i(0)]);
+    sc.call(n("operator.getitem"), vec![r(first), i(0)]);
+    let data = sc.call(n("operator.getitem"), vec![r(first), i(1)]);
+    let metadata_before = sc.eval(r(data), &["type", "bufferOffset"]);
+    let is_float3 = sc.call(
+        n("operator.eq"),
+        vec![ra(data, "type"), n("OCIO.UNIFORM_FLOAT3")],
+    );
+    for other in ["getDouble", "getBool", "getVectorFloat", "getVectorInt"] {
+        sc.raises(ra(data, other), vec![]);
+    }
+    let initial = sc.call(ra(data, "getFloat3"), vec![]);
+    // Do not reference a possibly failed getter result in a later transport step: first
+    // require equality and its positive Value outcome at this complete prefix.
+    let before = checkpoint(&sc);
+    assert_eq!(before[is_float3]["value"]["bool"], true);
+    assert_eq!(
+        before[initial]["value"]["items"].as_array().unwrap().len(),
+        3
+    );
+
+    let property = sc.call(
+        ra(desc, "getDynamicProperty"),
+        vec![n("OCIO.DYNAMIC_PROPERTY_GRADING_PRIMARY")],
+    );
+    let value = sc.call(ra(property, "getGradingPrimary"), vec![]);
+    let brightness = sc.call(
+        n("OCIO.GradingRGBM"),
+        vec![f(-10.0), f(45.0), f(-5.0), f(50.0)],
+    );
+    sc.step(
+        json!({ "setattr": r(value), "name": "brightness", "value": r(brightness) }),
+        Expect::Value,
+    );
+    sc.call(ra(property, "setGradingPrimary"), vec![r(value)]);
+    // Keep the original UniformData: replacing it could hide a stale captured getter.
+    let updated = sc.call(ra(data, "getFloat3"), vec![]);
+    let metadata_after = sc.eval(r(data), &["type", "bufferOffset"]);
+    sc.eval(r(desc), &STATE);
+    let text_after = sc.call(ra(desc, "getShaderText"), vec![]);
+    let cache_after = sc.call(ra(desc, "getCacheID"), vec![]);
+    let layout_after = sc.call(ra(desc, "getUniformBufferSize"), vec![]);
+    sc.call(ra(desc, "getNextResourceIndex"), vec![]);
+    let count_after = sc.call(n("len"), vec![r(uniforms)]);
+    let after = checkpoint(&sc);
+    let components = after[updated]["value"]["items"].as_array().unwrap();
+    assert_eq!(components.len(), 3);
+    assert_ne!(before[initial]["value"], after[updated]["value"]);
+    assert_ne!(components[0], components[1]);
+    assert_ne!(components[1], components[2]);
+    assert_ne!(components[0], components[2]);
+    // Only a dynamic value changed: compiled text/cache, layout, count and own UniformData
+    // fields stay as the wheel reported them before the update. Full port/wheel reports,
+    // including resource allocation, all creator state and wrong getters, were compared.
+    for (old, new) in [
+        (text_before, text_after),
+        (cache_before, cache_after),
+        (layout_before, layout_after),
+        (count_before, count_after),
+    ] {
+        assert_eq!(before[old]["value"], after[new]["value"]);
+    }
+    assert_eq!(
+        before[metadata_before]["getters"],
+        after[metadata_after]["getters"]
+    );
 }
 
 /// A language or an interpolation outside its enum's values (`GpuLanguage`, 0 to 15;

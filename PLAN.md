@@ -213,6 +213,15 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 - upstream's Python apps;
 - the Sphinx docs site;
 - a C ABI, unless something later needs one.
+- compatible native C++ ABI/type_info negotiation and native pointer exchange
+  between separately compiled Python extensions through `_pybind11_conduit_v1_`
+  (D-16). After ordinary Python argument checks accept the call, the matching
+  native protocol's outcomes (including pointer results and invalid-kind/type_info
+  negotiation responses for OCIO-bound C++ classes/enums) are outside §3 and M4.
+  The method's exact Python metadata/signature, ordinary argument type/arity/refusal
+  behavior, and incompatible-ABI real-capsule fallback stay in scope. This excludes
+  no ordinary Python/Rust OCIO values, aliases, repr, errors/logs, files, pixels,
+  shader data or NumPy buffer access beyond those matching native-protocol outcomes.
 
 ---
 
