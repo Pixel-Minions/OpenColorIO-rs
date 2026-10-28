@@ -3935,13 +3935,15 @@ note = "p6-objects 6.3d"
 path = "src/bindings/python/PySystemMonitors.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_system_monitors.rs"]
-status = "todo"
+status = "done"
+note = "p6-after-p9 6.8a: singleton wrapper and monitor tuple iterator, exact surface/indexing/lifetime in system_monitors_oracle.rs"
 
 [[file]]
 path = "src/bindings/python/PySystemMonitors.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_system_monitors.rs"]
-status = "todo"
+status = "done"
+note = "p6-after-p9 6.8a: singleton wrapper and monitor tuple iterator, exact surface/indexing/lifetime in system_monitors_oracle.rs"
 
 [[file]]
 path = "src/bindings/python/PyTransform.cpp"

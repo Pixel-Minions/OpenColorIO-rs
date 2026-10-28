@@ -19,8 +19,8 @@
 //!   which copies;
 //! - `archive` and `isArchivable`, the archives read back by the wheel.
 //!
-//! Not here: `instantiateDisplayFromMonitorName`, whose library function waits for the system
-//! monitors (Phase 9).
+//! Monitor-dependent `instantiateDisplayFromMonitorName` calls belong to
+//! `system_monitors_oracle.rs`, with real monitor names and upstream virtual-display configs.
 //!
 //! And, without the wheel, whose process dies there, `None` where upstream dereferences a null
 //! pointer or makes a `std::string` of it is the port's error (U-123, U-124); and against the

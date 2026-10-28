@@ -77,6 +77,8 @@ pub(crate) mod py_processor;
 #[cfg(feature = "python")]
 pub(crate) mod py_processor_metadata;
 #[cfg(feature = "python")]
+pub(crate) mod py_system_monitors;
+#[cfg(feature = "python")]
 pub(crate) mod py_transform;
 /// What the identity registries hold, for the tests of their size and cost.
 #[cfg(feature = "python")]
