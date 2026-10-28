@@ -10,11 +10,13 @@ from Rust and Python.
 
 > **Status: under development, about 83% done.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
-> format, file-based configs, `.ocioz` archives and the baker) and M3 (dynamic properties,
-> grading and app helpers) are complete: their CPU results and generated GPU shaders match
-> the official library. M4's complete upstream Python suite also passes: all 384 tests run
-> unmodified. Next: GPU execution, the remaining monitor support, SIMD performance, tools
-> and release work (M5). See [Progress](#progress).
+> format, file-based configs, `.ocioz` archives and the baker), M3 (dynamic properties,
+> grading and app helpers), and M4 (the `PyOpenColorIO` Python module) are complete.
+> CPU results and generated GPU shaders match the official library. All 384 upstream
+> Python tests pass unmodified; SystemMonitors and complete module metadata are checked
+> on Windows and Rocky Linux 9, within the approved [D-16 scope](docs/deviations.md).
+> Next: GPU execution, remaining library tests, SIMD performance, tools and release work
+> (M5). See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -88,8 +90,8 @@ one.
 
 ## Progress
 
-Status as of 2026-10-27: **milestones M0, M1, M2 and M3 are complete**, about 83% of the
-planned work (1,177 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
+Status as of 2026-10-28: **milestones M0, M1, M2, M3 and M4 are complete**, about 83% of the
+planned work (1,179 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
 test configs): the grading values (GradingPrimary, GradingTone,
@@ -97,15 +99,18 @@ GradingHueCurve) with their dynamic properties; the ExposureContrast, GradingPri
 GradingTone and GradingHueCurve op families, CPU and GPU; the ExposureContrast and grading
 transforms, with their builders, their YAML and their CLF/CTF elements; dynamic properties end to
 end; and every app helper (color space menus, display/view helpers, `LegacyViewingPipeline`,
-the mixing helpers). Phase 9 in main: ConfigUtils and complete config merging, including every
-section, OCIOM chains, whole-config merges and single-color-space merges. Phase 6 (M4) in main: the
+the mixing helpers). Phase 9 in main: ConfigUtils, OS monitor support and complete config merging,
+including every section, OCIOM chains, whole-config merges and single-color-space merges. Phase 6 (M4) in main: the
 `PyOpenColorIO` module's foundation (the module and its build, upstream's Python suite runner,
 pybind11's dispatcher, casters, classes and enums as the wheel shows them, every enum, constant
 and string conversion), every transform class, and the objects the config holds (context,
 file and viewing rules, color spaces and sets, looks, view and named transforms, format
 metadata), NumPy buffers with the CPU processor's apply, `Config`, the grading classes, dynamic
 properties, the app helpers, processors (CPU and GPU, shader descriptions), the baker,
-ConfigUtils statics and the parameters, merger and helpers for config merging. Phase 7 foundations
+ConfigUtils statics and the parameters, merger and helpers for config merging. SystemMonitors
+is exposed in Python too. The unchanged upstream driver and complete module metadata match
+the official wheel on both reference platforms; native C++ extension pointer exchange is outside
+the approved [D-16 scope](docs/deviations.md). Phase 7 foundations
 in main: the legacy GPU API, the reference client linked to the official wheel, and headless
 OpenGL infrastructure tested on llvmpipe. The upstream GPU execution suite and the legacy
 parity sweep follow. Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
@@ -116,9 +121,9 @@ Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pa
 files, and the CLF/CTF writer; the baker, in every format the official library bakes, CLF and
 CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
 4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
-ops in M3. Next: GPU execution and the legacy GPU path (Phase 7), monitor support and the remaining
+ops in M3. Next: GPU execution and the legacy GPU path (Phase 7), the remaining
 library tests (Phase 9), hardware SIMD and threading (Phase 8), and developer tools and release
-work (Phase 10). The SystemMonitors Python binding follows its remaining core monitor support.
+work (Phase 10).
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
@@ -234,7 +239,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 1,177 | 1,191 |
+| C++ | 1,179 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 384 | 384 |
 
@@ -246,14 +251,14 @@ compared with the official library's, text for text.
 
 Each milestone completes a section of OCIO with exact oracle checks:
 
-| Milestone | Section | Status (2026-10-26) | Version |
+| Milestone | Section | Status (2026-10-28) | Version |
 |---|---|---|---|
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
-| **M4** | The `PyOpenColorIO`-compatible Python module | **Suite complete:** all 384 upstream Python tests pass unmodified, including ConfigUtils and config merging. The SystemMonitors surface and its parity checks follow its core monitor support before M4 closes | `0.5.0` |
-| **M5** | Full OCIO 2.5.2 parity | In progress: GPU execution, monitors, SIMD performance, tools and release checks | `1.0.0` |
+| **M4** | The `PyOpenColorIO`-compatible Python module | **Done:** all 384 upstream Python tests, SystemMonitors and complete module metadata checks pass on both reference platforms, within the approved [D-16 scope](docs/deviations.md) | `0.5.0` |
+| **M5** | Full OCIO 2.5.2 parity | In progress: GPU execution, remaining library tests, SIMD performance, tools and release checks | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
 
