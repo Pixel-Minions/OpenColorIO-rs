@@ -144,6 +144,17 @@ mutation testing. What changes in Phase 9:
   is, and listed in `docs/improvements.md`.
 - `SystemMonitor_macos.cpp` is macOS's (P9-5). `PySystemMonitors.cpp` binds 9.3a in 6.8a.
 
+9.3a implementation checklist (`card/p9-monitors`):
+
+- [x] Core singleton, Windows wide-call FFI and monitor-to-config integration prepared.
+- [x] Both upstream virtual-display tests translated without skipping the Windows assertion;
+  same-machine wheel list, config serialization and exact-error comparisons prepared.
+- [x] Windows SDK structure/offset tests prepared from the platform headers.
+- [x] Independent MSVC/Windows SDK probe confirms all8 ABI sizes/alignments,16 offsets and4
+  constants (bounded1GiB/2CPUs/30seconds, no OCIO or Cargo build).
+- [ ] Run own-target Windows/Rocky tests, mutations and full staged release/Rocky gates.
+- [ ] Independent adversarial review and commit.
+
 ## WP 9.4: the tests earlier cards left behind (`ocio`)
 
 | Chunk | What | Port tests |

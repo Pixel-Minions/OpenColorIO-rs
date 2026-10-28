@@ -66,8 +66,9 @@ const CLASSES: [&str; 32] = [
 /// The nested classes no function of the module returns: no instance to call them with.
 const UNREACHABLE: [&str; 1] = ["FormatMetadata.ConstChildElementIterator"];
 
-/// Methods the named calls leave out: they write files or search the file system (or the
-/// system's monitors, which the library ports with Phase 9).
+/// Methods the generated named calls leave out: they write files or require real file/monitor
+/// inputs. `system_monitors_oracle.rs` covers monitor-name keywords with actual machine names;
+/// keep that method excluded here because the generator cannot supply those valid arguments.
 const NOT_RUN: [&str; 3] = [
     "write",
     "resolveFileLocation",

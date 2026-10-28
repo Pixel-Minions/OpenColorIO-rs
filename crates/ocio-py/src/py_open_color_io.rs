@@ -483,6 +483,7 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::py_named_transform::bind_py_named_transform(m)?;
     crate::py_processor::bind_py_processor(m)?;
     crate::py_processor_metadata::bind_py_processor_metadata(m)?;
+    crate::py_system_monitors::bind_py_system_monitors(m)?;
     crate::py_viewing_rules::bind_py_viewing_rules(m)?;
     crate::py_view_transform::bind_py_view_transform(m)?;
     crate::py_builtin_transform_registry::bind_py_builtin_transform_registry(m)?;

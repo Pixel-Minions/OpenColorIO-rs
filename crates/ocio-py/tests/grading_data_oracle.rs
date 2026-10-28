@@ -1297,3 +1297,109 @@ fn a_null_curve_is_the_ports_error() {
         );
     }
 }
+
+/// The nine replacement-setter bodies not reached by the existing constructor,
+/// retained-member and wrong-type scenarios. Inputs are test parameters; every
+/// value, identity, repr and error expectation is obtained from the real wheel.
+/// Upstream: src/bindings/python/PyGradingData.cpp:129-132 (exposure/lift),
+/// 213-218 (whites/highlights), 511-590 (the five curve properties) @ v2.5.2.
+#[test]
+fn replacement_members_copy_values_and_keep_retained_views() {
+    let mut scripts = Vec::new();
+    for (class, names, value_class) in [
+        ("GradingPrimary", &["exposure", "lift"][..], "GradingRGBM"),
+        (
+            "GradingTone",
+            &["whites", "highlights"][..],
+            "GradingRGBMSW",
+        ),
+    ] {
+        for name in names {
+            let members: &[&str] = if value_class == "GradingRGBMSW" {
+                &[
+                    "red", "green", "blue", "master", "start", "width", "__repr__",
+                ]
+            } else {
+                &["red", "green", "blue", "master", "__repr__"]
+            };
+            let mut sc = Script::new();
+            let owner = sc.call(n(&format!("OCIO.{class}")), vec![n("OCIO.GRADING_LOG")]);
+            let held = sc.eval(ra(owner, name), members);
+            let mut args = vec![f(1.0), f(2.0), f(3.0), f(4.0)];
+            if value_class == "GradingRGBMSW" {
+                args.extend([f(0.1), f(0.5)]);
+            }
+            let source = sc.call(n(&format!("OCIO.{value_class}")), args);
+            setattr(&mut sc, r(owner), name, r(source), Expect::Value);
+            let current = sc.eval(ra(owner, name), members);
+            sc.eval(r(held), members);
+            sc.call(n("operator.is_"), vec![r(current), r(held)]);
+            sc.call(n("operator.is_"), vec![r(current), r(source)]);
+            sc.repr(r(owner));
+            // A later source mutation distinguishes copying from retaining source.
+            setattr(&mut sc, r(source), "red", f(7.0), Expect::Value);
+            sc.eval(ra(owner, &format!("{name}.red")), &[]);
+            sc.eval(ra(held, "red"), &[]);
+            // A retained member mutation tests the parent/view relationship too.
+            setattr(&mut sc, r(held), "blue", f(-1.0), Expect::Value);
+            sc.eval(ra(owner, &format!("{name}.blue")), &[]);
+            sc.repr(r(owner));
+            // Enter the property's actual fset as well as Python setattr.
+            sc.call(
+                n(&format!("OCIO.{class}.{name}.fset")),
+                vec![r(owner), r(source)],
+            );
+            sc.eval(ra(owner, name), members);
+            setattr(&mut sc, r(owner), name, none(), Expect::Raised);
+            setattr(&mut sc, r(owner), name, s("wrong"), Expect::Raised);
+            sc.eval(ra(owner, name), members);
+            scripts.push(sc);
+        }
+    }
+    for (name, hue_type) in [
+        ("hue_hue", "HUE_HUE"),
+        ("lum_sat", "LUM_SAT"),
+        ("sat_sat", "SAT_SAT"),
+        ("lum_lum", "LUM_LUM"),
+        ("hue_fx", "HUE_FX"),
+    ] {
+        let mut sc = Script::new();
+        let owner = sc.call(n("OCIO.GradingHueCurve"), vec![n("OCIO.GRADING_LOG")]);
+        let held = sc.eval(ra(owner, name), &["getSplineType", "__repr__"]);
+        let source = sc.call(
+            n("OCIO.GradingBSplineCurve"),
+            vec![i(5), n(&format!("OCIO.{hue_type}"))],
+        );
+        // Make this source observably different before replacement.
+        let points = sc.call(ra(source, "getControlPoints"), vec![]);
+        let point = sc.call(n("OCIO.GradingControlPoint"), vec![f(0.4), f(0.8)]);
+        sc.call(ra(points, "__setitem__"), vec![i(1), r(point)]);
+        setattr(&mut sc, r(owner), name, r(source), Expect::Value);
+        let current = sc.eval(ra(owner, name), &["getSplineType", "getSlopes", "__repr__"]);
+        sc.eval(r(held), &["getSplineType", "getSlopes", "__repr__"]);
+        sc.call(n("operator.is_"), vec![r(current), r(held)]);
+        sc.call(n("operator.is_"), vec![r(current), r(source)]);
+        sc.repr(r(owner));
+        let different = sc.call(n("OCIO.GradingControlPoint"), vec![f(0.4), f(0.25)]);
+        sc.call(ra(points, "__setitem__"), vec![i(1), r(different)]);
+        sc.eval(ra(owner, name), &["__repr__"]);
+        sc.eval(r(held), &["__repr__"]);
+        let retained_points = sc.call(ra(held, "getControlPoints"), vec![]);
+        let retained_point = sc.call(n("OCIO.GradingControlPoint"), vec![f(0.4), f(0.5)]);
+        sc.call(
+            ra(retained_points, "__setitem__"),
+            vec![i(1), r(retained_point)],
+        );
+        sc.eval(ra(owner, name), &["__repr__"]);
+        sc.call(
+            n(&format!("OCIO.GradingHueCurve.{name}.fset")),
+            vec![r(owner), r(source)],
+        );
+        sc.eval(ra(owner, name), &["getSplineType", "getSlopes", "__repr__"]);
+        setattr(&mut sc, r(owner), name, s("wrong"), Expect::Raised);
+        sc.eval(ra(owner, name), &["__repr__"]);
+        scripts.push(sc);
+    }
+    assert_eq!(scripts.len(), 9);
+    compare(&scripts);
+}

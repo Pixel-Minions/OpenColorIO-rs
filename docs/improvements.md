@@ -4252,6 +4252,71 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   keyword call's processor and pixels are compared against the wheel in
   `config_utils_oracle.rs`.
 
+### I-452. Instantiated displays retain a virtual-only color-space token
+
+- **Upstream:** instantiating a display copies the virtual template's views unchanged
+  (`Config.cpp:1005-1018 @ v2.5.2`). A display-defined view may therefore retain
+  `display_colorspace: <USE_DISPLAY_NAME>`. Making it permanent only changes its flag
+  (`Config.cpp:4376-4384`); serialization writes the literal color-space field and reloading
+  preserves it (`Config.cpp:3601-3606`; `OCIOYaml.cpp:439-442,480-494,5198-5217`).
+  Ordinary-display validation rejects that token (`Config.cpp:601-621,1663-1693`), whereas
+  virtual-template validation bypasses the check (`Config.cpp:1711-1725`). The temporary
+  flag controls serialization, not an exemption in the ordinary-display validation loop.
+  The Windows 2.5.2 wheel (2026-10-27) rejects validation of the persisted/reloaded upstream
+  `virtual_display` input's copied `Film` view with the exact "can not use
+  '<USE_DISPLAY_NAME>' keyword for the color space name" exception.
+- **Who notices:** callers persisting and revalidating an instantiated display whose
+  virtual template contains that display-defined token. This does not make every saved
+  monitor config invalid: the upstream `virtual_display_with_active_displays` input has
+  only Raw/raw and shared sview1/raw in its virtual template, so this limitation does not
+  apply to it.
+- **A fix:** replace the copied token with the concrete display color-space name when
+  instantiating or persisting the display. That changes getters and serialized output.
+- **Status:** preserved by the Config/serialization port; `p6-after-p9` (6.8a),
+  `configs_from_real_monitors_match_the_wheels` in `system_monitors_oracle.rs`, compares
+  all state and the exact conditional validation exception without changing production.
+
+### I-453. Absolute FileTransforms still require a nonempty search path to validate
+
+- **Upstream:** `Config::validate` collects FileTransforms from all color spaces, including
+  ones not used by the active views (`Config.cpp:154-171,5476-5493 @ v2.5.2`). If any file
+  references exist, it requires at least one nonempty, resolvable search-path entry before
+  examining the individual files (`Config.cpp:1974-2039`). Absolute file sources are not
+  exempted, although `Context::resolveFileLocation` handles them independently of search
+  paths (`Context.cpp:441-454`). Instantiating a monitor display always adds its ICC
+  FileTransform (`Config.cpp:1024-1035`). With the upstream Raw-only active-display fixture,
+  saving its empty path writes `search_path: ""` (`OCIOYaml.cpp:5080-5086`); reloading
+  retains an empty-string path entry (`OCIOYaml.cpp:4509-4515`; `Context.cpp:195-203`, I-9).
+  The Windows 2.5.2 wheel (2026-10-27) then raises the exact validation message
+  "Config failed search path validation. The search_path must not be an empty string if
+  there are FileTransforms."
+- **Who notices:** callers validating configs with absolute ICC/LUT FileTransforms and no
+  nonempty resolvable search path, including persisted monitor configs made from that
+  Raw-only fixture. This is an empty-search-path restriction, not a failure of every ICC
+  config; a suitable nonempty search-path entry avoids this particular guard. A copied
+  virtual-only view token may instead fail earlier (I-452).
+- **A fix:** require a search path only for relative file references that need one. That
+  changes which configs pass validation, without changing their absolute file sources.
+- **Status:** preserved by the existing Config port; `p6-after-p9` (6.8a),
+  `configs_from_real_monitors_match_the_wheels` in `system_monitors_oracle.rs`, checks
+  this source-defined wheel reason as well as the complete exception and config state.
+
+## System monitors
+
+### I-541. Windows monitor friendly names follow a different list's index
+
+- **Upstream:** `getAllMonitorsWithQueryDisplayConfig` collects successful active-path target
+  queries in QueryDisplayConfig order, but `getAllMonitors` looks their friendly names up by
+  EnumDisplayDevices' adapter number (`SystemMonitor_windows.cpp:26-85,135-149 @ v2.5.2`).
+  The lists need not have the same entries or order. An existing entry can therefore label
+  another adapter; a missing or empty entry falls back to that adapter's DeviceString.
+- **Who notices:** Windows users with differing display-path and adapter enumeration orders,
+  inactive adapters, or a failed target-device query.
+- **A fix:** associate names through the adapter/target identity rather than unrelated list
+  positions; this changes reported monitor names and displays instantiated from those names.
+- **Status:** matched in p9-monitors (9.3a), `system_monitor_windows.rs`, including the fallback;
+  same-machine monitor-list and instantiated-config checks in `config_monitor_tests.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -6514,3 +6579,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   it does not treat that case as U-246 or add an immediate helper error.
   `tests/harness.rs::short_caller_buffers_are_refused_before_gl_reads_them`
   supplies a short image and a uniform getter whose count exceeds its values.
+
+### U-306. A failed Windows display-size query leaves uninitialized counts
+
+- **Upstream:** `getAllMonitorsWithQueryDisplayConfig` declares pathCount/modeCount without
+  initializing them, ignores a failure from GetDisplayConfigBufferSizes, and immediately
+  resizes both vectors from those counts (`SystemMonitor_windows.cpp:38-50 @ v2.5.2`). The
+  platform does not promise output counts on failure, so the library may use indeterminate
+  counts for allocations and the following QueryDisplayConfig call.
+- **Who notices:** Windows callers when the OS refuses the display-configuration size query,
+  for example in an unsupported session. The ordinary successful path is unaffected.
+- **A fix:** check the result before using either count.
+- **Status:** p9-monitors (9.3a) returns the deliberate error "Problem obtaining monitor profile
+  information from operating system."; SystemMonitors::get catches and debug-logs it while
+  keeping its empty list, as upstream's exception boundary does. No uninitialized storage is
+  read (`system_monitor_windows_ffi.rs`, `system_monitor_windows.rs`).

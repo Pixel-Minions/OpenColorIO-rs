@@ -335,3 +335,62 @@ assert t.getLength() == 4
         py.run(&code, None, None).unwrap_or_else(|e| panic!("{e}"));
     });
 }
+
+/// Enter Lut1D's named setter body, which constructors/getters and Lut3D's
+/// identically named setter do not execute. src/bindings/python/transforms/
+/// PyLut1DTransform.cpp:134-135 @ v2.5.2 forwards the actual Interpolation enum;
+/// output expectations come from the wheel.
+#[test]
+fn lut1d_interpolation_setter_and_keywords_match_the_wheel() {
+    let mut sc = Script::new();
+    let lut = sc.call(n("OCIO.Lut1DTransform"), vec![]);
+    sc.call(ra(lut, "getInterpolation"), vec![]);
+    for name in [
+        "INTERP_NEAREST",
+        "INTERP_LINEAR",
+        "INTERP_BEST",
+        "INTERP_DEFAULT",
+    ] {
+        sc.call(
+            ra(lut, "setInterpolation"),
+            vec![n(&format!("OCIO.{name}"))],
+        );
+        sc.call(ra(lut, "getInterpolation"), vec![]);
+        sc.repr(r(lut));
+    }
+    sc.call_kw(
+        ra(lut, "setInterpolation"),
+        vec![],
+        vec![("interpolation", n("OCIO.INTERP_LINEAR"))],
+        Expect::Value,
+    );
+    sc.call(ra(lut, "getInterpolation"), vec![]);
+    sc.call_kw(
+        n("OCIO.Lut1DTransform.setInterpolation"),
+        vec![],
+        vec![
+            ("self", r(lut)),
+            ("interpolation", n("OCIO.INTERP_NEAREST")),
+        ],
+        Expect::Value,
+    );
+    sc.call(ra(lut, "getInterpolation"), vec![]);
+    for bad in [i(1), s("linear"), none(), n("OCIO.TRANSFORM_DIR_FORWARD")] {
+        sc.raises(ra(lut, "setInterpolation"), vec![bad]);
+        sc.call(ra(lut, "getInterpolation"), vec![]);
+    }
+    sc.call_kw(
+        ra(lut, "setInterpolation"),
+        vec![],
+        vec![("wrong", n("OCIO.INTERP_LINEAR"))],
+        Expect::Raised,
+    );
+    sc.call_kw(
+        ra(lut, "setInterpolation"),
+        vec![n("OCIO.INTERP_LINEAR")],
+        vec![("interpolation", n("OCIO.INTERP_NEAREST"))],
+        Expect::Raised,
+    );
+    sc.call(ra(lut, "getInterpolation"), vec![]);
+    compare(&[sc]);
+}

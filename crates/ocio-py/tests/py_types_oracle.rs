@@ -4,7 +4,7 @@
 //! `bindPyTypes` (chunk 6.2b) against the wheel, through the oracle's surface walk
 //! (py_surface_walk.py's `_members`, run on the port's module in the embedded interpreter,
 //! against the wheel's py_surface):
-//! - every name of the port's module is one of the wheel's module, in the wheel's order (no
+//! - the complete ordered module name inventory equals the wheel's (no
 //!   `__all__`, which would make the package's `import *` drop the rest);
 //! - the enums and their exported values, the string constants, the exceptions and the
 //!   module's functions (the string conversions among them) report as the wheel's, entry for
@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 
 /// The declared classes whose cards bind them completely: each compares with the wheel's entry
 /// for entry (transforms_oracle.rs checks them in detail).
-const COMPLETE: [&str; 62] = [
+const COMPLETE: [&str; 63] = [
     "Baker",
     "Transform",
     "GroupTransform",
@@ -48,6 +48,7 @@ const COMPLETE: [&str; 62] = [
     "Config",
     "ConfigMergingParameters",
     "ConfigMerger",
+    "SystemMonitors",
     "ProcessorMetadata",
     "FileRules",
     "ViewingRules",
@@ -118,16 +119,12 @@ fn port_members() -> Vec<Value> {
         .clone()
 }
 
-/// Every name of the port's module is the wheel's, in the wheel's order.
+/// The complete module name inventory equals the wheel's, in its order.
 #[test]
 fn the_module_names_are_the_wheels_in_its_order() {
     let theirs: Vec<String> = wheel_members().iter().map(entry_name).collect();
     let ours: Vec<String> = port_members().iter().map(entry_name).collect();
-    for n in &ours {
-        assert!(theirs.contains(n), "{n} is not the wheel's");
-    }
-    let in_order: Vec<&String> = theirs.iter().filter(|n| ours.contains(n)).collect();
-    assert_eq!(ours.iter().collect::<Vec<_>>(), in_order);
+    assert_eq!(ours, theirs);
     // bindPyTypes' names are all there: 63 classes, 31 enums, 34 string constants.
     for n in [
         "Baker",

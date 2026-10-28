@@ -19,8 +19,8 @@
 //!   which copies;
 //! - `archive` and `isArchivable`, the archives read back by the wheel.
 //!
-//! Not here: `instantiateDisplayFromMonitorName`, whose library function waits for the system
-//! monitors (Phase 9).
+//! Monitor-dependent `instantiateDisplayFromMonitorName` calls belong to
+//! `system_monitors_oracle.rs`, with real monitor names and upstream virtual-display configs.
 //!
 //! And, without the wheel, whose process dies there, `None` where upstream dereferences a null
 //! pointer or makes a `std::string` of it is the port's error (U-123, U-124); and against the
@@ -1535,4 +1535,168 @@ fn argument_callbacks_script() -> Script {
 #[test]
 fn arguments_load_before_the_config_is_locked() {
     compare(&[argument_callbacks_script()]);
+}
+
+/// Named arguments of all 13 getProcessor overloads (PyConfig.cpp:724-808 @ v2.5.2).
+/// This also covers the one-transform overload's implicit forward direction; none of
+/// the other published signatures invents an optional direction argument.
+#[test]
+fn processor_keywords_and_default_direction_are_the_wheels() {
+    fn duplicate(sc: &Script) -> Script {
+        Script {
+            steps: sc.steps.clone(),
+            expect: sc.expect.clone(),
+            unrepr: sc.unrepr.clone(),
+            unlog: sc.unlog.clone(),
+            uncompared: sc.uncompared.clone(),
+        }
+    }
+
+    fn inspect(sc: &mut Script, p: usize) {
+        sc.eval(r(p), &["getCacheID", "isNoOp", "hasChannelCrosstalk"]);
+        let group = sc.call(ra(p, "createGroupTransform"), vec![]);
+        sc.repr(r(group));
+        let cpu = sc.call(ra(p, "getDefaultCPUProcessor"), vec![]);
+        sc.call(
+            ra(cpu, "applyRGB"),
+            vec![l(vec![f(0.125), f(0.25), f(0.5)])],
+        );
+    }
+
+    let mut setup = Script::new();
+    let c = config(&mut setup);
+    let ctx = call(&mut setup, c, "getCurrentContext", vec![]);
+    let lin = call(&mut setup, c, "getColorSpace", vec![s("lin")]);
+    let log = call(&mut setup, c, "getColorSpace", vec![s("log")]);
+    let nt = call(&mut setup, c, "getNamedTransform", vec![s("nt1")]);
+    let t = setup.call(n("OCIO.ColorSpaceTransform"), vec![s("lin"), s("log")]);
+    let forward = n("OCIO.TRANSFORM_DIR_FORWARD");
+    let inverse = n("OCIO.TRANSFORM_DIR_INVERSE");
+    let cases: Vec<Vec<(&str, Value)>> = vec![
+        vec![("srcColorSpace", r(lin)), ("dstColorSpace", r(log))],
+        vec![
+            ("context", r(ctx)),
+            ("srcColorSpace", r(lin)),
+            ("dstColorSpace", r(log)),
+        ],
+        vec![
+            ("srcColorSpaceName", s("lin")),
+            ("dstColorSpaceName", s("log")),
+        ],
+        vec![
+            ("context", r(ctx)),
+            ("srcColorSpaceName", s("lin")),
+            ("dstColorSpaceName", s("log")),
+        ],
+        vec![
+            ("srcColorSpaceName", s("lin")),
+            ("display", s("sRGB")),
+            ("view", s("Film")),
+            ("direction", forward.clone()),
+        ],
+        vec![
+            ("context", r(ctx)),
+            ("srcColorSpaceName", s("lin")),
+            ("display", s("disp")),
+            ("view", s("shared1")),
+            ("direction", forward.clone()),
+        ],
+        vec![("namedTransform", r(nt)), ("direction", forward.clone())],
+        vec![
+            ("context", r(ctx)),
+            ("namedTransform", r(nt)),
+            ("direction", inverse.clone()),
+        ],
+        vec![
+            ("namedTransformName", s("n1")),
+            ("direction", forward.clone()),
+        ],
+        vec![
+            ("context", r(ctx)),
+            ("namedTransformName", s("nt2")),
+            ("direction", inverse.clone()),
+        ],
+        vec![("transform", r(t))],
+        vec![("transform", r(t)), ("direction", inverse.clone())],
+        vec![
+            ("context", r(ctx)),
+            ("transform", r(t)),
+            ("direction", forward.clone()),
+        ],
+    ];
+    assert_eq!(cases.len(), 13);
+    let mut scripts = Vec::new();
+    for named in &cases {
+        for route in 0..3 {
+            let mut sc = duplicate(&setup);
+            let positional: Vec<Value> = named.iter().map(|(_, value)| value.clone()).collect();
+            let control = sc.call(ra(c, "getProcessor"), positional);
+            let kwargs: Vec<(&str, Value)> = named.iter().rev().cloned().collect();
+            let p = match route {
+                0 => sc.call_kw(ra(c, "getProcessor"), vec![], kwargs, Expect::Value),
+                1 => {
+                    let mut kwargs = kwargs;
+                    kwargs.push(("self", r(c)));
+                    sc.call_kw(n("OCIO.Config.getProcessor"), vec![], kwargs, Expect::Value)
+                }
+                _ => sc.call_kw(
+                    ra(c, "getProcessor"),
+                    vec![named[0].1.clone()],
+                    named[1..].iter().rev().cloned().collect(),
+                    Expect::Value,
+                ),
+            };
+            // Compare the positive return before a changed binding could break later refs.
+            scripts.push(duplicate(&sc));
+            sc.call(n("operator.is_"), vec![r(control), r(p)]);
+            inspect(&mut sc, control);
+            inspect(&mut sc, p);
+            scripts.push(sc);
+        }
+    }
+    assert_eq!(scripts.len(), 13 * 3 * 2);
+
+    let mut strict = duplicate(&setup);
+    for kwargs in [
+        vec![("srcColorSpaceName", s("lin"))],
+        vec![
+            ("srcColorSpaceName", s("lin")),
+            ("dstColorSpaceName", s("log")),
+            ("unknown", i(1)),
+        ],
+        vec![("transform", r(t)), ("direction", s("forward"))],
+        vec![
+            ("srcColorSpaceName", s("lin")),
+            ("display", s("sRGB")),
+            ("view", s("Film")),
+        ],
+        vec![("context", r(ctx)), ("transform", r(t))],
+        vec![("namedTransform", r(nt))],
+    ] {
+        strict.call_kw(ra(c, "getProcessor"), vec![], kwargs, Expect::Raised);
+    }
+    strict.call_kw(
+        ra(c, "getProcessor"),
+        vec![s("lin")],
+        vec![
+            ("srcColorSpaceName", s("lin")),
+            ("dstColorSpaceName", s("log")),
+        ],
+        Expect::Raised,
+    );
+    strict.call_kw(
+        n("OCIO.Config.getProcessor"),
+        vec![],
+        vec![("self", i(3)), ("transform", r(t))],
+        Expect::Raised,
+    );
+    scripts.push(strict);
+
+    let requests: Vec<Value> = scripts.iter().map(Script::json).collect();
+    let reports = common::wheel(&requests);
+    assert_eq!(reports.len(), scripts.len());
+    // One wheel batch; assert each checkpoint before evaluating its dependent port script.
+    for (script, report) in scripts.iter().zip(&reports) {
+        common::script::compare_with(std::slice::from_ref(script), std::slice::from_ref(report));
+    }
 }

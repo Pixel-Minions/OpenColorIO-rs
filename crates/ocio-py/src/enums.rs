@@ -17,7 +17,7 @@
 use pyo3::BoundObject;
 use pyo3::prelude::*;
 use pyo3::pyclass::CompareOp;
-use pyo3::types::{PyBool, PyBytes, PyDict, PyInt, PyString, PyTuple, PyType};
+use pyo3::types::{PyBool, PyBytes, PyCapsule, PyDict, PyInt, PyString, PyTuple, PyType};
 
 use crate::dispatch::{Cast, Function, Overload, Param};
 use crate::pybind11::{self, MODULE};
@@ -235,9 +235,10 @@ pub fn conduit(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
             CONDUIT_PARAMS,
             "object",
             |py, _, a, _| {
-                let capsule = a[2].get_type().name().is_ok_and(|n| n == "PyCapsule");
+                // The wheel's capsule caster checks the actual C type. An ordinary
+                // Python class named PyCapsule must still be refused.
                 if !a[1].is_instance_of::<PyBytes>()
-                    || !capsule
+                    || !a[2].is_instance_of::<PyCapsule>()
                     || !a[3].is_instance_of::<PyBytes>()
                 {
                     return Ok(None);

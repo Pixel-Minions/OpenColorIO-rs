@@ -20,10 +20,16 @@
 //!
 //! The duplicate search and the reference space converters apply CPU processors to test values
 //! (ConfigUtils), so this target belongs to the `cpu-tests` alias.
+//!
+//! Each test starts with empty port caches, before any config setup, matching the fresh
+//! Python process of its wheel batch. The guard lasts through the whole test. Archive file
+//! hashes and parsed LUT files intentionally share filename-only caches (I-209;
+//! PathUtils.cpp:64-115 and FileTransform.cpp:798-888 @ v2.5.2). Their warm behavior remains
+//! within each test and is covered by `ocioz_read_oracle::two_archives_in_one_process`.
 
 mod common;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use common::app_helpers::capture;
 use ocio::{
@@ -35,6 +41,9 @@ use ocio_testkit::battery::Tier;
 use ocio_testkit::oracle::BatchCall;
 use ocio_testkit::oracle_values::{bytes, log};
 use serde_json::{Value, json};
+
+/// Serialize the empty-cache boundary across this file's five tests.
+static CACHES: Mutex<()> = Mutex::new(());
 
 /// Upstream's test files directory (`GetTestFilesDir`) joined with `rel`, with forward
 /// slashes.
@@ -442,6 +451,8 @@ fn pair_opts(tier: Tier) -> Vec<Opts> {
 /// `MergeConfigs` over the pairs of configs and the options of [`pair_opts`].
 #[test]
 fn merges_match_the_wheel() {
+    let _cache_guard = CACHES.lock().unwrap_or_else(PoisonError::into_inner);
+    ocio::clear_all_caches();
     let tier = Tier::current();
     let mut cases = Vec::new();
     for (pair, (label, _, _)) in PAIRS.iter().enumerate() {
@@ -515,6 +526,8 @@ const OCIOM_FILES: &[&str] = &[
 /// spaces strategy set on every merge: every merged config, or the exception.
 #[test]
 fn ociom_merges_match_the_wheel() {
+    let _cache_guard = CACHES.lock().unwrap_or_else(PoisonError::into_inner);
+    ocio::clear_all_caches();
     // (file, the color spaces strategy set, if any)
     let mut cases: Vec<(&str, Option<usize>)> = Vec::new();
     for file in OCIOM_FILES {
@@ -621,6 +634,8 @@ fn ociom_merges_match_the_wheel() {
 /// configs or color spaces that are `None`.
 #[test]
 fn single_color_space_merges_match_the_wheel() {
+    let _cache_guard = CACHES.lock().unwrap_or_else(PoisonError::into_inner);
+    ocio::clear_all_caches();
     // (pair, color space index, PreferBase, which argument is None: 0 none, 1 base, 2 cs)
     let mut cases = Vec::new();
     let configs: Vec<(Arc<Config>, Arc<Config>)> = PAIRS[..8]
@@ -733,6 +748,8 @@ fn single_color_space_merges_match_the_wheel() {
 /// `MergeConfigs` with configs or parameters that are `None`: the functions' own checks.
 #[test]
 fn merges_of_none_match_the_wheel() {
+    let _cache_guard = CACHES.lock().unwrap_or_else(PoisonError::into_inner);
+    ocio::clear_all_caches();
     // (params, base, input) given or None.
     let cases = [
         (true, false, true),
@@ -794,6 +811,8 @@ fn merges_of_none_match_the_wheel() {
 /// port.
 #[test]
 fn a_missing_file_in_a_merge_is_a_plain_exception() {
+    let _cache_guard = CACHES.lock().unwrap_or_else(PoisonError::into_inner);
+    ocio::clear_all_caches();
     const BASE: &str = "ocio_profile_version: 2\n\nroles:\n  default: raw\n  \
                         aces_interchange: ACES2065-1\n\ncolorspaces:\n  - !<ColorSpace>\n    \
                         name: raw\n    isdata: true\n  - !<ColorSpace>\n    name: ACES2065-1\n";

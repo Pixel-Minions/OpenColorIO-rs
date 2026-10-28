@@ -31,6 +31,11 @@ pub mod ocioz_archive;
 pub mod parse_utils;
 pub mod path_utils;
 pub mod processor;
+pub mod system_monitor;
+#[cfg(windows)]
+mod system_monitor_windows;
+#[cfg(windows)]
+mod system_monitor_windows_ffi;
 pub(crate) mod tokens_manager;
 pub mod transform;
 pub mod transforms;
@@ -89,6 +94,7 @@ pub use ocio_ops::platform::{
 };
 pub use ocioz_archive::extract_ocioz_archive;
 pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
+pub use system_monitor::SystemMonitors;
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;
 pub use transforms::builtin_transform::BuiltinTransform;
