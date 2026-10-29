@@ -26,9 +26,9 @@ jobs:
           path: kept/finite-failure-probes/
       - name: Verify exact native source
         run: |
-          git fetch --depth=1 origin 4de885fbadaeb0aabf985c399f5346212cfed1ea
+          git fetch --depth=1 origin 81532d199bd80d1efa1ae11e3f36a507f8f752c4
           git diff --exit-code FETCH_HEAD HEAD -- . ':(exclude).github/workflows/ci.yml'
-          printf '%s\n' 4de885fbadaeb0aabf985c399f5346212cfed1ea > kept/finite-failure-probes/native-source-commit.txt
+          printf '%s\n' 81532d199bd80d1efa1ae11e3f36a507f8f752c4 > kept/finite-failure-probes/native-source-commit.txt
           git rev-parse HEAD > kept/finite-failure-probes/native-validation-commit.txt
       - name: Build the unchanged native runtime image
         run: docker build -t ocio-rs-rocky9:1 docker/rocky9
@@ -40,14 +40,16 @@ jobs:
             for optimization in 0 2; do
               c++ -std=c++17 -O$optimization -ffp-contract=off crates/ocio-gpu-exec/tests/native/finite_replay.cpp -ldl -o kept/finite-failure-probes/native-replay-O$optimization
               kept/finite-failure-probes/native-replay-O$optimization kept/finite-failure-probes/native-manifest.txt O$optimization > kept/finite-failure-probes/native-O$optimization.json
-              # The original shader above MUST match. This separate diagnostic
-              # variant may differ; return2 means a probe error and still fails.
-              if kept/finite-failure-probes/native-replay-O$optimization kept/finite-failure-probes/native-precise-manifest.txt precise-O$optimization > kept/finite-failure-probes/native-precise-O$optimization.json; then
-                :
-              else
-                result=$?
-                test "$result" = 1
-              fi
+              # Original identity above remains mandatory. These separate
+              # version/precision experiments record changes; probe errors fail.
+              for variant in version400 precise; do
+                if kept/finite-failure-probes/native-replay-O$optimization kept/finite-failure-probes/native-$variant-manifest.txt $variant-O$optimization > kept/finite-failure-probes/native-$variant-O$optimization.json; then
+                  :
+                else
+                  result=$?
+                  test "$result" = 1
+                fi
+              done
             done
           ' 2>&1 | tee kept/finite-failure-probes/native-replay.log
       - uses: actions/upload-artifact@v4
