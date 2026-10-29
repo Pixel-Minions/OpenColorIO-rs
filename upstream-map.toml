@@ -4407,9 +4407,9 @@ note = "generic_cache; processor_cache (its config with a FileTransform, p4-ctf-
 [[file]]
 path = "tests/cpu/ColorSpaceSet_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/color_space_set_tests.rs"]
-status = "todo"
-note = "all 4 tests build their sets with Config::getColorSpaces and addColorSpace: they move to p3-config-1 (3.4f). p3-model-objects (3.4b) tests the class on its own in color_space_set_tests.rs"
+target = ["crates/ocio/src/color_space_set_tests.rs", "crates/ocio/tests/color_space_set_tests.rs"]
+status = "done"
+note = "All four Config-backed upstream cases are ported in the integration target; the existing set-only extension tests remain in the unit module."
 
 [[file]]
 path = "tests/cpu/ColorSpace_tests.cpp"
