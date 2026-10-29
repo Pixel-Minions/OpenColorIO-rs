@@ -30,7 +30,20 @@ jobs:
           printf '%s\n' "$source" > kept/ci-validation/source-commit.txt
           git rev-parse HEAD > kept/ci-validation/validation-commit.txt
           git fetch --depth=1 origin a34cb567d31f0e733037cea79340baffff7e0822
-          python3 -c 'import pathlib,subprocess;old=subprocess.check_output(["git","show","a34cb567d31f0e733037cea79340baffff7e0822:waivers.toml"]);assert pathlib.Path("waivers.toml").read_bytes().startswith(old),"Existing Matrix rules changed before validation"'
+          git fetch --depth=1 origin d423697b720179ae14e3cc691d429db4ba2aec6d
+          python3 - <<'PY'
+          import pathlib, subprocess, tomllib
+          active = pathlib.Path("waivers.toml").read_text()
+          rows = tomllib.loads(active)["waiver"]
+          assert [r["id"] for r in rows] == ["W0001", "W0002", "W0013"]
+          assert all("gpu_renderer" not in r for r in rows)
+          previous = subprocess.check_output(["git", "show", "d423697b720179ae14e3cc691d429db4ba2aec6d:waivers.toml"]).decode()
+          start = previous.index('[[waiver]]\nid = "W0003"')
+          end = previous.index('# Owner-approved 2026-10-29.')
+          archived = pathlib.Path("docs/archive/gpu-matrix-waivers-2026-10-27.toml").read_text()
+          assert archived.endswith(previous[start:end].rstrip() + "\n")
+          assert active.startswith(previous[:start])
+          PY
       - name: Build the unchanged reference image
         run: docker build -t ocio-rs-rocky9:1 docker/rocky9
       - name: Guardrails and GPU clippy
@@ -41,6 +54,11 @@ jobs:
             git config --global --add safe.directory "*"
             cargo fmt --all --check
             cargo xtask ci --base a34cb567d31f0e733037cea79340baffff7e0822
+            cargo xtask parity
+            cargo xtask ratchet --update
+            cargo xtask ci --main --base a34cb567d31f0e733037cea79340baffff7e0822
+            mkdir -p kept/ci-validation/generated
+            cp docs/parity.md docs/ratchet.toml kept/ci-validation/generated/
             cargo clippy --keep-going --locked -j2 -p ocio-gpu-exec --all-targets -- -D warnings
           ' 2>&1 | tee kept/ci-validation/guardrails.log
       - name: Native regression, rejection controls and all 69 original GPU cases
