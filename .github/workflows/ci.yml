@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  CARGO_TERM_COLOR: never
+  RUSTFLAGS: -D warnings
+  OCIO_RS_ORACLE_NO_CACHE: "1"
 jobs:
   gpu-class:
     name: GPU class (${{ matrix.profile }})
@@ -13,10 +17,6 @@ jobs:
       fail-fast: false
       matrix:
         profile: [debug, release]
-    env:
-      CARGO_TERM_COLOR: never
-      RUSTFLAGS: -D warnings
-      OCIO_RS_ORACLE_NO_CACHE: "1"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -43,7 +43,7 @@ jobs:
             cargo xtask ci --base a34cb567d31f0e733037cea79340baffff7e0822
             cargo clippy --locked -j2 -p ocio-gpu-exec --all-targets -- -D warnings
           ' 2>&1 | tee kept/ci-validation/guardrails.log
-      - name: Native regression, rejection controls and all69 original GPU cases
+      - name: Native regression, rejection controls and all 69 original GPU cases
         env:
           PROFILE: ${{ matrix.profile }}
         run: |
