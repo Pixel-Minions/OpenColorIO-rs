@@ -6612,6 +6612,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   W0003-W0012 retired after both profiles passed with every old rule enforced.
   Their signed metadata is archived. See
   `docs/gpu-nonfinite.md`; no original image, filter or threshold is changed.
+
 ### I-543. Tone identity reset retains unused GPU uniform coefficients
 
 - **Upstream:** GradingTonePreRender::update returns immediately for identity
