@@ -4463,8 +4463,8 @@ note = "1.2b: basic and equal_double. The others need the grading properties (Ph
 [[file]]
 path = "tests/cpu/Exception_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/exception_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/tests/exception_tests.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/FileRules_tests.cpp"
