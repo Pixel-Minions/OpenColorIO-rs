@@ -23,10 +23,10 @@ jobs:
       - name: Verify the exact public capture source
         run: |
           mkdir -p kept/finite-failure-probes
-          git fetch --depth=1 origin a22eb86ce6fb3d5e83e6a63ab5ebdc8a295df924
+          git fetch --depth=1 origin 2729ed5afc927879b0036b372bdd765526c36a6b
           git diff --exit-code FETCH_HEAD HEAD -- . ':(exclude).github/workflows/ci.yml'
           git rev-parse HEAD > kept/finite-failure-probes/validation-commit.txt
-          printf '%s\n' 'a22eb86ce6fb3d5e83e6a63ab5ebdc8a295df924' > kept/finite-failure-probes/source-commit.txt
+          printf '%s\n' '2729ed5afc927879b0036b372bdd765526c36a6b' > kept/finite-failure-probes/source-commit.txt
       - name: Build the unchanged reference image
         run: docker build -t ocio-rs-rocky9:1 docker/rocky9
       - name: Capture the five public fixtures, keeping original failures
@@ -49,6 +49,11 @@ jobs:
             else
               outcome=1
             fi
+          done
+          python3 crates/ocio-gpu-exec/tests/native/prepare_finite_replay.py /work/kept/finite-failure-probes
+          for optimization in 0 2; do
+            c++ -std=c++17 -O$optimization -ffp-contract=off crates/ocio-gpu-exec/tests/native/finite_replay.cpp -ldl -o kept/finite-failure-probes/native-replay-O$optimization
+            kept/finite-failure-probes/native-replay-O$optimization kept/finite-failure-probes/native-manifest.txt O$optimization > kept/finite-failure-probes/native-O$optimization.json
           done
           exit "$outcome"
           SH
