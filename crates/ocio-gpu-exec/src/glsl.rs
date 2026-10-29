@@ -417,6 +417,17 @@ impl OpenGLBuilder {
             },
             client
         );
+        // TEMPORARY DIAGNOSTIC BRANCH: preserve exact compiled shader sources.
+        if let Some(root) = std::env::var_os("OCIO_GPU_FINITE_CAPTURE") {
+            let folder = std::path::Path::new(&root).join("compiled");
+            std::fs::create_dir_all(&folder).map_err(|e| Exception::new(e.to_string()))?;
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| Exception::new(e.to_string()))?
+                .as_nanos();
+            std::fs::write(folder.join(format!("shader-{stamp}.glsl")), text.as_bytes())
+                .map_err(|e| Exception::new(e.to_string()))?;
+        }
         if self.verbose {
             let mut stdout = std::io::stdout().lock();
             let _ = write!(stdout, "\nGPU Shader Program:\n\n{text}\n\n");

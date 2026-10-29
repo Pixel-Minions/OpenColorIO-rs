@@ -371,6 +371,71 @@ impl GpuUnitTest {
                 );
                 let comparison: ImageComparison =
                     compare_image(&reference.cpu, &pixels, entries, self.comparison);
+                // TEMPORARY DIAGNOSTIC BRANCH: capture actual observations only.
+                // Original comparisons below are deliberately left failing.
+                if let Some(root) = std::env::var_os("OCIO_GPU_FINITE_CAPTURE")
+                    && matches!(
+                        self.name.as_str(),
+                        "style_aces2_4000nit_p3_rndtrip"
+                            | "style_aces2_nan_bug"
+                            | "style_aces2_rec709_rndtrip"
+                            | "style_aces2_rgb_to_jmh_fwd"
+                            | "style_aces_gamutcomp13_inv"
+                    )
+                {
+                    let proof = crate::native_reference::controls()?;
+                    let folder = std::path::Path::new(&root).join(&self.name);
+                    std::fs::create_dir_all(&folder).map_err(|e| Exception::new(e.to_string()))?;
+                    let bytes = |values: &[f32]| {
+                        values
+                            .iter()
+                            .flat_map(|v| v.to_bits().to_le_bytes())
+                            .collect::<Vec<_>>()
+                    };
+                    for (name, values) in [
+                        ("input.bin", &self.values.input_values),
+                        ("cpu.bin", &reference.cpu),
+                        ("port.bin", &pixels),
+                        ("wheel.bin", &wheel_pixels),
+                    ] {
+                        std::fs::write(folder.join(name), bytes(values))
+                            .map_err(|e| Exception::new(e.to_string()))?;
+                    }
+                    std::fs::write(folder.join("ocio.glsl"), shader.text.as_bytes())
+                        .map_err(|e| Exception::new(e.to_string()))?;
+                    let mut textures = Vec::new();
+                    for (i, t) in shader.textures.iter().enumerate() {
+                        let file = format!("texture-{i}.bin");
+                        std::fs::write(folder.join(&file), bytes(&t.values))
+                            .map_err(|e| Exception::new(e.to_string()))?;
+                        textures.push(serde_json::json!({"file":file,"name":t.name,"sampler":t.sampler_name,
+                            "width":t.width,"height":t.height,"channel":t.channel,"dimensions":t.dimensions,
+                            "interpolation":t.interpolation,"binding_index":t.binding_index}));
+                    }
+                    let mut textures3d = Vec::new();
+                    for (i, t) in shader.textures_3d.iter().enumerate() {
+                        let file = format!("texture3d-{i}.bin");
+                        std::fs::write(folder.join(&file), bytes(&t.values))
+                            .map_err(|e| Exception::new(e.to_string()))?;
+                        textures3d.push(serde_json::json!({"file":file,"name":t.name,"sampler":t.sampler_name,
+                            "edge":t.edge_len,"interpolation":t.interpolation,"binding_index":t.binding_index}));
+                    }
+                    let info = app.info()?;
+                    let record = serde_json::json!({"test":self.name,"run":index,"entries":entries,
+                        "original_size":self.values.original_input_value_size,
+                        "all_input_finite":self.values.input_values.iter().all(|v|v.is_finite()),
+                        "threshold":self.comparison.error_threshold,"relative":self.comparison.relative,
+                        "minimum":self.comparison.expected_minimal_value,"comparison":format!("{comparison:?}"),
+                        "port_wheel_gpu_exact":true,"native_proof":proof.directory.to_string_lossy(),
+                        "renderer":info.renderer,"gl_version":info.version,"glsl":info.shading_language_version,
+                        "gpu_metadata":reference.gpu.result,"textures":textures,"textures3d":textures3d});
+                    std::fs::write(
+                        folder.join("observations.json"),
+                        serde_json::to_vec_pretty(&record)
+                            .map_err(|e| Exception::new(e.to_string()))?,
+                    )
+                    .map_err(|e| Exception::new(e.to_string()))?;
+                }
                 let class_checked = if let Some(class) = class.as_ref().filter(|_| special_image) {
                     if !app.upstream_class_sampling()? {
                         return Err(Exception::new(
