@@ -82,9 +82,18 @@ int main(int argc,char** argv) {
             size_t mismatches=0,first_bad=pixels.size();
             for(size_t j=0;j<pixels.size();++j)if(bits(pixels[j])!=bits(expected[j])){++mismatches;if(first_bad==pixels.size())first_bad=j;}
             const bool exact=mismatches==0;all=all&&exact;
+            const auto point=read_binary(folder/"point-input.bin");
+            const auto point_gpu=read_binary(folder/"point-port.bin");
+            need(point.size()==4&&point_gpu.size()==4,"actual four-component probe point");
+            std::vector<F> constant_image(pixels.size());
+            for(size_t j=0;j<constant_image.size();++j)constant_image[j]=point[j%4];
+            const auto constant_pixels=replay(shader,constant_image,resources);
+            size_t constant_mismatches=0;
+            for(size_t j=0;j<constant_pixels.size();++j)if(bits(constant_pixels[j])!=bits(point_gpu[j%4]))++constant_mismatches;
+            binary(folder/(std::string("constant-native-")+argv[2]+".bin"),constant_pixels);
             binary(folder/(std::string("native-")+argv[2]+".bin"),pixels);
             if(i)std::cout<<",";
-            std::cout<<"{\"name\":"<<js(folder.filename().string())<<",\"resources\":"<<n<<",\"full_gpu_bits_exact\":"<<(exact?"true":"false")<<",\"mismatches\":"<<mismatches<<",\"first_mismatch\":"<<first_bad<<"}";
+            std::cout<<"{\"name\":"<<js(folder.filename().string())<<",\"resources\":"<<n<<",\"full_gpu_bits_exact\":"<<(exact?"true":"false")<<",\"mismatches\":"<<mismatches<<",\"first_mismatch\":"<<first_bad<<",\"constant_input_matches_original_pixel\":"<<(constant_mismatches==0?"true":"false")<<",\"constant_component_mismatches\":"<<constant_mismatches<<"}";
         }
         std::cout<<"],\"all_exact\":"<<(all?"true":"false")<<"}\n";
         eglMakeCurrent(display,nullptr,nullptr,nullptr);eglDestroyContext(display,context);eglDestroySurface(display,surface);eglTerminate(display);

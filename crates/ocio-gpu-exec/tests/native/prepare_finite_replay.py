@@ -1,4 +1,4 @@
-import json,pathlib,sys
+import json,pathlib,sys,re
 root=pathlib.Path(sys.argv[1]).resolve()
 compiled=[p for p in (root/'compiled').glob('*.glsl')]
 rows=[]
@@ -8,6 +8,13 @@ for folder in sorted(root.iterdir()):
  if not p.exists():continue
  data=json.loads(p.read_text())
  assert data['all_input_finite'] and data['port_wheel_gpu_exact']
+ component=int(re.search(r'index_diff: Some\((\d+)\)',data['comparison']).group(1))
+ pixel=component//4
+ for kind in ('input','cpu','port'):
+  raw=(folder/(kind+'.bin')).read_bytes()
+  point=raw[pixel*16:pixel*16+16]
+  assert len(point)==16
+  (folder/('point-'+kind+'.bin')).write_bytes(point)
  assert not data['gpu_metadata']['shader']['uniforms'],'static fixture only'
  assert (folder/'port.bin').read_bytes()==(folder/'wheel.bin').read_bytes()
  code=(folder/'ocio.glsl').read_text()
