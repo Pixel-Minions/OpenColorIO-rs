@@ -395,3 +395,14 @@ On Windows and Rocky Linux 9 (the GPU suite where P7-3 says):
   HLSL (P7-5);
 - `upstream-map.toml` has `NoOps.cpp/.h`, `Processor.cpp`, `tests/gpu/*`, `GPUUnitTest.*`,
   `oglapp.*` and `glsl.*` done, and `docs/parity.md` counts the GPU tests.
+
+## Suite4 validation, 2026-10-29
+
+The 87 ExposureContrast and grading cases retain their upstream inputs,
+settings, dynamic updates and thresholds. CI40945892072 passed all156 upstream
+GPU cases and all native/rejection/reference controls in both debug and release.
+The shared transport updates the CPU processor's own properties and retains
+native GPU descriptor history, matching the upstream harness. No new oracle
+command, numerical expectation, class scope or waiver is introduced. See
+[the dynamic reference proof](../gpu-dynamic-retests.md) and
+[the verified profile summary](../gpu-suite4-validation.json).

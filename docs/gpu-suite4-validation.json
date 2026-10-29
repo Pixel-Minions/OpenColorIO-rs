@@ -1,0 +1,40 @@
+{
+  "Run": 40945892072,
+  "Source": "741b03e836790c4a6b816a651ecf9faa48cefadf",
+  "ValidationHead": "e6bd3f913e1b426b78eadfddec0951ce99512fb8",
+  "BothProfilesPassed": true,
+  "GeneratedFilesIdenticalBothProfiles": true,
+  "Profiles": [
+    {
+      "Profile": "debug",
+      "UpstreamGPUCases": 156,
+      "ClassFrames": 93,
+      "FiniteCompanionCases": 78,
+      "ExceptedCases": 77,
+      "ExceptedComponents": 891,
+      "NativeProcesses": 10,
+      "NativeObservations": 2600,
+      "FullNativeRustReadbacks": 50,
+      "GPUExact": true,
+      "ReferenceRegressionsPassed": true,
+      "RejectionControlsPassed": true,
+      "GeneratedMainModePassed": true
+    },
+    {
+      "Profile": "release",
+      "UpstreamGPUCases": 156,
+      "ClassFrames": 93,
+      "FiniteCompanionCases": 78,
+      "ExceptedCases": 77,
+      "ExceptedComponents": 891,
+      "NativeProcesses": 10,
+      "NativeObservations": 2600,
+      "FullNativeRustReadbacks": 50,
+      "GPUExact": true,
+      "ReferenceRegressionsPassed": true,
+      "RejectionControlsPassed": true,
+      "GeneratedMainModePassed": true
+    }
+  ],
+  "VerifiedUTC": "2026-10-29T20:17:35.186700+00:00"
+}

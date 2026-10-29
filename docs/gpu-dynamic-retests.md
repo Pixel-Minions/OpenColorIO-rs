@@ -26,3 +26,12 @@ The live regressions compare original and complete finite CPU frames with
 independent fresh wheel CPU processors, check retained processor flags, and
 check native Tone uniform history on reset. These controls fail with the earlier
 Processor-property CPU binding or fresh-per-frame GPU metadata transport.
+
+[CI 40945892072](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/40945892072)
+passed both debug and release on exact runtime source `741b03e8`: all 156
+upstream GPU cases, the CPU ownership and retained-descriptor regressions,
+and all native/class/rejection controls. Each profile verified 50 complete
+native/Rust readbacks and 2,600 independent native observations. Both generated
+identical parity and ratchet files. The [verified summary](gpu-suite4-validation.json)
+records the preserved artifact checks. This validation changes no threshold,
+comparison, oracle command or renderer waiver.
