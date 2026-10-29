@@ -37,5 +37,41 @@
       "TestLogSHA256": "89CACD433594E92CE2E6CB2F0F0780A3AFFB7933E2BCEE5AF89CB7D6B86B2BBD"
     }
   ],
-  "RetirementConditionSatisfiedUTC": "2026-10-29T18:09:43.6841903Z"
+  "RetirementConditionSatisfiedUTC": "2026-10-29T18:09:43.6841903Z",
+  "PostRetirementValidation": {
+    "Run": 40929446610,
+    "Source": "6c886b54bf4a3f58cc636d67bbe20c9723c5d87e",
+    "ValidationHead": "a311987d95f498ea779a29aea0ecf36b598f13be",
+    "BothProfilesPassed": true,
+    "GeneratedFilesIdenticalBothProfiles": true,
+    "Profiles": [
+      {
+        "Profile": "debug",
+        "UpstreamGPUCases": 69,
+        "FiniteCompanions": 47,
+        "ExceptedCases": 46,
+        "ExceptedComponents": 519,
+        "NativeProcesses": 7,
+        "NativeObservations": 1820,
+        "FullNativeRustReadbacks": 35,
+        "GPUExact": true,
+        "RejectionControlsPassed": true,
+        "GeneratedMainModePassed": true
+      },
+      {
+        "Profile": "release",
+        "UpstreamGPUCases": 69,
+        "FiniteCompanions": 47,
+        "ExceptedCases": 46,
+        "ExceptedComponents": 519,
+        "NativeProcesses": 7,
+        "NativeObservations": 1820,
+        "FullNativeRustReadbacks": 35,
+        "GPUExact": true,
+        "RejectionControlsPassed": true,
+        "GeneratedMainModePassed": true
+      }
+    ],
+    "VerifiedUTC": "2026-10-29T18:31:05.2550531Z"
+  }
 }

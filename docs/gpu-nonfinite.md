@@ -83,6 +83,13 @@ in [the archive](archive/gpu-matrix-waivers-2026-10-27.toml); the active parser
 rejects per-test renderer entries. Runtime acceptance uses only W0013, with all
 new native, finite-footprint, companion and rejection checks retained.
 
+After retirement, [CI40929446610](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/40929446610)
+passed both profiles again on source6c886b54. All69 cases,47 complete finite
+companions,519 classified components/46 cases, native readbacks and rejection
+controls passed unchanged. Both jobs independently generated identical parity
+and ratchet files, and passed the main-mode bookkeeping check. These results
+are also recorded in the verified metadata linked above.
+
 The final merge candidate must pass the normal reference-platform CI workflow.
 The separate validation/diagnostic ci.yml branches are never merged. Main's GPU
 count changes only when the validated chunk is merged.
