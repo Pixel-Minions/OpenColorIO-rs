@@ -13,7 +13,7 @@ API(void, glTexImage3D, (U,I,I,I,I,I,I,U,U,const void*));
 struct Resource { std::string sampler,file; I dimensions,width,height,edge,channels; U filter; };
 
 std::vector<F> replay(const std::string& shader, const std::vector<F>& image,
-                      const std::vector<Resource>& resources) {
+                      const std::vector<Resource>& resources, const std::array<F,4>& control={0,0,0,0}) {
     const I w=256,h=256;
     need(image.size()==size_t(w*h*4),"complete input image");
     need([](const std::vector<F>& a){for(F v:a)if(!std::isfinite(v))return false;return true;}(image),"public input is finite");
@@ -35,6 +35,7 @@ std::vector<F> replay(const std::string& shader, const std::vector<F>& image,
     U program=glCreateProgram();glAttachShader(program,fragment);glLinkProgram(program);
     glGetProgramiv(program,0x8B82,&ok);glGetProgramInfoLog(program,sizeof(log),nullptr,log);need(ok!=0,std::string("link: ")+log);
     glUseProgram(program);I location=glGetUniformLocation(program,"img");need(location>=0,"image sampler active");glUniform1i(location,0);
+    location=glGetUniformLocation(program,"probe_control");if(location>=0)glUniform4fv(location,1,control.data());
     std::vector<U> handles;
     for(const auto& r:resources) {
         const auto values=read_binary(r.file);
@@ -64,6 +65,7 @@ std::vector<F> replay(const std::string& shader, const std::vector<F>& image,
     return pixels;
 }
 
+#ifndef FINITE_REPLAY_LIBRARY_ONLY
 int main(int argc,char** argv) {
     try {
         need(argc==3,"usage: finite-replay MANIFEST LABEL");init();
@@ -100,3 +102,5 @@ int main(int argc,char** argv) {
         return all?0:1;
     }catch(const std::exception& e){std::cerr<<"native finite replay failed: "<<e.what()<<"\n";return 2;}
 }
+
+#endif
