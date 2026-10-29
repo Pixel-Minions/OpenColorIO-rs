@@ -26,9 +26,9 @@ jobs:
           path: kept/finite-failure-probes/
       - name: Verify exact native source
         run: |
-          git fetch --depth=1 origin 81532d199bd80d1efa1ae11e3f36a507f8f752c4
+          git fetch --depth=1 origin a8e13fe545333b032128488c7cb43e745b202b67
           git diff --exit-code FETCH_HEAD HEAD -- . ':(exclude).github/workflows/ci.yml'
-          printf '%s\n' 81532d199bd80d1efa1ae11e3f36a507f8f752c4 > kept/finite-failure-probes/native-source-commit.txt
+          printf '%s\n' a8e13fe545333b032128488c7cb43e745b202b67 > kept/finite-failure-probes/native-source-commit.txt
           git rev-parse HEAD > kept/finite-failure-probes/native-validation-commit.txt
       - name: Build the unchanged native runtime image
         run: docker build -t ocio-rs-rocky9:1 docker/rocky9
@@ -40,6 +40,8 @@ jobs:
             for optimization in 0 2; do
               c++ -std=c++17 -O$optimization -ffp-contract=off crates/ocio-gpu-exec/tests/native/finite_replay.cpp -ldl -o kept/finite-failure-probes/native-replay-O$optimization
               kept/finite-failure-probes/native-replay-O$optimization kept/finite-failure-probes/native-manifest.txt O$optimization > kept/finite-failure-probes/native-O$optimization.json
+              c++ -std=c++17 -O$optimization -ffp-contract=off crates/ocio-gpu-exec/tests/native/power_precision.cpp -ldl -o kept/finite-failure-probes/power-probe-O$optimization
+              kept/finite-failure-probes/power-probe-O$optimization kept/finite-failure-probes O$optimization > kept/finite-failure-probes/power-O$optimization.json
               # Original identity above remains mandatory. These separate
               # version/precision experiments record changes; probe errors fail.
               for variant in version400 precise; do
