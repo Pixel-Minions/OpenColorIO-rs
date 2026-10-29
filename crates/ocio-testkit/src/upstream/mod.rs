@@ -14,6 +14,9 @@
 use std::fmt::{Debug, Display, LowerExp};
 use std::ops::{Div, Neg, Sub};
 
+/// The GPU suite's numeric, NaN and infinity comparisons.
+pub mod gpu;
+
 /// The float types upstream's checks are instantiated with.
 pub trait UpstreamFloat:
     Copy + PartialOrd + Debug + LowerExp + Sub<Output = Self> + Div<Output = Self> + Neg<Output = Self>

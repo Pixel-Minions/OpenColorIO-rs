@@ -5,6 +5,7 @@
 //! uniforms, fragment compilation and program linking on a current GL context.
 #![allow(unsafe_code)]
 
+use std::cell::RefCell;
 use std::io::Write;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -53,6 +54,22 @@ struct Uniform {
     data: UniformData,
 }
 
+/// Values observed during actual GL uploads, without invoking a getter again.
+/// These records support Phase 7's wheel parity checks without changing callback timing.
+#[derive(Debug, Clone)]
+pub enum UniformUpload {
+    /// The original double, before GL's float narrowing.
+    Double(f64),
+    /// The original boolean, uploaded as 0 or 1.
+    Bool(bool),
+    /// RGB assembled from upstream's three B/G/R getter evaluations.
+    Float3([f32; 3]),
+    /// Signed count and float-vector values; a rejected negative count has no values.
+    VectorFloat { count: i32, values: Vec<f32> },
+    /// Signed count and int-vector values; a rejected negative count has no values.
+    VectorInt { count: i32, values: Vec<i32> },
+}
+
 /// glow's slice uploads infer a nonnegative count from length. Preserve the
 /// original signed GLsizei for defined negative-count errors instead.
 #[derive(Debug)]
@@ -90,6 +107,7 @@ pub(crate) struct OpenGLBuilder {
     desc: Arc<GpuShaderDesc>,
     textures: Vec<TextureId>,
     uniforms: Vec<Uniform>,
+    last_uniform_uploads: RefCell<Vec<UniformUpload>>,
     vector_uniforms: VectorUniforms,
     start_index: u32,
     fragment_shader: Option<glow::Shader>,
@@ -111,6 +129,7 @@ impl OpenGLBuilder {
             desc,
             textures: Vec::new(),
             uniforms: Vec::new(),
+            last_uniform_uploads: RefCell::new(Vec::new()),
             vector_uniforms,
             start_index: 0,
             fragment_shader: None,
@@ -293,16 +312,23 @@ impl OpenGLBuilder {
     pub(crate) fn use_all_uniforms(&self) -> Result<()> {
         self.context.activate()?;
         let gl = &self.context.gl;
+        let mut uploads = Vec::with_capacity(self.uniforms.len());
         for uniform in &self.uniforms {
             let location = uniform.location.as_ref();
             // SAFETY: GL uniforms belong to the current program. Nonnegative
             // counts are checked against slice lengths; GL's defined negative-
             // count error path does not read the borrowed pointer.
             unsafe {
-                match &uniform.data {
-                    UniformData::Double(get) => gl.uniform_1_f32(location, get() as f32),
+                let upload = match &uniform.data {
+                    UniformData::Double(get) => {
+                        let value = get();
+                        gl.uniform_1_f32(location, value as f32);
+                        UniformUpload::Double(value)
+                    }
                     UniformData::Bool(get) => {
-                        gl.uniform_1_f32(location, if get() { 1.0 } else { 0.0 })
+                        let value = get();
+                        gl.uniform_1_f32(location, if value { 1.0 } else { 0.0 });
+                        UniformUpload::Bool(value)
                     }
                     UniformData::Float3(get) => {
                         // The exact upstream function-pointer expression calls
@@ -312,11 +338,12 @@ impl OpenGLBuilder {
                         let g = get()[1];
                         let r = get()[0];
                         gl.uniform_3_f32(location, r, g, b);
+                        UniformUpload::Float3([r, g, b])
                     }
                     UniformData::VectorFloat { size, values } => {
                         // Rocky GCC evaluates the pointer argument before the
                         // count in upstream's function-pointer call (I-481).
-                        let values = values();
+                        let mut values = values();
                         let count = size();
                         if count < 0 {
                             // GL records INVALID_VALUE without reading the
@@ -324,26 +351,38 @@ impl OpenGLBuilder {
                             // error; Uniform::use/setShader do not CheckStatus.
                             let location = location.map_or(-1, |value| value.0 as i32);
                             (self.vector_uniforms.float)(location, count, values.as_ptr());
+                            values.clear(); // GL read no data for this rejected count.
                         } else {
                             let used = used_values(count, &values)?;
                             gl.uniform_1_f32_slice(location, used);
+                            values.truncate(count as usize);
                         }
+                        UniformUpload::VectorFloat { count, values }
                     }
                     UniformData::VectorInt { size, values } => {
-                        let values = values();
+                        let mut values = values();
                         let count = size();
                         if count < 0 {
                             let location = location.map_or(-1, |value| value.0 as i32);
                             (self.vector_uniforms.int)(location, count, values.as_ptr());
+                            values.clear();
                         } else {
                             let used = used_values(count, &values)?;
                             gl.uniform_1_i32_slice(location, used);
+                            values.truncate(count as usize);
                         }
+                        UniformUpload::VectorInt { count, values }
                     }
-                }
+                };
+                uploads.push(upload);
             }
         }
+        *self.last_uniform_uploads.borrow_mut() = uploads;
         Ok(())
+    }
+
+    pub(crate) fn uniform_uploads(&self) -> Vec<UniformUpload> {
+        self.last_uniform_uploads.borrow().clone()
     }
 
     /// Port of OpenGLBuilder::getGLSLVersionString (glsl.cpp:454-480 @ v2.5.2).

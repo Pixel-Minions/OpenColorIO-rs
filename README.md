@@ -112,8 +112,11 @@ is exposed in Python too. The unchanged upstream driver and complete module meta
 the official wheel on both reference platforms; native C++ extension pointer exchange is outside
 the approved [D-16 scope](docs/deviations.md). Phase 7 foundations
 in main: the legacy GPU API, the reference client linked to the official wheel, and headless
-OpenGL infrastructure tested on llvmpipe. The upstream GPU execution suite and the legacy
-parity sweep follow. Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
+OpenGL execution on llvmpipe. The 10 upstream Matrix GPU tests compare the port's rendered
+pixels bit for bit with the official shader's output on the same renderer. Their CPU/GPU
+comparisons use upstream's thresholds and the ten approved [renderer exceptions](docs/waivers.md).
+The remaining 254 GPU tests and the legacy parity sweep follow. Phases 1 (the op engine and
+the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
 Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pandora, Nuke
@@ -240,7 +243,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 | Suite | Ported | Total |
 |---|---:|---:|
 | C++ | 1,179 | 1,191 |
-| GPU | 0 | 264 |
+| GPU | 10 | 264 |
 | Python | 384 | 384 |
 
 The live numbers are in [`docs/parity.md`](docs/parity.md). The GPU tests need a GPU to run

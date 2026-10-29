@@ -588,6 +588,38 @@ impl HeadlessApp {
             .map_err(|e| Exception::new(e.to_string()))
     }
 
+    /// Render an actual wheel description on this same context without replacing
+    /// the port's compiled program or its live dynamic getters. The original GL
+    /// bindings are restored even when reference compilation/rendering fails.
+    /// This is the Phase 7 wheel-shader identity check, in addition to upstream's run.
+    pub fn render_reference_shader(&mut self, desc: Arc<GpuShaderDesc>) -> Result<Vec<f32>> {
+        if self.builder.is_none() {
+            return Err(Exception::new(
+                "Reference rendering requires an existing shader",
+            ));
+        }
+        let original = self.builder.take();
+        let result = self.set_shader(desc).and_then(|()| {
+            self.redisplay()?;
+            self.read_image()
+        });
+        drop(self.builder.take());
+        self.builder = original;
+        if let Some(builder) = &self.builder {
+            builder.use_program()?;
+            builder.bind_image_sampler()?;
+            builder.use_all_textures()?;
+        }
+        result
+    }
+
+    /// Values from the last actual uniform upload; does not call any getter.
+    pub fn uniform_uploads(&self) -> Vec<crate::UniformUpload> {
+        self.builder
+            .as_ref()
+            .map_or_else(Vec::new, OpenGLBuilder::uniform_uploads)
+    }
+
     /// Port of OglApp::readImage (oglapp.cpp:189-194 @ v2.5.2).
     pub fn read_image(&self) -> Result<Vec<f32>> {
         self.context.activate()?;

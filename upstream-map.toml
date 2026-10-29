@@ -5380,15 +5380,16 @@ status = "todo"
 [[file]]
 path = "tests/gpu/GPUUnitTest.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/gpu_unit_test.rs"]
-status = "todo"
-note = "p7-oracle O7.2: oracle/ocio_oracle/spec.py supports the harness's Config::Create with PROCESSOR_CACHE_OFF (137-142); O7.1: oracle/native/legacy_gpu.cpp calls the pinned wheel's public legacy GPU API, with exact ordinary-GPU transport proof and capped edge probes in crates/ocio-testkit/tests/legacy_gpu_oracle.rs; the harness itself remains for p7-harness 7.2c"
+target = ["crates/ocio-gpu-exec/src/gpu_unit_test.rs", "crates/ocio-testkit/src/upstream/gpu.rs", "crates/ocio-gpu-exec/tests/gpu_unit_test.rs"]
+status = "partial"
+note = "p7-oracle O7.2: oracle/ocio_oracle/spec.py supports the harness's Config::Create with PROCESSOR_CACHE_OFF (137-142); O7.1: oracle/native/legacy_gpu.cpp calls the pinned wheel's public legacy GPU API, with exact ordinary-GPU transport proof and capped edge probes in crates/ocio-testkit/tests/legacy_gpu_oracle.rs. p7-harness 7.2c source prepared on the actual integrated prerequisites: defaults/input, exact upstream special-value comparisons, run/retests and wheel-shader same-context identity; runtime/mutations/full gates remain pending. main's registry and argument parsing are excluded by the Phase 7 card."
 
 [[file]]
 path = "tests/gpu/GPUUnitTest.h"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/gpu_unit_test.rs"]
-status = "todo"
+target = ["crates/ocio-gpu-exec/src/gpu_unit_test.rs"]
+status = "partial"
+note = "p7-harness 7.2c source prepared against actual integrated O7/legacy APIs; runtime/mutations/full gates pending."
 
 [[file]]
 path = "tests/gpu/GammaOp_test.cpp"
@@ -5447,9 +5448,9 @@ status = "todo"
 [[file]]
 path = "tests/gpu/MatrixOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/matrix_op_test.rs"]
-status = "todo"
-note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (matrix_cases); 1.3m4 checks their shaders' text against the wheel (crates/ocio-gpu/tests/matrix_op_gpu_oracle.rs)"
+target = ["crates/ocio-gpu-exec/tests/matrix_op_test.rs"]
+status = "partial"
+note = "p7-harness 7.2c source prepared: all ten source cases, eight legacy, using upstream matrix_cases data, exact 5e-7 tolerance and pinned input digest; actual wheel CPU batch and wheel-shader render identity. Runtime/mutations/full gates pending. Existing ten-language shader-text parity remains in crates/ocio-gpu/tests/matrix_op_gpu_oracle.rs."
 
 [[file]]
 path = "tests/gpu/RangeOp_test.cpp"

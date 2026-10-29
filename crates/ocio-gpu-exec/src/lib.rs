@@ -9,6 +9,10 @@
 #![deny(unsafe_code)]
 
 mod glsl;
+mod gpu_renderer_waiver;
+pub mod gpu_unit_test;
 pub mod oglapp;
+mod wheel_shader;
 
+pub use glsl::UniformUpload;
 pub use oglapp::{Components, GlInfo, HeadlessApp};
