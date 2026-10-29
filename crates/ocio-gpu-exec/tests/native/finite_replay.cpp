@@ -19,7 +19,7 @@ std::vector<F> replay(const std::string& shader, const std::vector<F>& image,
     need([](const std::vector<F>& a){for(F v:a)if(!std::isfinite(v))return false;return true;}(image),"public input is finite");
     U texture=0,fbo=0,renderbuffer=0;
     glActiveTexture(0x84C0);glGenTextures(1,&texture);glBindTexture(0x0DE1,texture);
-    glTexImage2D(0x0DE1,0,0x8814,w,h,0,0x1908,0x1406,image.data());
+    glTexImage2D(0x0DE1,0,0x8814,w,h,0,0x1908,0x1406,const_cast<F*>(image.data()));
     glTexParameteri(0x0DE1,0x2801,0x2601);glTexParameteri(0x0DE1,0x2800,0x2601);
     glTexParameteri(0x0DE1,0x2802,0x2900);glTexParameteri(0x0DE1,0x2803,0x2900);
     std::vector<F> uploaded(image.size());glGetTexImage(0x0DE1,0,0x1908,0x1406,uploaded.data());
@@ -48,7 +48,7 @@ std::vector<F> replay(const std::string& shader, const std::vector<F>& image,
         glTexParameteri(target,0x2801,r.filter);glTexParameteri(target,0x2800,r.filter);
         for(U axis:{0x2802U,0x2803U,0x8072U})glTexParameteri(target,axis,0x812F);
         if(r.dimensions==1)glTexImage1D(target,0,internal,r.width,0,format,0x1406,values.data());
-        else if(r.dimensions==2)glTexImage2D(target,0,internal,r.width,r.height,0,format,0x1406,values.data());
+        else if(r.dimensions==2)glTexImage2D(target,0,internal,r.width,r.height,0,format,0x1406,const_cast<F*>(values.data()));
         else glTexImage3D(target,0,internal,r.edge,r.edge,r.edge,0,format,0x1406,values.data());
         std::vector<F> actual(values.size());glGetTexImage(target,0,format,0x1406,actual.data());
         need(std::memcmp(actual.data(),values.data(),values.size()*4)==0,"resource upload exact");
