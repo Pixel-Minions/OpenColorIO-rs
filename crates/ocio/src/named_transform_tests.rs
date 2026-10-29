@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the named transform. Upstream's `basic` and `alias`
-//! (`tests/cpu/NamedTransform_tests.cpp` @ v2.5.2) add named transforms to a config and call
-//! `NamedTransform::GetTransform`, so they come with the config's named transforms (WP 3.4j)
+//! Tests of the named transform. Upstream's `basic`
+//! (`tests/cpu/NamedTransform_tests.cpp` @ v2.5.2) adds named transforms to a config and calls
+//! `NamedTransform::GetTransform`, so its complete port also needs the config named transforms
 //! and the color space transform's builder (WP 3.2a); these tests check the parts that need
-//! neither, with upstream's values. The text is compared with the wheel's in
+//! neither, with upstream's values. The complete `alias` below also checks its Config assertions.
+//! The text is compared with the wheel's in
 //! `tests/model_objects_oracle.rs`. Upstream's `Config` tests of named transforms are here too,
 //! with the processors the config makes of them (WP 3.2d).
 
@@ -54,9 +55,11 @@ fn basic_without_a_config() {
     );
 }
 
-/// The alias part of upstream's `alias` (NamedTransform_tests.cpp:66-138 @ v2.5.2).
+/// Port of `OCIO_ADD_TEST(NamedTransform, alias)` @ v2.5.2.
+/// Source: tests/cpu/NamedTransform_tests.cpp:64-211; includes all Config assertions.
 #[test]
-fn alias_without_a_config() {
+fn alias() {
+    let _env = crate::test_env::EnvGuard::new();
     let mut nt = NamedTransform::new();
     assert_eq!(nt.num_aliases(), 0);
     const ALIAS_A: &str = "aliasA";
@@ -117,6 +120,79 @@ fn alias_without_a_config() {
     assert_eq!(nt.num_aliases(), 0);
     assert!(!nt.has_alias(ALIAS_B));
     assert!(!nt.has_alias("other"));
+
+    // Add and access named transforms in a config.
+    let mut config = crate::Config::create_raw().unwrap();
+    nt.set_name("name");
+    nt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        TransformDirection::Forward,
+    )
+    .unwrap();
+
+    {
+        config.add_named_transform(&nt).unwrap();
+        nt.set_name("other");
+        nt.add_alias(ALIAS_B);
+        config.add_named_transform(&nt).unwrap();
+        assert_eq!(config.num_named_transforms(), 2);
+        let ntcfg = config.named_transform("name").unwrap();
+        assert_eq!(ntcfg.num_aliases(), 0);
+    }
+
+    // Access by alias.
+    {
+        let ntcfg = config.named_transform(ALIAS_B).unwrap();
+        assert_eq!(ntcfg.name(), b"other");
+        assert_eq!(ntcfg.num_aliases(), 1);
+        assert_eq!(config.canonical_name(ALIAS_B), b"other");
+        assert_eq!(config.canonical_name("other"), b"other");
+        assert_eq!(config.canonical_name("not found"), b"");
+        assert_eq!(config.canonical_name(""), b"");
+    }
+
+    // Named transform with same name is replaced.
+    {
+        nt.set_name("name");
+        nt.clear_aliases();
+        nt.add_alias(ALIAS_A);
+        config.add_named_transform(&nt).unwrap();
+        assert_eq!(config.num_named_transforms(), 2);
+        let ntcfg = config.named_transform("name").unwrap();
+        assert_eq!(ntcfg.num_aliases(), 1);
+    }
+
+    // Can't add a named transform if name is used as an existing alias.
+    {
+        nt.set_name(ALIAS_A);
+        nt.clear_aliases();
+        check_throw_what(
+            config.add_named_transform(&nt),
+            "Cannot add 'aliasA' named transform, existing named transform, \
+             'name' is using this name as an alias",
+        );
+    }
+
+    // Can't add a named transform if alias is used as an existing alias.
+    {
+        nt.set_name("newName");
+        nt.add_alias(ALIAS_B);
+        check_throw_what(
+            config.add_named_transform(&nt),
+            "Cannot add 'newName' named transform, it has 'aliasB' alias and \
+             existing named transform, 'other' is using the same alias",
+        );
+    }
+
+    // Can't add a named transform if alias is used as an existing name.
+    {
+        nt.add_alias("other");
+        check_throw_what(
+            config.add_named_transform(&nt),
+            "Cannot add 'newName' named transform, it has 'aliasB' alias and \
+             existing named transform, 'other' is using the same alias",
+        );
+    }
 }
 
 /// Port of `OCIO_ADD_TEST(NamedTransform, static_get_transform)` @ v2.5.2.
