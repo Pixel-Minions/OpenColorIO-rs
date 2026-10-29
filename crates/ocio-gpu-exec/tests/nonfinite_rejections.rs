@@ -118,7 +118,7 @@ fn mismatched_actual_wheel_shader_text_cannot_use_the_class() {
 }
 
 #[test]
-fn registered_matrix_tuples_remain_mandatory_during_transition() {
+fn matrix_uses_the_single_class_shared_by_every_test_family() {
     let case = matrix_cases()[0];
     let make = || {
         let mut matrix = MatrixTransform::new();
@@ -133,16 +133,16 @@ fn registered_matrix_tuples_remain_mandatory_during_transition() {
     };
     let processor =
         json!({"config":{"create":{"processor_cache":"off"}},"transform":case.transform()});
-    let mut value = reference::batch(&[make()], &[processor]).pop().unwrap();
+    let value = reference::batch(&[make()], &[processor]).pop().unwrap();
     assert!(make().run(std::slice::from_ref(&value)).unwrap());
-    // A changed recorded CPU tuple still lies in a non-finite footprint and
-    // would satisfy the new class alone. The retained signed rule must reject it.
-    value.cpu[16] = f32::NEG_INFINITY;
-    assert!(
-        make()
-            .run(&[value])
-            .unwrap_err()
-            .to_string()
-            .contains("Retained legacy GPU rule")
-    );
+    for id in [
+        "MatrixOps/matrix",
+        "RangeOps/arbitrary_1_no_clamp",
+        "any/family",
+    ] {
+        let rules = ocio_testkit::gpu_waivers::gpu_renderer_waivers(id).unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["id"], "W0013");
+        assert_eq!(rules[0]["kind"], "gpu_nonfinite");
+    }
 }

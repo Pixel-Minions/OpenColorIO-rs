@@ -407,7 +407,7 @@ impl GpuUnitTest {
                     app.update_image(&self.values.input_values)?;
                     let (finite_port, finite_wheel) = finite_result?;
                     let info = app.info()?;
-                    let mut assessed = nonfinite_class::assess(
+                    let assessed = nonfinite_class::assess(
                         class,
                         Environment {
                             info: &info,
@@ -431,38 +431,13 @@ impl GpuUnitTest {
                             }),
                         },
                     );
-                    // A candidate class must not replace the active signed
-                    // Matrix tuple rules before both CI profiles pass.
-                    let mut retained_legacy_id = None;
-                    if assessed.is_ok()
-                        && !comparison.passes(self.comparison)
-                        && class.retained_legacy
-                    {
-                        match crate::gpu_renderer_waiver::matching(
-                            self,
-                            index,
-                            &info,
-                            [&reference.cpu, &pixels, &wheel_pixels],
-                            entries,
-                            &comparison,
-                        ) {
-                            Ok(Some(id)) => retained_legacy_id = Some(id),
-                            Ok(None) => {
-                                assessed = Err(Exception::new(
-                                    "Retained legacy GPU rule did not match; it cannot be replaced before CI passes",
-                                ))
-                            }
-                            Err(error) => assessed = Err(error),
-                        }
-                    }
                     let stamp = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map_err(|e| Exception::new(e.to_string()))?
                         .as_nanos();
                     let record = serde_json::json!({
                         "test":format!("{}/{}",self.group,self.name),"run":index,"class":class.id,
-                        "retained_legacy_required":class.retained_legacy,
-                        "retained_legacy_id":retained_legacy_id,
+                        "matrix_rules_retired_after_ci":40926626678_u64,
                         "original_max_diff_bits":format!("{:08x}",comparison.max_diff.to_bits()),
                         "original_index_diff":comparison.index_diff,"original_index_inf":comparison.index_inf,"original_index_nan":comparison.index_nan,
                         "excepted_components":assessed.as_ref().ok(),"error":assessed.as_ref().err().map(ToString::to_string),
@@ -496,39 +471,24 @@ impl GpuUnitTest {
                     false
                 };
                 if !comparison.passes(self.comparison) && !class_checked {
-                    let owner_waiver = crate::gpu_renderer_waiver::matching(
-                        self,
+                    return Err(Exception::new(format!(
+                        "{} / {} run {}: GPU max vals = {:?}; GPU min vals = {:?}; Maximum error: {}; component {:?}; Large number error at {:?}; NAN error at {:?}; {} tolerance={}",
+                        self.group,
+                        self.name,
                         index,
-                        &app.info()?,
-                        [&reference.cpu, &pixels, &wheel_pixels],
-                        entries,
-                        &comparison,
-                    )?;
-                    if let Some(id) = owner_waiver {
-                        eprintln!(
-                            "Owner renderer waiver {id}: {} / {} run {}; original upstream comparison {:?}; full port/wheel GPU bits remain equal",
-                            self.group, self.name, index, comparison,
-                        );
-                    } else {
-                        return Err(Exception::new(format!(
-                            "{} / {} run {}: GPU max vals = {:?}; GPU min vals = {:?}; Maximum error: {}; component {:?}; Large number error at {:?}; NAN error at {:?}; {} tolerance={}",
-                            self.group,
-                            self.name,
-                            index,
-                            comparison.max_values,
-                            comparison.min_values,
-                            comparison.max_diff,
-                            comparison.index_diff,
-                            comparison.index_inf,
-                            comparison.index_nan,
-                            if self.comparison.relative {
-                                "relative"
-                            } else {
-                                "absolute"
-                            },
-                            self.comparison.error_threshold,
-                        )));
-                    }
+                        comparison.max_values,
+                        comparison.min_values,
+                        comparison.max_diff,
+                        comparison.index_diff,
+                        comparison.index_inf,
+                        comparison.index_nan,
+                        if self.comparison.relative {
+                            "relative"
+                        } else {
+                            "absolute"
+                        },
+                        self.comparison.error_threshold,
+                    )));
                 }
                 if comparison.max_diff > self.max_diff {
                     self.max_diff = comparison.max_diff;

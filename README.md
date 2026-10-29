@@ -90,7 +90,7 @@ one.
 
 ## Progress
 
-Status as of 2026-10-28: **milestones M0, M1, M2, M3 and M4 are complete**, about 83% of the
+Status as of 2026-10-29: **milestones M0, M1, M2, M3 and M4 are complete**, about 83% of the
 planned work (1,179 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
@@ -112,10 +112,12 @@ is exposed in Python too. The unchanged upstream driver and complete module meta
 the official wheel on both reference platforms; native C++ extension pointer exchange is outside
 the approved [D-16 scope](docs/deviations.md). Phase 7 foundations
 in main: the legacy GPU API, the reference client linked to the official wheel, and headless
-OpenGL execution on llvmpipe. The 10 upstream Matrix GPU tests compare the port's rendered
-pixels bit for bit with the official shader's output on the same renderer. Their CPU/GPU
-comparisons use upstream's thresholds and the ten approved [renderer exceptions](docs/waivers.md).
-The remaining 254 GPU tests and the legacy parity sweep follow. Phases 1 (the op engine and
+OpenGL execution on llvmpipe. All 69 upstream Matrix, Range, Gamma, CDL and Log
+GPU tests compare the port's rendered pixels bit for bit with the official
+shader's output on the same renderer. CPU/GPU checks retain upstream thresholds
+on finite sampling footprints, plus a complete finite companion and independent
+native readback controls under the approved [non-finite class](docs/gpu-nonfinite.md).
+The remaining 195 GPU tests and the legacy parity sweep follow. Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
@@ -243,7 +245,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 | Suite | Ported | Total |
 |---|---:|---:|
 | C++ | 1,179 | 1,191 |
-| GPU | 10 | 264 |
+| GPU | 69 | 264 |
 | Python | 384 | 384 |
 
 The live numbers are in [`docs/parity.md`](docs/parity.md). The GPU tests need a GPU to run

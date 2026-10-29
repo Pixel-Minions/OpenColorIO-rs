@@ -75,7 +75,13 @@ The port's GPU output is never used as an expected pixel value.
 | W0011 | MatrixOps/matrix_offset_generic_shader | 32 | 4.7683716e-7 |
 | W0012 | MatrixOps/matrix_offset_inverse_generic_shader | 32 | 4.7683716e-7 |
 
-## W0003 — MatrixOps/matrix (owner approved 2026-10-27; validation pending)
+The following W0003-W0012 sections are historical. Their active entries were
+retired only after [CI40926626678](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/40926626678)
+passed debug and release with every old Matrix rule still mandatory. The exact
+metadata remains in [the archive](archive/gpu-matrix-waivers-2026-10-27.toml).
+W0013 below is the single active GPU class; the parser rejects per-test entries.
+
+## W0003 — MatrixOps/matrix (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: 58a1c3b1b486f83ee34b9faeb6bc1b01.
 
@@ -118,7 +124,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 46 | 00000000 | ff800000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0004 — MatrixOps/scale (owner approved 2026-10-27; validation pending)
+## W0004 — MatrixOps/scale (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: 1f17ec51c941868a9885448181bd403d.
 
@@ -148,7 +154,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 43 | 00000000 | 00000000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0005 — MatrixOps/offset (owner approved 2026-10-27; validation pending)
+## W0005 — MatrixOps/offset (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: 56907b6a75e171e5bb461c775198f17c.
 
@@ -178,7 +184,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 43 | 00000000 | 00000000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0006 — MatrixOps/matrix_offset (owner approved 2026-10-27; validation pending)
+## W0006 — MatrixOps/matrix_offset (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: 7948f03ec6b5d1e88a38712ad0827ae4.
 
@@ -221,7 +227,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 46 | 00000000 | ff800000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0007 — MatrixOps/matrix_inverse (owner approved 2026-10-27; validation pending)
+## W0007 — MatrixOps/matrix_inverse (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: aeea5955c51458f7ac351ebaeac94c80.
 
@@ -264,7 +270,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 46 | 00000000 | 7f800000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0008 — MatrixOps/scale_inverse (owner approved 2026-10-27; validation pending)
+## W0008 — MatrixOps/scale_inverse (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: d9ce8ca13cab6f4274af03b9cbe74de4.
 
@@ -294,7 +300,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 43 | 00000000 | 00000000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0009 — MatrixOps/offset_inverse (owner approved 2026-10-27; validation pending)
+## W0009 — MatrixOps/offset_inverse (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: 7e20f38cfcd91faa67cbb355e5231951.
 
@@ -324,7 +330,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 43 | 00000000 | 00000000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0010 — MatrixOps/matrix_offset_inverse (owner approved 2026-10-27; validation pending)
+## W0010 — MatrixOps/matrix_offset_inverse (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: be70f717ca8c7c4ba55d6fd4399ec915.
 
@@ -367,7 +373,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 46 | 00000000 | 7f800000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0011 — MatrixOps/matrix_offset_generic_shader (owner approved 2026-10-27; validation pending)
+## W0011 — MatrixOps/matrix_offset_generic_shader (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: caaa4e41060dacb9fb48acd975c581c6.
 
@@ -410,7 +416,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 46 | 00000000 | ff800000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0012 — MatrixOps/matrix_offset_inverse_generic_shader (owner approved 2026-10-27; validation pending)
+## W0012 — MatrixOps/matrix_offset_inverse_generic_shader (retired 2026-10-29; historical evidence)
 
 Pinned actual wheel processor_cache_id: be70f717ca8c7c4ba55d6fd4399ec915.
 
@@ -453,7 +459,7 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 46 | 00000000 | 7f800000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
 
-## W0013 - One GPU non-finite class (owner approved 2026-10-29; CI validation pending)
+## W0013 - One GPU non-finite class (owner approved 2026-10-29; debug/release validated)
 
 The owner approved exact whole-image GPU identity, original upstream checks on
 finite GL image-filter footprints, a complete finite-input companion, and
@@ -462,7 +468,8 @@ regression and rejection controls are in one chunk. No transform/channel mask
 or per-test tuple list is added. See `docs/gpu-nonfinite.md` for scope, proof,
 controls and the evidence location outside target.
 
-W0003-W0012 remain registered and mandatory during this initial validation.
-The new class cannot bypass one of their changed tuples. They will be retired
-only after the candidate passes both CI profiles, followed by normal CI on
-the final merge candidate.
+Both profiles passed all69 cases, full finite companions, independent readback
+regressions and rejection controls in CI40926626678 before W0003-W0012 were
+retired. All519 original exceptions across46 cases match the reviewed audit.
+The old entries are archived and cannot grant active exceptions; all new class
+checks remain enforced. Normal CI must still pass on the final merge candidate.
