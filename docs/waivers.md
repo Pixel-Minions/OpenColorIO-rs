@@ -452,3 +452,17 @@ Every row has CPU non-NaN and both GPUs NaN; exact bits differ by case and compo
 | 45 | 00000000 | 7f800000 | ffc00000 | ffc00000 |
 | 46 | 00000000 | 7f800000 | ffc00000 | ffc00000 |
 | 47 | ff800000 | ff800000 | ffc00000 | ffc00000 |
+
+## W0013 - One GPU non-finite class (owner approved 2026-10-29; CI validation pending)
+
+The owner approved exact whole-image GPU identity, original upstream checks on
+finite GL image-filter footprints, a complete finite-input companion, and
+independent native/Rust platform controls. The classifier, native readback
+regression and rejection controls are in one chunk. No transform/channel mask
+or per-test tuple list is added. See `docs/gpu-nonfinite.md` for scope, proof,
+controls and the evidence location outside target.
+
+W0003-W0012 remain registered and mandatory during this initial validation.
+The new class cannot bypass one of their changed tuples. They will be retired
+only after the candidate passes both CI profiles, followed by normal CI on
+the final merge candidate.

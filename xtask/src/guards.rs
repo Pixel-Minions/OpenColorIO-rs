@@ -51,6 +51,9 @@ pub(crate) struct Waiver {
     /// Owner-signed P7-6 scope; nested fields are strictly validated by the test kit.
     #[serde(default)]
     pub(crate) gpu_renderer: Option<toml::Table>,
+    /// Owner-approved class; its safeguards and renderer scope are schema checked.
+    #[serde(default)]
+    pub(crate) gpu_nonfinite: Option<toml::Table>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,7 +196,10 @@ pub(crate) fn run() -> Result<(), String> {
             ));
         }
     }
-    if waivers.waivers.iter().any(|w| w.gpu_renderer.is_some())
+    if waivers
+        .waivers
+        .iter()
+        .any(|w| w.gpu_renderer.is_some() || w.gpu_nonfinite.is_some())
         && let Err(error) = ocio_testkit::gpu_waivers::gpu_renderer_waivers("__schema_check_only__")
     {
         problems.push(error);

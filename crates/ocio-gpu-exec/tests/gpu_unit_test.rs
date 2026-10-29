@@ -80,6 +80,7 @@ fn retests_reach_the_actual_extracted_and_decoupled_gpu_property() {
         assert_eq!(gpu.shader().dynamic_properties.len(), 1);
         references.push(ReferenceRun {
             cpu: cpu.blob_f32(0),
+            finite_cpu: None,
             gpu,
             shader_settings: settings.clone(),
         });

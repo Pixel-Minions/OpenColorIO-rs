@@ -6594,3 +6594,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   information from operating system."; SystemMonitors::get catches and debug-logs it while
   keeping its empty list, as upstream's exception boundary does. No uninitialized storage is
   read (`system_monitor_windows_ffi.rs`, `system_monitor_windows.rs`).
+
+### I-542. CPU/GPU special-value differences in the llvmpipe harness
+
+- **Upstream:** OglApp::initImage selects GL_LINEAR (`oglapp.cpp:65-66 @ v2.5.2`).
+  Linear sampling can introduce NaN from a zero-weight non-finite texel; matrix
+  arithmetic can also propagate Inf*0 into other channels. Independent native
+  EGL/GL probes on Mesa25.2.7/LLVM21.1.8 reproduce the behavior without OCIO or
+  the Rust harness (CI40892696031).
+- **Who notices:** CPU/GPU comparisons containing NaN or infinity image data.
+  Original image coordinates are finite. Ordinary finite samples retain
+  upstream thresholds; exact port/official GPU output is still mandatory.
+- **A fix:** choosing nearest filtering or cleaning special values would alter
+  upstream behavior and is not applied. The owner approved one bounded CPU/GPU
+  acceptance class instead, with finite companions and native readback controls.
+- **Status:** behavior preserved; W0013 implements the approved class. Existing
+  W0003-W0012 stay mandatory until debug/release validation passes. See
+  `docs/gpu-nonfinite.md`; no original image, filter or threshold is changed.

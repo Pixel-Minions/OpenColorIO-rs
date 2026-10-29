@@ -76,6 +76,70 @@ struct Rule {
     renderer: Renderer,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NonfiniteClass {
+    approved: bool,
+    platform: String,
+    ocio_version: String,
+    language: String,
+    width: usize,
+    height: usize,
+    components: usize,
+    image_filter: String,
+    image_wrap: String,
+    finite_footprint_checks: bool,
+    complete_finite_companion: bool,
+    native_readback_required: bool,
+    renderer: Renderer,
+}
+
+fn nonfinite_rule(
+    entry: &toml::Value,
+    raw: &toml::Value,
+) -> Result<Option<serde_json::Value>, String> {
+    let rule: NonfiniteClass = raw
+        .clone()
+        .try_into()
+        .map_err(|e| format!("GPU non-finite class schema: {e}"))?;
+    if entry.get("id").and_then(toml::Value::as_str) != Some("W0013")
+        || rule.platform != "linux"
+        || rule.ocio_version != "2.5.2"
+        || rule.language != "GPU_LANGUAGE_GLSL_1_2"
+        || (rule.width, rule.height, rule.components) != (256, 256, 4)
+        || rule.image_filter != "GL_LINEAR"
+        || rule.image_wrap != "GL_CLAMP"
+        || !rule.finite_footprint_checks
+        || !rule.complete_finite_companion
+        || !rule.native_readback_required
+        || rule.renderer.vendor != "Mesa"
+        || rule.renderer.renderer != "llvmpipe (LLVM 21.1.8, 256 bits)"
+        || rule.renderer.version != "4.5 (Compatibility Profile) Mesa 25.2.7"
+        || rule.renderer.shading_language_version != "4.50"
+        || rule.renderer.egl_vendor != "Mesa Project"
+        || rule.renderer.egl_version != "1.5"
+        || rule.renderer.max_texture_size != 16384
+    {
+        return Err("GPU non-finite class has unsupported scope or missing safeguards".into());
+    }
+    if !rule.approved {
+        return Ok(None);
+    }
+    for field in ["approved_by", "date"] {
+        if entry
+            .get(field)
+            .and_then(toml::Value::as_str)
+            .is_none_or(|v| v.trim().is_empty())
+        {
+            return Err("GPU non-finite class lacks owner provenance".into());
+        }
+    }
+    let mut value = serde_json::to_value(raw).map_err(|e| e.to_string())?;
+    value["id"] = serde_json::Value::String("W0013".into());
+    value["kind"] = serde_json::Value::String("gpu_nonfinite".into());
+    Ok(Some(value))
+}
+
 fn hex(text: &str, digits: usize) -> bool {
     text.len() == digits
         && text
@@ -155,7 +219,8 @@ fn validate(rule: &Rule) -> Result<(), String> {
 }
 
 /// Unpublished test-helper signature approved by the project owner on 2026-10-27.
-/// Reads only owner-approved, schema-checked rules for one exact upstream test ID.
+/// Reads owner-approved, schema-checked rules: exact legacy test IDs plus the
+/// single non-finite class approved on 2026-10-29. The latter has kind gpu_nonfinite.
 /// The private GPU execution harness must still check renderer, all settings,
 /// complete mismatch set and every tuple's bits; this function grants nothing alone.
 pub fn gpu_renderer_waivers(test_id: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -173,6 +238,15 @@ fn parse(text: &str, test_id: &str) -> Result<Vec<serde_json::Value>, String> {
     let mut ids = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for entry in entries {
+        if let Some(raw) = entry.get("gpu_nonfinite") {
+            if !ids.insert("W0013".to_owned()) {
+                return Err("Duplicate GPU non-finite class".into());
+            }
+            if let Some(rule) = nonfinite_rule(entry, raw)? {
+                out.push(rule);
+            }
+            continue;
+        }
         let Some(raw) = entry.get("gpu_renderer") else {
             continue;
         };
@@ -233,6 +307,7 @@ mod tests {
         )))
         .unwrap();
         let entries = doc["waiver"].as_array_mut().unwrap();
+        entries.retain(|entry| entry.get("gpu_nonfinite").is_none());
         let entry = entries
             .iter_mut()
             .find(|e| e["id"].as_str() == Some("W0003"))
@@ -325,5 +400,56 @@ mod tests {
             .unwrap()
             .swap(0, 1);
         assert!(parse(&document(&doc), "MatrixOps/matrix").is_err());
+    }
+
+    #[test]
+    fn nonfinite_class_requires_each_safeguard_and_owner_provenance() {
+        let original: toml::Value = toml::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../waivers.toml"
+        )))
+        .unwrap();
+        let class = original["waiver"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"].as_str() == Some("W0013"))
+            .unwrap()
+            .clone();
+        let class_doc = |entry: toml::Value| {
+            let mut d = toml::Table::new();
+            d.insert("waiver".into(), toml::Value::Array(vec![entry]));
+            toml::Value::Table(d)
+        };
+        let doc = class_doc(class.clone());
+        assert_eq!(
+            parse(&document(&doc), "any/family").unwrap()[0]["id"],
+            "W0013"
+        );
+        for field in [
+            "finite_footprint_checks",
+            "complete_finite_companion",
+            "native_readback_required",
+        ] {
+            let mut changed = class.clone();
+            changed["gpu_nonfinite"][field] = toml::Value::Boolean(false);
+            assert!(
+                parse(&document(&class_doc(changed)), "any/family").is_err(),
+                "{field}"
+            );
+        }
+        let mut changed = class.clone();
+        changed["approved_by"] = toml::Value::String(String::new());
+        assert!(parse(&document(&class_doc(changed)), "any/family").is_err());
+        let mut changed = class.clone();
+        changed["gpu_nonfinite"]["renderer"]["version"] = toml::Value::String("different".into());
+        assert!(parse(&document(&class_doc(changed)), "any/family").is_err());
+        let mut changed = class;
+        changed["gpu_nonfinite"]["approved"] = toml::Value::Boolean(false);
+        assert!(
+            parse(&document(&class_doc(changed)), "any/family")
+                .unwrap()
+                .is_empty()
+        );
     }
 }

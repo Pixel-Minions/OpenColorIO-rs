@@ -18,8 +18,6 @@ glow.workspace = true
 khronos-egl.workspace = true
 # Pin the dynamic loader used by khronos-egl as approved in P7-2.
 libloading.workspace = true
-
-[target.'cfg(target_os = "linux")'.dev-dependencies]
 serde_json.workspace = true
 
 [lints]

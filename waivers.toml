@@ -772,3 +772,34 @@ shading_language_version = "4.50"
 egl_vendor = "Mesa Project"
 egl_version = "1.5"
 max_texture_size = 16384
+
+# Owner-approved 2026-10-29. Retained Matrix entries above are still mandatory
+# until this implementation passes both CI profiles and a separate retirement.
+[[waiver]]
+id = "W0013"
+scope = "Linux OCIO2.5.2 GLSL1.20 on the validated Mesa llvmpipe renderer; non-finite image sampling footprints only; all test families, no test-specific lists"
+check = "Full port/wheel GPU bits and shader/resource/uniform/cache identity remain exact. Original upstream thresholds and exceptional-value checks remain enforced on every finite image-filter footprint. A complete uncached live-wheel finite companion must pass without exceptions. Independent native-vs-Rust complete readback and platform controls are mandatory. All original comparisons and class exceptions are recorded. Existing registered Matrix rules remain mandatory during transition."
+reason = "Minimal independent EGL/GL probes prove NaN/Inf texel filtering and Inf*0 matrix behavior. CI40892696031 measured520 native observations; all519 recorded Suite1/Matrix mismatches have non-finite sampling dependencies. The owner explicitly approved the stricter finite-footprint variant with native/Rust regression and rejection controls in the same chunk; evidence must be outside target, diagnostic ci.yml must stay out of main, and W0003-W0012 retire only after both CI profiles pass. See docs/gpu-nonfinite.md."
+approved_by = "Project owner, explicit chat approval of the stricter three-check rule and four implementation conditions, 2026-10-29"
+date = "2026-10-29"
+[waiver.gpu_nonfinite]
+approved = true
+platform = "linux"
+ocio_version = "2.5.2"
+language = "GPU_LANGUAGE_GLSL_1_2"
+width = 256
+height = 256
+components = 4
+image_filter = "GL_LINEAR"
+image_wrap = "GL_CLAMP"
+finite_footprint_checks = true
+complete_finite_companion = true
+native_readback_required = true
+[waiver.gpu_nonfinite.renderer]
+vendor = "Mesa"
+renderer = "llvmpipe (LLVM 21.1.8, 256 bits)"
+version = "4.5 (Compatibility Profile) Mesa 25.2.7"
+shading_language_version = "4.50"
+egl_vendor = "Mesa Project"
+egl_version = "1.5"
+max_texture_size = 16384
