@@ -115,18 +115,20 @@ std::vector<F> read_binary(const std::filesystem::path& p) {
     std::ifstream f(p,std::ios::binary|std::ios::ate); need(bool(f),"read: "+p.string()); auto length=f.tellg();
     need(length>0 && length%4==0,"float file size"); std::vector<F> v(static_cast<size_t>(length)/4); f.seekg(0); f.read(reinterpret_cast<char*>(v.data()),length); need(bool(f),"float file read"); return v;
 }
-std::vector<F> default_image() {
+std::vector<F> default_image(bool nan=true, bool infinity=true, bool wide=true) {
     // Diagnostic input construction copied from GPUUnitTest.cpp:212-286 @ v2.5.2.
     // Default wide interval is [-1,2]; special values precede the finite ramp.
-    std::vector<F> image(256*256*4,-1);
+    const F minimum=wide?-1.0f:0.0f;
+    std::vector<F> image(256*256*4,minimum);
     size_t start=0;
     for(U raw:{0x7fc00000u,0x7f800000u,0xff800000u}) {
+        if(raw==0x7fc00000u ? !nan : !infinity) { continue; }
         for(size_t channel=0;channel<4;++channel)for(size_t i=0;i<4;++i)image[start+channel*4+i]=i==channel?value(raw):0;
         start+=16;
     }
     const size_t entries=image.size()-start;
-    const F step=3.0f/F(entries);
-    for(size_t i=0;i<entries;++i)image[start+i]=-1.0f+step*F(i);
+    const F step=(wide?3.0f:1.0f)/F(entries);
+    for(size_t i=0;i<entries;++i)image[start+i]=minimum+step*F(i);
     return image;
 }
 void error(const char* where) { U e=glGetError(); need(e==0,std::string(where)+" GL error "+std::to_string(e)); }
@@ -220,6 +222,10 @@ int main(int argc,char** argv) {
       auto actual=std::string(argv[2])=="--generate-upstream-input"?default_image():read_binary(argv[2]);need(actual.size()==256*256*4,"actual default image");
       run(std::string("actual_identity")+suffix,copy,actual,256,256,filter,0x2900);
       run(std::string("actual_coordinate_echo")+suffix,prefix+"void main(){gl_FragColor=vec4(gl_TexCoord[0].st,0.0,1.0);}\n",actual,256,256,filter,0x2900);
+      run(std::string("profile_nan_only")+suffix,copy,default_image(true,false,true),256,256,filter,0x2900);
+      run(std::string("profile_inf_only")+suffix,copy,default_image(false,true,true),256,256,filter,0x2900);
+      run(std::string("profile_finite_wide")+suffix,copy,default_image(false,false,true),256,256,filter,0x2900);
+      run(std::string("profile_finite_unit")+suffix,copy,default_image(false,false,false),256,256,filter,0x2900);
     }
     const std::array<std::pair<std::string,std::string>,7> math={{{"echo","v"},{"matrix_uniform","m*v"},{"matrix_literal","mat4(1.0)*v"},{"component_identity","v*vec4(1.0)"},{"scalar_uniform_zero","vec4(v.x*a,v.y*a,v.z*a,v.w*a)"},{"scalar_literal_zero","v*0.0"},{"dot_zero","vec4(dot(v,vec4(a)))"}}};
     for(int k=-1;k<3;++k)for(int channel=0;channel<(k<0?1:4);++channel){
