@@ -26,9 +26,9 @@ jobs:
           path: kept/finite-failure-probes/
       - name: Verify exact native source
         run: |
-          git fetch --depth=1 origin a07529de785a535320cc64f5b7dda92640d1f4f6
+          git fetch --depth=1 origin 9500dac996302e95cb0e856dda487042d6d94794
           git diff --exit-code FETCH_HEAD HEAD -- . ':(exclude).github/workflows/ci.yml'
-          printf '%s\n' a07529de785a535320cc64f5b7dda92640d1f4f6 > kept/finite-failure-probes/native-source-commit.txt
+          printf '%s\n' 9500dac996302e95cb0e856dda487042d6d94794 > kept/finite-failure-probes/native-source-commit.txt
           git rev-parse HEAD > kept/finite-failure-probes/native-validation-commit.txt
       - name: Build the unchanged native runtime image
         run: docker build -t ocio-rs-rocky9:1 docker/rocky9
