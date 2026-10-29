@@ -41,7 +41,7 @@ jobs:
             git config --global --add safe.directory "*"
             cargo fmt --all --check
             cargo xtask ci --base a34cb567d31f0e733037cea79340baffff7e0822
-            cargo clippy --locked -j2 -p ocio-gpu-exec --all-targets -- -D warnings
+            cargo clippy --keep-going --locked -j2 -p ocio-gpu-exec --all-targets -- -D warnings
           ' 2>&1 | tee kept/ci-validation/guardrails.log
       - name: Native regression, rejection controls and all 69 original GPU cases
         env:
@@ -54,7 +54,7 @@ jobs:
             export CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 LP_NUM_THREADS=1
             git config --global --add safe.directory '*'
             cargo test --locked -j2 -p ocio-testkit $flag gpu_waivers -- --test-threads=1 --show-output
-            cargo test --locked -j2 -p ocio-gpu-exec $flag --lib --tests -- --test-threads=1 --show-output
+            cargo test --no-fail-fast --locked -j2 -p ocio-gpu-exec $flag --lib --tests -- --test-threads=1 --show-output
           " 2>&1 | tee kept/ci-validation/tests.log
       - uses: actions/upload-artifact@v4
         if: always()
