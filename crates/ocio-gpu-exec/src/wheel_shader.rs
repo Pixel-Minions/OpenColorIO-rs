@@ -351,7 +351,7 @@ mod tests {
         let settings = test.shader_settings.clone();
         let exposures = [0.0_f64, 1.0, 2.0];
         let mut calls = Vec::new();
-        for exposure in exposures.iter().copied() {
+        for exposure in &exposures {
             calls.push(BatchCall {
                 cmd: "gpu_shader",
                 args: json!({"config":{"create":{"processor_cache":"off"}},

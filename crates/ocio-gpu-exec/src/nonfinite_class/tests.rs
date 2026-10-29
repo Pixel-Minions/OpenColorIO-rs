@@ -176,3 +176,32 @@ fn finite_only_inputs_and_nan_failures_in_finite_regions_are_rejected() {
             .is_err()
     );
 }
+
+#[test]
+fn nonfinite_and_float_upload_overflow_parameters_are_outside_the_class() {
+    // Policy-only metadata, with no expected OCIO or GPU output.
+    let mut shader = Shader {
+        cache_id: String::new(),
+        text: "return inPixel;".into(),
+        uniforms: Vec::new(),
+        textures: Vec::new(),
+        textures_3d: Vec::new(),
+        dynamic_properties: Vec::new(),
+        getters: Value::Null,
+    };
+    assert!(finite_shader_parameters(&shader));
+    shader.uniforms.push(ocio_testkit::gpu::Uniform {
+        name: "policy_parameter".into(),
+        kind: "UNIFORM_DOUBLE".into(),
+        buffer_offset: 0,
+        value: UniformValue::Double(1.0),
+    });
+    assert!(finite_shader_parameters(&shader));
+    for value in [f64::INFINITY, f64::NAN, f64::MAX] {
+        shader.uniforms[0].value = UniformValue::Double(value);
+        assert!(!finite_shader_parameters(&shader));
+    }
+    shader.uniforms[0].value = UniformValue::Double(1.0);
+    shader.text = "return vec4(inf);".into();
+    assert!(!finite_shader_parameters(&shader));
+}
