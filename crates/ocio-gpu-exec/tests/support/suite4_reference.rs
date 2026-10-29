@@ -65,8 +65,14 @@ pub(super) fn batch(plans: &[Plan]) -> Vec<Vec<ReferenceRun>> {
                 })
         })
         .collect();
+    let gpu_streams: Vec<_> = plans
+        .iter()
+        .map(|plan| (plan.test.num_retests() != 0).then(|| prepare_gpu(plan)))
+        .collect();
     let mut calls = Vec::new();
-    for ((plan, original), companion) in plans.iter().zip(&prepared).zip(&finite) {
+    for (((plan, original), companion), gpu_stream) in
+        plans.iter().zip(&prepared).zip(&finite).zip(&gpu_streams)
+    {
         calls.push(BatchCall {
             cmd: "dynamic_apply",
             args: original.args.clone(),
@@ -77,6 +83,13 @@ pub(super) fn batch(plans: &[Plan]) -> Vec<Vec<ReferenceRun>> {
                 cmd: "dynamic_apply",
                 args: companion.args.clone(),
                 blobs: vec![companion.input.as_slice()],
+            });
+        }
+        if let Some(gpu_stream) = gpu_stream {
+            calls.push(BatchCall {
+                cmd: "dynamic_apply",
+                args: gpu_stream.args.clone(),
+                blobs: Vec::new(),
             });
         }
         for transform in &plan.transforms {
@@ -92,7 +105,9 @@ pub(super) fn batch(plans: &[Plan]) -> Vec<Vec<ReferenceRun>> {
     assert_eq!(answers.len(), calls.len());
     let mut answers = answers.into_iter();
     let mut all = Vec::new();
-    for ((plan, original), companion) in plans.iter().zip(&prepared).zip(&finite) {
+    for (((plan, original), companion), gpu_prepared) in
+        plans.iter().zip(&prepared).zip(&finite).zip(&gpu_streams)
+    {
         let cpu = cpu_frames(
             &answers.next().unwrap().expect("actual wheel CPU stream"),
             plan,
@@ -108,6 +123,15 @@ pub(super) fn batch(plans: &[Plan]) -> Vec<Vec<ReferenceRun>> {
                 prepared,
             )
         });
+        let gpu_stream = gpu_prepared.as_ref().map(|prepared| {
+            let response = answers
+                .next()
+                .unwrap()
+                .expect("actual reused wheel GPU descriptor");
+            validate_gpu_stream(&response, plan, prepared);
+            (prepared, response)
+        });
+        let mut original_gpu_result = None;
         let mut out = Vec::new();
         for (frame, pixels) in cpu.into_iter().enumerate() {
             let gpu = GpuShaderReply::from_response(
@@ -123,6 +147,21 @@ pub(super) fn batch(plans: &[Plan]) -> Vec<Vec<ReferenceRun>> {
             assert!(gpu.shader.is_some());
             assert_eq!(gpu.result["log"], json!([]));
             assert_eq!(gpu.shader().dynamic_properties.len(), plan.bindings.len());
+            if frame == 0 {
+                original_gpu_result = Some(gpu.result.clone());
+            }
+            let gpu = if let Some((prepared, stream)) = &gpu_stream {
+                gpu_frame(
+                    plan,
+                    prepared,
+                    stream,
+                    frame,
+                    original_gpu_result.as_ref().unwrap(),
+                    &gpu,
+                )
+            } else {
+                gpu
+            };
             out.push(ReferenceRun {
                 cpu: pixels,
                 finite_cpu: finite_cpu.as_ref().map(|frames| frames[frame].clone()),
@@ -235,6 +274,135 @@ fn prepare(plan: &Plan, finite: bool) -> Prepared {
         apply_steps,
         steps: steps.len(),
     }
+}
+
+struct GpuFrameSteps {
+    uniforms: usize,
+    properties: Vec<usize>,
+}
+struct GpuPrepared {
+    args: Value,
+    frames: Vec<GpuFrameSteps>,
+    steps: usize,
+}
+
+/// Retain the actual native descriptor through all upstream updates. Its unused
+/// Tone coefficients may retain history when an identity reset bypasses them.
+fn prepare_gpu(plan: &Plan) -> GpuPrepared {
+    assert!(!plan.bindings.is_empty());
+    let mut steps = Vec::new();
+    for &binding in &plan.bindings {
+        steps.push(json!({"get":binding,"from":"gpu","as":binding}));
+    }
+    let mut frames = Vec::new();
+    for updates in &plan.updates {
+        steps.extend(updates.iter().cloned());
+        let uniforms = steps.len();
+        steps.push(json!({"uniforms":true}));
+        let mut properties = Vec::new();
+        for &binding in &plan.bindings {
+            properties.push(steps.len());
+            steps.push(json!({"read":binding}));
+        }
+        frames.push(GpuFrameSteps {
+            uniforms,
+            properties,
+        });
+    }
+    let args = json!({"config":{"create":{"processor_cache":"off"}},
+        "transform":plan.transforms[0], "gpu":{"shader":plan.test.shader_settings.json()}, "steps":steps});
+    GpuPrepared {
+        args,
+        frames,
+        steps: steps.len(),
+    }
+}
+
+fn validate_gpu_stream(response: &Response, plan: &Plan, prepared: &GpuPrepared) {
+    assert!(
+        response.result.get("exception").is_none(),
+        "{}",
+        response.result
+    );
+    assert_eq!(response.result["log"], json!([]));
+    assert!(response.result["shader"].is_object());
+    let steps = response.result["steps"].as_array().unwrap();
+    assert_eq!(steps.len(), prepared.steps);
+    assert_eq!(prepared.frames.len(), plan.transforms.len());
+    for (index, step) in steps.iter().enumerate() {
+        assert!(
+            step.get("exception").is_none(),
+            "{}/{}: {step}",
+            plan.test.group,
+            plan.test.name
+        );
+        assert_eq!(step["log"], json!([]));
+        assert!(step["result"].get("unbound").is_none());
+        if index < plan.bindings.len() {
+            assert_eq!(step["has"], json!(true));
+        }
+    }
+}
+
+/// Transport actual native observations, never calculated uniform expectations.
+/// The original GPU processor flags belong to the retained processor. Fresh
+/// per-state extraction still checks code/resources/layout and property values.
+fn gpu_frame(
+    plan: &Plan,
+    prepared: &GpuPrepared,
+    response: &Response,
+    frame: usize,
+    original: &Value,
+    fresh: &GpuShaderReply,
+) -> GpuShaderReply {
+    assert_eq!(response.result["gpu_cache_id"], original["gpu_cache_id"]);
+    assert_eq!(
+        response.result["processor_cache_id"],
+        original["processor_cache_id"]
+    );
+    let observations = response.result["steps"].as_array().unwrap();
+    let indices = &prepared.frames[frame];
+    let mut result = original.clone();
+    result["shader"] = response.result["shader"].clone();
+    result["shader"]["uniforms"] = observations[indices.uniforms]["result"].clone();
+    assert!(result["shader"]["uniforms"].is_array());
+    let properties = result["shader"]["dynamic_properties"]
+        .as_array_mut()
+        .unwrap();
+    assert_eq!(properties.len(), plan.bindings.len());
+    for property in properties {
+        let matching: Vec<_> = indices
+            .properties
+            .iter()
+            .map(|&index| &observations[index]["result"])
+            .filter(|value| value["type"] == property["type"])
+            .collect();
+        assert_eq!(matching.len(), 1);
+        *property = matching[0].clone();
+    }
+    let actual = GpuShaderReply::from_response(Response {
+        result,
+        blobs: response.blobs.clone(),
+    });
+    let a = actual.shader();
+    let b = fresh.shader();
+    if frame == 0 {
+        assert_eq!(a, b, "initial independent wheel extractions");
+    }
+    assert_eq!(a.cache_id, b.cache_id);
+    assert_eq!(a.text, b.text);
+    assert_eq!(a.textures, b.textures);
+    assert_eq!(a.textures_3d, b.textures_3d);
+    assert_eq!(a.getters, b.getters);
+    assert_eq!(a.dynamic_properties, b.dynamic_properties);
+    assert_eq!(a.uniforms.len(), b.uniforms.len());
+    for (a, b) in a.uniforms.iter().zip(&b.uniforms) {
+        assert_eq!(
+            (&a.name, &a.kind, a.buffer_offset),
+            (&b.name, &b.kind, b.buffer_offset)
+        );
+    }
+    actual
 }
 
 #[cfg(test)]
