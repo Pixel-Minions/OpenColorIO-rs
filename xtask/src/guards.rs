@@ -48,6 +48,9 @@ pub(crate) struct Waiver {
     /// When and over what the bound was measured; required with `bound_ulp`.
     #[serde(default)]
     pub(crate) bound_measured: String,
+    /// Owner-signed P7-6 scope; nested fields are strictly validated by the test kit.
+    #[serde(default)]
+    pub(crate) gpu_renderer: Option<toml::Table>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,6 +192,11 @@ pub(crate) fn run() -> Result<(), String> {
                 w.id
             ));
         }
+    }
+    if waivers.waivers.iter().any(|w| w.gpu_renderer.is_some())
+        && let Err(error) = ocio_testkit::gpu_waivers::gpu_renderer_waivers("__schema_check_only__")
+    {
+        problems.push(error);
     }
     for na in &waivers.not_applicable {
         if na.reason.is_empty() || na.approved_by.is_empty() {

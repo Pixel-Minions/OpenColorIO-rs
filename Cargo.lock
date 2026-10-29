@@ -318,9 +318,11 @@ dependencies = [
  "glow",
  "khronos-egl",
  "libloading",
+ "ocio",
  "ocio-gpu",
  "ocio-ops",
  "ocio-testkit",
+ "serde_json",
 ]
 
 [[package]]
