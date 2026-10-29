@@ -17,15 +17,11 @@ use crate::GlInfo;
 
 pub(super) struct Approval {
     pub id: String,
-    pub retained_legacy: bool,
     scope: Value,
 }
 
 pub(super) fn approval(test_id: &str) -> Result<Option<Approval>> {
     let rules = ocio_testkit::gpu_waivers::gpu_renderer_waivers(test_id).map_err(Exception::new)?;
-    let retained_legacy = rules
-        .iter()
-        .any(|r| r["kind"].as_str() != Some("gpu_nonfinite"));
     let mut classes = rules
         .into_iter()
         .filter(|r| r["kind"].as_str() == Some("gpu_nonfinite"));
@@ -37,7 +33,6 @@ pub(super) fn approval(test_id: &str) -> Result<Option<Approval>> {
     }
     Ok(Some(Approval {
         id: scope["id"].as_str().expect("validated class id").into(),
-        retained_legacy,
         scope,
     }))
 }

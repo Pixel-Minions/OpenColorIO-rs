@@ -41,7 +41,7 @@ change must be rejected by the native/Rust comparison.
 Policy controls reject finite-region errors, missing/corrupt/incomplete finite
 companions, original or companion GPU bit changes, wrong renderer/language,
 missing native proof, and changed shader metadata. Live-wheel rejection tests
-exercise actual harness runs, including retention of the old Matrix policy.
+exercise actual harness runs. The initial transition also required every old Matrix rule.
 
 ## Evidence and preservation
 
@@ -63,14 +63,26 @@ New native and class evidence is written outside target at
 on failure. The regular CI workflow remains intact; the separate diagnostic
 ci.yml branch is never a merge source.
 
-## Transition
+## Validation and retirement
 
-W0003-W0012 remain registered and mandatory in the initial implementation.
-The new class and finite companion must pass too, so a failed new safeguard
-cannot fall back to the old waiver. A changed old Matrix tuple cannot fall
-through to the new class. Only after debug and release CI pass will a separate
-change retire those ten active entries. The resulting final merge candidate
-then runs the normal required CI checks again.
+[CI40926626678](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/40926626678)
+passed debug and release on source d423697b720179ae14e3cc691d429db4ba2aec6d.
+Each profile passed all69 upstream cases, the native/Rust readback regression,
+and the live and policy rejection controls. All47 non-finite cases passed their
+complete finite companions; the519 excepted components across46 cases match
+the earlier root-cause audit. Seven independent native processes per profile
+completed260 observations each and compared35 complete readbacks bit for bit.
+The native regression rejects shared non-finite-pixel sanitization and changed
+NaN payloads. See [verified metadata](gpu-nonfinite-validation.json).
 
-Validation of the implementation is pending CI. No pass count in main changes
-until the validated chunk is merged.
+W0003-W0012 remained registered and mandatory throughout both passing profiles.
+The transition control rejected a changed old Matrix tuple even when it would
+satisfy the new class alone. Only after both results and artifacts were verified
+were these ten entries retired. Their complete historical metadata is preserved
+in [the archive](archive/gpu-matrix-waivers-2026-10-27.toml); the active parser
+rejects per-test renderer entries. Runtime acceptance uses only W0013, with all
+new native, finite-footprint, companion and rejection checks retained.
+
+The final merge candidate must pass the normal reference-platform CI workflow.
+The separate validation/diagnostic ci.yml branches are never merged. Main's GPU
+count changes only when the validated chunk is merged.
