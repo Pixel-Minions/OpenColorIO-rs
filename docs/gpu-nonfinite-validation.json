@@ -1,0 +1,77 @@
+{
+  "Run": 40926626678,
+  "ValidationHead": "b5b7ae04bc045f2088ab141e0fbf72def0636197",
+  "Source": "d423697b720179ae14e3cc691d429db4ba2aec6d",
+  "BothProfilesPassed": true,
+  "UpstreamGPUCasesPerProfile": 69,
+  "ClassNativeAndRejectionTestsPassed": true,
+  "Profiles": [
+    {
+      "Profile": "debug",
+      "Source": "d423697b720179ae14e3cc691d429db4ba2aec6d",
+      "NativeProofProcesses": 7,
+      "NativeObservations": 1820,
+      "CompleteReadbacks": 35,
+      "PositiveClassCases": 47,
+      "ExceptedCases": 46,
+      "ExceptedComponents": 519,
+      "All10MatrixRulesEnforced": true,
+      "RecordedNegativeRejections": 3,
+      "OriginalGPUExact": true,
+      "CompleteFiniteCompanionsPassed": true,
+      "TestLogSHA256": "B71A34645BF76B1DE3F3F33E517315412838F18556D2B38DF6D49F69F1429FDC"
+    },
+    {
+      "Profile": "release",
+      "Source": "d423697b720179ae14e3cc691d429db4ba2aec6d",
+      "NativeProofProcesses": 7,
+      "NativeObservations": 1820,
+      "CompleteReadbacks": 35,
+      "PositiveClassCases": 47,
+      "ExceptedCases": 46,
+      "ExceptedComponents": 519,
+      "All10MatrixRulesEnforced": true,
+      "RecordedNegativeRejections": 3,
+      "OriginalGPUExact": true,
+      "CompleteFiniteCompanionsPassed": true,
+      "TestLogSHA256": "89CACD433594E92CE2E6CB2F0F0780A3AFFB7933E2BCEE5AF89CB7D6B86B2BBD"
+    }
+  ],
+  "RetirementConditionSatisfiedUTC": "2026-10-29T18:09:43.6841903Z",
+  "PostRetirementValidation": {
+    "Run": 40929446610,
+    "Source": "6c886b54bf4a3f58cc636d67bbe20c9723c5d87e",
+    "ValidationHead": "a311987d95f498ea779a29aea0ecf36b598f13be",
+    "BothProfilesPassed": true,
+    "GeneratedFilesIdenticalBothProfiles": true,
+    "Profiles": [
+      {
+        "Profile": "debug",
+        "UpstreamGPUCases": 69,
+        "FiniteCompanions": 47,
+        "ExceptedCases": 46,
+        "ExceptedComponents": 519,
+        "NativeProcesses": 7,
+        "NativeObservations": 1820,
+        "FullNativeRustReadbacks": 35,
+        "GPUExact": true,
+        "RejectionControlsPassed": true,
+        "GeneratedMainModePassed": true
+      },
+      {
+        "Profile": "release",
+        "UpstreamGPUCases": 69,
+        "FiniteCompanions": 47,
+        "ExceptedCases": 46,
+        "ExceptedComponents": 519,
+        "NativeProcesses": 7,
+        "NativeObservations": 1820,
+        "FullNativeRustReadbacks": 35,
+        "GPUExact": true,
+        "RejectionControlsPassed": true,
+        "GeneratedMainModePassed": true
+      }
+    ],
+    "VerifiedUTC": "2026-10-29T18:31:05.2550531Z"
+  }
+}

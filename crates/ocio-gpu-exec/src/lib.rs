@@ -9,8 +9,9 @@
 #![deny(unsafe_code)]
 
 mod glsl;
-mod gpu_renderer_waiver;
 pub mod gpu_unit_test;
+mod native_reference;
+mod nonfinite_class;
 pub mod oglapp;
 mod wheel_shader;
 

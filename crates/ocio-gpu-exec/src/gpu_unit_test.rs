@@ -16,6 +16,7 @@ use ocio_testkit::upstream::gpu::{
     comparison_dimensions,
 };
 
+use crate::nonfinite_class::{self, Companion, Environment, Frame};
 use crate::wheel_shader;
 use crate::{Components, HeadlessApp};
 
@@ -38,6 +39,10 @@ pub struct CustomValues {
 pub struct ReferenceRun {
     /// Actual wheel CPU float bits for the comparison rectangle.
     pub cpu: Vec<f32>,
+    /// Actual uncached wheel CPU result for the entire padded image after only
+    /// non-finite image inputs become zero. Required for the approved class;
+    /// no companion is needed when the original image is entirely finite.
+    pub finite_cpu: Option<Vec<f32>>,
     /// Actual ordinary or native-legacy wheel shader reply.
     pub gpu: GpuShaderReply,
     /// Original descriptor setter arguments; normalization runs exactly once.
@@ -306,6 +311,8 @@ impl GpuUnitTest {
         }
         self.prepare_values()?;
         let entries = self.comparison_entries()?;
+        let class = nonfinite_class::approval(&format!("{}/{}", self.group, self.name))?;
+        let special_image = self.values.input_values.iter().any(|v| !v.is_finite());
         for reference in references {
             self.validate_reference(reference, entries)?;
         }
@@ -364,40 +371,124 @@ impl GpuUnitTest {
                 );
                 let comparison: ImageComparison =
                     compare_image(&reference.cpu, &pixels, entries, self.comparison);
-                if !comparison.passes(self.comparison) {
-                    let owner_waiver = crate::gpu_renderer_waiver::matching(
-                        self,
-                        index,
-                        &app.info()?,
-                        [&reference.cpu, &pixels, &wheel_pixels],
-                        entries,
-                        &comparison,
-                    )?;
-                    if let Some(id) = owner_waiver {
-                        eprintln!(
-                            "Owner renderer waiver {id}: {} / {} run {}; original upstream comparison {:?}; full port/wheel GPU bits remain equal",
-                            self.group, self.name, index, comparison,
-                        );
-                    } else {
-                        return Err(Exception::new(format!(
-                            "{} / {} run {}: GPU max vals = {:?}; GPU min vals = {:?}; Maximum error: {}; component {:?}; Large number error at {:?}; NAN error at {:?}; {} tolerance={}",
-                            self.group,
-                            self.name,
-                            index,
-                            comparison.max_values,
-                            comparison.min_values,
-                            comparison.max_diff,
-                            comparison.index_diff,
-                            comparison.index_inf,
-                            comparison.index_nan,
-                            if self.comparison.relative {
-                                "relative"
-                            } else {
-                                "absolute"
-                            },
-                            self.comparison.error_threshold,
-                        )));
+                let class_checked = if let Some(class) = class.as_ref().filter(|_| special_image) {
+                    if !app.upstream_class_sampling()? {
+                        return Err(Exception::new(
+                            "GPU non-finite class: unverified image sampling state",
+                        ));
                     }
+                    let proof = crate::native_reference::controls()?;
+                    if !nonfinite_class::finite_shader_parameters(shader) {
+                        return Err(Exception::new(
+                            "GPU non-finite class excludes non-finite shader parameters",
+                        ));
+                    }
+                    let finite_cpu = reference.finite_cpu.as_ref().ok_or_else(|| {
+                        Exception::new("GPU non-finite class: missing complete finite companion")
+                    })?;
+                    let finite_inputs: Vec<_> = self
+                        .values
+                        .input_values
+                        .iter()
+                        .map(|&v| if v.is_finite() { v } else { 0.0 })
+                        .collect();
+                    app.update_image(&finite_inputs)?;
+                    let finite_result = (|| {
+                        app.redisplay()?;
+                        wheel_shader::assert_matches(&desc, shader, &app.uniform_uploads());
+                        let finite_port = app.read_image()?;
+                        let reference_desc =
+                            wheel_shader::from_wheel(shader, &reference.shader_settings)?;
+                        let finite_wheel = app.render_reference_shader(Arc::new(reference_desc))?;
+                        Ok::<_, ocio_ops::Exception>((finite_port, finite_wheel))
+                    })();
+                    // Each retest sees the original complete input and original
+                    // port program, even when the finite companion is rejected.
+                    app.update_image(&self.values.input_values)?;
+                    let (finite_port, finite_wheel) = finite_result?;
+                    let info = app.info()?;
+                    let assessed = nonfinite_class::assess(
+                        class,
+                        Environment {
+                            info: &info,
+                            native: Some(&proof.info),
+                            language: self
+                                .shader_settings
+                                .language
+                                .unwrap_or(ocio_testkit::gpu::GpuLanguage::Glsl12),
+                        },
+                        Frame {
+                            inputs: &self.values.input_values,
+                            cpu: &reference.cpu,
+                            port: &pixels,
+                            wheel: &wheel_pixels,
+                            entries,
+                            settings: self.comparison,
+                            companion: Some(Companion {
+                                cpu: finite_cpu,
+                                port: &finite_port,
+                                wheel: &finite_wheel,
+                            }),
+                        },
+                    );
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(|e| Exception::new(e.to_string()))?
+                        .as_nanos();
+                    let record = serde_json::json!({
+                        "test":format!("{}/{}",self.group,self.name),"run":index,"class":class.id,
+                        "matrix_rules_retired_after_ci":40926626678_u64,
+                        "original_max_diff_bits":format!("{:08x}",comparison.max_diff.to_bits()),
+                        "original_index_diff":comparison.index_diff,"original_index_inf":comparison.index_inf,"original_index_nan":comparison.index_nan,
+                        "excepted_components":assessed.as_ref().ok(),"error":assessed.as_ref().err().map(ToString::to_string),
+                        "input_sha256":ocio_testkit::upstream::gpu::input_digest(&self.values.input_values),
+                        "finite_input_sha256":ocio_testkit::upstream::gpu::input_digest(&finite_inputs),
+                        "finite_cpu_sha256":ocio_testkit::upstream::gpu::input_digest(finite_cpu),
+                        "finite_port_sha256":ocio_testkit::upstream::gpu::input_digest(&finite_port),
+                        "finite_wheel_sha256":ocio_testkit::upstream::gpu::input_digest(&finite_wheel),
+                        "original_port_sha256":ocio_testkit::upstream::gpu::input_digest(&pixels),
+                        "original_wheel_sha256":ocio_testkit::upstream::gpu::input_digest(&wheel_pixels),
+                        "exceptions":assessed.as_ref().ok().map(|indices| indices.iter().map(|&i| serde_json::json!({
+                            "component":i,"input_bits":format!("{:08x}",self.values.input_values[i].to_bits()),
+                            "cpu_bits":format!("{:08x}",reference.cpu[i].to_bits()),"port_bits":format!("{:08x}",pixels[i].to_bits()),
+                            "wheel_bits":format!("{:08x}",wheel_pixels[i].to_bits()),
+                            "category":if reference.cpu[i].is_nan()!=pixels[i].is_nan() {"nan"} else if ocio_testkit::upstream::gpu::validate_inf(reference.cpu[i],pixels[i])==ocio_testkit::upstream::gpu::LimitsDiff::Inconsistent {"inf"} else {"numeric"}
+                        })).collect::<Vec<_>>()),
+                    });
+                    std::fs::write(
+                        proof.directory.join(format!("class-{stamp}-{index}.json")),
+                        serde_json::to_vec_pretty(&record)
+                            .map_err(|e| Exception::new(e.to_string()))?,
+                    )
+                    .map_err(|e| Exception::new(e.to_string()))?;
+                    let excepted = assessed?;
+                    eprintln!(
+                        "GPU class {} verified {}/{} run {}: original {:?}; excepted {:?}; complete finite companion passed; full GPU bits exact",
+                        class.id, self.group, self.name, index, comparison, excepted
+                    );
+                    true
+                } else {
+                    false
+                };
+                if !comparison.passes(self.comparison) && !class_checked {
+                    return Err(Exception::new(format!(
+                        "{} / {} run {}: GPU max vals = {:?}; GPU min vals = {:?}; Maximum error: {}; component {:?}; Large number error at {:?}; NAN error at {:?}; {} tolerance={}",
+                        self.group,
+                        self.name,
+                        index,
+                        comparison.max_values,
+                        comparison.min_values,
+                        comparison.max_diff,
+                        comparison.index_diff,
+                        comparison.index_inf,
+                        comparison.index_nan,
+                        if self.comparison.relative {
+                            "relative"
+                        } else {
+                            "absolute"
+                        },
+                        self.comparison.error_threshold,
+                    )));
                 }
                 if comparison.max_diff > self.max_diff {
                     self.max_diff = comparison.max_diff;

@@ -1,4 +1,5 @@
 /target/
+/kept/
 **/*.rs.bk
 .venv/
 __pycache__/

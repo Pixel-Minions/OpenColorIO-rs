@@ -620,6 +620,46 @@ impl HeadlessApp {
             .map_or_else(Vec::new, OpenGLBuilder::uniform_uploads)
     }
 
+    /// Verify the sampling assumptions used by the owner-approved class. This
+    /// checks initImage/reshape's state (oglapp.cpp:46-71,152-163 @ v2.5.2)
+    /// without repairing a changed sampler, viewport or binding.
+    pub(crate) fn upstream_class_sampling(&self) -> Result<bool> {
+        self.context.activate()?;
+        if self.image_width != 256
+            || self.image_height != 256
+            || self.viewport_width != 256
+            || self.viewport_height != 256
+            || self.components != Components::Rgba
+            || self.y_mirror
+        {
+            return Ok(false);
+        }
+        // SAFETY: current context and live image texture. Only active-unit state
+        // changes, and it is restored without changing any texture binding.
+        let result = unsafe {
+            let gl = &self.context.gl;
+            let active = gl.get_parameter_i32(glow::ACTIVE_TEXTURE) as u32;
+            gl.active_texture(glow::TEXTURE0);
+            let bound = gl.get_parameter_i32(glow::TEXTURE_BINDING_2D) as u32;
+            let mut viewport = [0; 4];
+            gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+            let result = self
+                .image_texture
+                .is_some_and(|texture| texture.0.get() == bound)
+                && viewport == [0, 0, 256, 256]
+                && gl.get_tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER)
+                    == glow::LINEAR as i32
+                && gl.get_tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER)
+                    == glow::LINEAR as i32
+                && gl.get_tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S) == GL_CLAMP
+                && gl.get_tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T) == GL_CLAMP;
+            gl.active_texture(active);
+            result
+        };
+        crate::glsl::check_status(&self.context.gl)?;
+        Ok(result)
+    }
+
     /// Port of OglApp::readImage (oglapp.cpp:189-194 @ v2.5.2).
     pub fn read_image(&self) -> Result<Vec<f32>> {
         self.context.activate()?;
@@ -692,5 +732,46 @@ pub(crate) fn float_bytes(values: &[f32]) -> &[u8] {
     // one, and the read-only byte view has the same lifetime and complete size.
     unsafe {
         std::slice::from_raw_parts(values.as_ptr().cast::<u8>(), std::mem::size_of_val(values))
+    }
+}
+
+#[cfg(test)]
+mod class_sampling_controls {
+    use super::*;
+
+    #[test]
+    fn class_rejects_changed_filter_viewport_and_image_binding() {
+        let mut app = HeadlessApp::new(10, 10).unwrap();
+        app.init_image(256, 256, Components::Rgba, &vec![0.0; 256 * 256 * 4])
+            .unwrap();
+        app.create_gl_buffers().unwrap();
+        app.reshape(256, 256).unwrap();
+        assert!(app.upstream_class_sampling().unwrap());
+        // SAFETY: this test owns the current context; all mutations are normal
+        // GL state setters, deliberately changing the class preconditions.
+        unsafe {
+            app.context.gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::NEAREST as i32,
+            );
+        }
+        assert!(!app.upstream_class_sampling().unwrap());
+        // SAFETY: same owned current context and valid GL enums/dimensions.
+        unsafe {
+            app.context.gl.tex_parameter_i32(
+                glow::TEXTURE_2D,
+                glow::TEXTURE_MIN_FILTER,
+                glow::LINEAR as i32,
+            );
+            app.context.gl.viewport(0, 0, 128, 256);
+        }
+        assert!(!app.upstream_class_sampling().unwrap());
+        // SAFETY: same current context; no object is destroyed by unbinding.
+        unsafe {
+            app.context.gl.viewport(0, 0, 256, 256);
+            app.context.gl.bind_texture(glow::TEXTURE_2D, None);
+        }
+        assert!(!app.upstream_class_sampling().unwrap());
     }
 }

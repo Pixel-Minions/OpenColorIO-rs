@@ -5348,8 +5348,8 @@ note = "p3-transforms (3.1b): basic; aces builds the ops of IDENTITY, an ACES ma
 [[file]]
 path = "tests/gpu/CDLOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/cdl_op_test.rs"]
-status = "todo"
+target = ["crates/ocio-gpu-exec/tests/cdl_op_test.rs"]
+status = "done"
 note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (cdl_cases); 1.3c4 checks the shaders' text of the 11 that use a version 2 config against the wheel (crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs). O7.1 follow-up: create.major_version calls the actual wheel setter before cache flags and reaches the native client, with direct-wheel version1/2 CDL contracts in create_version_oracle.rs; GPU execution remains pending."
 
 [[file]]
@@ -5394,8 +5394,8 @@ note = "p7-harness 7.2c source prepared against actual integrated O7/legacy APIs
 [[file]]
 path = "tests/gpu/GammaOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/gamma_op_test.rs"]
-status = "todo"
+target = ["crates/ocio-gpu-exec/tests/gamma_op_test.rs"]
+status = "done"
 note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (gamma_cases); 1.3g4 checks the shaders' text of the 10 that use a version 2 config against the wheel (crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs). O7.1 follow-up: create.major_version preserves Config::Create/setMajorVersion from AddExponent, with direct-wheel version1/2 native ordinary/legacy contracts in create_version_oracle.rs; GPU execution remains pending."
 
 [[file]]
@@ -5429,8 +5429,8 @@ note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phas
 [[file]]
 path = "tests/gpu/LogOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/log_op_test.rs"]
-status = "todo"
+target = ["crates/ocio-gpu-exec/tests/log_op_test.rs"]
+status = "done"
 note = "Phase 7 (GPU execution). Its 22 cases are data in crates/ocio-testkit/src/gpu_cases.rs (log_cases); 1.3l4 checks their shaders' text against the wheel (crates/ocio-gpu/tests/log_op_gpu_oracle.rs)"
 
 [[file]]
@@ -5455,8 +5455,8 @@ note = "p7-harness 7.2c source prepared: all ten source cases, eight legacy, usi
 [[file]]
 path = "tests/gpu/RangeOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/range_op_test.rs"]
-status = "todo"
+target = ["crates/ocio-gpu-exec/tests/range_op_test.rs"]
+status = "done"
 note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (range_cases); 1.3r3 checks their shaders' text against the wheel (crates/ocio-gpu/tests/range_op_gpu_oracle.rs)"
 
 [[file]]
