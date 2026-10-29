@@ -1,5 +1,5 @@
 # Diagnostic only. NEVER MERGE this workflow.
-name: Pinned SDE thread-limit documentation
+name: Pinned SDE cumulative-thread reproduction
 on:
   workflow_dispatch:
 permissions:
@@ -8,7 +8,7 @@ env:
   OCIO_RS_ORACLE_NO_CACHE: "1"
 jobs:
   help:
-    name: SDE help (${{ matrix.os }})
+    name: Sequential SDE threads (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -39,6 +39,10 @@ jobs:
             printf "%s\n" "$result" > kept/sde-thread-probe/help-exit-code.txt
             test -s kept/sde-thread-probe/long-help.txt
           '
+      - name: Reproduce the default limit and prove its documented override
+        run: |
+          rustup show active-toolchain
+          scripts/sde.sh hsw python scripts/diagnostics/sde-thread-probe.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
