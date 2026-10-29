@@ -27,7 +27,7 @@ fn finite_parameters(value: &Value) -> bool {
     }
 }
 
-pub fn batch(tests: &[GpuUnitTest], processors: &[Value]) -> Vec<ReferenceRun> {
+pub(super) fn batch(tests: &[GpuUnitTest], processors: &[Value]) -> Vec<ReferenceRun> {
     assert!(!tests.is_empty());
     assert_eq!(tests.len(), processors.len());
     let entries: Vec<_> = tests
