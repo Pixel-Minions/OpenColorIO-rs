@@ -53,6 +53,7 @@ jobs:
             export CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 LP_NUM_THREADS=1
             git config --global --add safe.directory "*"
             cargo fmt --all --check
+            cargo test --locked -j2 -p xtask register_merge -- --test-threads=1
             cargo xtask ci --base 05c59ac459c5e2134ee019cf57714a9da5100efd
             cargo xtask parity
             cargo xtask ratchet --update
