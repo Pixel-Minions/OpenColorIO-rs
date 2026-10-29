@@ -37,7 +37,7 @@ jobs:
           scripts/rocky9.sh bash -s -- "$PROFILE" <<'SH' 2>&1 | tee kept/finite-failure-probes/tests.log
           set -eu
           export CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 LP_NUM_THREADS=1
-          export OCIO_GPU_FINITE_CAPTURE=kept/finite-failure-probes
+          export OCIO_GPU_FINITE_CAPTURE=/work/kept/finite-failure-probes
           git config --global --add safe.directory '*'
           flag=""
           if [ "$1" = release ]; then flag="--release"; fi
