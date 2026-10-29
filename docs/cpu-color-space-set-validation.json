@@ -1,0 +1,66 @@
+{
+  "Run": 40959291599,
+  "Source": "f2a5c578243e0a7b634d7db9a8bc3258a8d38030",
+  "Validation": "4e46c21d1a465ee00d6e4a97de385a25c9277c89",
+  "AllFourProfilesPassed": true,
+  "GeneratedFilesIdenticalAcrossPlatformsAndProfiles": true,
+  "Profiles": [
+    {
+      "OS": "Windows",
+      "Profile": "debug",
+      "OriginalCasesPassed": 4,
+      "CPP": 1183,
+      "GPU": 205,
+      "GuardrailsPassed": true,
+      "TargetClippyPassed": true,
+      "GeneratedMainModePassed": true,
+      "GeneratedSHA256": {
+        "parity.md": "142f34d4468e3ebb490081f672303a807df6f8374211bfed418498f8c92f2bce",
+        "ratchet.toml": "dd3c72ddcb292926c536d2f027aaadbdf6d7791f5903f9b8dd34e949219cf3bc"
+      }
+    },
+    {
+      "OS": "Windows",
+      "Profile": "release",
+      "OriginalCasesPassed": 4,
+      "CPP": 1183,
+      "GPU": 205,
+      "GuardrailsPassed": true,
+      "TargetClippyPassed": true,
+      "GeneratedMainModePassed": true,
+      "GeneratedSHA256": {
+        "parity.md": "142f34d4468e3ebb490081f672303a807df6f8374211bfed418498f8c92f2bce",
+        "ratchet.toml": "dd3c72ddcb292926c536d2f027aaadbdf6d7791f5903f9b8dd34e949219cf3bc"
+      }
+    },
+    {
+      "OS": "Linux",
+      "Profile": "debug",
+      "OriginalCasesPassed": 4,
+      "CPP": 1183,
+      "GPU": 205,
+      "GuardrailsPassed": true,
+      "TargetClippyPassed": true,
+      "GeneratedMainModePassed": true,
+      "GeneratedSHA256": {
+        "parity.md": "142f34d4468e3ebb490081f672303a807df6f8374211bfed418498f8c92f2bce",
+        "ratchet.toml": "dd3c72ddcb292926c536d2f027aaadbdf6d7791f5903f9b8dd34e949219cf3bc"
+      }
+    },
+    {
+      "OS": "Linux",
+      "Profile": "release",
+      "OriginalCasesPassed": 4,
+      "CPP": 1183,
+      "GPU": 205,
+      "GuardrailsPassed": true,
+      "TargetClippyPassed": true,
+      "GeneratedMainModePassed": true,
+      "GeneratedSHA256": {
+        "parity.md": "142f34d4468e3ebb490081f672303a807df6f8374211bfed418498f8c92f2bce",
+        "ratchet.toml": "dd3c72ddcb292926c536d2f027aaadbdf6d7791f5903f9b8dd34e949219cf3bc"
+      }
+    }
+  ],
+  "VerifiedUTC": "2026-10-29T21:46:06.215851+00:00"
+}
