@@ -5442,8 +5442,8 @@ status = "done"
 [[file]]
 path = "tests/gpu/Lut3DOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/lut3d_op_test.rs"]
-status = "todo"
+target = ["crates/ocio-gpu-exec/tests/lut3d_op_test.rs"]
+status = "done"
 
 [[file]]
 path = "tests/gpu/MatrixOp_test.cpp"
