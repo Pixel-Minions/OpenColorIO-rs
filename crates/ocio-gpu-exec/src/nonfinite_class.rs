@@ -163,6 +163,10 @@ pub(super) fn assess(
         || !frame.entries.is_multiple_of(COMPONENTS)
         || frame.cpu.len() != frame.entries
         || frame.settings.print_min_max
+        || !frame.settings.error_threshold.is_finite()
+        || frame.settings.error_threshold < 0.0
+        || !frame.settings.expected_minimal_value.is_finite()
+        || frame.settings.expected_minimal_value <= 0.0
     {
         return Err(reject("invalid frame dimensions or diagnostic settings"));
     }
