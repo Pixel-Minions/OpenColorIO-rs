@@ -9,7 +9,7 @@
 
 use std::sync::OnceLock;
 
-use ocio::{FileTransform, Interpolation, Lut3DTransform, Transform, TransformDirection};
+use ocio::{FileTransform, Interpolation, Lut3DTransform, TransformDirection};
 use ocio_gpu_exec::gpu_unit_test::{GpuUnitTest, ReferenceRun};
 use ocio_testkit::upstream::gpu::input_digest;
 use serde_json::{Value, json};
