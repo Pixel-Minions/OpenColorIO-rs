@@ -24,7 +24,7 @@ jobs:
           for profile in O0 O2; do
             docker run --rm --pull=never --network none --read-only \
               --memory 2g --memory-swap 2g --cpus 1 --pids-limit 128 \
-              --tmpfs /build:rw,nosuid,nodev,size=128m \
+              --tmpfs /build:rw,nosuid,nodev,exec,size=128m \
               --tmpfs /tmp:rw,nosuid,nodev,size=128m \
               --mount "type=bind,source=$PWD/tools/gpu-root-cause,target=/probe,readonly" \
               --mount "type=bind,source=$PWD/evidence/$profile,target=/evidence" \
