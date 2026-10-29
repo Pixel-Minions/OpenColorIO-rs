@@ -122,7 +122,7 @@ fn alias() {
     assert!(!nt.has_alias("other"));
 
     // Add and access named transforms in a config.
-    let mut config = crate::Config::create_raw().unwrap();
+    let mut config = (*crate::Config::create_raw().unwrap()).clone();
     nt.set_name("name");
     nt.set_transform(
         Some(&Transform::from(MatrixTransform::new())),
