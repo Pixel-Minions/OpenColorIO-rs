@@ -13,7 +13,8 @@ use ocio_testkit::upstream::gpu::{ENTRIES, HEIGHT, WIDTH, comparison_dimensions}
 use serde_json::{Value, json};
 
 /// Ordered upstream input descriptions; updates[0] is empty. Later entries are
-/// dynamic_apply operations before that frame. Bindings name actual properties.
+/// dynamic_apply operations before that frame. Bindings name the CPU processor's
+/// own properties, which the wheel decouples from the parent Processor.
 pub(super) struct Plan {
     pub(super) test: GpuUnitTest,
     pub(super) transforms: Vec<Value>,
@@ -214,7 +215,7 @@ fn prepare(plan: &Plan, finite: bool) -> Prepared {
     };
     let mut steps = Vec::new();
     for &binding in &plan.bindings {
-        steps.push(json!({"get":binding,"from":"processor","as":binding}));
+        steps.push(json!({"get":binding,"from":"cpu","as":binding}));
     }
     let mut apply_steps = Vec::new();
     for updates in &plan.updates {
