@@ -11,6 +11,8 @@ use std::sync::OnceLock;
 use ocio::FixedFunctionStyle;
 use ocio_gpu_exec::gpu_unit_test::ReferenceRun;
 
+#[path = "support/fixed_function_aces2_test.rs"]
+mod aces2;
 #[path = "support/fixed_function_cases.rs"]
 mod cases;
 #[path = "support/suite1_reference.rs"]
