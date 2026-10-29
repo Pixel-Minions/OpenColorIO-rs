@@ -5367,9 +5367,9 @@ status = "todo"
 [[file]]
 path = "tests/gpu/ECOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/ec_op_test.rs"]
-status = "todo"
-note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
+target = ["crates/ocio-gpu-exec/tests/ec_op_test.rs"]
+status = "done"
+note = "p7-suite4: upstream cases and dynamic retests in the Linux execution harness; uncached wheel streams, exact GPU identity and complete finite companions under the approved class"
 
 [[file]]
 path = "tests/gpu/FixedFunctionOp_test.cpp"
@@ -5408,16 +5408,16 @@ note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phas
 [[file]]
 path = "tests/gpu/GradingPrimaryOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/grading_primary_op_test.rs"]
-status = "todo"
-note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
+target = ["crates/ocio-gpu-exec/tests/grading_primary_op_test.rs"]
+status = "done"
+note = "p7-suite4: upstream cases and dynamic retests in the Linux execution harness; uncached wheel streams, exact GPU identity and complete finite companions under the approved class"
 
 [[file]]
 path = "tests/gpu/GradingRGBCurveOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/grading_rgb_curve_op_test.rs"]
-status = "todo"
-note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
+target = ["crates/ocio-gpu-exec/tests/grading_rgb_curve_op_test.rs"]
+status = "done"
+note = "p7-suite4: upstream cases and dynamic retests in the Linux execution harness; uncached wheel streams, exact GPU identity and complete finite companions under the approved class"
 
 [[file]]
 path = "tests/gpu/GradingToneOp_test.cpp"
