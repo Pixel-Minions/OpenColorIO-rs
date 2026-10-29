@@ -5374,7 +5374,7 @@ note = "p7-suite4: upstream cases and dynamic retests in the Linux execution har
 [[file]]
 path = "tests/gpu/FixedFunctionOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu-exec/tests/fixed_function_aces2_test.rs", "crates/ocio-gpu-exec/tests/fixed_function_op_test.rs"]
+target = ["crates/ocio-gpu-exec/tests/support/fixed_function_aces2_test.rs", "crates/ocio-gpu-exec/tests/fixed_function_op_test.rs"]
 status = "done"
 
 [[file]]

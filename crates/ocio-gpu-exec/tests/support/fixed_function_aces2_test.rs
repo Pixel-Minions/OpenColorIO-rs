@@ -11,10 +11,7 @@ use std::sync::OnceLock;
 use ocio::FixedFunctionStyle;
 use ocio_gpu_exec::gpu_unit_test::ReferenceRun;
 
-#[path = "support/fixed_function_cases.rs"]
-mod cases;
-#[path = "support/suite1_reference.rs"]
-mod reference;
+use super::{cases, reference};
 
 use cases::{Build, Case, Input};
 
