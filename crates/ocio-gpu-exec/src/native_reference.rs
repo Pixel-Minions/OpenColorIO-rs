@@ -31,8 +31,10 @@ fn read_values(path: &Path) -> Result<Vec<f32>> {
         return Err(error("Incomplete native image"));
     }
     Ok(bytes
-        .chunks_exact(4)
-        .map(|v| f32::from_bits(u32::from_le_bytes(v.try_into().expect("four bytes"))))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|v| f32::from_bits(u32::from_le_bytes(*v)))
         .collect())
 }
 
@@ -235,7 +237,7 @@ mod tests {
         )
         .unwrap();
         let mut sanitized = reference.clone();
-        for pixel in sanitized.chunks_exact_mut(4) {
+        for pixel in sanitized.as_chunks_mut::<4>().0 {
             if pixel.iter().any(|v| !v.is_finite()) {
                 pixel.fill(0.0);
             }

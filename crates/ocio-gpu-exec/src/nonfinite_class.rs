@@ -113,7 +113,8 @@ fn finite_footprint(inputs: &[f32], pixel: usize) -> bool {
 
 pub(super) fn finite_shader_parameters(shader: &Shader) -> bool {
     let finite_uniforms = shader.uniforms.iter().all(|u| match &u.value {
-        UniformValue::Double(v) => v.is_finite(),
+        // OpenGLBuilder uploads this f64 through glUniform1f (glsl.cpp:239-241 @ v2.5.2).
+        UniformValue::Double(v) => v.is_finite() && (*v as f32).is_finite(),
         UniformValue::Float3(v) => v.iter().all(|v| v.is_finite()),
         UniformValue::VectorFloat(v) => v.iter().all(|v| v.is_finite()),
         UniformValue::Bool(_) | UniformValue::VectorInt(_) => true,
