@@ -12,8 +12,7 @@ use std::error::Error;
 fn basic() {
     const MESSAGE: &str = "Dummy error";
     // Upstream Test0: receive the concrete OCIO error and inspect what().
-    let result: Result<(), Exception> = Err(Exception::new(MESSAGE));
-    let error = result.unwrap_err();
+    let error = Exception::new(MESSAGE);
     assert_eq!(error.what(), MESSAGE.as_bytes());
     assert_eq!(error.kind(), ExceptionKind::Exception);
     // Test1: the standard error interface preserves the same message.
@@ -23,10 +22,11 @@ fn basic() {
     // Test2: copy while the source exists, then receive the copy after it dies.
     let copy = {
         let original = Exception::new(MESSAGE);
-        original.clone()
+        let copy = original.clone();
+        assert_eq!(original.what(), MESSAGE.as_bytes());
+        copy
     };
-    let result: Result<(), Exception> = Err(copy);
-    let received = result.unwrap_err();
+    let received = copy;
     let standard: &dyn Error = &received;
     assert_eq!(standard.to_string(), MESSAGE);
 }
@@ -35,8 +35,7 @@ fn basic() {
 #[test]
 fn missing_file() {
     const MESSAGE: &str = "Dummy error";
-    let result: Result<(), Exception> = Err(Exception::missing_file(MESSAGE));
-    let error = result.unwrap_err();
+    let error = Exception::missing_file(MESSAGE);
     assert_eq!(error.kind(), ExceptionKind::MissingFile);
     let standard: &dyn Error = &error;
     assert_eq!(standard.to_string(), MESSAGE);
