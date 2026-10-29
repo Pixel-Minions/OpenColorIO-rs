@@ -344,8 +344,8 @@ p7-compile (7.4b now; 7.4a after 7.2a) ─────────────�
    question with the baseline evidence.
 
 Counted as they land: 10 tests with `p7-harness` (MatrixOps); 69 with `p7-suite-1` (every
-family `gpu_cases.rs` already holds); 156 with `p7-suite-4`; 215 with `p7-suite-3`; 264 with
-`p7-suite-2`, including P7-7's four inverse tests. A P7-6 renderer waiver keeps
+family `gpu_cases.rs` already holds); 156 with `p7-suite-4`; 205 with `p7-suite-2`,
+including P7-7's four inverse tests; 264 after the remaining `p7-suite-3` cases pass. A P7-6 renderer waiver keeps
 the test running and checking same-renderer identity. 234 of the 264 don't use the legacy
 processor. No test's upstream check needs P7-1; the identity check of the 30 legacy tests
 against the wheel's shader comes with `p7-legacy-parity`, once O7.1 exists. The critical path is five chunks deep: 7.2a,
@@ -406,3 +406,19 @@ native GPU descriptor history, matching the upstream harness. No new oracle
 command, numerical expectation, class scope or waiver is introduced. See
 [the dynamic reference proof](../gpu-dynamic-retests.md) and
 [the verified profile summary](../gpu-suite4-validation.json).
+
+## Suite2 validation, 2026-10-29
+
+All49 Config/Lut1D/Lut3D cases passed in the full264-case diagnostic run in both
+profiles, including the four inverse3D cases with unchanged Linux settings and
+thresholds. The five failures belonged to the unmerged fixed-function card and
+remain failing there, outside the approved non-finite class.
+
+Suite2 is independent of Suite3. Its49 source cases were therefore replayed onto
+the passing Suite4 landing candidate, without removing any test from main.
+CI40949990314 then passed all205 upstream GPU cases and every native/class/
+rejection/reference control in debug and release. Both generated identical
+parity/ratchet files. Preserved artifacts independently verified65 complete
+native/Rust readbacks and3380 native observations per profile. See
+[the verified summary](../gpu-lut-config-validation.json). No new waiver,
+comparison threshold, image setting, oracle command or library API is introduced.
