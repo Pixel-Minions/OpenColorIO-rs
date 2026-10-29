@@ -5401,9 +5401,9 @@ note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/g
 [[file]]
 path = "tests/gpu/GradingHueCurveOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/grading_hue_curve_op_test.rs"]
-status = "todo"
-note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
+target = ["crates/ocio-gpu-exec/tests/grading_hue_curve_op_test.rs"]
+status = "done"
+note = "p7-suite4: upstream cases and dynamic retests in the Linux execution harness; uncached wheel streams, exact GPU identity and complete finite companions under the approved class"
 
 [[file]]
 path = "tests/gpu/GradingPrimaryOp_test.cpp"
@@ -5422,9 +5422,9 @@ note = "p7-suite4: upstream cases and dynamic retests in the Linux execution har
 [[file]]
 path = "tests/gpu/GradingToneOp_test.cpp"
 kind = "test-gpu"
-target = ["crates/ocio-gpu/tests/grading_tone_op_test.rs"]
-status = "todo"
-note = "waits for Phase 7: the GPU suite runs in the GPU execution harness; Phase 5 checks the same shaders' text, uniforms and their values after sets against the wheel (crates/ocio/tests/api_gpu_oracle.rs, crates/ocio-gpu/tests)"
+target = ["crates/ocio-gpu-exec/tests/grading_tone_op_test.rs"]
+status = "done"
+note = "p7-suite4: upstream cases and dynamic retests in the Linux execution harness; uncached wheel streams, exact GPU identity and complete finite companions under the approved class"
 
 [[file]]
 path = "tests/gpu/LogOp_test.cpp"
