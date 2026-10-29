@@ -243,7 +243,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 1,179 | 1,191 |
+| C++ | 1,183 | 1,191 |
 | GPU | 205 | 264 |
 | Python | 384 | 384 |
 
