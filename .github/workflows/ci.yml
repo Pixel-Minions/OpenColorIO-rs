@@ -1,17 +1,15 @@
-# Diagnostic branch only. NEVER MERGE this workflow or capture instrumentation.
-name: Public upstream finite GPU diagnostics
+# Native-only diagnostic branch. NEVER MERGE.
+name: Independent native replay of public finite fixtures
 on:
   workflow_dispatch:
 permissions:
   contents: read
-env:
-  RUSTFLAGS: -D warnings
-  OCIO_RS_ORACLE_NO_CACHE: "1"
+  actions: read
 jobs:
-  finite:
-    name: Public fixture probes (${{ matrix.profile }})
+  native:
+    name: Native replay (${{ matrix.profile }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -19,47 +17,34 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          submodules: true
-      - name: Verify the exact public capture source
+          submodules: false
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 40950573272
+          name: public-finite-fixtures-${{ matrix.profile }}
+          path: kept/finite-failure-probes/
+      - name: Verify exact native source
         run: |
-          mkdir -p kept/finite-failure-probes
-          git fetch --depth=1 origin 2729ed5afc927879b0036b372bdd765526c36a6b
+          git fetch --depth=1 origin a07529de785a535320cc64f5b7dda92640d1f4f6
           git diff --exit-code FETCH_HEAD HEAD -- . ':(exclude).github/workflows/ci.yml'
-          git rev-parse HEAD > kept/finite-failure-probes/validation-commit.txt
-          printf '%s\n' '2729ed5afc927879b0036b372bdd765526c36a6b' > kept/finite-failure-probes/source-commit.txt
-      - name: Build the unchanged reference image
+          printf '%s\n' a07529de785a535320cc64f5b7dda92640d1f4f6 > kept/finite-failure-probes/native-source-commit.txt
+          git rev-parse HEAD > kept/finite-failure-probes/native-validation-commit.txt
+      - name: Build the unchanged native runtime image
         run: docker build -t ocio-rs-rocky9:1 docker/rocky9
-      - name: Capture the five public fixtures, keeping original failures
-        env:
-          PROFILE: ${{ matrix.profile }}
+      - name: Replay without compiling or linking any Rust or OCIO renderer
         run: |
           set -o pipefail
-          scripts/rocky9.sh bash -s -- "$PROFILE" <<'SH' 2>&1 | tee kept/finite-failure-probes/tests.log
-          set -eu
-          export CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 LP_NUM_THREADS=1
-          export OCIO_GPU_FINITE_CAPTURE=/work/kept/finite-failure-probes
-          git config --global --add safe.directory '*'
-          flag=""
-          if [ "$1" = release ]; then flag="--release"; fi
-          cargo fmt --all --check
-          outcome=0
-          for test_name in aces2::style_aces2_4000nit_p3_rndtrip aces2::style_aces2_nan_bug aces2::style_aces2_rec709_rndtrip aces2::style_aces2_rgb_to_jmh_fwd style_aces_gamutcomp13_inv; do
-            if cargo test --locked -j2 -p ocio-gpu-exec $flag --test fixed_function_op_test "$test_name" -- --exact --test-threads=1 --show-output; then
-              :
-            else
-              outcome=1
-            fi
-          done
-          python3 crates/ocio-gpu-exec/tests/native/prepare_finite_replay.py /work/kept/finite-failure-probes
-          for optimization in 0 2; do
-            c++ -std=c++17 -O$optimization -ffp-contract=off crates/ocio-gpu-exec/tests/native/finite_replay.cpp -ldl -o kept/finite-failure-probes/native-replay-O$optimization
-            kept/finite-failure-probes/native-replay-O$optimization kept/finite-failure-probes/native-manifest.txt O$optimization > kept/finite-failure-probes/native-O$optimization.json
-          done
-          exit "$outcome"
-          SH
+          scripts/rocky9.sh bash -ec '
+            python3 crates/ocio-gpu-exec/tests/native/prepare_finite_replay.py /work/kept/finite-failure-probes
+            for optimization in 0 2; do
+              c++ -std=c++17 -O$optimization -ffp-contract=off crates/ocio-gpu-exec/tests/native/finite_replay.cpp -ldl -o kept/finite-failure-probes/native-replay-O$optimization
+              kept/finite-failure-probes/native-replay-O$optimization kept/finite-failure-probes/native-manifest.txt O$optimization > kept/finite-failure-probes/native-O$optimization.json
+            done
+          ' 2>&1 | tee kept/finite-failure-probes/native-replay.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: public-finite-fixtures-${{ matrix.profile }}
+          name: native-public-finite-${{ matrix.profile }}
           path: kept/finite-failure-probes/
           retention-days: 30
