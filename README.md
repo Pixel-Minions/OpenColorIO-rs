@@ -91,7 +91,7 @@ one.
 ## Progress
 
 Status as of 2026-10-29: **milestones M0, M1, M2, M3 and M4 are complete**, about 84% of the
-planned work (1,179 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
+planned work (1,183 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
 test configs): the grading values (GradingPrimary, GradingTone,
