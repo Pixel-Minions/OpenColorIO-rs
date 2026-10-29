@@ -6609,5 +6609,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   upstream behavior and is not applied. The owner approved one bounded CPU/GPU
   acceptance class instead, with finite companions and native readback controls.
 - **Status:** behavior preserved; W0013 implements the approved class. Existing
-  W0003-W0012 stay mandatory until debug/release validation passes. See
+  W0003-W0012 retired after both profiles passed with every old rule enforced.
+  Their signed metadata is archived. See
   `docs/gpu-nonfinite.md`; no original image, filter or threshold is changed.
+### I-543. Tone identity reset retains unused GPU uniform coefficients
+
+- **Upstream:** GradingTonePreRender::update returns immediately for identity
+  after setting local bypass (`ops/gradingtone/GradingTone.cpp:406-447 @ v2.5.2`).
+  Previously computed coefficients are not reset. Actual uniform getters of a
+  reused description can therefore differ from a fresh identity description.
+- **Who notices:** clients reading complete GPU uniform metadata after dynamic
+  Tone changes and an identity reset. The bypass keeps the inactive coefficients
+  out of the rendered result; reading the metadata still observes their history.
+- **A fix:** clearing those coefficients would change observable upstream values.
+  The port preserves them, and retest references read the actual reused native
+  description rather than substituting a fresh extraction.
+- **Status:** preserved; a minimal official-wheel probe and live metadata-history
+  regression cover the behavior. See `docs/gpu-dynamic-retests.md`.
