@@ -72,3 +72,20 @@ clippy, guardrails/main mode and identical generated files across all four
 profiles; see `texture-reader-startup-validation.json`. Full normal CI on the
 updated exact landing remains required. The prior failed candidate is preserved
 in its history; no checks or tolerances were relaxed.
+
+P27 completes the original `Builtins/read_write` test. It builds the original
+2.4 YAML config with every registry style in its original order, validates the
+config, checks serialization byte for byte, and creates the `ref` to `test`
+processor. It uses existing APIs and copies the original YAML/assertions; no
+production code, dependency, API, oracle, waiver or comparison changes.
+
+[CI41070682176](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/41070682176)
+passed the actual original case on Windows and Rocky Linux 9 debug/release,
+including guards, target clippy and main-mode generation. Independent artifact
+review checked all four source/workflow identities and identical generated files;
+see `cpu-builtin-registry-validation.json`. Proposed C++ coverage is 1,188/1,191;
+GPU remains 205/264. Full exact landing CI is required before merging.
+
+This CPU test completion does not change the 59 held fixed-function GPU cases.
+The separate ACES2 investigation remains with the owner's debugger; its checkout,
+branch and the frozen prior GPU evidence were not accessed or modified.
