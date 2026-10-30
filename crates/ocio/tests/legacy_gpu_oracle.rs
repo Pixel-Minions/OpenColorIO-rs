@@ -4,7 +4,7 @@
 //! WP7.1c: small legacy lattices, allocation/file boundaries and GPU-cache request order
 //! against O7.1's native client linked to the official wheel. Shader text/cache IDs, logs
 //! and every texture bit remain exact. No FixedFunctionTransform or execution exception
-//! is involved. Larger edges and post-extraction dynamic updates remain separate chunks.
+//! is involved. Post-extraction dynamic updates remain separate work.
 
 use ocio::{
     Allocation, AllocationTransform, Config, DynamicPropertyType, ExposureContrastTransform,
@@ -604,11 +604,135 @@ fn legacy_dynamic_positions_and_snapshot_values_match_native_wheel() {
     println!("P34: {measured} exact uniform/property snapshot rows");
 }
 
+#[test]
+fn legacy_boundary_edges_match_native_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let chains = chains();
+    let mut jobs = Vec::new();
+    // NoOps.cpp:175-206 constructs Lut3DOpData before allocating the RGBA lattice.
+    // The existing array constructor rejects >129. Zero retains I-503's native error;
+    // an analytic-only chain can bypass the lattice. The wheel decides every outcome.
+    for chain in 0..chains.len() {
+        for level in 0..LEVELS.len() {
+            for edge in [0, 1, 130, 1626, u32::MAX] {
+                for language in 0..GpuLanguage::ALL.len() {
+                    jobs.push(Job {
+                        chain,
+                        level,
+                        edge,
+                        before: 0,
+                        language,
+                    });
+                }
+            }
+        }
+    }
+    assert_eq!(jobs.len(), 1400, "the complete P35 boundary input plan");
+    compare_batches("P35 boundary", &chains, &jobs, 50, false);
+}
+
+#[test]
+fn legacy_large_lattice_values_match_native_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let chains = chains();
+    let full = matches!(
+        std::env::var("OCIO_RS_TIER").as_deref(),
+        Ok("full" | "exhaustive")
+    );
+    let edges: &[u32] = if full { &[32, 64, 129] } else { &[32] };
+    let level = LEVELS
+        .iter()
+        .position(|(name, _)| *name == "OPTIMIZATION_DEFAULT")
+        .expect("the named DEFAULT input");
+    let mut jobs = Vec::new();
+    for chain in 0..chains.len() {
+        for &edge in edges {
+            for language in 0..GpuLanguage::ALL.len() {
+                jobs.push(Job {
+                    chain,
+                    level,
+                    edge,
+                    before: 0,
+                    language,
+                });
+            }
+        }
+    }
+    assert_eq!(
+        jobs.len(),
+        if full { 120 } else { 40 },
+        "the P35 large input plan"
+    );
+    // One live response at a time bounds peak memory. Never cache copies of 129^3 textures.
+    compare_batches("P35 large", &chains, &jobs, 1, false);
+}
+
+/// A bounded diagnostic path; equality still compares every bit/byte of the whole outcome.
+fn json_difference_path(actual: &Value, expected: &Value, path: &str) -> Option<String> {
+    if actual == expected {
+        return None;
+    }
+    match (actual, expected) {
+        (Value::Array(actual), Value::Array(expected)) if actual.len() == expected.len() => actual
+            .iter()
+            .zip(expected)
+            .enumerate()
+            .find_map(|(index, (actual, expected))| {
+                json_difference_path(actual, expected, &format!("{path}[{index}]"))
+            }),
+        (Value::Object(actual), Value::Object(expected)) if actual.len() == expected.len() => {
+            actual
+                .iter()
+                .find_map(|(key, actual)| match expected.get(key) {
+                    Some(expected) => {
+                        json_difference_path(actual, expected, &format!("{path}.{key}"))
+                    }
+                    None => Some(format!("{path}.{key} (missing key)")),
+                })
+        }
+        _ => Some(path.into()),
+    }
+}
+
+fn outcome_difference(actual: &Outcome, expected: &Outcome) -> String {
+    if let (
+        Outcome::Gpu {
+            processor: actual_processor,
+            shader: actual_shader,
+        },
+        Outcome::Gpu {
+            processor: expected_processor,
+            shader: expected_shader,
+        },
+    ) = (actual, expected)
+    {
+        if let Some(path) = json_difference_path(actual_processor, expected_processor, "processor")
+        {
+            return path;
+        }
+        if let (Ok(actual), Ok(expected)) = (actual_shader, expected_shader) {
+            return json_difference_path(actual, expected, "shader").expect("different shader");
+        }
+        return "extraction outcome/stage/message".into();
+    }
+    "processor outcome/stage/message".into()
+}
+
 fn compare_jobs(chunk: &str, chains: &[Chain], jobs: &[Job]) -> usize {
+    compare_batches(chunk, chains, jobs, 50, true)
+}
+
+fn compare_batches(
+    chunk: &str,
+    chains: &[Chain],
+    jobs: &[Job],
+    batch_size: usize,
+    cacheable: bool,
+) -> usize {
     let mut compared = 0;
     let mut refusals = 0;
     let mut measured_dynamic = 0;
-    for batch in jobs.chunks(50) {
+    for batch in jobs.chunks(batch_size) {
         let calls = batch
             .iter()
             .map(|job| BatchCall {
@@ -617,7 +741,7 @@ fn compare_jobs(chunk: &str, chains: &[Chain], jobs: &[Job]) -> usize {
                 blobs: Vec::new(),
             })
             .collect::<Vec<_>>();
-        let responses = Oracle::get().batch(&calls, true);
+        let responses = Oracle::get().batch(&calls, cacheable);
         assert_eq!(responses.len(), batch.len());
         for (job, response) in batch.iter().zip(responses) {
             let chain = &chains[job.chain];
@@ -633,7 +757,12 @@ fn compare_jobs(chunk: &str, chains: &[Chain], jobs: &[Job]) -> usize {
             let expected = wheel(&reply);
             let (actual, actual_log) = capture(|| port(chain, job));
             assert_eq!(actual_log, reply.log(), "{label}: log");
-            assert_eq!(actual, expected, "{label}");
+            assert!(
+                actual == expected,
+                "{label}: exact outcome differs at {}; request {}",
+                outcome_difference(&actual, &expected),
+                job.args(chain)
+            );
             if let Outcome::Gpu { shader: Ok(_), .. } = expected {
                 measured_dynamic +=
                     reply.shader().uniforms.len() + reply.shader().dynamic_properties.len();
