@@ -4511,7 +4511,7 @@ path = "tests/cpu/NamedTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/named_transform_tests.rs"]
 status = "partial"
-note = "P25 completes alias (NamedTransform_tests.cpp:64-211), including Config cloning, lookup/canonical names, replacement and all three collision errors with original literals. basic remains partial: its existing reference-typed API cannot accept the C++ null argument; do not count basic yet. p3-model-objects (3.4c) checks its model-only part in named_transform_tests.rs. p3-validate 3.8: named_transform_io, colorspace_transform_named_transform, inactive_named_transform_precedence. p3-builders 3.2a: static_get_transform; 3.2d: named_transform_processor, named_transform_validation, inactive_named_transforms"
+note = "P25 completes alias (NamedTransform_tests.cpp:64-211), including Config cloning, lookup/canonical names, replacement and all three collision errors with original literals. P28 adds every remaining existing-API basic assertion (copied-object identity, static forward/inverse GetTransform and Config name/transform errors); basic stays uncounted because its C++ null shared-pointer argument cannot be passed to the reference-typed API. No boundary exclusion is approved here. p3-model-objects (3.4c) checks its model-only part in named_transform_tests.rs. p3-validate 3.8: named_transform_io, colorspace_transform_named_transform, inactive_named_transform_precedence. p3-builders 3.2a: static_get_transform; 3.2d: named_transform_processor, named_transform_validation, inactive_named_transforms"
 
 [[file]]
 path = "tests/cpu/OCIOZArchive_tests.cpp"

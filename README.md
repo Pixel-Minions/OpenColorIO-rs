@@ -34,8 +34,8 @@ from Rust and Python.
 - **OCIO's own tests pass.** Upstream's 1,191 C++ unit tests and 264 GPU tests are ported, and
   its 384 Python tests run unmodified against this port's Python module.
 - **Nothing is waived silently.** Every exception is a written, approved waiver in
-  [`waivers.toml`](waivers.toml), and CI fails on any difference that isn't listed there. Today
-  there are two:
+  [`waivers.toml`](waivers.toml), and CI fails on any difference that isn't listed there.
+  W0001 and W0002 cover these differences:
   - **W0001:** on Windows, the port uses standard `powf` in one exact-math PQ path. The official
     build uses MSVC's vector math library there. About 1.7% of values differ. For inputs up to
     1 in magnitude the difference is bounded and invisible in practice. Above 1, `PQ_TO_LIN`
@@ -44,6 +44,7 @@ from Rust and Python.
   - **W0002:** with a NaN parameter, the internal bits of the resulting NaN values may differ,
     including in the 1D LUT the optimizer bakes from it and the CPU cache ID that hashes that LUT;
     they are still NaN.
+  The approved GPU rule W0013 is documented in [GPU non-finite comparisons](docs/gpu-nonfinite.md).
 - **Deviations are listed too.** [`docs/deviations.md`](docs/deviations.md) records where the
   port intentionally behaves differently.
 
@@ -90,7 +91,7 @@ one.
 
 ## Progress
 
-Status as of 2026-10-29: **milestones M0, M1, M2, M3 and M4 are complete**, about 84% of the
+Status as of 2026-10-30: **milestones M0, M1, M2, M3 and M4 are complete**, about 84% of the
 planned work (1,188 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
 unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
@@ -247,9 +248,10 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 | GPU | 205 | 264 |
 | Python | 384 | 384 |
 
-The live numbers are in [`docs/parity.md`](docs/parity.md). The GPU tests need a GPU to run
-on; they are ported with the pixel harness in a later phase. The shaders themselves are already
-compared with the official library's, text for text.
+The live numbers are in [`docs/parity.md`](docs/parity.md). NamedTransform's existing Rust API
+checks are complete; its C++ null-pointer assertion remains uncounted pending review.
+The ported GPU tests run headlessly on llvmpipe in CI. Their rendered pixels and generated
+shader text are compared with the official library.
 
 ### Milestones
 
