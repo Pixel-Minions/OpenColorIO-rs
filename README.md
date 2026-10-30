@@ -117,10 +117,12 @@ OpenGL execution on llvmpipe. All 205 ported upstream GPU tests compare the port
 shader's output on the same renderer. CPU/GPU checks retain upstream thresholds
 on finite sampling footprints, plus a complete finite companion and independent
 native readback controls under the approved [non-finite class](docs/gpu-nonfinite.md).
-Small legacy lattices and cache request order are also checked against the wheel's native
-legacy API in all 10 shader languages, including every texture value bit. Larger and boundary
-lattices, allocation cuts, file transforms and dynamic legacy cases remain. The remaining
-59 fixed-function GPU tests follow. Phases 1 (the op engine and
+Legacy shader and LUT data are also checked against the wheel's native API in all 10
+languages: all seven named optimization levels on small lattices, shared-cache request
+orders, allocation/file boundaries, mixed LUT/range/alpha chains and initial dynamic snapshots.
+The DEFAULT sweep also checks larger lattices through 129 cubed, with every texture value
+bit exact. Post-extraction dynamic updates remain separate work. The remaining 59
+fixed-function GPU tests follow. Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
