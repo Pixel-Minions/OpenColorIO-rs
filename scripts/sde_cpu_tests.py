@@ -144,6 +144,9 @@ def run_cargo(original):
     base = pathlib.Path('kept/sde-cpu-tests')
     base.mkdir(parents=True, exist_ok=True)
     root = pathlib.Path(tempfile.mkdtemp(prefix='run-', dir=base)).resolve()
+    if not windows:
+        # The Rocky container writes as root; its host must be able to export this evidence.
+        root.chmod(0o755)
     build_command = build + ['--no-run', '--message-format=json']
     with (root / 'compiler-artifacts.jsonl').open('w', encoding='utf-8') as log:
         result = subprocess.run(build_command, stdout=log)
