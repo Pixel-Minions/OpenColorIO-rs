@@ -6627,3 +6627,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   description rather than substituting a fresh extraction.
 - **Status:** preserved; a minimal official-wheel probe and live metadata-history
   regression cover the behavior. See `docs/gpu-dynamic-retests.md`.
+
+### I-544. The ACES2 nan_bug regression input is ill-conditioned on the CPU itself
+
+- **Upstream:** `tests/gpu/FixedFunctionOp_test.cpp:756-777 @ v2.5.2` uses gray
+  `0.89942779f` (`3f6640e6`) in a PQ/P3 inverse-output chain. It reaches the inverse
+  Reinhard remap near its pole (`ACES2/Transform.cpp:1007-1040`). Small pow errors,
+  amplified by Aab cancellation, put CPU and llvmpipe on opposite sides of the cap.
+- **Who notices:** GPU/CPU comparisons near that particular gamut boundary. The
+  official wheel itself switches output families at plus or minus one input ULP;
+  101 regime changes occur in the debugger's 614-neighbour sweep. This is not a
+  port or harness defect, and no hardware-GPU result was inferred as a measurement.
+- **A fix:** upstream could choose a stable regression input away from the pole.
+  Substituting wheel `rgb_a` or JMh into the original GPU shader yields the exact
+  CPU output, whereas correctly rounded builtins alone still do not stabilize
+  this input. Changing the upstream input would change its test and is not applied.
+- **Status:** original input, shader and 0.01 relative threshold preserved. The
+  owner approved W0014's exact observed failure on Mesa25.2.7/LLVM21.1.8, retaining
+  whole-image port/wheel GPU identity and rejecting any changed or newly passing
+  result. See `docs/gpu-finite-exact-pins.md` and the preserved debugger report.

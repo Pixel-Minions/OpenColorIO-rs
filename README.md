@@ -15,7 +15,7 @@ from Rust and Python.
 > CPU results and generated GPU shaders match the official library. All 384 upstream
 > Python tests pass unmodified; SystemMonitors and complete module metadata are checked
 > on Windows and Rocky Linux 9, within the approved [D-16 scope](docs/deviations.md).
-> Next: GPU execution, remaining library tests, SIMD performance, tools and release work
+> Next: remaining library tests, legacy GPU parity, SIMD performance, tools and release work
 > (M5). See [Progress](#progress).
 
 ## How precise: byte for byte
@@ -113,11 +113,13 @@ is exposed in Python too. The unchanged upstream driver and complete module meta
 the official wheel on both reference platforms; native C++ extension pointer exchange is outside
 the approved [D-16 scope](docs/deviations.md). Phase 7 foundations
 in main: the legacy GPU API, the reference client linked to the official wheel, and headless
-OpenGL execution on llvmpipe. All 205 ported upstream GPU tests compare the port's rendered pixels bit for bit with the official
-shader's output on the same renderer. CPU/GPU checks retain upstream thresholds
+OpenGL execution on llvmpipe. All 264 upstream GPU tests run on llvmpipe and compare the port's complete rendered images
+bit for bit with the official shader's output on the same renderer. CPU/GPU checks retain upstream thresholds
 on finite sampling footprints, plus a complete finite companion and independent
 native readback controls under the approved [non-finite class](docs/gpu-nonfinite.md).
-The remaining 59 fixed-function GPU tests and the legacy parity sweep follow. Phases 1 (the op engine and
+Five finite CPU/GPU failures have separately approved [exact pins](docs/gpu-finite-exact-pins.md)
+for the recorded renderer; original thresholds stay enforced and any changed or newly passing
+result is rejected. The remaining legacy GPU parity sweep follows. Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
@@ -264,7 +266,7 @@ Each milestone completes a section of OCIO with exact oracle checks:
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
 | **M4** | The `PyOpenColorIO`-compatible Python module | **Done:** all 384 upstream Python tests, SystemMonitors and complete module metadata checks pass on both reference platforms, within the approved [D-16 scope](docs/deviations.md) | `0.5.0` |
-| **M5** | Full OCIO 2.5.2 parity | In progress: GPU execution, remaining library tests, SIMD performance, tools and release checks | `1.0.0` |
+| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. Remaining: library tests, legacy GPU parity, SIMD performance, tools and release checks | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
 

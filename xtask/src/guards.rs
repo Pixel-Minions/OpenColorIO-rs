@@ -54,6 +54,9 @@ pub(crate) struct Waiver {
     /// Owner-approved class; its safeguards and renderer scope are schema checked.
     #[serde(default)]
     pub(crate) gpu_nonfinite: Option<toml::Table>,
+    /// Owner-approved individual finite GPU failure fingerprints.
+    #[serde(default)]
+    pub(crate) gpu_exact_pin: Option<toml::Table>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -199,7 +202,7 @@ pub(crate) fn run() -> Result<(), String> {
     if waivers
         .waivers
         .iter()
-        .any(|w| w.gpu_renderer.is_some() || w.gpu_nonfinite.is_some())
+        .any(|w| w.gpu_renderer.is_some() || w.gpu_nonfinite.is_some() || w.gpu_exact_pin.is_some())
         && let Err(error) = ocio_testkit::gpu_waivers::gpu_renderer_waivers("__schema_check_only__")
     {
         problems.push(error);

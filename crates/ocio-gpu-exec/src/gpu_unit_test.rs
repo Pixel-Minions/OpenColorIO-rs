@@ -17,8 +17,8 @@ use ocio_testkit::upstream::gpu::{
 };
 
 use crate::nonfinite_class::{self, Companion, Environment, Frame};
-use crate::wheel_shader;
 use crate::{Components, HeadlessApp};
+use crate::{exact_pin, wheel_shader};
 
 // Upstream's callback captures its OCIOGPUTest by reference. Borrowing the actual
 // extracted description/processor at invocation avoids capturing or pre-extracting it.
@@ -312,6 +312,7 @@ impl GpuUnitTest {
         self.prepare_values()?;
         let entries = self.comparison_entries()?;
         let class = nonfinite_class::approval(&format!("{}/{}", self.group, self.name))?;
+        let exact = exact_pin::approval(&format!("{}/{}", self.group, self.name))?;
         let special_image = self.values.input_values.iter().any(|v| !v.is_finite());
         for reference in references {
             self.validate_reference(reference, entries)?;
@@ -371,6 +372,61 @@ impl GpuUnitTest {
                 );
                 let comparison: ImageComparison =
                     compare_image(&reference.cpu, &pixels, entries, self.comparison);
+                let pin_checked = if let Some(pin) = &exact {
+                    if !app.upstream_class_sampling()? {
+                        return Err(Exception::new(
+                            "Exact GPU failure pin: original image sampling changed",
+                        ));
+                    }
+                    let proof = crate::native_reference::controls()?;
+                    let info = app.info()?;
+                    let record = exact_pin::assess(
+                        pin,
+                        Environment {
+                            info: &info,
+                            native: Some(&proof.info),
+                            language: self
+                                .shader_settings
+                                .language
+                                .unwrap_or(ocio_testkit::gpu::GpuLanguage::Glsl12),
+                        },
+                        Frame {
+                            inputs: &self.values.input_values,
+                            cpu: &reference.cpu,
+                            port: &pixels,
+                            wheel: &wheel_pixels,
+                            entries,
+                            settings: self.comparison,
+                            companion: None,
+                        },
+                        index,
+                        &comparison,
+                    )?;
+                    let stamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(|e| Exception::new(e.to_string()))?
+                        .as_nanos();
+                    std::fs::write(
+                        proof
+                            .directory
+                            .join(format!("exact-pin-{stamp}-{}-{index}.json", self.name)),
+                        serde_json::to_vec_pretty(&record)
+                            .map_err(|e| Exception::new(e.to_string()))?,
+                    )
+                    .map_err(|e| Exception::new(e.to_string()))?;
+                    eprintln!(
+                        "GPU exact pin {} verified {}/{} run {}: original error bits {:08x}, component {:?}; complete GPU identity and historical output bits exact",
+                        pin.id,
+                        self.group,
+                        self.name,
+                        index,
+                        comparison.max_diff.to_bits(),
+                        comparison.index_diff
+                    );
+                    true
+                } else {
+                    false
+                };
                 let class_checked = if let Some(class) = class.as_ref().filter(|_| special_image) {
                     if !app.upstream_class_sampling()? {
                         return Err(Exception::new(
@@ -470,7 +526,7 @@ impl GpuUnitTest {
                 } else {
                     false
                 };
-                if !comparison.passes(self.comparison) && !class_checked {
+                if !comparison.passes(self.comparison) && !class_checked && !pin_checked {
                     return Err(Exception::new(format!(
                         "{} / {} run {}: GPU max vals = {:?}; GPU min vals = {:?}; Maximum error: {}; component {:?}; Large number error at {:?}; NAN error at {:?}; {} tolerance={}",
                         self.group,

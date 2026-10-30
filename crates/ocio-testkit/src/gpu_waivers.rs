@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Owner-approved GPU non-finite class lookup (2026-10-29).
+//! Owner-approved non-finite class and individual exact finite GPU pins.
 //! This metadata grants nothing alone; the execution harness enforces every check.
 
 use serde::Deserialize;
+
+mod exact_pin;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,15 +86,16 @@ fn nonfinite_rule(
 
 /// Existing unpublished test-helper signature; the class applies to every family.
 /// The harness must enforce GPU identity, finite footprints, complete finite
-/// companions, native readback and actual renderer/sampling state. Retired per-test
-/// rules are rejected. They are preserved only in docs/archive and Git history.
+/// companions, native readback and actual renderer/sampling state. Retired Matrix
+/// rules remain rejected. The five separately approved finite pins require exact
+/// test identity, original settings, historical outputs and their own safeguards.
 pub fn gpu_renderer_waivers(test_id: &str) -> Result<Vec<serde_json::Value>, String> {
     let path = crate::paths::workspace_root().join("waivers.toml");
     let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     parse(&text, test_id).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn parse(text: &str, _test_id: &str) -> Result<Vec<serde_json::Value>, String> {
+fn parse(text: &str, test_id: &str) -> Result<Vec<serde_json::Value>, String> {
     let doc: toml::Value = toml::from_str(text).map_err(|e| e.to_string())?;
     let entries = doc
         .get("waiver")
@@ -100,6 +103,7 @@ fn parse(text: &str, _test_id: &str) -> Result<Vec<serde_json::Value>, String> {
         .ok_or("No waiver array")?;
     let mut out = Vec::new();
     let mut class_seen = false;
+    let mut pin_tests = std::collections::BTreeSet::new();
     for entry in entries {
         if entry.get("gpu_renderer").is_some() {
             return Err(
@@ -113,6 +117,21 @@ fn parse(text: &str, _test_id: &str) -> Result<Vec<serde_json::Value>, String> {
             }
             class_seen = true;
             if let Some(rule) = nonfinite_rule(entry, raw)? {
+                out.push(rule);
+            }
+        }
+        if let Some(raw) = entry.get("gpu_exact_pin") {
+            if entry.get("gpu_nonfinite").is_some() {
+                return Err("An exact GPU pin cannot also be a class rule".into());
+            }
+            let test = raw
+                .get("test_id")
+                .and_then(toml::Value::as_str)
+                .ok_or("Exact GPU pin lacks test id")?;
+            if !pin_tests.insert(test.to_owned()) {
+                return Err("Duplicate exact GPU test pin".into());
+            }
+            if let Some(rule) = exact_pin::rule(entry, raw, test_id)? {
                 out.push(rule);
             }
         }
