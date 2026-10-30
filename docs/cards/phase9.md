@@ -333,3 +333,17 @@ Through OCIO's API, on Windows and Rocky Linux 9:
 - `upstream-map.toml` has no `todo` or `partial` entry outside the bindings (Phase 6), the
   GPU suite and legacy GPU path (Phase 7) and the tools (Phase 10), each listed with its
   phase.
+
+## P28 catch-up: NamedTransform basic, existing API (2026-10-30)
+
+`NamedTransform_tests.cpp:12-62` now has every assertion expressible through the existing
+Rust API: copied-transform identity, static forward/inverse `GetTransform`, and the original
+Config errors for an empty name and a missing transform, alongside the earlier model/text
+checks. Source `ad412be6` passed all ten named-transform module tests, guardrails, target
+clippy and generated-file main-mode checks on Windows and Rocky Linux 9, debug and release
+(CI 41074096744). Generated files agree on all four profiles.
+
+`NamedTransform/basic` remains partial, unmarked and uncounted: the C++ null shared-pointer
+argument cannot be passed to `Config::add_named_transform(&NamedTransform)`. No owner boundary
+decision, new API, exclusion or policy change is made here. The count remains 1,188/1,191
+on the P27 prerequisite; a separate normal CI run gates this chunk before merge.
