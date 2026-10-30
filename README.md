@@ -120,7 +120,10 @@ on finite sampling footprints, plus a complete finite companion and independent
 native readback controls under the approved [non-finite class](docs/gpu-nonfinite.md).
 Five finite CPU/GPU failures have separately approved [exact pins](docs/gpu-finite-exact-pins.md)
 for the recorded renderer; original thresholds stay enforced and any changed or newly passing
-result is rejected. The remaining legacy GPU parity sweep follows. Phases 1 (the op engine and
+result is rejected. Small legacy lattices and cache request order are also checked against the
+wheel's native legacy API in all 10 shader languages, including every texture value bit.
+Larger and boundary lattices, allocation cuts, file transforms and dynamic legacy cases remain.
+Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,

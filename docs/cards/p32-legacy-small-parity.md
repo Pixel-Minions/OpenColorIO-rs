@@ -26,3 +26,14 @@ this first chunk as the whole legacy parity sweep or as GPU pixel execution cove
 No FixedFunctionTransform, ACES2 failure investigation, GPU waiver, threshold or held test
 belongs to this chunk. The separate debugger's worktree/branch and protected evidence stay
 untouched; all 59 fixed-function GPU cases stay unmerged.
+
+## Focused evidence
+
+Source `14b03497` passed Windows/Rocky debug/release in CI 41100526872. Each profile compared
+1,680 requests: 1,554 shader/texture outcomes and 126 matching reference refusals, with zero
+ignored tests. Exact source identities, guardrails, target clippy, generated main-mode checks
+and identical generated files were independently verified in
+`docs/legacy-gpu-small-validation.json`. No upstream marker or count is added.
+
+The final landing still requires normal CI and CPU-profile validation of the added target.
+This first chunk does not close the broader WP7.1c checklist or claim new pixel executions.

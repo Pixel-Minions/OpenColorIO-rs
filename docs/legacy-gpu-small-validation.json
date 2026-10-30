@@ -1,0 +1,77 @@
+{
+  "VerifiedUTC": "2026-10-30T18:03:46.823647+00:00",
+  "Run": 41100526872,
+  "Source": "14b03497379c07d8f193ddf71fa43e301029fda8",
+  "Validation": "d582b4579a58abf947f2a6f50335550feb7ac9d7",
+  "AllFourProfilesPassed": true,
+  "RequestsPerProfile": 1680,
+  "GeneratedFilesIdentical": true,
+  "CPPCountDoesNotIncrease": true,
+  "GPUCountDoesNotIncrease": true,
+  "NoNewWaiver": true,
+  "OracleUnchanged": true,
+  "Scope": "small legacy lattices and request ordering only; not full WP7.1c or pixel execution",
+  "FullNormalAndEmulatedCPUValidationStillRequired": true,
+  "Profiles": [
+    {
+      "OS": "Windows",
+      "Profile": "debug",
+      "Requests": 1680,
+      "ExactShadersAndTextures": 1554,
+      "ExactRefusals": 126,
+      "Ignored": 0,
+      "GuardsClippyMainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      }
+    },
+    {
+      "OS": "Windows",
+      "Profile": "release",
+      "Requests": 1680,
+      "ExactShadersAndTextures": 1554,
+      "ExactRefusals": 126,
+      "Ignored": 0,
+      "GuardsClippyMainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      }
+    },
+    {
+      "OS": "Linux",
+      "Profile": "debug",
+      "Requests": 1680,
+      "ExactShadersAndTextures": 1554,
+      "ExactRefusals": 126,
+      "Ignored": 0,
+      "GuardsClippyMainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      }
+    },
+    {
+      "OS": "Linux",
+      "Profile": "release",
+      "Requests": 1680,
+      "ExactShadersAndTextures": 1554,
+      "ExactRefusals": 126,
+      "Ignored": 0,
+      "GuardsClippyMainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      }
+    }
+  ]
+}
