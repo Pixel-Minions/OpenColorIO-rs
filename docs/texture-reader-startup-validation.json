@@ -1,0 +1,84 @@
+{
+  "Run": 41004232105,
+  "Runtime": "15fc77f61ee5b49d985017ae3664d3c5acd12073",
+  "Validation": "ef4bce479e8fa922d83fee1799d0ac0d137ca797",
+  "TotalCompleteStressTestsPassed": 20,
+  "OriginalStressCountsUnchanged": true,
+  "GeneratedFilesIdenticalAcrossAllFourProfiles": true,
+  "Profiles": [
+    {
+      "OS": "Windows",
+      "Profile": "debug",
+      "RepeatedTestsPassed": 5,
+      "ReaderRoundsPerTest": 200,
+      "ReadersPerRound": 5,
+      "ExtractionsPerRound": 10,
+      "SourceIdentityVerified": true,
+      "GuardrailsPassed": true,
+      "PythonFeatureTargetClippyPassed": true,
+      "MainModePassed": true,
+      "CPP": 1187,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "c76b98d4dc84c295bb13d08550da35b9bb6b4c2c2e1c42b51c385d5695390589",
+        "ratchet.toml": "1d038088abde06cf421d3fd3b6a03760570aab6d80efbdbcb2f55ac09c6312e2"
+      }
+    },
+    {
+      "OS": "Windows",
+      "Profile": "release",
+      "RepeatedTestsPassed": 5,
+      "ReaderRoundsPerTest": 200,
+      "ReadersPerRound": 5,
+      "ExtractionsPerRound": 10,
+      "SourceIdentityVerified": true,
+      "GuardrailsPassed": true,
+      "PythonFeatureTargetClippyPassed": true,
+      "MainModePassed": true,
+      "CPP": 1187,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "c76b98d4dc84c295bb13d08550da35b9bb6b4c2c2e1c42b51c385d5695390589",
+        "ratchet.toml": "1d038088abde06cf421d3fd3b6a03760570aab6d80efbdbcb2f55ac09c6312e2"
+      }
+    },
+    {
+      "OS": "Linux",
+      "Profile": "debug",
+      "RepeatedTestsPassed": 5,
+      "ReaderRoundsPerTest": 200,
+      "ReadersPerRound": 5,
+      "ExtractionsPerRound": 10,
+      "SourceIdentityVerified": true,
+      "GuardrailsPassed": true,
+      "PythonFeatureTargetClippyPassed": true,
+      "MainModePassed": true,
+      "CPP": 1187,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "c76b98d4dc84c295bb13d08550da35b9bb6b4c2c2e1c42b51c385d5695390589",
+        "ratchet.toml": "1d038088abde06cf421d3fd3b6a03760570aab6d80efbdbcb2f55ac09c6312e2"
+      }
+    },
+    {
+      "OS": "Linux",
+      "Profile": "release",
+      "RepeatedTestsPassed": 5,
+      "ReaderRoundsPerTest": 200,
+      "ReadersPerRound": 5,
+      "ExtractionsPerRound": 10,
+      "SourceIdentityVerified": true,
+      "GuardrailsPassed": true,
+      "PythonFeatureTargetClippyPassed": true,
+      "MainModePassed": true,
+      "CPP": 1187,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "c76b98d4dc84c295bb13d08550da35b9bb6b4c2c2e1c42b51c385d5695390589",
+        "ratchet.toml": "1d038088abde06cf421d3fd3b6a03760570aab6d80efbdbcb2f55ac09c6312e2"
+      }
+    }
+  ],
+  "VerifiedUTC": "2026-10-30T06:51:13.015774+00:00",
+  "FullNormalCIStillRequired": true
+}

@@ -4511,7 +4511,7 @@ path = "tests/cpu/NamedTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/named_transform_tests.rs"]
 status = "partial"
-note = "basic and alias add named transforms to a config (3.4j) and call NamedTransform::GetTransform (3.2a): they move to p3-config-2; p3-model-objects (3.4c) checks their parts without a config in named_transform_tests.rs. p3-validate 3.8: named_transform_io, colorspace_transform_named_transform, inactive_named_transform_precedence. p3-builders 3.2a: static_get_transform; 3.2d: named_transform_processor, named_transform_validation, inactive_named_transforms"
+note = "P25 completes alias (NamedTransform_tests.cpp:64-211), including Config cloning, lookup/canonical names, replacement and all three collision errors with original literals. basic remains partial: its existing reference-typed API cannot accept the C++ null argument; do not count basic yet. p3-model-objects (3.4c) checks its model-only part in named_transform_tests.rs. p3-validate 3.8: named_transform_io, colorspace_transform_named_transform, inactive_named_transform_precedence. p3-builders 3.2a: static_get_transform; 3.2d: named_transform_processor, named_transform_validation, inactive_named_transforms"
 
 [[file]]
 path = "tests/cpu/OCIOZArchive_tests.cpp"
@@ -5237,8 +5237,8 @@ note = "p5-transforms 5.5a: basic, processor, processor_several_ec"
 path = "tests/cpu/transforms/FileTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/file_transform_tests.rs"]
-status = "partial"
-note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; 4.1b: load_file_fail, and context_variables' cases 1-3 in a test of their own; p4-ctf-read-3 (4.1b, 4.1c): load_file_ok, interpolation_validity, cc_file_with_different_file_extension; context_variables itself waits for the ExposureContrast reader (4.5i): its case 3 builds the processor of exposure_contrast_linear.ctf"
+status = "done"
+note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; 4.1b: load_file_fail, and context_variables' cases 1-3 in a test of their own; p4-ctf-read-3 (4.1b, 4.1c): load_file_ok, interpolation_validity, cc_file_with_different_file_extension; P26 completes context_variables, including the ExposureContrast processor construction and all original CCC ID case-4 assertions (FileTransform_tests.cpp:368-497)"
 
 [[file]]
 path = "tests/cpu/transforms/FixedFunctionTransform_tests.cpp"
