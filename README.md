@@ -120,7 +120,11 @@ on finite sampling footprints, plus a complete finite companion and independent
 native readback controls under the approved [non-finite class](docs/gpu-nonfinite.md).
 Five finite CPU/GPU failures have separately approved [exact pins](docs/gpu-finite-exact-pins.md)
 for the recorded renderer; original thresholds stay enforced and any changed or newly passing
-result is rejected. The remaining legacy GPU parity sweep follows. Phases 1 (the op engine and
+result is rejected. Legacy shader and LUT data are also checked against the wheel's native API
+in all 10 languages: all seven named optimization levels on small lattices, shared-cache request
+orders, allocation/file boundaries, mixed LUT/range/alpha chains and initial dynamic snapshots.
+The DEFAULT sweep also checks larger lattices through 129 cubed, with every texture value
+bit exact. Post-extraction dynamic updates remain separate work. Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
@@ -215,7 +219,9 @@ debug and release builds, and was reviewed independently before merging.
 - **Checks on emulated CPUs.** The CPU-dependent tests also run under Intel's CPU emulator, as
   Nehalem, Sandy Bridge, Haswell, Skylake and Skylake server. So every SIMD kernel the official
   library has (SSE2, AVX, AVX2, AVX-512) is compared with the port's, whatever CPU the tests
-  run on.
+  run on. Kernel jobs record Cargo's complete selected target and test manifests, then run
+  each selected test in a fresh emulator to avoid SDE's cumulative thread limit. The two
+  long LUT sweeps retain their separate jobs.
 - **A shared test battery.** Every op family is tested the same way against the official
   library: probe sets, generated extreme and non-finite parameters, and every numeric profile.
   Every card's tests were mutation-tested by an independent reviewer to prove they catch
