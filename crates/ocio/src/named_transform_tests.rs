@@ -1,24 +1,22 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the named transform. Upstream's `basic`
-//! (`tests/cpu/NamedTransform_tests.cpp` @ v2.5.2) adds named transforms to a config and calls
-//! `NamedTransform::GetTransform`, so its complete port also needs the config named transforms
-//! and the color space transform's builder (WP 3.2a); these tests check the parts that need
-//! neither, with upstream's values. The complete `alias` below also checks its Config assertions.
-//! The text is compared with the wheel's in
-//! `tests/model_objects_oracle.rs`. Upstream's `Config` tests of named transforms are here too,
-//! with the processors the config makes of them (WP 3.2d).
-
+//! Tests of the named transform: `tests/cpu/NamedTransform_tests.cpp` @v2.5.2.
+//! The representable parts of `basic` include model/copy/text, static GetTransform and
+//! Config error checks. The C++ null shared-pointer argument cannot be passed to the
+//! existing reference-typed API, so `basic` stays uncounted pending owner scope review.
+//! The complete `alias` and Config/processor tests below retain their original markers.
+//! Text is also compared with the wheel in `tests/model_objects_oracle.rs`.
 use ocio_testkit::upstream::check_throw_what;
 
 use super::*;
 use crate::MatrixTransform;
 
-/// The first part of upstream's `basic` (NamedTransform_tests.cpp:14-46 @ v2.5.2): a new named
-/// transform, a copy of its transform, and upstream's text.
+/// Existing-API checks of upstream's `basic` (NamedTransform_tests.cpp:12-62 @v2.5.2).
+/// Its C++ null-argument assertion remains unrepresented; do not add a full port marker.
 #[test]
-fn basic_without_a_config() {
+fn basic_existing_rust_api() {
+    let _env = crate::test_env::EnvGuard::new();
     let mut named_transform = NamedTransform::new();
     assert!(named_transform.name().is_empty());
     assert!(
@@ -41,17 +39,38 @@ fn basic_without_a_config() {
         .unwrap();
     let fwd_transform = named_transform.transform(TransformDirection::Forward);
     assert!(matches!(fwd_transform, Some(Transform::Matrix(_))));
+    // Upstream copies the transform when it is set, so the two objects are distinct.
+    assert!(!std::ptr::eq(fwd_transform.unwrap(), &mat));
     assert!(
         named_transform
             .transform(TransformDirection::Inverse)
             .is_none()
     );
 
+    let actual_fwd =
+        NamedTransform::get_transform(&named_transform, TransformDirection::Forward).unwrap();
+    assert!(matches!(actual_fwd, Transform::Matrix(_)));
+    let actual_inv =
+        NamedTransform::get_transform(&named_transform, TransformDirection::Inverse).unwrap();
+    assert!(matches!(actual_inv, Transform::Matrix(_)));
+
     assert_eq!(
         named_transform.to_string(),
         "<NamedTransform name=NewName,\n    forward=\n        <MatrixTransform \
          direction=forward, fileindepth=unknown, fileoutdepth=unknown, matrix=[1, 0, 0, 0, 0, \
          1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], offset=[0, 0, 0, 0]>>"
+    );
+    let mut config = (*crate::Config::create_raw().unwrap()).clone();
+    // The preceding C++ null shared-pointer call is not expressible by this API.
+    let mut invalid = NamedTransform::new();
+    check_throw_what(
+        config.add_named_transform(&invalid),
+        "Named transform must have a non-empty name",
+    );
+    invalid.set_name("name");
+    check_throw_what(
+        config.add_named_transform(&invalid),
+        "Named transform must define at least one transform",
     );
 }
 
