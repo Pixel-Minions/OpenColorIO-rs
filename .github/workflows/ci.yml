@@ -2,6 +2,11 @@
 name: P29 whole-merge partition validation
 on:
   workflow_dispatch:
+    inputs:
+      native_only:
+        description: Reuse the existing exact-source SDE trial and run native profiles only
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
@@ -30,7 +35,7 @@ jobs:
       - name: Exact source identity
         run: |
           mkdir -p kept/p29-validation
-          git fetch --depth=1 origin refs/heads/codex/p29-named-basic-existing-api
+          git fetch --depth=1 origin bb1f1a4b3f7ac9c1d4a2075741ee3fda7d7f2ef3
           source=$(git rev-parse FETCH_HEAD)
           git diff --exit-code "$source" HEAD -- . ':(exclude).github/workflows/ci.yml'
           printf '%s\n' "$source" > kept/p29-validation/source-commit.txt
@@ -100,6 +105,7 @@ jobs:
           retention-days: 30
 
   sde:
+    if: ${{ !inputs.native_only }}
     name: P29 SDE (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
