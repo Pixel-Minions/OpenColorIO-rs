@@ -8,7 +8,8 @@
 
 use ocio::{
     Allocation, AllocationTransform, Config, DynamicPropertyType, ExposureContrastTransform,
-    FileTransform, GroupTransform, Lut1DTransform, MatrixTransform, OptimizationFlags, Transform,
+    FileTransform, GroupTransform, Lut1DTransform, Lut3DTransform, MatrixTransform,
+    OptimizationFlags, RangeTransform, Transform,
 };
 use ocio_gpu::gpu_shader::{TextureDimensions, TextureType, UniformData};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
@@ -441,6 +442,79 @@ fn dynamic_chains() -> Vec<Chain> {
     chains
 }
 
+/// The existing zero-alpha lattice probe's inputs (no_ops_tests.rs:
+/// a_legacy_lattice_matches_the_wheels_cpu_pixels), now through the complete processor.
+fn matrix_alpha() -> (Transform, Value) {
+    let values = [
+        1.1, 0.2, -0.3, 0.7, -0.4, 0.9, 0.15, -0.2, 0.3, -0.1, 1.2, 0.5, 0.0, 0.0, 0.0, 1.0,
+    ];
+    let offset = [0.03, -0.04, 0.12, 0.25];
+    let mut transform = MatrixTransform::new();
+    transform.set_matrix(&values);
+    transform.set_offset(&offset);
+    (
+        transform.into(),
+        json!({"class": "MatrixTransform", "calls": [["setMatrix", values], ["setOffset", offset]]}),
+    )
+}
+
+/// Probe inputs only; outputs come from the native wheel, including every baked value bit.
+fn lut3() -> (Transform, Value) {
+    let mut transform = Lut3DTransform::with_grid_size(2).expect("the input grid");
+    transform
+        .set_value(1, 1, 1, 0.8, 0.9, 0.7)
+        .expect("the input corner");
+    (
+        transform.into(),
+        json!({"class": "Lut3DTransform", "args": {"gridSize": 2},
+               "calls": [["setValue", 1, 1, 1, 0.8, 0.9, 0.7]]}),
+    )
+}
+
+fn range() -> (Transform, Value) {
+    let mut transform = RangeTransform::new();
+    transform.set_min_in_value(0.0);
+    transform.set_max_in_value(1.0);
+    transform.set_min_out_value(0.125);
+    transform.set_max_out_value(0.875);
+    (
+        transform.into(),
+        json!({"class": "RangeTransform", "calls": [
+            ["setMinInValue", 0.0], ["setMaxInValue", 1.0],
+            ["setMinOutValue", 0.125], ["setMaxOutValue", 0.875],
+        ]}),
+    )
+}
+
+fn mixed_chains() -> Vec<Chain> {
+    vec![
+        group_chain("lut3", vec![lut3()]),
+        group_chain("alpha-lut3-range", vec![matrix_alpha(), lut3(), range()]),
+        group_chain(
+            "lut1-alpha-lut3-range",
+            vec![lut(), matrix_alpha(), lut3(), range()],
+        ),
+        group_chain("range-lut1-range", vec![range(), lut(), range()]),
+        group_chain(
+            "uniform-vars-lut3",
+            vec![allocation(Allocation::Uniform, Some(&[-0.5, 1.5])), lut3()],
+        ),
+        group_chain(
+            "lg2-vars-lut3",
+            vec![allocation(Allocation::Lg2, Some(&[-8.0, 8.0])), lut3()],
+        ),
+        group_chain(
+            "lg2-lut3-alpha-lut1",
+            vec![
+                allocation(Allocation::Lg2, Some(&[-8.0, 8.0])),
+                lut3(),
+                matrix_alpha(),
+                lut(),
+            ],
+        ),
+    ]
+}
+
 #[derive(Debug)]
 struct Job {
     chain: usize,
@@ -613,6 +687,30 @@ fn legacy_dynamic_positions_and_snapshot_values_match_native_wheel() {
         "the native sweep must expose dynamic snapshot values"
     );
     println!("P34: {measured} exact uniform/property snapshot rows");
+}
+
+#[test]
+fn legacy_mixed_lut_range_and_alpha_lattices_match_native_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let chains = mixed_chains();
+    let mut jobs = Vec::new();
+    for chain in 0..chains.len() {
+        for level in 0..LEVELS.len() {
+            for edge in [2, 3] {
+                for language in 0..GpuLanguage::ALL.len() {
+                    jobs.push(Job {
+                        chain,
+                        level,
+                        edge,
+                        before: 0,
+                        language,
+                    });
+                }
+            }
+        }
+    }
+    assert_eq!(jobs.len(), 980, "the complete P37 mixed-op input plan");
+    compare_batches("P37", &chains, &jobs, 50, false);
 }
 
 #[test]
