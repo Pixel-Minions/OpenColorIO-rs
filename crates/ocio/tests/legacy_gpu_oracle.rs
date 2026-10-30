@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! P32 / WP7.1c: small legacy lattices and GPU-cache request order against O7.1's native
-//! client linked to the official wheel. Shader text/cache IDs, logs and every texture bit
-//! remain exact. No FixedFunctionTransform or GPU execution exception is involved.
-//! Larger edges, allocations, file transforms and dynamic properties are separate chunks.
+//! WP7.1c: small legacy lattices, allocation/file boundaries and GPU-cache request order
+//! against O7.1's native client linked to the official wheel. Shader text/cache IDs, logs
+//! and every texture bit remain exact. No FixedFunctionTransform or execution exception
+//! is involved. Larger edges and dynamic properties remain separate chunks.
 
-use ocio::{Config, GroupTransform, Lut1DTransform, MatrixTransform, OptimizationFlags, Transform};
+use ocio::{
+    Allocation, AllocationTransform, Config, FileTransform, GroupTransform, Lut1DTransform,
+    MatrixTransform, OptimizationFlags, Transform,
+};
 use ocio_gpu::gpu_shader::{TextureDimensions, TextureType};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
 use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
@@ -202,6 +205,20 @@ fn lut() -> (Transform, Value) {
     )
 }
 
+fn group_chain(label: &'static str, steps: Vec<(Transform, Value)>) -> Chain {
+    let mut group = GroupTransform::new();
+    let mut children = Vec::new();
+    for (transform, spec) in steps {
+        group.append_transform(transform);
+        children.push(spec);
+    }
+    Chain {
+        label,
+        transform: group.into(),
+        spec: json!({"class": "GroupTransform", "children": children}),
+    }
+}
+
 fn chains() -> Vec<Chain> {
     [
         ("analytic", vec![false]),
@@ -211,20 +228,82 @@ fn chains() -> Vec<Chain> {
     ]
     .into_iter()
     .map(|(label, steps)| {
-        let mut group = GroupTransform::new();
-        let mut children = Vec::new();
-        for is_lut in steps {
-            let (transform, spec) = if is_lut { lut() } else { matrix() };
-            group.append_transform(transform);
-            children.push(spec);
-        }
-        Chain {
+        group_chain(
             label,
-            transform: group.into(),
-            spec: json!({"class": "GroupTransform", "children": children}),
-        }
+            steps
+                .into_iter()
+                .map(|is_lut| if is_lut { lut() } else { matrix() })
+                .collect(),
+        )
     })
     .collect()
+}
+
+/// Allocation inputs of NoOps_tests.cpp:17-23 and its partition chains at 160-234 @v2.5.2.
+fn allocation(kind: Allocation, vars: Option<&[f32]>) -> (Transform, Value) {
+    let mut transform = AllocationTransform::new();
+    transform.set_allocation(kind);
+    let name = match kind {
+        Allocation::Uniform => "ALLOCATION_UNIFORM",
+        Allocation::Lg2 => "ALLOCATION_LG2",
+        other => panic!("allocation input {other:?}"),
+    };
+    let mut calls = vec![json!(["setAllocation", {"enum": name}])];
+    if let Some(vars) = vars {
+        transform.set_vars(vars);
+        calls.push(json!(["setVars", vars]));
+    }
+    (
+        transform.into(),
+        json!({"class": "AllocationTransform", "calls": calls}),
+    )
+}
+
+/// File-loaded lattice boundary of NoOps.cpp:266-269, using upstream's SPI1D input @v2.5.2.
+fn file() -> (Transform, Value) {
+    let path = ocio_testkit::paths::upstream_dir().join("tests/data/files/lut1d_1.spi1d");
+    let path = path.to_str().expect("UTF-8").replace('\\', "/");
+    let path = path.trim_start_matches("//?/");
+    let mut transform = FileTransform::new();
+    transform.set_src(path);
+    (
+        transform.into(),
+        json!({"class": "FileTransform", "calls": [["setSrc", path]]}),
+    )
+}
+
+fn allocation_file_chains() -> Vec<Chain> {
+    let lg2 = || allocation(Allocation::Lg2, Some(&[-8.0, 8.0]));
+    vec![
+        group_chain("lg2-lut-scale", vec![lg2(), lut(), matrix()]),
+        group_chain(
+            "lut-scale-lg2-lut-scale-lg2",
+            vec![lut(), matrix(), lg2(), lut(), matrix(), lg2()],
+        ),
+        group_chain(
+            "lg2-scale-lut-scale-lg2-lut-scale-lg2",
+            vec![
+                lg2(),
+                matrix(),
+                lut(),
+                matrix(),
+                lg2(),
+                lut(),
+                matrix(),
+                lg2(),
+            ],
+        ),
+        group_chain(
+            "uniform-default-lut",
+            vec![allocation(Allocation::Uniform, None), lut()],
+        ),
+        group_chain(
+            "lg2-default-lut",
+            vec![allocation(Allocation::Lg2, None), lut()],
+        ),
+        group_chain("file", vec![file()]),
+        group_chain("scale-file-scale", vec![matrix(), file(), matrix()]),
+    ]
 }
 
 #[derive(Debug)]
@@ -326,6 +405,35 @@ fn small_legacy_lattices_and_cache_order_match_native_wheel() {
             }
         }
     }
+    assert_eq!(jobs.len(), 1680, "the complete P32 input plan");
+    compare_jobs("P32", &chains, &jobs);
+}
+
+#[test]
+fn legacy_allocation_cuts_and_file_boundaries_match_native_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let chains = allocation_file_chains();
+    let mut jobs = Vec::new();
+    for chain in 0..chains.len() {
+        for level in 0..LEVELS.len() {
+            for edge in [2, 3] {
+                for language in 0..GpuLanguage::ALL.len() {
+                    jobs.push(Job {
+                        chain,
+                        level,
+                        edge,
+                        before: 0,
+                        language,
+                    });
+                }
+            }
+        }
+    }
+    assert_eq!(jobs.len(), 980, "the complete P33 input plan");
+    compare_jobs("P33", &chains, &jobs);
+}
+
+fn compare_jobs(chunk: &str, chains: &[Chain], jobs: &[Job]) {
     let mut compared = 0;
     let mut refusals = 0;
     for batch in jobs.chunks(50) {
@@ -344,6 +452,11 @@ fn small_legacy_lattices_and_cache_order_match_native_wheel() {
             let label = format!("{} {job:?}", chain.label);
             let reply = GpuShaderReply::from_response(
                 response.unwrap_or_else(|error| panic!("{label}: {error}")),
+            );
+            assert_eq!(
+                reply.result["oracle_native"]["wheel_version"],
+                json!("2.5.2"),
+                "{label}: actual native wheel"
             );
             let expected = wheel(&reply);
             let (actual, actual_log) = capture(|| port(chain, job));
@@ -369,7 +482,7 @@ fn small_legacy_lattices_and_cache_order_match_native_wheel() {
     assert_eq!(compared + refusals, jobs.len());
     assert!(compared > 0);
     println!(
-        "P32: {} exact legacy requests: {compared} shaders/textures, {refusals} matching refusals",
+        "{chunk}: {} exact legacy requests: {compared} shaders/textures, {refusals} matching refusals",
         jobs.len()
     );
 }
