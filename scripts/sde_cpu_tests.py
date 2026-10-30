@@ -20,6 +20,34 @@ import time
 
 PREFIX_KEY = 'OCIO_RS_SDE_EXEC_PREFIX_JSON'
 REPORT_KEY = 'OCIO_RS_SDE_EXEC_REPORT_ROOT'
+SHARD_KEY = 'OCIO_RS_SDE_SHARD'
+
+
+def shard_spec(text):
+    if text is None:
+        return None
+    if not re.fullmatch(r'\d+/\d+', text):
+        raise RuntimeError('SDE shard must be zero-based INDEX/COUNT')
+    index, count = map(int, text.split('/'))
+    if not 1 <= count <= 16 or not 0 <= index < count:
+        raise RuntimeError('SDE shard is outside the bounded 1..16 partition')
+    return dict(Index=index, Count=count)
+
+
+def target_key(metadata):
+    package = metadata['Package'].split('#')[0].rstrip('/').rsplit('/', 1)[-1]
+    target = metadata['Target']
+    return package + '/' + ','.join(target['kind']) + '/' + target['name']
+
+
+def selected_shard(metadata, names, shard):
+    if shard is None:
+        return names
+    key = target_key(metadata)
+    def belongs(name):
+        digest = hashlib.sha256((key + '\0' + name).encode()).digest()
+        return int.from_bytes(digest[:8], 'little') % shard['Count'] == shard['Index']
+    return [name for name in names if belongs(name)]
 
 
 def write_json(path, value):
@@ -101,13 +129,18 @@ def test_binary(binary, arguments):
     directory = root / hashlib.sha256(executable.encode()).hexdigest()
     directory.mkdir()  # A duplicate Cargo invocation must not overwrite an earlier report.
     all_names = native_list(binary, [])
-    selected = native_list(binary, arguments)
-    if not set(selected).issubset(all_names):
+    original_selected = native_list(binary, arguments)
+    if not set(original_selected).issubset(all_names):
         raise RuntimeError('Filtered names are not in the full native manifest')
+    shard = shard_spec(os.environ.get(SHARD_KEY))
+    selected = selected_shard(expected[executable], original_selected, shard)
     report = dict(Executable=executable, WorkingDirectory=os.getcwd(), CargoHarnessArgs=arguments,
                   Unfiltered=all_names, Selected=selected,
-                  ExcludedByOriginalArgs=sorted(set(all_names)-set(selected)), Results=[],
+                  ExcludedByOriginalArgs=sorted(set(all_names)-set(original_selected)), Results=[],
                   AllSelectedPassed=False, ExactlyOnce=False)
+    if shard is not None:
+        report.update(Shard=shard, OriginalSelected=original_selected,
+                      LogicalTarget=target_key(expected[executable]))
     write_json(directory / 'report.json', report)
     prefix = json.loads(os.environ[PREFIX_KEY])
     for index, name in enumerate(selected):
@@ -129,6 +162,7 @@ def cargo_command(original, config):
 
 
 def run_cargo(original):
+    shard = shard_spec(os.environ.get(SHARD_KEY))
     if len(original) < 2 or original[0] != 'cargo' or original[1] != 'cpu-tests':
         raise RuntimeError('This runner accepts the original cargo cpu-tests command only')
     split = original.index('--') if '--' in original else len(original)
@@ -160,6 +194,8 @@ def run_cargo(original):
         raise RuntimeError('Native Cargo build produced no selected test executables')
     write_json(root / 'expected-executables.json', expected)
     environment = os.environ.copy()
+    # Every job must run the real preflight audit, regardless of its production bucket.
+    environment.pop(SHARD_KEY, None)
     environment[PREFIX_KEY] = json.dumps(prefix)
     runner = [sys.executable, str(pathlib.Path(__file__).resolve()), '--test-binary']
     # CLI configuration has precedence over the inherited SDE runner; the array also
@@ -186,6 +222,8 @@ def run_cargo(original):
         raise RuntimeError('Cargo runner preflight failed; do not start the full suite')
 
     environment[REPORT_KEY] = str(root)
+    if shard is not None:
+        environment[SHARD_KEY] = f"{shard['Index']}/{shard['Count']}"
     result = subprocess.run(cargo_command(original, config), env=environment)
     reports = [json.loads(path.read_text()) for path in root.glob('*/report.json')]
     observed = [report['Executable'] for report in reports]
@@ -197,6 +235,9 @@ def run_cargo(original):
                    PassedTests=sum(row['Passed'] for report in reports for row in report['Results']),
                    ExcludedByOriginalArgs=[name for report in reports for name in report['ExcludedByOriginalArgs']],
                    AllSelectedTestsPassed=passed, CargoExit=result.returncode)
+    if shard is not None:
+        summary.update(Shard=shard, RequiresShardAggregation=True,
+                       OriginalSelectedTests=sum(len(report['OriginalSelected']) for report in reports))
     write_json(root / 'summary.json', summary)
     print(json.dumps(summary, indent=2), flush=True)
     return 0 if passed else 1
