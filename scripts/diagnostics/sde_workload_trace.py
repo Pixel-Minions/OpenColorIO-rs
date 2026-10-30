@@ -7,10 +7,12 @@ out=pathlib.Path('kept/sde-workload-trace');out.mkdir(parents=True,exist_ok=True
 command=['cargo','test','--locked','--release','-p','ocio','--lib','--','--nocapture',f'--test-threads={threads}']
 env=os.environ.copy();env['RUST_TEST_THREADS']=str(threads)
 process=subprocess.Popen(command,env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8',errors='replace',start_new_session=os.name!='nt',bufsize=1)
-started=time.monotonic();lines=queue.Queue();tail=[];observed=False;timed_out=False
+started=time.monotonic();lines=queue.Queue();tail=[];observed=False;timed_out=False;reader_done=threading.Event()
 
 def consume():
-    for line in process.stdout: lines.put(line)
+    try:
+        for line in process.stdout: lines.put(line)
+    finally:reader_done.set()
 threading.Thread(target=consume,daemon=True).start()
 
 def snapshot():
@@ -48,7 +50,7 @@ def kill_owned():
 snapshots=[];next_snapshot=0;all_text=[]
 try:
     with (out/'workload.log').open('w',encoding='utf-8') as log:
-        while process.poll() is None or not lines.empty():
+        while process.poll() is None or not reader_done.is_set() or not lines.empty():
             now=time.monotonic()-started
             if now>=next_snapshot:
                 snapshots.append(dict(ElapsedSeconds=round(now,2),Processes=snapshot()))
