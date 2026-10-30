@@ -2,6 +2,8 @@
 name: Actual SDE workload thread trace
 on:
   workflow_dispatch:
+  push:
+    branches: [codex/sde-workload-thread-trace]
 permissions:
   contents: read
 env:
