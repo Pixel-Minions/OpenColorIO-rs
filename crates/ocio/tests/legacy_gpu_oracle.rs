@@ -4,13 +4,13 @@
 //! WP7.1c: small legacy lattices, allocation/file boundaries and GPU-cache request order
 //! against O7.1's native client linked to the official wheel. Shader text/cache IDs, logs
 //! and every texture bit remain exact. No FixedFunctionTransform or execution exception
-//! is involved. Larger edges and dynamic properties remain separate chunks.
+//! is involved. Larger edges and post-extraction dynamic updates remain separate chunks.
 
 use ocio::{
-    Allocation, AllocationTransform, Config, FileTransform, GroupTransform, Lut1DTransform,
-    MatrixTransform, OptimizationFlags, Transform,
+    Allocation, AllocationTransform, Config, DynamicPropertyType, ExposureContrastTransform,
+    FileTransform, GroupTransform, Lut1DTransform, MatrixTransform, OptimizationFlags, Transform,
 };
-use ocio_gpu::gpu_shader::{TextureDimensions, TextureType};
+use ocio_gpu::gpu_shader::{TextureDimensions, TextureType, UniformData};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
 use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
@@ -19,6 +19,7 @@ use ocio_testkit::gpu::{
     self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings, Texture,
 };
 use ocio_testkit::oracle::BatchCall;
+use ocio_testkit::processor_ops::Dumped;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -56,6 +57,72 @@ fn texture_json(t: &Texture) -> Value {
         "binding_index": t.binding_index,
         "values": t.values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
     })
+}
+
+fn uniform_value_json(value: &oracle_gpu::UniformValue) -> Value {
+    match value {
+        oracle_gpu::UniformValue::Unknown => Value::Null,
+        oracle_gpu::UniformValue::Double(value) => json!(value.to_bits()),
+        oracle_gpu::UniformValue::Bool(value) => json!(value),
+        oracle_gpu::UniformValue::Float3(values) => {
+            json!(values.map(f32::to_bits))
+        }
+        oracle_gpu::UniformValue::VectorFloat(values) => {
+            json!(
+                values
+                    .iter()
+                    .map(|value| value.to_bits())
+                    .collect::<Vec<_>>()
+            )
+        }
+        oracle_gpu::UniformValue::VectorInt(values) => json!(values),
+    }
+}
+
+/// Exact uniform rows, as api_gpu_oracle::port_uniform_rows compares the ordinary API.
+fn port_uniforms(desc: &GpuShaderDesc) -> Vec<Value> {
+    let text = |value: &[u8]| String::from_utf8(value.to_vec()).expect("UTF-8");
+    let bits = |values: &[f32]| {
+        values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+    desc.uniforms()
+        .iter()
+        .map(|uniform| {
+            let (kind, value) = match uniform.data() {
+                UniformData::Double(get) => ("UNIFORM_DOUBLE", json!(get().to_bits())),
+                UniformData::Bool(get) => ("UNIFORM_BOOL", json!(get())),
+                UniformData::Float3(get) => ("UNIFORM_FLOAT3", json!(bits(&get()))),
+                UniformData::VectorFloat { size, values } => (
+                    "UNIFORM_VECTOR_FLOAT",
+                    json!(bits(&values()[..size() as usize])),
+                ),
+                UniformData::VectorInt { size, values } => (
+                    "UNIFORM_VECTOR_INT",
+                    json!(values()[..size() as usize].to_vec()),
+                ),
+            };
+            json!([text(uniform.name()), kind, uniform.buffer_offset(), value])
+        })
+        .collect()
+}
+
+fn port_dynamic_properties(desc: &GpuShaderDesc) -> Vec<Value> {
+    desc.dynamic_properties()
+        .iter()
+        .map(|property| {
+            let kind = match property.get_type() {
+                DynamicPropertyType::Exposure => "DYNAMIC_PROPERTY_EXPOSURE",
+                DynamicPropertyType::Contrast => "DYNAMIC_PROPERTY_CONTRAST",
+                DynamicPropertyType::Gamma => "DYNAMIC_PROPERTY_GAMMA",
+                other => panic!("unexpected dynamic input {other:?}"),
+            };
+            let value = property.as_double().expect("the input's double property");
+            json!([kind, value.get_value().to_bits()])
+        })
+        .collect()
 }
 
 /// The port's texture `index`, as the oracle reports the wheel's.
@@ -127,14 +194,23 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
                 "function_name": shader.getters["function_name"],
                 "pixel_name": shader.getters["pixel_name"],
                 "resource_prefix": shader.getters["resource_prefix"],
-                "uniforms": shader.uniforms.len(),
+                "getters": shader.getters,
+                "uniforms": shader.uniforms.iter().map(|uniform| json!([
+                    uniform.name, uniform.kind, uniform.buffer_offset,
+                    uniform_value_json(&uniform.value),
+                ])).collect::<Vec<_>>(),
                 "textures": shader.textures.iter().map(texture_json).collect::<Vec<_>>(),
                 "textures_3d": shader.textures_3d.iter().map(|t| json!({
                     "name": t.name, "sampler_name": t.sampler_name, "edge_len": t.edge_len,
                     "interpolation": t.interpolation, "binding_index": t.binding_index,
                     "values": t.values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
                 })).collect::<Vec<Value>>(),
-                "dynamic_properties": shader.dynamic_properties.len(),
+                "dynamic_properties": shader.dynamic_properties.iter().map(|property| {
+                    let Dumped::F64(value) = &property.value else {
+                        panic!("unexpected dynamic input {:?}", property.value)
+                    };
+                    json!([property.kind, value.to_bits()])
+                }).collect::<Vec<_>>(),
             }))
         }
     };
@@ -173,6 +249,7 @@ struct Chain {
     label: &'static str,
     transform: Transform,
     spec: Value,
+    dynamic: bool,
 }
 
 /// Inputs from CreateGenericScaleOp/CreateGenericLutOp, NoOps_tests.cpp:26-52 @v2.5.2.
@@ -216,6 +293,7 @@ fn group_chain(label: &'static str, steps: Vec<(Transform, Value)>) -> Chain {
         label,
         transform: group.into(),
         spec: json!({"class": "GroupTransform", "children": children}),
+        dynamic: false,
     }
 }
 
@@ -306,6 +384,61 @@ fn allocation_file_chains() -> Vec<Chain> {
     ]
 }
 
+/// Initial values from ExposureContrastTransform_tests.cpp:47-50 @v2.5.2.
+fn dynamic(kind: usize) -> (Transform, Value) {
+    let mut transform = ExposureContrastTransform::new();
+    transform.set_exposure(1.1);
+    transform.set_contrast(0.5);
+    transform.set_gamma(1.5);
+    let mut calls = vec![
+        json!(["setExposure", 1.1]),
+        json!(["setContrast", 0.5]),
+        json!(["setGamma", 1.5]),
+    ];
+    if matches!(kind, 0 | 3) {
+        transform.make_exposure_dynamic();
+        calls.push(json!(["makeExposureDynamic"]));
+    }
+    if matches!(kind, 1 | 3) {
+        transform.make_contrast_dynamic();
+        calls.push(json!(["makeContrastDynamic"]));
+    }
+    if matches!(kind, 2 | 3) {
+        transform.make_gamma_dynamic();
+        calls.push(json!(["makeGammaDynamic"]));
+    }
+    (
+        transform.into(),
+        json!({"class": "ExposureContrastTransform", "calls": calls}),
+    )
+}
+
+fn dynamic_chains() -> Vec<Chain> {
+    let mut chains = Vec::new();
+    for kind in 0..4 {
+        for (label, position) in [
+            ("dynamic-before", 0),
+            ("dynamic-inside", 1),
+            ("dynamic-after", 2),
+        ] {
+            let mut steps = vec![dynamic(kind)];
+            match position {
+                0 => steps.push(lut()),
+                1 => {
+                    steps.insert(0, lut());
+                    steps.push(lut());
+                }
+                2 => steps.insert(0, lut()),
+                _ => unreachable!("the three lattice positions"),
+            }
+            let mut chain = group_chain(label, steps);
+            chain.dynamic = true;
+            chains.push(chain);
+        }
+    }
+    chains
+}
+
 #[derive(Debug)]
 struct Job {
     chain: usize,
@@ -375,10 +508,19 @@ fn port(chain: &Chain, job: &Job) -> Outcome {
     let shader = gpu.extract_gpu_shader_info(&mut desc).map(|()| json!({
         "text": text(desc.shader_text()), "cache_id": text(&desc.cache_id()),
         "function_name": text(desc.function_name()), "pixel_name": text(desc.pixel_name()),
-        "resource_prefix": text(desc.resource_prefix()), "uniforms": desc.num_uniforms(),
+        "resource_prefix": text(desc.resource_prefix()), "uniforms": port_uniforms(&desc),
+        "getters": {
+            "language": oracle_gpu::GpuLanguage::ALL[job.language].oracle_name(),
+            "function_name": text(desc.function_name()), "pixel_name": text(desc.pixel_name()),
+            "resource_prefix": text(desc.resource_prefix()), "uid": text(desc.unique_id()),
+            "descriptor_set_index": desc.descriptor_set_index(),
+            "texture_binding_start": desc.texture_binding_start(),
+            "texture_max_width": desc.texture_max_width(), "allow_texture_1d": desc.allow_texture_1d(),
+            "uniform_buffer_size": desc.uniform_buffer_size(),
+        },
         "textures": (0..desc.num_textures()).map(|i| texture_json(&port_texture(&desc, i))).collect::<Vec<_>>(),
         "textures_3d": (0..desc.num_textures_3d()).map(|i| port_texture_3d(&desc, i)).collect::<Vec<_>>(),
-        "dynamic_properties": desc.num_dynamic_properties(),
+        "dynamic_properties": port_dynamic_properties(&desc),
     })).map_err(|error| ("extract".to_string(), error.message().to_string()));
     Outcome::Gpu { processor, shader }
 }
@@ -433,9 +575,39 @@ fn legacy_allocation_cuts_and_file_boundaries_match_native_wheel() {
     compare_jobs("P33", &chains, &jobs);
 }
 
-fn compare_jobs(chunk: &str, chains: &[Chain], jobs: &[Job]) {
+#[test]
+fn legacy_dynamic_positions_and_snapshot_values_match_native_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let chains = dynamic_chains();
+    let mut jobs = Vec::new();
+    for chain in 0..chains.len() {
+        for level in 0..LEVELS.len() {
+            for edge in [2, 3] {
+                for language in 0..GpuLanguage::ALL.len() {
+                    jobs.push(Job {
+                        chain,
+                        level,
+                        edge,
+                        before: 0,
+                        language,
+                    });
+                }
+            }
+        }
+    }
+    assert_eq!(jobs.len(), 1680, "the complete P34 input plan");
+    let measured = compare_jobs("P34", &chains, &jobs);
+    assert!(
+        measured > 0,
+        "the native sweep must expose dynamic snapshot values"
+    );
+    println!("P34: {measured} exact uniform/property snapshot rows");
+}
+
+fn compare_jobs(chunk: &str, chains: &[Chain], jobs: &[Job]) -> usize {
     let mut compared = 0;
     let mut refusals = 0;
+    let mut measured_dynamic = 0;
     for batch in jobs.chunks(50) {
         let calls = batch
             .iter()
@@ -463,16 +635,21 @@ fn compare_jobs(chunk: &str, chains: &[Chain], jobs: &[Job]) {
             assert_eq!(actual_log, reply.log(), "{label}: log");
             assert_eq!(actual, expected, "{label}");
             if let Outcome::Gpu { shader: Ok(_), .. } = expected {
-                // These chains contain no dynamic ops. A new uniform/property must not
-                // silently go unmeasured by this non-dynamic comparison.
-                assert!(
-                    reply.shader().uniforms.is_empty(),
-                    "{label}: compare uniform values"
-                );
-                assert!(
-                    reply.shader().dynamic_properties.is_empty(),
-                    "{label}: compare dynamic values"
-                );
+                measured_dynamic +=
+                    reply.shader().uniforms.len() + reply.shader().dynamic_properties.len();
+                // Preserve P32/P33's no-dynamic invariant in addition to comparing all
+                // rows and value bits. P34's deliberately dynamic chains compare the full
+                // snapshots, including what the native lattice retained or baked away.
+                if !chain.dynamic {
+                    assert!(
+                        reply.shader().uniforms.is_empty(),
+                        "{label}: non-dynamic uniforms"
+                    );
+                    assert!(
+                        reply.shader().dynamic_properties.is_empty(),
+                        "{label}: non-dynamic properties"
+                    );
+                }
                 compared += 1;
             } else {
                 refusals += 1;
@@ -485,4 +662,5 @@ fn compare_jobs(chunk: &str, chains: &[Chain], jobs: &[Job]) {
         "{chunk}: {} exact legacy requests: {compared} shaders/textures, {refusals} matching refusals",
         jobs.len()
     );
+    measured_dynamic
 }
