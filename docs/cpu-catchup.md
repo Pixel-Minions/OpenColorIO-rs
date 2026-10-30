@@ -53,3 +53,22 @@ oracle, script, dependency and workflow files to validated context runtime
 `ee787da8b4a1c2775cd68ae68219862d4d3dba4a`; only landing bookkeeping differs.
 Proposed cumulative coverage is 1,187/1,191 C++ and 205/264 GPU tests. Full normal
 CI on the exact combined landing remains required before merging.
+
+PR82's first normal Windows check failed before the Rust comparison: the official
+wheel's last reader deque was empty despite zero reader errors. Starting a thread
+does not guarantee its first read precedes the main thread's stop signal.
+The existing concurrency test now signals an Event only after getValues and the
+sample selection succeed, waits for every reader in every round, and checks each
+wait succeeded. It retains all 200 rounds, five readers, ten extractions per
+round, zero-reader-error checks, exact final samples, the port's time limit and
+the same script/report comparison on both sides. Production binding code and the
+oracle are unchanged.
+
+[Startup CI41004232105](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/41004232105)
+passed five complete repetitions on Windows and Rocky Linux 9 in both debug and
+release (20 repetitions total). Independent artifact review verified all source
+identities, actual test executions, unchanged stress counts, target Python-feature
+clippy, guardrails/main mode and identical generated files across all four
+profiles; see `texture-reader-startup-validation.json`. Full normal CI on the
+updated exact landing remains required. The prior failed candidate is preserved
+in its history; no checks or tolerances were relaxed.
