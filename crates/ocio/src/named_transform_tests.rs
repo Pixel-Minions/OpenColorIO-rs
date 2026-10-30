@@ -49,10 +49,10 @@ fn basic_existing_rust_api() {
 
     let actual_fwd =
         NamedTransform::get_transform(&named_transform, TransformDirection::Forward).unwrap();
-    assert!(matches!(actual_fwd, Transform::Matrix(_)));
+    assert!(matches!(actual_fwd.as_ref(), Transform::Matrix(_)));
     let actual_inv =
         NamedTransform::get_transform(&named_transform, TransformDirection::Inverse).unwrap();
-    assert!(matches!(actual_inv, Transform::Matrix(_)));
+    assert!(matches!(actual_inv.as_ref(), Transform::Matrix(_)));
 
     assert_eq!(
         named_transform.to_string(),
