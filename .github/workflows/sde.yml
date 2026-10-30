@@ -29,7 +29,9 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - "crates/ocio/**"
       - "crates/ocio-ops/**"
+      - "crates/ocio-gpu/**"
       - "crates/ocio-testkit/**"
       - "oracle/**"
       - "scripts/sde.sh"
