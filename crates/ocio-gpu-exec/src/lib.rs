@@ -8,6 +8,7 @@
 #![cfg(target_os = "linux")]
 #![deny(unsafe_code)]
 
+mod exact_pin;
 mod glsl;
 pub mod gpu_unit_test;
 mod native_reference;

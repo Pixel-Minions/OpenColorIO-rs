@@ -65,3 +65,205 @@ shading_language_version = "4.50"
 egl_vendor = "Mesa Project"
 egl_version = "1.5"
 max_texture_size = 16384
+
+[[waiver]]
+id = "W0014"
+scope = "Only FixedFunction/style_aces2_nan_bug on recorded Linux Mesa25.2.7 llvmpipe LLVM21.1.8; one exact observed finite failure, no class rule"
+check = "Run original upstream inputs/settings/thresholds; require complete live port/wheel GPU bit identity, exact recorded error bits/component and complete input/CPU/GPU hashes; reject every change including a newly passing test. nan_bug additionally pins reported GPU/CPU RGB bits. Native readback and exact renderer required."
+reason = "Ill-conditioned upstream input: llvmpipe pow ULP differences are amplified by Aab cancellation across the inverse Reinhard pole. Injecting wheel rgb_a or JMh gives exact CPU output; CPU neighbours flip regime at +/-1 ULP. ACES2-GPU-FINDINGS.md section1 and native/knockout.py."
+approved_by = "Project owner, explicit five-test exact-pin approval on 2026-10-30"
+date = "2026-10-30"
+[waiver.gpu_exact_pin]
+approved = true
+test_id = "FixedFunction/style_aces2_nan_bug"
+platform = "linux"
+ocio_version = "2.5.2"
+language = "GPU_LANGUAGE_GLSL_1_2"
+run = 0
+width = 256
+height = 256
+components = 4
+image_filter = "GL_LINEAR"
+image_wrap = "GL_CLAMP"
+comparison_entries = 4
+threshold_bits = "3c23d70a"
+minimum_bits = "3f800000"
+relative = true
+max_diff_bits = "3f5691a0"
+component = 2
+input_sha256 = "b04589158c71c748aabac981a96d68df981d0f1740c2cf8eeea0988a379f9198"
+cpu_sha256 = "edcbe56de18c06e7d9b39c442e848534e6e89ef2307189a8f87e46a668ab6a94"
+gpu_sha256 = "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+gpu_rgb_bits = ["4389b37a", "444b9830", "4470eaee"]
+cpu_rgb_bits = ["44739272", "440e0021", "45ba139c"]
+whole_image_gpu_identity_required = true
+native_readback_required = true
+reject_passing = true
+[waiver.gpu_exact_pin.renderer]
+vendor = "Mesa"
+renderer = "llvmpipe (LLVM 21.1.8, 256 bits)"
+version = "4.5 (Compatibility Profile) Mesa 25.2.7"
+shading_language_version = "4.50"
+egl_vendor = "Mesa Project"
+egl_version = "1.5"
+max_texture_size = 16384
+
+[[waiver]]
+id = "W0015"
+scope = "Only FixedFunction/style_aces2_4000nit_p3_rndtrip on recorded Linux Mesa25.2.7 llvmpipe LLVM21.1.8; one exact observed finite failure, no class rule"
+check = "Run original upstream inputs/settings/thresholds; require complete live port/wheel GPU bit identity, exact recorded error bits/component and complete input/CPU/GPU hashes; reject every change including a newly passing test. nan_bug additionally pins reported GPU/CPU RGB bits. Native readback and exact renderer required."
+reason = "llvmpipe atan/pow precision leaves a near-zero round-trip residual amplified by PQ. Knocking out atan or pow passes the original0.018 threshold. ACES2-GPU-FINDINGS.md section2; work/knockout.txt."
+approved_by = "Project owner, explicit five-test exact-pin approval on 2026-10-30"
+date = "2026-10-30"
+[waiver.gpu_exact_pin]
+approved = true
+test_id = "FixedFunction/style_aces2_4000nit_p3_rndtrip"
+platform = "linux"
+ocio_version = "2.5.2"
+language = "GPU_LANGUAGE_GLSL_1_2"
+run = 0
+width = 256
+height = 256
+components = 4
+image_filter = "GL_LINEAR"
+image_wrap = "GL_CLAMP"
+comparison_entries = 20480
+threshold_bits = "3c9374bc"
+minimum_bits = "358637bd"
+relative = false
+max_diff_bits = "3c96534b"
+component = 19448
+input_sha256 = "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05"
+cpu_sha256 = "035ac1db28b74f92fa164ffca2a73c0d56e0eb3d602b61ad1ad251ea494cd6fb"
+gpu_sha256 = "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+whole_image_gpu_identity_required = true
+native_readback_required = true
+reject_passing = true
+[waiver.gpu_exact_pin.renderer]
+vendor = "Mesa"
+renderer = "llvmpipe (LLVM 21.1.8, 256 bits)"
+version = "4.5 (Compatibility Profile) Mesa 25.2.7"
+shading_language_version = "4.50"
+egl_vendor = "Mesa Project"
+egl_version = "1.5"
+max_texture_size = 16384
+
+[[waiver]]
+id = "W0016"
+scope = "Only FixedFunction/style_aces2_rec709_rndtrip on recorded Linux Mesa25.2.7 llvmpipe LLVM21.1.8; one exact observed finite failure, no class rule"
+check = "Run original upstream inputs/settings/thresholds; require complete live port/wheel GPU bit identity, exact recorded error bits/component and complete input/CPU/GPU hashes; reject every change including a newly passing test. nan_bug additionally pins reported GPU/CPU RGB bits. Native readback and exact renderer required."
+reason = "llvmpipe atan precision leaves a near-zero channel amplified by gamma2.4. Atan knockout passes the original0.004 threshold. ACES2-GPU-FINDINGS.md section3; work/knockout.txt."
+approved_by = "Project owner, explicit five-test exact-pin approval on 2026-10-30"
+date = "2026-10-30"
+[waiver.gpu_exact_pin]
+approved = true
+test_id = "FixedFunction/style_aces2_rec709_rndtrip"
+platform = "linux"
+ocio_version = "2.5.2"
+language = "GPU_LANGUAGE_GLSL_1_2"
+run = 0
+width = 256
+height = 256
+components = 4
+image_filter = "GL_LINEAR"
+image_wrap = "GL_CLAMP"
+comparison_entries = 20480
+threshold_bits = "3b83126f"
+minimum_bits = "358637bd"
+relative = false
+max_diff_bits = "3b92de74"
+component = 1090
+input_sha256 = "f962ffeabbdaa8e167e599a94f937be88e0d5e9bcacf36120f6ecb758dfb7c81"
+cpu_sha256 = "659059ae9414491556c7cdadb6ed442918f00b9e144054fafc4c16188fb40e4e"
+gpu_sha256 = "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+whole_image_gpu_identity_required = true
+native_readback_required = true
+reject_passing = true
+[waiver.gpu_exact_pin.renderer]
+vendor = "Mesa"
+renderer = "llvmpipe (LLVM 21.1.8, 256 bits)"
+version = "4.5 (Compatibility Profile) Mesa 25.2.7"
+shading_language_version = "4.50"
+egl_vendor = "Mesa Project"
+egl_version = "1.5"
+max_texture_size = 16384
+
+[[waiver]]
+id = "W0017"
+scope = "Only FixedFunction/style_aces2_rgb_to_jmh_fwd on recorded Linux Mesa25.2.7 llvmpipe LLVM21.1.8; one exact observed finite failure, no class rule"
+check = "Run original upstream inputs/settings/thresholds; require complete live port/wheel GPU bit identity, exact recorded error bits/component and complete input/CPU/GPU hashes; reject every change including a newly passing test. nan_bug additionally pins reported GPU/CPU RGB bits. Native readback and exact renderer required."
+reason = "llvmpipe pow(lms,0.42) ULP error amplified by Aab cancellation plus atan. Either knockout passes0.0002; both reduce error to3.05e-5. ACES2-GPU-FINDINGS.md section4; work/knockout.txt."
+approved_by = "Project owner, explicit five-test exact-pin approval on 2026-10-30"
+date = "2026-10-30"
+[waiver.gpu_exact_pin]
+approved = true
+test_id = "FixedFunction/style_aces2_rgb_to_jmh_fwd"
+platform = "linux"
+ocio_version = "2.5.2"
+language = "GPU_LANGUAGE_GLSL_1_2"
+run = 0
+width = 256
+height = 256
+components = 4
+image_filter = "GL_LINEAR"
+image_wrap = "GL_CLAMP"
+comparison_entries = 108
+threshold_bits = "3951b717"
+minimum_bits = "358637bd"
+relative = false
+max_diff_bits = "39700000"
+component = 46
+input_sha256 = "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319"
+cpu_sha256 = "00d58accf9b5787ddce23cf6238cc8ccd05a5da7f3c9fad2bf8fd6ee55eea7a7"
+gpu_sha256 = "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+whole_image_gpu_identity_required = true
+native_readback_required = true
+reject_passing = true
+[waiver.gpu_exact_pin.renderer]
+vendor = "Mesa"
+renderer = "llvmpipe (LLVM 21.1.8, 256 bits)"
+version = "4.5 (Compatibility Profile) Mesa 25.2.7"
+shading_language_version = "4.50"
+egl_vendor = "Mesa Project"
+egl_version = "1.5"
+max_texture_size = 16384
+
+[[waiver]]
+id = "W0018"
+scope = "Only FixedFunction/style_aces_gamutcomp13_inv on recorded Linux Mesa25.2.7 llvmpipe LLVM21.1.8; one exact observed finite failure, no class rule"
+check = "Run original upstream inputs/settings/thresholds; require complete live port/wheel GPU bit identity, exact recorded error bits/component and complete input/CPU/GPU hashes; reject every change including a newly passing test. nan_bug additionally pins reported GPU/CPU RGB bits. Native readback and exact renderer required."
+reason = "Minimal independent pow shader reproduces the original GPU output. Replacing only GPU pow result3f7a4c78 with platform result3f7a4c75 reduces error below upstream3e-6. GAMUT-ROOT-CAUSE-STATUS.md; CI40956371150."
+approved_by = "Project owner, explicit five-test exact-pin approval on 2026-10-30"
+date = "2026-10-30"
+[waiver.gpu_exact_pin]
+approved = true
+test_id = "FixedFunction/style_aces_gamutcomp13_inv"
+platform = "linux"
+ocio_version = "2.5.2"
+language = "GPU_LANGUAGE_GLSL_1_2"
+run = 0
+width = 256
+height = 256
+components = 4
+image_filter = "GL_LINEAR"
+image_wrap = "GL_CLAMP"
+comparison_entries = 156
+threshold_bits = "3649539c"
+minimum_bits = "358637bd"
+relative = false
+max_diff_bits = "37bc0000"
+component = 14
+input_sha256 = "a1e10b53e849db3bf7c233cb4e5da58e826f66fd7f1189bf4c66e5540e2a21e6"
+cpu_sha256 = "c7524fe7167c2bd0c390ca84f70502fd257df95721dc33bc8afd3e27e86c59d5"
+gpu_sha256 = "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+whole_image_gpu_identity_required = true
+native_readback_required = true
+reject_passing = true
+[waiver.gpu_exact_pin.renderer]
+vendor = "Mesa"
+renderer = "llvmpipe (LLVM 21.1.8, 256 bits)"
+version = "4.5 (Compatibility Profile) Mesa 25.2.7"
+shading_language_version = "4.50"
+egl_vendor = "Mesa Project"
+egl_version = "1.5"
+max_texture_size = 16384

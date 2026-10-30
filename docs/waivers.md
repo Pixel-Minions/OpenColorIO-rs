@@ -79,7 +79,8 @@ The following W0003-W0012 sections are historical. Their active entries were
 retired only after [CI40926626678](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/40926626678)
 passed debug and release with every old Matrix rule still mandatory. The exact
 metadata remains in [the archive](archive/gpu-matrix-waivers-2026-10-27.toml).
-W0013 below is the single active GPU class; the parser rejects per-test entries.
+W0013 below remains the single non-finite GPU class; retired Matrix rules are rejected.
+The five finite exact pins W0014-W0018 are separately owner-approved on 2026-10-30.
 
 ## W0003 — MatrixOps/matrix (retired 2026-10-29; historical evidence)
 
@@ -473,3 +474,42 @@ regressions and rejection controls in CI40926626678 before W0003-W0012 were
 retired. All519 original exceptions across46 cases match the reviewed audit.
 The old entries are archived and cannot grant active exceptions; all new class
 checks remain enforced. Normal CI must still pass on the final merge candidate.
+
+## W0014-W0018 - Five individual finite GPU failure pins (owner approved 2026-10-30)
+
+These are five separately approved exact observed failures, not a new class rule.
+Every original upstream case runs with its unchanged inputs and thresholds. All
+262,144 port/wheel GPU components must still match bit for bit. The original
+comparison must fail with the exact error bits/component below. A newly passing
+test is an error requiring review or retirement of its pin.
+
+All pins require the complete recorded Mesa25.2.7 llvmpipe LLVM21.1.8 identity,
+GLSL1.20, original image sampling/settings and independent native readback proof.
+Complete input, live CPU and complete GPU hashes pin every historical result bit;
+nan_bug additionally checks the report's explicit GPU/CPU RGB words. Other drivers,
+missing proof, changed settings, changed outputs or any altered failure reject.
+
+| ID | Original FixedFunction test | Error bits | Component | Unchanged upstream limit |
+|---|---|---|---:|---|
+| W0014 | style_aces2_nan_bug | 3f5691a0 | 2 | 0.01 relative |
+| W0015 | style_aces2_4000nit_p3_rndtrip | 3c96534b | 19448 | 0.018 absolute |
+| W0016 | style_aces2_rec709_rndtrip | 3b92de74 | 1090 | 0.004 absolute |
+| W0017 | style_aces2_rgb_to_jmh_fwd | 39700000 | 46 | 0.0002 absolute |
+| W0018 | style_aces_gamutcomp13_inv | 37bc0000 | 14 | 0.000003 absolute |
+
+W0014 pins GPU RGB `4389b37a 444b9830 4470eaee` and CPU RGB
+`44739272 440e0021 45ba139c`. Its upstream input is ill-conditioned (I-544).
+Injecting wheel rgb_a or compressed JMh yields exact CPU output; the wheel's own
+neighbouring inputs switch branches at one ULP. W0015/W0016 atan knockouts pass
+their original limits; W0015 pow knockout also passes. For W0017, either pow or
+atan knockout passes, and both reduce error to about3.05e-5. W0018's minimal pow
+substitution reduces its error below3e-6. These identify renderer builtin precision
+and nan_bug's unstable input, with no port or harness defect.
+
+The [debugger report](../kept/gpu-exact-pins/2026-10-30/aces2-debug/ACES2-GPU-FINDINGS.md),
+its knockout/injection sources and raw results, the
+[GamutComp13 report](../kept/gpu-exact-pins/2026-10-30/GAMUT-ROOT-CAUSE-STATUS.md) and
+hash manifest are preserved outside target. The debugger's local source commit is
+370cd592; its branch/worktree is not modified or pushed. See
+[implementation and evidence](gpu-finite-exact-pins.md). Full normal CI on the final
+landing remains required; source approval is not a runtime pass.
