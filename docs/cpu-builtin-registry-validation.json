@@ -1,0 +1,67 @@
+{
+  "Run": 41070682176,
+  "Source": "74c68b2ec38b442410be086af4490dbdfb4b5440",
+  "Validation": "9223b8561933c795be1d93a24196d31fe0313c50",
+  "AllFourProfilesPassed": true,
+  "GeneratedFilesIdenticalAcrossProfiles": true,
+  "Profiles": [
+    {
+      "OS": "Windows",
+      "Profile": "debug",
+      "OriginalCasePassed": true,
+      "GuardrailsPassed": true,
+      "TargetClippyPassed": true,
+      "MainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      }
+    },
+    {
+      "OS": "Windows",
+      "Profile": "release",
+      "OriginalCasePassed": true,
+      "GuardrailsPassed": true,
+      "TargetClippyPassed": true,
+      "MainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      }
+    },
+    {
+      "OS": "Linux",
+      "Profile": "debug",
+      "OriginalCasePassed": true,
+      "GuardrailsPassed": true,
+      "TargetClippyPassed": true,
+      "MainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      }
+    },
+    {
+      "OS": "Linux",
+      "Profile": "release",
+      "OriginalCasePassed": true,
+      "GuardrailsPassed": true,
+      "TargetClippyPassed": true,
+      "MainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      }
+    }
+  ],
+  "VerifiedUTC": "2026-10-30T14:30:25.229865+00:00",
+  "FullNormalCIStillRequired": true
+}
