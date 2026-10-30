@@ -33,7 +33,10 @@ jobs:
         run: |
           mkdir -p kept/sde-workload-trace
           git rev-parse HEAD > kept/sde-workload-trace/validation-commit.txt
-          git rev-parse HEAD^ > kept/sde-workload-trace/source-commit.txt
+          git fetch --depth=1 origin 5f7e2a3eb1faf4fc02e7c5a04a6cbf14d90a53d2
+          git diff --exit-code FETCH_HEAD HEAD -- . ':(exclude).github/workflows/ci.yml'
+          git rev-parse FETCH_HEAD > kept/sde-workload-trace/source-commit.txt
+          git fetch --depth=1 origin 2f768f6fb69cc53e040f8c3d1d2ea0df1d6dfc0c
           git diff --exit-code 2f768f6fb69cc53e040f8c3d1d2ea0df1d6dfc0c HEAD -- crates oracle .cargo scripts/sde.sh .github/workflows/sde.yml
       - uses: Swatinem/rust-cache@v2
         with:
