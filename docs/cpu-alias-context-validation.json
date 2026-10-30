@@ -1,0 +1,125 @@
+{
+  "Components": [
+    {
+      "Card": "p25",
+      "Run": 40964313761,
+      "Source": "212d2dbe2418fca3fddbc1af22193e539c918ea5",
+      "Validation": "3679a1c6562aa95721f49ef194a1920a71ccd697",
+      "AllFourProfilesPassed": true,
+      "GeneratedFilesIdenticalAcrossPlatformsAndProfiles": true,
+      "Profiles": [
+        {
+          "OS": "Windows",
+          "Profile": "debug",
+          "TargetCasesPassed": 10,
+          "RequiredCase": "named_transform::tests::alias",
+          "CPP": 1186,
+          "GPU": 205,
+          "GeneratedSHA256": {
+            "parity.md": "2b4ea59f032b98dde9d6457f6183d1203b93f055282b72c443abb23503a5110b",
+            "ratchet.toml": "36a6b21690ba7f650c61850619fdad08b9ce91965de9f2b5a6ea70d4943f014f"
+          }
+        },
+        {
+          "OS": "Windows",
+          "Profile": "release",
+          "TargetCasesPassed": 10,
+          "RequiredCase": "named_transform::tests::alias",
+          "CPP": 1186,
+          "GPU": 205,
+          "GeneratedSHA256": {
+            "parity.md": "2b4ea59f032b98dde9d6457f6183d1203b93f055282b72c443abb23503a5110b",
+            "ratchet.toml": "36a6b21690ba7f650c61850619fdad08b9ce91965de9f2b5a6ea70d4943f014f"
+          }
+        },
+        {
+          "OS": "Linux",
+          "Profile": "debug",
+          "TargetCasesPassed": 10,
+          "RequiredCase": "named_transform::tests::alias",
+          "CPP": 1186,
+          "GPU": 205,
+          "GeneratedSHA256": {
+            "parity.md": "2b4ea59f032b98dde9d6457f6183d1203b93f055282b72c443abb23503a5110b",
+            "ratchet.toml": "36a6b21690ba7f650c61850619fdad08b9ce91965de9f2b5a6ea70d4943f014f"
+          }
+        },
+        {
+          "OS": "Linux",
+          "Profile": "release",
+          "TargetCasesPassed": 10,
+          "RequiredCase": "named_transform::tests::alias",
+          "CPP": 1186,
+          "GPU": 205,
+          "GeneratedSHA256": {
+            "parity.md": "2b4ea59f032b98dde9d6457f6183d1203b93f055282b72c443abb23503a5110b",
+            "ratchet.toml": "36a6b21690ba7f650c61850619fdad08b9ce91965de9f2b5a6ea70d4943f014f"
+          }
+        }
+      ],
+      "VerifiedUTC": "2026-10-30T02:26:43.105980+00:00"
+    },
+    {
+      "Card": "p26",
+      "Run": 40965288458,
+      "Source": "ee787da8b4a1c2775cd68ae68219862d4d3dba4a",
+      "Validation": "7f7f8b706b6f54535ae48e80c9e750c73d85d3c4",
+      "AllFourProfilesPassed": true,
+      "GeneratedFilesIdenticalAcrossPlatformsAndProfiles": true,
+      "Profiles": [
+        {
+          "OS": "Windows",
+          "Profile": "debug",
+          "TargetCasesPassed": 1,
+          "RequiredCase": "transforms::file_transform::tests::context_variables",
+          "CPP": 1187,
+          "GPU": 205,
+          "GeneratedSHA256": {
+            "parity.md": "c76b98d4dc84c295bb13d08550da35b9bb6b4c2c2e1c42b51c385d5695390589",
+            "ratchet.toml": "1d038088abde06cf421d3fd3b6a03760570aab6d80efbdbcb2f55ac09c6312e2"
+          }
+        },
+        {
+          "OS": "Windows",
+          "Profile": "release",
+          "TargetCasesPassed": 1,
+          "RequiredCase": "transforms::file_transform::tests::context_variables",
+          "CPP": 1187,
+          "GPU": 205,
+          "GeneratedSHA256": {
+            "parity.md": "c76b98d4dc84c295bb13d08550da35b9bb6b4c2c2e1c42b51c385d5695390589",
+            "ratchet.toml": "1d038088abde06cf421d3fd3b6a03760570aab6d80efbdbcb2f55ac09c6312e2"
+          }
+        },
+        {
+          "OS": "Linux",
+          "Profile": "debug",
+          "TargetCasesPassed": 1,
+          "RequiredCase": "transforms::file_transform::tests::context_variables",
+          "CPP": 1187,
+          "GPU": 205,
+          "GeneratedSHA256": {
+            "parity.md": "c76b98d4dc84c295bb13d08550da35b9bb6b4c2c2e1c42b51c385d5695390589",
+            "ratchet.toml": "1d038088abde06cf421d3fd3b6a03760570aab6d80efbdbcb2f55ac09c6312e2"
+          }
+        },
+        {
+          "OS": "Linux",
+          "Profile": "release",
+          "TargetCasesPassed": 1,
+          "RequiredCase": "transforms::file_transform::tests::context_variables",
+          "CPP": 1187,
+          "GPU": 205,
+          "GeneratedSHA256": {
+            "parity.md": "c76b98d4dc84c295bb13d08550da35b9bb6b4c2c2e1c42b51c385d5695390589",
+            "ratchet.toml": "1d038088abde06cf421d3fd3b6a03760570aab6d80efbdbcb2f55ac09c6312e2"
+          }
+        }
+      ],
+      "VerifiedUTC": "2026-10-30T02:26:43.107483+00:00"
+    }
+  ],
+  "FinalCPP": 1187,
+  "GPU": 205,
+  "FullLandingCIStillRequired": true
+}

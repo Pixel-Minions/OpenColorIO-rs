@@ -31,3 +31,25 @@ runtime source `1e0a581b659ed1c5a29e50d32196ff9e7c4a8085` and validation workflo
 generated files across all four profiles; see `cpu-exception-validation.json`.
 The proposed cumulative coverage is 1,185/1,191 C++ tests and 205/264 GPU tests.
 Normal landing CI remains required before merging this chunk.
+
+P25/P26 finish two previously partial upstream cases using existing APIs:
+`NamedTransform/alias` now includes the original Config copy, canonical-name,
+replacement and collision checks; `FileTransform/context_variables` now includes
+the original ExposureContrast processor build and complete CCC-ID case 4.
+Original values, YAML, variable order and assertions are preserved. The unrelated
+`NamedTransform/basic` null-argument case remains uncounted.
+
+[Alias CI40964313761](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/40964313761)
+passed all ten named-transform module tests on Windows/Rocky debug/release.
+[Context CI40965288458](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/40965288458)
+executed and passed the complete four-case context test on all four profiles.
+Independent artifact verification checked both exact runtime/workflow identities,
+actual required test names, guardrails, target clippy, main-mode generation and
+identical generated files within each component's four profiles. See
+`cpu-alias-context-validation.json` for the eight profile records.
+
+The source-only replay onto the merged P24 parent has identical crate, map,
+oracle, script, dependency and workflow files to validated context runtime
+`ee787da8b4a1c2775cd68ae68219862d4d3dba4a`; only landing bookkeeping differs.
+Proposed cumulative coverage is 1,187/1,191 C++ and 205/264 GPU tests. Full normal
+CI on the exact combined landing remains required before merging.
