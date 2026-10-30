@@ -5,7 +5,7 @@ Read-only debugger report: local commit370cd592, branchclaude/aces2-gpu-debug. D
 or push that worktree/branch. Existing protected2026-10-29 evidence remains unchanged.
 
 Own the three preserved fixed-function test files, private GPU exact-pin enforcement and
-its tests, existing testkit waiver parser, waiver/improvement docs/register, upstream map
+its tests, existing testkit waiver parser and xtask schema reader, waiver/improvement docs/register, upstream map
 and this card. No new public API, arithmetic, oracle, fixture or dependency change.
 
 Run all59 original upstream cases with unchanged inputs/settings/thresholds. Keep existing
