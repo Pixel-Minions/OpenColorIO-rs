@@ -5342,8 +5342,8 @@ note = "p1-transforms-fam1 (1.8c)"
 path = "tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry_tests.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): basic; aces builds the ops of IDENTITY, an ACES matrix and ACEScct (3.2e, 3.2g), the version_*_validation tests with p3-yaml-load-2 (checkVersionConsistency, pulled forward from 3.8c); read_write, which builds every entry's processor (p3-after-p2 ports the ops), also needs Config::validate and the processor between two color spaces (Config::getProcessor(src, dst), ColorSpaceTransform's ops, WP 3.2a), which are not ported yet"
+status = "done"
+note = "All original tests complete. P27 read_write uses every registry entry in original order, validates the original 2.4 config, compares serialization byte for byte and creates the ref-to-test processor using existing APIs. Original values and assertions preserved; no API/runtime/waiver change."
 
 [[file]]
 path = "tests/gpu/CDLOp_test.cpp"

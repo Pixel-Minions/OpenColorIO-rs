@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the built-in transform registry:
-//! `tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp` @ v2.5.2. `read_write`
-//! builds every entry's processor: it comes with the last builders (`p3-after-p2`). The
+//! `tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp` @ v2.5.2.
+//! `read_write` now validates exact serialization and processor creation for all entries. The
 //! `version_*_validation` tests read configs, which `checkVersionConsistency` refuses
 //! (`p3-yaml-load-2`). The registry's styles are compared with the wheel's in
 //! `tests/config_transforms_oracle.rs`.
@@ -344,4 +344,68 @@ fn version_2_3_validation() {
     test_style(
         "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-REC2020-D60-in-REC2020-D65_2.0",
     );
+}
+
+/// Port of `OCIO_ADD_TEST(Builtins, read_write)` @ v2.5.2.
+/// Source: tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp:104-202.
+#[test]
+fn read_write() {
+    let _env = crate::test_env::EnvGuard::new();
+    // Original CONFIG_BUILTIN_TRANSFORMS literal, byte for byte.
+    const CONFIG_BUILTIN_TRANSFORMS: &str = r#"ocio_profile_version: 2.4
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  aces_interchange: test
+  color_timing: test
+  compositing_log: test
+  default: ref
+  scene_linear: test
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  Disp1:
+    - !<View> {name: View1, colorspace: test}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: test
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    from_scene_reference: !<GroupTransform>
+      children:"#;
+    let registry = BuiltinTransformRegistry::get();
+    let mut config_text = CONFIG_BUILTIN_TRANSFORMS.as_bytes().to_vec();
+    // Add all existing built-ins to the original single GroupTransform, in registry order.
+    for index in 0..registry.num_builtins() {
+        config_text.extend_from_slice(b"\n        - !<BuiltinTransform> {style: ");
+        config_text.extend_from_slice(registry.builtin_style(index).unwrap());
+        config_text.extend_from_slice(b"}");
+    }
+    config_text.extend_from_slice(b"\n");
+    let config = crate::Config::create_from_stream(config_text.as_slice()).unwrap();
+    config.validate().unwrap();
+    assert_eq!(config.serialize().unwrap(), config_text);
+    let _processor = config.processor_between("ref", "test").unwrap();
 }
