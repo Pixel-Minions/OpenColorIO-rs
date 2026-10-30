@@ -1256,7 +1256,9 @@ const EXTRACTIONS_PER_ROUND: i128 = 10;
 /// default=extractGpuShaderInfo)` over a list of the description: the pure-Python encoder that
 /// `indent` selects is a bytecode loop, so the interpreter switches threads between extractions
 /// (every 10 us, `setswitchinterval`), as in the verifier's `for` loop. Each `getValues`
-/// releases the GIL. A reader's exception goes to `threading.excepthook`, here a list's
+/// releases the GIL. An event signaled after the first successful value read makes startup
+/// explicit in every round; Thread.start alone does not guarantee a sample before done.
+/// A reader's exception goes to `threading.excepthook`, here a list's
 /// `append`. The process's switch interval and excepthook are restored last (the port's
 /// scripts share their test binary's interpreter). The script, the step that reads the errors'
 /// count, and the steps that read the last round's readers' last values, each with the step
@@ -1266,7 +1268,7 @@ const EXTRACTIONS_PER_ROUND: i128 = 10;
 /// failed in some rounds' first extractions. Measured on this machine (2026-10-25) with that
 /// code put back in one reader kind at a time: the 2D texture's, 3 runs of the test failed out
 /// of 4 (the readers' errors counted, 34 in one); the 3D texture's, 4 of 4.
-fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>) {
+fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>, Vec<usize>) {
     let mut sc = Script::new();
     let modules = n("threading._sys.modules");
     let module = |sc: &mut Script, name: &str| {
@@ -1317,6 +1319,8 @@ fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>) {
     let no_args = sc.call(ra(itertools, "repeat"), vec![common::script::t(vec![])]);
     sc.unrepr(no_args);
     let sixth = sc.call(n("operator.itemgetter"), vec![i(5)]);
+    let first = sc.call(n("operator.itemgetter"), vec![i(0)]);
+    let mut ready_steps = Vec::new();
 
     let mut lasts = Vec::new();
     for _ in 0..READER_ROUNDS {
@@ -1353,7 +1357,11 @@ fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>) {
         sc.unrepr(done);
         lasts.clear();
         let mut threads = Vec::new();
+        let mut first_reads = Vec::new();
         for texture in [tex, tex, tex, tex3, tex3] {
+            let first_read = sc.call(n("threading.Event"), vec![]);
+            sc.unrepr(first_read);
+            first_reads.push(first_read);
             let running = sc.call(n("iter"), vec![ra(done, "is_set"), b(true)]);
             sc.unrepr(running);
             let reads = sc.call(
@@ -1364,6 +1372,18 @@ fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>) {
             let each = sc.call(n("zip"), vec![r(reads)]);
             sc.unrepr(each);
             let floats = sc.call(ra(itertools, "starmap"), vec![r(sixth), r(each)]);
+            sc.unrepr(floats);
+            // zip evaluates floats first: signal only after getValues and itemgetter succeed.
+            let signals = sc.call(
+                ra(itertools, "starmap"),
+                vec![ra(first_read, "set"), r(no_args)],
+            );
+            sc.unrepr(signals);
+            let after_read = sc.call(n("zip"), vec![r(floats), r(signals)]);
+            sc.unrepr(after_read);
+            let each_read = sc.call(n("zip"), vec![r(after_read)]);
+            sc.unrepr(each_read);
+            let floats = sc.call(ra(itertools, "starmap"), vec![r(first), r(each_read)]);
             sc.unrepr(floats);
             let reading = sc.call(n("zip"), vec![r(running), r(floats)]);
             sc.unrepr(reading);
@@ -1388,6 +1408,11 @@ fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>) {
         }
         for &thread in &threads {
             sc.call(ra(thread, "start"), vec![]);
+        }
+        // Thread.start does not promise a read. Every round must observe all five readers
+        // before extraction can finish and set done; all original overlap/error/value checks stay.
+        for first_read in first_reads {
+            ready_steps.push(sc.call(ra(first_read, "wait"), vec![f(10.0)]));
         }
         let descs = sc.call(
             n("operator.mul"),
@@ -1422,7 +1447,7 @@ fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>) {
         .zip([buf, buf, buf, cube, cube])
         .map(|(&last, values)| (sc.call(n("list"), vec![r(last)]), values))
         .collect();
-    (sc, count, read)
+    (sc, count, read, ready_steps)
 }
 
 /// Upstream's `Texture.getValues` and `Texture3D.getValues` read the description with the GIL
@@ -1435,10 +1460,17 @@ fn texture_readers_script() -> (Script, usize, Vec<(usize, usize)>) {
 /// reader's error, the last round's readers' last value (the texture's sixth float).
 #[test]
 fn textures_read_during_an_extraction_are_the_wheels() {
-    let (sc, count, read) = texture_readers_script();
+    let (sc, count, read, ready_steps) = texture_readers_script();
     let theirs = common::wheel(&[sc.json()]).remove(0);
     let steps = theirs["steps"].as_array().unwrap();
     assert_eq!(steps.len(), sc.steps.len(), "{theirs}");
+    for step in ready_steps {
+        assert_eq!(
+            steps[step]["value"]["bool"], true,
+            "reader never started: {}",
+            steps[step]
+        );
+    }
     assert_eq!(steps[count]["value"]["int"], "0", "{}", steps[count]);
     assert_eq!(read.len(), 5);
     for &(k, values) in &read {
