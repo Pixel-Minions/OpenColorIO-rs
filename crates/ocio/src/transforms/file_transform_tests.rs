@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the file transform: `tests/cpu/transforms/FileTransform_tests.cpp` @ v2.5.2, but
-//! `context_variables`, which waits for the ExposureContrast reader (WP 4.5i). The text and
+//! Tests of the file transform: `tests/cpu/transforms/FileTransform_tests.cpp` @ v2.5.2.
+//! The complete context test covers filename, search path, processor build and CCC ID.
+//! The text and
 //! the validation are compared with the wheel's in `tests/config_transforms_oracle.rs`, the
 //! loader's errors in `tests/file_transform_load_oracle.rs`.
 
@@ -304,13 +305,11 @@ fn load_file_fail() {
     );
 }
 
-/// The context variables a file transform uses: its path's, its search's and none for a path
-/// without any. Cases 1 to 3 of upstream's `context_variables` (FileTransform_tests.cpp:368-438
-/// @ v2.5.2), with its expected values. The test itself waits for the ExposureContrast reader
-/// (WP 4.5i, Phase 5): its case 3 builds the processor of `exposure_contrast_linear.ctf`, an
-/// ExposureContrast.
+/// Port of `OCIO_ADD_TEST(FileTransform, context_variables)` @ v2.5.2.
+/// Source: tests/cpu/transforms/FileTransform_tests.cpp:368-497, all four cases.
 #[test]
-fn context_variables_of_the_path_and_the_search_path() {
+fn context_variables() {
+    let _env = crate::test_env::EnvGuard::new();
     use crate::context::Context;
     use crate::context_variable_utils::collect_context_variables;
 
@@ -394,6 +393,59 @@ fn context_variables_of_the_path_and_the_search_path() {
         b"exposure_contrast_linear.ctf",
         used_context_vars.string_var_by_index(1)
     );
+
+    // A basic check that the context variables are used to build the processor.
+    cfg.processor_with_context(&ctx, &tr, TransformDirection::Forward)
+        .unwrap();
+
+    {
+        // Case 4 - The 'cccid' now contains a context variable.
+        let config = [
+            r#"ocio_profile_version: 2
+
+environment:
+  CCPREFIX: cc
+  CCNUM: 02
+
+search_path: "#,
+            &dir,
+            r#"
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs2}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<FileTransform> {src: cdl_test1.ccc, cccid: $CCPREFIX00$CCNUM}
+"#,
+        ]
+        .concat();
+        let cfg = Config::create_from_stream(config.as_bytes()).unwrap();
+        cfg.validate().unwrap();
+        ctx = (*cfg.current_context().get()).clone();
+        ctx.set_string_var("CCNUM", Some(b"01"));
+        used_context_vars = Context::new();
+        let tr1 = cfg
+            .color_space("cs2")
+            .unwrap()
+            .transform(crate::ColorSpaceDirection::FromReference)
+            .unwrap();
+        assert!(matches!(tr1, Transform::File(_)));
+        assert!(collect_context_variables(&cfg, &ctx, tr1, &mut used_context_vars).unwrap());
+        assert_eq!(2, used_context_vars.num_string_vars());
+        assert_eq!(b"CCPREFIX", used_context_vars.string_var_name_by_index(0));
+        assert_eq!(b"cc", used_context_vars.string_var_by_index(0));
+        assert_eq!(b"CCNUM", used_context_vars.string_var_name_by_index(1));
+        assert_eq!(b"01", used_context_vars.string_var_by_index(1));
+    }
 }
 
 /// Port of `OCIO_ADD_TEST(FileTransform, load_file_ok)` @ v2.5.2.
