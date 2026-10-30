@@ -18,9 +18,11 @@ use ocio_testkit::Oracle;
 use ocio_testkit::gpu::{
     self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings, Texture,
 };
-use ocio_testkit::oracle::BatchCall;
+use ocio_testkit::oracle::{BatchCall, Response};
 use ocio_testkit::processor_ops::Dumped;
 use serde_json::{Value, json};
+use std::io::Write;
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 
 static SERIAL: Mutex<()> = Mutex::new(());
@@ -466,6 +468,10 @@ impl Job {
 }
 
 fn port(chain: &Chain, job: &Job) -> Outcome {
+    port_requested(chain, job, false)
+}
+
+fn port_requested(chain: &Chain, job: &Job, ordinary_last: bool) -> Outcome {
     let raised = |stage: &str, error: ocio::Exception| {
         Outcome::Raised(stage.into(), error.message().to_string())
     };
@@ -490,7 +496,12 @@ fn port(chain: &Chain, job: &Job) -> Outcome {
         Some(Ok(value)) => Some(value),
         None => None,
     };
-    let gpu = match processor.optimized_legacy_gpu_processor(flags, job.edge) {
+    let last = if ordinary_last {
+        processor.optimized_gpu_processor(flags)
+    } else {
+        processor.optimized_legacy_gpu_processor(flags, job.edge)
+    };
+    let gpu = match last {
         Ok(value) => value,
         Err(error) => return raised("gpu_processor", error),
     };
@@ -665,6 +676,133 @@ fn legacy_large_lattice_values_match_native_wheel() {
     );
     // One live response at a time bounds peak memory. Never cache copies of 129^3 textures.
     compare_batches("P35 large", &chains, &jobs, 1, false);
+}
+
+/// The already-reviewed native packet supports both request kinds. The public command ends
+/// legacy; consume its existing transport to end ordinary, after its complete ordinary
+/// Python/native identity check. No output value is computed by this test-side consumer.
+fn reverse_reference(args: &[Value]) -> Vec<Response> {
+    const SCRIPT: &str = r#"
+import json,sys
+from ocio_oracle import commands,legacy_gpu,native_build
+for index,args in enumerate(json.load(sys.stdin)):
+    try:
+        checked,_=legacy_gpu.legacy_gpu_shader(args,[])
+        assert checked['oracle_native']['wheel_version']=='2.5.2'
+        program,provenance=native_build.executable()
+        requests=args['before']+[{'kind':'default','optimization':args['optimization']}]
+        result,blobs,abi=legacy_gpu._native(program,legacy_gpu._message(args,[],requests))
+        assert abi['wheel_version']=='2.5.2' and abi['abi']==checked['oracle_native']['abi']
+        provenance.update(abi)
+        result['oracle_native']=provenance
+        print(json.dumps({'result':result,'blobs':[list(blob) for blob in blobs]}),flush=True)
+    except Exception as error:
+        raise RuntimeError(f'reverse request {index}: {args!r}') from error
+"#;
+    // Batch via stdin: full transform requests exceed Windows' argument limit together.
+    // Oracle::command provides the same pinned Python, cwd and sanitized environment as
+    // run_script; no response cache or per-case Python process is used here.
+    let mut child = Oracle::get()
+        .command()
+        .args(["-X", "utf8", "-c", SCRIPT])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the oracle's Python runs");
+    child
+        .stdin
+        .take()
+        .expect("request stdin")
+        .write_all(&serde_json::to_vec(args).expect("request JSON"))
+        .expect("write reference requests");
+    let output = child.wait_with_output().expect("reference process exits");
+    assert!(
+        output.status.success(),
+        "native reverse reference: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).expect("reference UTF-8");
+    let responses = text
+        .lines()
+        .map(|line| {
+            let report: Value = serde_json::from_str(line).expect("native reference JSON");
+            Response {
+                result: report["result"].clone(),
+                blobs: serde_json::from_value(report["blobs"].clone()).expect("native byte blobs"),
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), args.len(), "every reverse request replied");
+    responses
+}
+
+#[test]
+fn ordinary_after_legacy_keeps_native_cached_shader_and_texture_values() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let chains = chains();
+    let mut jobs = Vec::new();
+    for chain in 0..chains.len() {
+        for level in 0..LEVELS.len() {
+            for language in 0..GpuLanguage::ALL.len() {
+                jobs.push(Job {
+                    chain,
+                    level,
+                    edge: 2,
+                    before: 2,
+                    language,
+                });
+            }
+        }
+    }
+    assert_eq!(jobs.len(), 280, "the complete P36 reverse input plan");
+    let mut compared = 0;
+    let mut refusals = 0;
+    for batch in jobs.chunks(50) {
+        let requests = batch
+            .iter()
+            .map(|job| job.args(&chains[job.chain]))
+            .collect::<Vec<_>>();
+        let responses = reverse_reference(&requests);
+        for (job, response) in batch.iter().zip(responses) {
+            let chain = &chains[job.chain];
+            let label = format!("P36 {} {job:?}", chain.label);
+            let reply = GpuShaderReply::from_response(response);
+            assert_eq!(
+                reply.result["oracle_native"]["wheel_version"],
+                json!("2.5.2"),
+                "{label}"
+            );
+            let expected = wheel(&reply);
+            let (actual, log) = capture(|| port_requested(chain, job, true));
+            assert_eq!(log, reply.log(), "{label}: log");
+            assert!(
+                actual == expected,
+                "{label}: differs at {}; request {}",
+                outcome_difference(&actual, &expected),
+                job.args(chain)
+            );
+            if let Outcome::Gpu { shader: Ok(_), .. } = expected {
+                assert!(
+                    reply.shader().uniforms.is_empty(),
+                    "{label}: non-dynamic uniforms"
+                );
+                assert!(
+                    reply.shader().dynamic_properties.is_empty(),
+                    "{label}: non-dynamic properties"
+                );
+                compared += 1;
+            } else {
+                refusals += 1;
+            }
+        }
+    }
+    assert_eq!(compared + refusals, jobs.len());
+    assert!(compared > 0);
+    println!(
+        "P36: {} exact reverse requests: {compared} shaders/textures, {refusals} matching refusals",
+        jobs.len()
+    );
 }
 
 /// A bounded diagnostic path; equality still compares every bit/byte of the whole outcome.
