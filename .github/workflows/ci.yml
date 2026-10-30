@@ -1,9 +1,9 @@
 # Diagnostic only. NEVER MERGE.
-name: Actual SDE workload thread trace
+name: SDE fresh-process library trial
 on:
   workflow_dispatch:
   push:
-    branches: [codex/sde-workload-thread-trace]
+    branches: [codex/sde-fresh-process-trial]
 permissions:
   contents: read
 env:
@@ -13,14 +13,13 @@ env:
   OCIO_RS_TIER: quick
 jobs:
   trace:
-    name: SDE workload (${{ matrix.os }}, threads=${{ matrix.threads }})
+    name: Fresh-process SDE (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2025, ubuntu-24.04]
-        threads: [1, 4]
     defaults:
       run:
         shell: bash
@@ -33,11 +32,11 @@ jobs:
           version: "0.11.7"
       - name: Exact source
         run: |
-          mkdir -p kept/sde-workload-trace
-          git rev-parse HEAD > kept/sde-workload-trace/validation-commit.txt
-          git fetch --depth=1 origin 5f7e2a3eb1faf4fc02e7c5a04a6cbf14d90a53d2
+          mkdir -p kept/sde-fresh-process-trial
+          git rev-parse HEAD > kept/sde-fresh-process-trial/validation-commit.txt
+          git fetch --depth=1 origin 1e4781c5b103617a3dfc258f86e38b3a81435e15
           git diff --exit-code FETCH_HEAD HEAD -- . ':(exclude).github/workflows/ci.yml'
-          git rev-parse FETCH_HEAD > kept/sde-workload-trace/source-commit.txt
+          git rev-parse FETCH_HEAD > kept/sde-fresh-process-trial/source-commit.txt
           git fetch --depth=1 origin 2f768f6fb69cc53e040f8c3d1d2ea0df1d6dfc0c
           git diff --exit-code 2f768f6fb69cc53e040f8c3d1d2ea0df1d6dfc0c HEAD -- crates oracle .cargo scripts/sde.sh .github/workflows/sde.yml
       - uses: Swatinem/rust-cache@v2
@@ -52,8 +51,8 @@ jobs:
         run: |
           rustup show active-toolchain
           cargo xtask oracle info
-          cargo test --locked --release -p ocio --lib --no-run
-          scripts/sde.sh hsw python scripts/diagnostics/sde_workload_trace.py ${{ matrix.threads }}
+          cargo test --locked --release -p ocio --lib --no-run --message-format=json > kept/sde-fresh-process-trial/compiler-artifacts.jsonl
+          scripts/sde.sh hsw python scripts/diagnostics/sde_fresh_process_trial.py
       - name: Rocky image
         if: runner.os == 'Linux'
         run: docker build -t ocio-rs-rocky9:1 docker/rocky9
@@ -64,12 +63,12 @@ jobs:
             export CARGO_BUILD_JOBS=2
             git config --global --add safe.directory "*"
             cargo xtask oracle info
-            cargo test --locked --release -p ocio --lib --no-run
-            scripts/sde.sh snb python3 scripts/diagnostics/sde_workload_trace.py ${{ matrix.threads }}
+            cargo test --locked --release -p ocio --lib --no-run --message-format=json > kept/sde-fresh-process-trial/compiler-artifacts.jsonl
+            scripts/sde.sh snb python3 scripts/diagnostics/sde_fresh_process_trial.py
           '
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: actual-sde-${{ runner.os }}-threads-${{ matrix.threads }}
-          path: kept/sde-workload-trace/
+          name: fresh-sde-${{ runner.os }}
+          path: kept/sde-fresh-process-trial/
           retention-days: 30
