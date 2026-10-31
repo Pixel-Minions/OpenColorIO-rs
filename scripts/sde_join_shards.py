@@ -121,6 +121,14 @@ def load(directory):
     return root, summary, expected, found
 
 
+def _ordered_results(original, combined):
+    observed = [row['Name'] for _, _, row in combined]
+    require(len(observed) == len(set(observed)) == len(original)
+            and set(observed) == set(original), 'Full profile union is incomplete')
+    positions = {name: index for index, name in enumerate(original)}
+    return sorted(combined, key=lambda item: positions[item[2]['Name']])
+
+
 def aggregate(directories, output):
     loaded = [load(pathlib.Path(d)) for d in directories]
     require(loaded, 'No shard artifacts')
@@ -143,10 +151,7 @@ def aggregate(directories, output):
     for key, (_, first) in first_reports.items():
         combined = [(shard, path, row) for shard, (_, _, _, found) in enumerate(loaded)
                     for path, report in [found[key]] for row in report['Results']]
-        observed = [row['Name'] for _, _, row in combined]
-        require(len(observed) == len(set(observed)) == len(first['OriginalSelected'])
-                and set(observed) == set(first['OriginalSelected']), 'Full profile union is incomplete')
-        merged[key] = combined
+        merged[key] = _ordered_results(first['OriginalSelected'], combined)
     require(not output.exists(), 'Output must be a new directory')
     output.mkdir(parents=True)
     write_json(output / 'expected-executables.json', expected)

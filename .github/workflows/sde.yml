@@ -39,6 +39,7 @@ on:
       - "crates/ocio-gpu/**"
       - "scripts/sde_join_shards.py"
       - "scripts/diagnostics/p41_shard_controls.py"
+      - "scripts/diagnostics/p46_join_order_controls.py"
       - "scripts/sde_cpu_tests.py"
       - ".cargo/config.toml"
       - ".github/workflows/sde.yml"
@@ -252,6 +253,7 @@ jobs:
           path: kept/sde-shard-inputs
       - name: Every original target and selected test passed exactly once
         run: |
+          python3 scripts/diagnostics/p46_join_order_controls.py
           python3 scripts/sde_join_shards.py kept/sde-cpu-tests-joined/profile             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-0             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-1             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-2             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-3
       - uses: actions/upload-artifact@v4
         if: always()
