@@ -7,6 +7,7 @@
 
 pub mod argparse;
 pub mod c_numbers;
+pub mod lcms2;
 pub mod log_guard;
 #[cfg(target_os = "linux")]
 mod sigpipe;
