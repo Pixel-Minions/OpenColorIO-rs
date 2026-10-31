@@ -18,3 +18,8 @@ The README's test table also retained205 GPU tests after all264 were merged. Cor
 that table, show the inherited P56 C++ accounting as1189ported+2reviewedN/A, and
 remove the stale remaining-GPU-execution/null-review text. Overall effort stays84%;
 these accounting corrections do not imply additional implementation work.
+
+The same entry audit closes three stale C++ test-file statuses: all88 Config tests,
+11 GpuShader tests and19 FixedFunctionOp tests already have their port markers.
+Their map targets now include every marker's Rust file. Every original case remains;
+no test source changes. This extends the audit to six precisely checked map entries.
