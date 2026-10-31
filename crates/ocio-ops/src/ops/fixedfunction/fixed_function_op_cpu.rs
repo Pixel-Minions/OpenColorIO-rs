@@ -40,6 +40,10 @@
 //! only NaN parameters (W0002); they follow both wheels' order anyway, and the gamma-log
 //! restores the sign per platform (I-83, [`times_copysign_one`]).
 
+#[cfg(target_arch = "x86_64")]
+use super::fixed_function_op_cpu_sse2 as sse2;
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::blocks::for_each_block;
 use std::sync::Arc;
 
 use super::aces2::common::{
@@ -1902,6 +1906,20 @@ fn pq_power<const FAST_POWER: bool>(x: f32, exp: f32) -> f32 {
     }
 }
 
+/// The PQ curve's constants for the real kernels.
+#[cfg(target_arch = "x86_64")]
+#[inline]
+fn pq_constants() -> sse2::Pq {
+    use st_2084::*;
+    sse2::Pq {
+        m1: M1 as f32,
+        m2: M2 as f32,
+        c1: C1 as f32,
+        c2: C2 as f32,
+        c3: C3 as f32,
+    }
+}
+
 /// Linear (100 nits = 1) to PQ, mirrored around 0, in `float`: the renderer the Linux wheel
 /// takes with fast math off.
 ///
@@ -1973,22 +1991,32 @@ impl<const FAST_POWER: bool> CpuOp for RendererLinToPqSse<FAST_POWER> {
     /// @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         use st_2084::*;
-        for pixel in rgba.as_chunks_mut::<4>().0 {
-            for value in &mut pixel[..3] {
-                let v = *value;
+        let exact = |block: &mut [[f32; 4]]| {
+            for pixel in block {
+                for value in &mut pixel[..3] {
+                    let v = *value;
 
-                // Clear sign bits of RGB.
-                let vabs = v.abs();
-                // Input is in nits/100, convert to [0,1], where 1 is 10000 nits.
-                let l = 0.01f32 * vabs;
-                let y = pq_power::<FAST_POWER>(l, M1 as f32);
-                let ratpoly = (C1 as f32 + C2 as f32 * y) / (1.0f32 + C3 as f32 * y);
-                let n = pq_power::<FAST_POWER>(ratpoly, M2 as f32);
+                    // Clear sign bits of RGB.
+                    let vabs = v.abs();
+                    // Input is in nits/100, convert to [0,1], where 1 is 10000 nits.
+                    let l = 0.01f32 * vabs;
+                    let y = pq_power::<FAST_POWER>(l, M1 as f32);
+                    let ratpoly = (C1 as f32 + C2 as f32 * y) / (1.0f32 + C3 as f32 * y);
+                    let n = pq_power::<FAST_POWER>(ratpoly, M2 as f32);
 
-                // Restore sign bits.
-                *value = with_sign_of(n, v);
+                    // Restore sign bits.
+                    *value = with_sign_of(n, v);
+                }
             }
+        };
+        let pixels = rgba.as_chunks_mut::<4>().0;
+        #[cfg(target_arch = "x86_64")]
+        if FAST_POWER {
+            let fast = |block: &mut [[f32; 4]]| sse2::lin_to_pq(block, &pq_constants());
+            for_each_block(pixels, fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels);
     }
 }
 
@@ -2010,23 +2038,33 @@ impl<const FAST_POWER: bool> CpuOp for RendererPqToLinSse<FAST_POWER> {
         use st_2084::*;
         let vm1_inv = 1.0f32 / M1 as f32;
         let vm2_inv = 1.0f32 / M2 as f32;
-        for pixel in rgba.as_chunks_mut::<4>().0 {
-            for value in &mut pixel[..3] {
-                let v = *value;
+        let exact = |block: &mut [[f32; 4]]| {
+            for pixel in block {
+                for value in &mut pixel[..3] {
+                    let v = *value;
 
-                // Clear sign bits of RGB.
-                let vabs = v.abs();
-                let x = pq_power::<FAST_POWER>(vabs, vm2_inv);
-                let nom = sse_max(0.0f32, x - C1 as f32);
-                let denom = C2 as f32 - C3 as f32 * x;
+                    // Clear sign bits of RGB.
+                    let vabs = v.abs();
+                    let x = pq_power::<FAST_POWER>(vabs, vm2_inv);
+                    let nom = sse_max(0.0f32, x - C1 as f32);
+                    let denom = C2 as f32 - C3 as f32 * x;
 
-                // Output scale is 1.0 = 10000 nits, we map it to make 1.0 = 100 nits.
-                let nits100 = 100.0f32 * pq_power::<FAST_POWER>(nom / denom, vm1_inv);
+                    // Output scale is 1.0 = 10000 nits, we map it to make 1.0 = 100 nits.
+                    let nits100 = 100.0f32 * pq_power::<FAST_POWER>(nom / denom, vm1_inv);
 
-                // Restore the sign bits.
-                *value = with_sign_of(nits100, v);
+                    // Restore the sign bits.
+                    *value = with_sign_of(nits100, v);
+                }
             }
+        };
+        let pixels = rgba.as_chunks_mut::<4>().0;
+        #[cfg(target_arch = "x86_64")]
+        if FAST_POWER {
+            let fast = |block: &mut [[f32; 4]]| sse2::pq_to_lin(block, &pq_constants());
+            for_each_block(pixels, fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels);
     }
 }
 
