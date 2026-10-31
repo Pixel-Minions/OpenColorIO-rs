@@ -3,46 +3,23 @@
 
 //! `cargo xtask test-shard <shard>`: one CI job's share of `cargo test --workspace`.
 //!
-//! CI (`.github/workflows/ci.yml`) runs each platform's debug and release tests as parallel
-//! jobs, one per shard below, so that the required checks finish in about an hour instead of
-//! three. The workspace's tests (every target `cargo test --workspace` runs, and each
-//! library's doctests) fall into three groups:
+//! Each reference platform and profile runs four disjoint groups: `formats`, `heavy`,
+//! `grading` and `rest`. The latter contains every new or otherwise unlisted target.
+//! The commands retain workspace-wide feature unification and include doctests. Unit tests
+//! prove the complete target union exactly once and require the workflow matrices to match.
 //!
-//! - `formats`: the API format sweep (`ocio` `api_formats_oracle`), alone because its
-//!   `builtin_transform` test runs 54 minutes in debug on GitHub's Windows runner;
-//! - `heavy`: the next slowest test targets, listed by hand;
-//! - `rest`: everything else, so a new package or test target runs here by default.
+//! Run 41126692114 (2026-10-30, source be369c75, live oracle, full tier) measured the old
+//! Windows release `rest` job at 156.7 minutes, including 141.7 minutes in test binaries.
+//! Grading tone, hue curve and primary took 36.7, 31.8 and 20.7 minutes respectively.
+//! Move primary to `heavy`, and tone plus hue curve to `grading`: the old rest's measured
+//! test time becomes 52.4 minutes. Debug's corresponding time becomes 42.1 minutes.
+//! On Rocky the old rest test times fall from 108.6/116.0 to 43.5/45.7 minutes (release/debug).
+//! These are replayed component timings, not a promised new job duration. Builds and runner
+//! contention remain, and `formats` still has an approximately 81-minute Windows debug job.
 //!
-//! Each shard runs some of the groups on one platform in one profile, and each platform runs
-//! every group exactly once per profile (the tests below check that, simulating cargo's
-//! target selection, and that the workflow's matrices list every shard once). A shard that
-//! ran all three groups would run `cargo test --workspace --no-fail-fast` itself (none does
-//! now); the others add target filters to it (`--lib`, `--bin <name>`, `--test <name>`, or
-//! `--doc` in a run of its own), so features unify over the whole workspace and every test
-//! binary is built exactly as without filters.
-//!
-//! Measured on CI run 39641166482 (PR #63, 2026-10-21, `OCIO_RS_TIER=full`, no oracle response
-//! reused between profiles), minutes of test binary time (the sum of each binary's "finished
-//! in"), debug / release:
-//!
-//! | group     | Windows       | Rocky Linux 9 |
-//! |-----------|---------------|---------------|
-//! | `formats` | 68.9 / 38.5   | 30.8 / 41.5   |
-//! | `heavy`   | 36.1 / 32.9   | 16.3 / 24.9   |
-//! | `rest`    | 37.9 / 34.7   | 17.4 / 27.4   |
-//!
-//! A job also builds first (3 to 14 minutes; the most for `rest`, with its many small binaries).
-//! Jobs of the first run, in minutes: Windows debug `formats` 73, `heavy` 40, `rest` 49; Windows
-//! release `formats` 41, `heavy` + `rest` together 81; Rocky Linux 9 debug `formats` 33,
-//! `heavy` + `rest` 38; release `formats` + `heavy` + `rest` together 100. Expected from the
-//! table plus the build, release shards of the split: Windows `heavy` about 39 and `rest`
-//! about 47; Linux `formats` about 45 and `heavy` + `rest` about 58.
-//!
-//! `windows-debug-formats` stays over an hour, because of one test: the binary of its group
-//! runs its 15 tests in parallel, and `builtin_transform_matches_the_wheel_at_every_format_and_level`
-//! ends last, at 69 minutes (`lut3d_transform_...` at 51, the others by 28). It needs about 54
-//! minutes by itself on a Windows runner (run 39496721649) and more while the others share
-//! its four cores. The shards place whole test targets and don't split inside one.
+//! No individual test, input, tier, assertion, oracle call or comparison changes. Every group
+//! uses target filters over `cargo test --workspace --no-fail-fast`, with doctests separate;
+//! a request for all four groups runs the original complete workspace command directly.
 
 use std::path::Path;
 use std::process::Command;
@@ -67,16 +44,18 @@ at the end if any did. The test tier comes from OCIO_RS_TIER, as for `cargo test
 pub(crate) enum Group {
     Formats,
     Heavy,
+    Grading,
     Rest,
 }
 
 impl Group {
-    const ALL: [Group; 3] = [Group::Formats, Group::Heavy, Group::Rest];
+    const ALL: [Group; 4] = [Group::Formats, Group::Heavy, Group::Grading, Group::Rest];
 
     fn name(self) -> &'static str {
         match self {
             Group::Formats => "formats",
             Group::Heavy => "heavy",
+            Group::Grading => "grading",
             Group::Rest => "rest",
         }
     }
@@ -86,6 +65,7 @@ impl Group {
         match self {
             Group::Formats => FORMATS,
             Group::Heavy => HEAVY,
+            Group::Grading => GRADING,
             Group::Rest => &[],
         }
     }
@@ -101,6 +81,13 @@ const HEAVY: &[(&str, &str)] = &[
     ("ocio-ops", "lut1d_renderer_oracle"),
     ("ocio", "api_battery_oracle"),
     ("ocio", "api_gpu_oracle"),
+    ("ocio-ops", "grading_primary_oracle"),
+];
+
+/// Tone and hue curve together took 68.5 minutes on Windows release in run 41126692114.
+const GRADING: &[(&str, &str)] = &[
+    ("ocio-ops", "grading_tone_oracle"),
+    ("ocio-ops", "grading_hue_curve_oracle"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,6 +140,12 @@ pub(crate) const SHARDS: &[Shard] = &[
         groups: &[Group::Heavy],
     },
     Shard {
+        id: "windows-debug-grading",
+        platform: Platform::Windows,
+        release: false,
+        groups: &[Group::Grading],
+    },
+    Shard {
         id: "windows-debug-rest",
         platform: Platform::Windows,
         release: false,
@@ -169,6 +162,12 @@ pub(crate) const SHARDS: &[Shard] = &[
         platform: Platform::Windows,
         release: true,
         groups: &[Group::Heavy],
+    },
+    Shard {
+        id: "windows-release-grading",
+        platform: Platform::Windows,
+        release: true,
+        groups: &[Group::Grading],
     },
     Shard {
         id: "windows-release-rest",
@@ -191,6 +190,12 @@ pub(crate) const SHARDS: &[Shard] = &[
         groups: &[Group::Heavy],
     },
     Shard {
+        id: "linux-debug-grading",
+        platform: Platform::Linux,
+        release: false,
+        groups: &[Group::Grading],
+    },
+    Shard {
         id: "linux-debug-rest",
         platform: Platform::Linux,
         release: false,
@@ -209,6 +214,12 @@ pub(crate) const SHARDS: &[Shard] = &[
         platform: Platform::Linux,
         release: true,
         groups: &[Group::Heavy],
+    },
+    Shard {
+        id: "linux-release-grading",
+        platform: Platform::Linux,
+        release: true,
+        groups: &[Group::Grading],
     },
     Shard {
         id: "linux-release-rest",
@@ -242,7 +253,7 @@ impl Unit {
         else {
             return Group::Rest;
         };
-        [Group::Formats, Group::Heavy]
+        [Group::Formats, Group::Heavy, Group::Grading]
             .into_iter()
             .find(|g| g.listed().contains(&(package.as_str(), name.as_str())))
             .unwrap_or(Group::Rest)
@@ -525,6 +536,9 @@ mod tests {
                     target("lut3d_inv_oracle", "test", false),
                     target("lut1d_renderer_oracle", "test", false),
                     target("log_oracle", "test", false),
+                    target("grading_primary_oracle", "test", false),
+                    target("grading_tone_oracle", "test", false),
+                    target("grading_hue_curve_oracle", "test", false),
                     target("build-script-build", "custom-build", false),
                 ],
             },
@@ -617,9 +631,23 @@ mod tests {
                 "--test",
                 "lut1d_renderer_oracle",
                 "--test",
+                "grading_primary_oracle",
+                "--test",
                 "api_battery_oracle",
                 "--test",
                 "api_gpu_oracle"
+            ])]
+        );
+        assert_eq!(
+            commands(&packages, &[Group::Grading], false).unwrap(),
+            [strings(&[
+                "test",
+                "--workspace",
+                "--no-fail-fast",
+                "--test",
+                "grading_tone_oracle",
+                "--test",
+                "grading_hue_curve_oracle"
             ])]
         );
         // `config_version_oracle` is a test of two packages; `--test` names it once.
@@ -641,7 +669,7 @@ mod tests {
                 strings(&["test", "--workspace", "--doc", "--no-fail-fast"]),
             ]
         );
-        // All three groups: the whole workspace, as one cargo run.
+        // All four groups: the whole workspace, as one cargo run.
         assert_eq!(
             commands(&packages, &Group::ALL, true).unwrap(),
             [strings(&[
