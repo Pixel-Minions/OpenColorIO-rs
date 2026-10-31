@@ -31,8 +31,9 @@ from Rust and Python.
   (SSE2, AVX, AVX2, AVX-512) the official build can run.
 - **GPU shaders are byte-identical**, with the same uniforms and textures, in all 10 shading
   languages OCIO supports.
-- **OCIO's own tests pass.** Upstream's 1,191 C++ unit tests and 264 GPU tests are ported, and
-  its 384 Python tests run unmodified against this port's Python module.
+- **OCIO's own tests are checked.** Of 1,191 C++ tests, 1,189 are ported and two are on the
+  [reviewed not-applicable list](docs/waivers.md#p9-6---reviewed-c-tests-not-applicable-owner-approved-2026-10-23).
+  All 264 GPU tests are ported, and all 384 Python tests run unmodified against this port's module.
 - **Nothing is waived silently.** Every exception is a written, approved waiver in
   [`waivers.toml`](waivers.toml), and CI fails on any difference that isn't listed there.
   W0001 and W0002 cover these differences:
@@ -91,9 +92,9 @@ one.
 
 ## Progress
 
-Status as of 2026-10-30: **milestones M0, M1, M2, M3 and M4 are complete**, about 84% of the
-planned work (1,188 of 1,191 upstream C++ tests ported; 384 of 384 upstream Python tests pass
-unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
+Status as of 2026-10-31: **milestones M0, M1, M2, M3 and M4 are complete**, about 84% of the
+planned work (1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
+all 1,191; 384 of 384 upstream Python tests pass unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
 test configs): the grading values (GradingPrimary, GradingTone,
 GradingHueCurve) with their dynamic properties; the ExposureContrast, GradingPrimary,
@@ -109,7 +110,7 @@ file and viewing rules, color spaces and sets, looks, view and named transforms,
 metadata), NumPy buffers with the CPU processor's apply, `Config`, the grading classes, dynamic
 properties, the app helpers, processors (CPU and GPU, shader descriptions), the baker,
 ConfigUtils statics and the parameters, merger and helpers for config merging. SystemMonitors
-is exposed in Python too. The unchanged upstream driver and complete module metadata match
+is exposed in Python too. The unmodified upstream test modules pass, and complete module metadata matches
 the official wheel on both reference platforms; native C++ extension pointer exchange is outside
 the approved [D-16 scope](docs/deviations.md). Phase 7 foundations
 in main: the legacy GPU API, the reference client linked to the official wheel, and headless
@@ -128,9 +129,8 @@ Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pa
 files, and the CLF/CTF writer; the baker, in every format the official library bakes, CLF and
 CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
 4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
-ops in M3. Next: GPU execution and the legacy GPU path (Phase 7), the remaining
-library tests (Phase 9), hardware SIMD and threading (Phase 8), and developer tools and release
-work (Phase 10).
+ops in M3. Next: remaining legacy GPU parity (Phase 7), the remaining library-file audit
+(Phase 9), hardware SIMD and threading (Phase 8), and developer tools and release work (Phase 10).
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
@@ -242,16 +242,17 @@ Where the official library reads or writes memory it doesn't own, the port retur
 instead. Every such case, and every upstream bug the port reproduces, is listed in
 [`docs/improvements.md`](docs/improvements.md) for a decision at the end of the port.
 
-**Upstream tests ported:**
+**Upstream test accounting:**
 
-| Suite | Ported | Total |
-|---|---:|---:|
-| C++ | 1,188 | 1,191 |
-| GPU | 205 | 264 |
-| Python | 384 | 384 |
+| Suite | Ported | Reviewed n/a | Total |
+|---|---:|---:|---:|
+| C++ | 1,189 | 2 | 1,191 |
+| GPU | 264 | 0 | 264 |
+| Python | 384 | 0 | 384 |
 
-The live numbers are in [`docs/parity.md`](docs/parity.md). NamedTransform's existing Rust API
-checks are complete; its C++ null-pointer assertion remains uncounted pending review.
+The live numbers are in [`docs/parity.md`](docs/parity.md). The two C++ exclusions are the
+owner-approved P9-6 decisions in [`docs/waivers.md`](docs/waivers.md). NamedTransform/basic
+checks its null argument through the existing production Python API as `None`.
 The ported GPU tests run headlessly on llvmpipe in CI. Their rendered pixels and generated
 shader text are compared with the official library.
 
