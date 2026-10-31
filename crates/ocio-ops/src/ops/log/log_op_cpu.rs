@@ -24,9 +24,17 @@
 //! [`sse_add`]/[`sse_mul`], in the order the wheels' machine code uses: upstream's source order,
 //! except where the comments say otherwise. Rust's `+` and `*` would leave it to LLVM. (The
 //! Log2/Log10 renderers only multiply by constants.)
+//!
+//! # SSE2 fast paths
+//!
+//! Those lanes branch on every operand. With finite coefficients, blocks of finite pixels take
+//! the real SSE2 kernels of `log_op_cpu_sse2`, which says why no operand order shows there. Any
+//! other block takes the lanes.
 
 use std::sync::Arc;
 
+#[cfg(target_arch = "x86_64")]
+use super::log_op_cpu_sse2 as sse2;
 use super::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE, LogOpData,
     Params, SHORT_PARAMS,
@@ -34,9 +42,70 @@ use super::log_op_data::{
 use super::log_utils::{get_linear_offset, get_linear_slope, get_log_side_break};
 use crate::exception::{Exception, Result};
 use crate::math_utils::{sse_add, sse_max, sse_mul, std_max};
-use crate::op::CpuOp;
+use crate::op::{CpuOp, Pixels, PixelsMut};
 use crate::open_color_types::TransformDirection;
 use crate::sse::{sse_exp2, sse_log2};
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::blocks::{for_each_block, for_each_block_to};
+
+/// Whether every value is finite, as the real SSE2 kernels need.
+#[cfg(target_arch = "x86_64")]
+fn finite<'a>(values: impl IntoIterator<Item = &'a [f32; 3]>) -> bool {
+    values.into_iter().flatten().all(|v| v.is_finite())
+}
+
+/// A renderer with fast math: its exact lanes, and on x86-64 its real kernels and what they
+/// need.
+trait Kernels {
+    /// The exact lanes on `block`, in place.
+    fn exact(&self, block: &mut [[f32; 4]]);
+    /// Whether the coefficients allow the real kernels.
+    #[cfg(target_arch = "x86_64")]
+    fn is_finite(&self) -> bool;
+    /// The real kernel on a finite `block`, in place.
+    #[cfg(target_arch = "x86_64")]
+    fn fast(&self, block: &mut [[f32; 4]]);
+    /// The real kernel from a finite block to another.
+    #[cfg(target_arch = "x86_64")]
+    fn fast_to(&self, from: &[[f32; 4]], to: &mut [[f32; 4]]);
+}
+
+/// Implements [`CpuOp`] from [`Kernels`], in place and, as the C++, between two buffers without
+/// a copy of the input.
+macro_rules! cpu_op {
+    ($name:ident) => {
+        impl CpuOp for $name {
+            fn apply(&self, rgba: &mut [f32]) {
+                #[cfg(target_arch = "x86_64")]
+                if self.is_finite() {
+                    let fast = |block: &mut [[f32; 4]]| self.fast(block);
+                    for_each_block(pixels(rgba), fast, |block, _| self.exact(block));
+                    return;
+                }
+                self.exact(pixels(rgba));
+            }
+
+            fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
+                let (in_name, out_name) = (input.type_name(), output.type_name());
+                let (Pixels::F32(input), PixelsMut::F32(output)) = (input, output) else {
+                    panic!("{self:?} processes float pixels only, not {in_name} to {out_name}");
+                };
+                #[cfg(target_arch = "x86_64")]
+                if self.is_finite() {
+                    for_each_block_to(
+                        input.as_chunks::<4>().0,
+                        output.as_chunks_mut::<4>().0,
+                        |from, to| self.fast_to(from, to),
+                        |block, _| self.exact(block),
+                    );
+                    return;
+                }
+                output.copy_from_slice(input);
+                self.exact(pixels(output));
+            }
+        }
+    };
+}
 
 /// `LOG2_10` (src/OpenColorIO/ops/log/LogOpCPU.cpp:221 @ v2.5.2).
 const LOG2_10: f32 = 3.3219280948873623478703194294894_f64 as f32;
@@ -166,10 +235,10 @@ impl LogRendererSse {
     }
 }
 
-impl CpuOp for LogRendererSse {
+impl Kernels for LogRendererSse {
     /// Port of `LogRendererSSE::apply` (src/OpenColorIO/ops/log/LogOpCPU.cpp:421-451 @ v2.5.2).
-    fn apply(&self, rgba: &mut [f32]) {
-        for px in pixels(rgba) {
+    fn exact(&self, block: &mut [[f32; 4]]) {
+        for px in block {
             for v in &mut px[..3] {
                 let mut pixel = sse_max(*v, MIN_VALUE);
                 pixel = sse_log2(pixel);
@@ -177,7 +246,24 @@ impl CpuOp for LogRendererSse {
             }
         }
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn is_finite(&self) -> bool {
+        self.0.log_scale.is_finite()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast(&self, block: &mut [[f32; 4]]) {
+        sse2::log(block, MIN_VALUE, self.0.log_scale);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast_to(&self, from: &[[f32; 4]], to: &mut [[f32; 4]]) {
+        sse2::log_to(from, to, MIN_VALUE, self.0.log_scale);
+    }
 }
+
+cpu_op!(LogRendererSse);
 
 // -------------------------------------------------------------------------------------------
 // AntiLog10 and AntiLog2.
@@ -228,17 +314,34 @@ impl AntiLogRendererSse {
     }
 }
 
-impl CpuOp for AntiLogRendererSse {
+impl Kernels for AntiLogRendererSse {
     /// Port of `AntiLogRendererSSE::apply` (src/OpenColorIO/ops/log/LogOpCPU.cpp:490-520
     /// @ v2.5.2).
-    fn apply(&self, rgba: &mut [f32]) {
-        for px in pixels(rgba) {
+    fn exact(&self, block: &mut [[f32; 4]]) {
+        for px in block {
             for v in &mut px[..3] {
                 *v = sse_exp2(*v * self.0.log2_base);
             }
         }
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn is_finite(&self) -> bool {
+        self.0.log2_base.is_finite()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast(&self, block: &mut [[f32; 4]]) {
+        sse2::anti_log(block, self.0.log2_base);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast_to(&self, from: &[[f32; 4]], to: &mut [[f32; 4]]) {
+        sse2::anti_log_to(from, to, self.0.log2_base);
+    }
 }
+
+cpu_op!(AntiLogRendererSse);
 
 // -------------------------------------------------------------------------------------------
 // LogToLin.
@@ -304,12 +407,12 @@ impl Log2LinRendererSse {
     }
 }
 
-impl CpuOp for Log2LinRendererSse {
+impl Kernels for Log2LinRendererSse {
     /// Port of `Log2LinRendererSSE::apply` (src/OpenColorIO/ops/log/LogOpCPU.cpp:581-620
     /// @ v2.5.2).
-    fn apply(&self, rgba: &mut [f32]) {
+    fn exact(&self, block: &mut [[f32; 4]]) {
         let r = &self.0;
-        for px in pixels(rgba) {
+        for px in block {
             for (c, v) in px[..3].iter_mut().enumerate() {
                 let mut pixel = sse_add(*v, r.minuskb[c]);
                 pixel = sse_mul(pixel, r.kinv[c]);
@@ -319,7 +422,27 @@ impl CpuOp for Log2LinRendererSse {
             }
         }
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn is_finite(&self) -> bool {
+        let r = &self.0;
+        finite([&r.kinv, &r.minuskb, &r.minusb, &r.minv])
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast(&self, block: &mut [[f32; 4]]) {
+        let r = &self.0;
+        sse2::log2lin(block, &r.kinv, &r.minuskb, &r.minusb, &r.minv)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast_to(&self, from: &[[f32; 4]], to: &mut [[f32; 4]]) {
+        let r = &self.0;
+        sse2::log2lin_to(from, to, &r.kinv, &r.minuskb, &r.minusb, &r.minv)
+    }
 }
+
+cpu_op!(Log2LinRendererSse);
 
 // -------------------------------------------------------------------------------------------
 // LinToLog.
@@ -387,12 +510,12 @@ impl Lin2LogRendererSse {
     }
 }
 
-impl CpuOp for Lin2LogRendererSse {
+impl Kernels for Lin2LogRendererSse {
     /// Port of `Lin2LogRendererSSE::apply` (src/OpenColorIO/ops/log/LogOpCPU.cpp:682-720
     /// @ v2.5.2).
-    fn apply(&self, rgba: &mut [f32]) {
+    fn exact(&self, block: &mut [[f32; 4]]) {
         let r = &self.0;
-        for px in pixels(rgba) {
+        for px in block {
             for (c, v) in px[..3].iter_mut().enumerate() {
                 let mut pixel = sse_mul(*v, r.m[c]);
                 pixel = sse_add(pixel, r.b[c]);
@@ -403,7 +526,27 @@ impl CpuOp for Lin2LogRendererSse {
             }
         }
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn is_finite(&self) -> bool {
+        let r = &self.0;
+        finite([&r.m, &r.b, &r.klog, &r.kb])
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast(&self, block: &mut [[f32; 4]]) {
+        let r = &self.0;
+        sse2::lin2log(block, MIN_VALUE, &r.m, &r.b, &r.klog, &r.kb)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast_to(&self, from: &[[f32; 4]], to: &mut [[f32; 4]]) {
+        let r = &self.0;
+        sse2::lin2log_to(from, to, MIN_VALUE, &r.m, &r.b, &r.klog, &r.kb)
+    }
 }
+
+cpu_op!(Lin2LogRendererSse);
 
 // -------------------------------------------------------------------------------------------
 // Camera styles.
@@ -513,12 +656,12 @@ impl CameraLog2LinRendererSse {
     }
 }
 
-impl CpuOp for CameraLog2LinRendererSse {
+impl Kernels for CameraLog2LinRendererSse {
     /// Port of `CameraLog2LinRendererSSE::apply` (src/OpenColorIO/ops/log/LogOpCPU.cpp:810-859
     /// @ v2.5.2).
-    fn apply(&self, rgba: &mut [f32]) {
+    fn exact(&self, block: &mut [[f32; 4]]) {
         let r = &self.0;
-        for px in pixels(rgba) {
+        for px in block {
             for (c, v) in px[..3].iter_mut().enumerate() {
                 let pixel = *v;
                 let flag = pixel > r.base.log_side_break[c];
@@ -536,7 +679,53 @@ impl CpuOp for CameraLog2LinRendererSse {
             }
         }
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn is_finite(&self) -> bool {
+        let r = &self.0;
+        finite([
+            &r.kinv,
+            &r.minuskb,
+            &r.minusb,
+            &r.minv,
+            &r.minuslino,
+            &r.linsinv,
+            &r.base.log_side_break,
+        ])
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast(&self, block: &mut [[f32; 4]]) {
+        let r = &self.0;
+        let c = sse2::CameraLog2Lin {
+            kinv: &r.kinv,
+            minuskb: &r.minuskb,
+            minusb: &r.minusb,
+            minv: &r.minv,
+            break_pnt: &r.base.log_side_break,
+            linoinv: &r.minuslino,
+            linsinv: &r.linsinv,
+        };
+        sse2::camera_log2lin(block, &c)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast_to(&self, from: &[[f32; 4]], to: &mut [[f32; 4]]) {
+        let r = &self.0;
+        let c = sse2::CameraLog2Lin {
+            kinv: &r.kinv,
+            minuskb: &r.minuskb,
+            minusb: &r.minusb,
+            minv: &r.minv,
+            break_pnt: &r.base.log_side_break,
+            linoinv: &r.minuslino,
+            linsinv: &r.linsinv,
+        };
+        sse2::camera_log2lin_to(from, to, &c)
+    }
 }
+
+cpu_op!(CameraLog2LinRendererSse);
 
 /// CameraLinToLog: below `linSideBreak`, `linearSlope * in + linearOffset`; above it,
 /// [`Lin2LogRenderer`]'s curve. With `log2f`.
@@ -610,12 +799,12 @@ impl CameraLin2LogRendererSse {
     }
 }
 
-impl CpuOp for CameraLin2LogRendererSse {
+impl Kernels for CameraLin2LogRendererSse {
     /// Port of `CameraLin2LogRendererSSE::apply` (src/OpenColorIO/ops/log/LogOpCPU.cpp:928-981
     /// @ v2.5.2).
-    fn apply(&self, rgba: &mut [f32]) {
+    fn exact(&self, block: &mut [[f32; 4]]) {
         let r = &self.0;
-        for px in pixels(rgba) {
+        for px in block {
             for (c, v) in px[..3].iter_mut().enumerate() {
                 let pixel = *v;
                 let flag = pixel > r.linb[c];
@@ -634,7 +823,53 @@ impl CpuOp for CameraLin2LogRendererSse {
             }
         }
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn is_finite(&self) -> bool {
+        let r = &self.0;
+        finite([
+            &r.m,
+            &r.b,
+            &r.klog,
+            &r.kb,
+            &r.linb,
+            &r.base.linear_slope,
+            &r.base.linear_offset,
+        ])
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast(&self, block: &mut [[f32; 4]]) {
+        let r = &self.0;
+        let c = sse2::CameraLin2Log {
+            m: &r.m,
+            b: &r.b,
+            klog: &r.klog,
+            kb: &r.kb,
+            lins: &r.base.linear_slope,
+            lino: &r.base.linear_offset,
+            break_pnt: &r.linb,
+        };
+        sse2::camera_lin2log(block, MIN_VALUE, &c)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn fast_to(&self, from: &[[f32; 4]], to: &mut [[f32; 4]]) {
+        let r = &self.0;
+        let c = sse2::CameraLin2Log {
+            m: &r.m,
+            b: &r.b,
+            klog: &r.klog,
+            kb: &r.kb,
+            lins: &r.base.linear_slope,
+            lino: &r.base.linear_offset,
+            break_pnt: &r.linb,
+        };
+        sse2::camera_lin2log_to(from, to, MIN_VALUE, &c)
+    }
 }
+
+cpu_op!(CameraLin2LogRendererSse);
 
 #[cfg(test)]
 #[path = "log_op_cpu_tests.rs"]

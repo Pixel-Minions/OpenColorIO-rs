@@ -268,6 +268,7 @@ pub mod blocks {
     /// Whether every value of `pixels` is finite: its exponent bits aren't all ones.
     #[inline]
     pub fn block_is_finite(pixels: &[[f32; 4]]) -> bool {
+        // A few pixels, such as `applyRGBA`'s one, don't pay for the wider registers.
         if std::arch::is_x86_feature_detected!("avx2") {
             // SAFETY: the CPU has AVX2.
             return unsafe { crate::avx2::block_is_finite(pixels) };
@@ -293,6 +294,54 @@ pub mod blocks {
         }
         // SAFETY: x86-64 has SSE2.
         unsafe { check(pixels) }
+    }
+
+    /// A pixel of a loop between two buffers, for a kernel written for a pixel in place.
+    #[derive(Debug)]
+    pub struct Pair<'a> {
+        /// The input.
+        pub from: &'a [f32; 4],
+        /// The output.
+        pub to: &'a mut [f32; 4],
+    }
+
+    impl Pair<'_> {
+        /// The input as a register.
+        #[inline]
+        pub fn load(&self) -> __m128 {
+            load(self.from)
+        }
+
+        /// Writes red, green and blue of `value`, and the input's alpha, a finite value whose
+        /// copy has nothing to quiet.
+        #[inline]
+        pub fn store_rgb(&mut self, value: __m128) {
+            store_rgb(self.to, value);
+            self.to[3] = self.from[3];
+        }
+    }
+
+    /// [`for_each_block`] from `input` to `output`, the same number of pixels: `fast` renders a
+    /// finite block from one to the other, and `exact` a copy of another block, in place. The
+    /// C++ renders the first op of a chain between two rows, without that copy.
+    #[inline]
+    pub fn for_each_block_to(
+        input: &[[f32; 4]],
+        output: &mut [[f32; 4]],
+        mut fast: impl FnMut(&[[f32; 4]], &mut [[f32; 4]]),
+        mut exact: impl FnMut(&mut [[f32; 4]], usize),
+    ) {
+        let blocks = input
+            .chunks(BLOCK_PIXELS)
+            .zip(output.chunks_mut(BLOCK_PIXELS));
+        for (index, (from, to)) in blocks.enumerate() {
+            if block_is_finite(from) {
+                fast(from, to);
+            } else {
+                to.copy_from_slice(from);
+                exact(to, index * BLOCK_PIXELS);
+            }
+        }
     }
 
     /// Cuts `pixels` into blocks: `fast` renders the finite ones, `exact` the others, with the
