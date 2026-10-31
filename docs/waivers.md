@@ -81,6 +81,7 @@ passed debug and release with every old Matrix rule still mandatory. The exact
 metadata remains in [the archive](archive/gpu-matrix-waivers-2026-10-27.toml).
 W0013 below remains the single non-finite GPU class; retired Matrix rules are rejected.
 The five finite exact pins W0014-W0018 are separately owner-approved on 2026-10-30.
+W0019, for the dev tools, is owner-approved on 2026-10-31.
 
 ## W0003 — MatrixOps/matrix (retired 2026-10-29; historical evidence)
 
@@ -514,6 +515,12 @@ hash manifest are preserved outside target. The debugger's local source commit i
 [implementation and evidence](gpu-finite-exact-pins.md). Full normal CI on the final
 landing remains required; source approval is not a runtime pass.
 
+## W0019 - Non-ASCII command-line arguments of the tools on Windows (owner approved 2026-10-31)
+
+Deviation D-17 (`deviations.md`), `improvements.md` I-601. The wheel's tools get their arguments
+in the ANSI code page; the port's take them in Unicode and use UTF-8. ASCII arguments and Linux
+are not waived. No sweep passes a non-ASCII argument on Windows, so no check is relaxed in code:
+the waiver records what isn't compared. The measurements are in `waivers.toml` and D-17.
 
 ## P9-6 - Reviewed C++ tests not applicable (owner approved 2026-10-23)
 

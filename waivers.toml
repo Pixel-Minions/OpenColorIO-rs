@@ -268,6 +268,14 @@ egl_vendor = "Mesa Project"
 egl_version = "1.5"
 max_texture_size = 16384
 
+[[waiver]]
+id = "W0019"
+scope = "Windows only: the tools ociocheck, ociochecklut, ociowrite and ociobakelut, for command-line arguments outside ASCII (deviation D-17, docs/improvements.md I-601). ASCII arguments and Linux are not waived"
+check = "Stdout, stderr, exit code and written files of those tools, against the wheel's tool on the same machine, for such arguments only. No sweep passes a non-ASCII argument on Windows, so no check is relaxed in code: the waiver records what isn't compared. Every other case stays byte-exact. Linux compares non-ASCII paths in crates/ocio-tools/tests/ociocheck_oracle.rs (non_ascii_paths)"
+reason = "The wheel's main(int, const char **) gets arguments in the ANSI code page; the port takes them in Unicode and uses UTF-8. Measured on code page 1252, console code page 437: --iconfig, ociochecklut and --lut with an e-acute in the file name fail to read and exit 1 in the wheel, and work in the port; a printed e-acute is E9 in the wheel and C3 A9 in the port; a character outside the code page becomes ? in the wheel, and file operations fail, and it works in the port. ociowrite --file with an e-acute, $OCIO holding non-ASCII text and pixel text with non-ASCII bytes are the same on both sides. Matching would need Windows FFI in ocio-tools, and it would keep a defect: the wheel's own library reads those paths as UTF-8"
+approved_by = "Project owner, explicit chat approval on 2026-10-31"
+date = "2026-10-31"
+
 [[not_applicable]]
 test = "Platform/aligned_memory_test"
 reason = "P9-6 (owner decision2026-10-23): native C++ AlignedMalloc/AlignedFree allocation of1001 bytes at16-byte alignment. The current Rust renderer owns a Vec and uses unaligned loads; no corresponding C++ allocator API applies. Reopen if Phase8 introduces applicable aligned storage."
