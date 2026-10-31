@@ -437,6 +437,91 @@ pub fn sse_sin_cos_scalar(x: f32) -> (f32, f32) {
     (sin_x, cos_x)
 }
 
+/// The real `sseLog2`, `sseExp2` and `ssePower`, on four lanes, for the kernels' fast paths
+/// (`docs/cards/phase8.md`). The lanes above are the exact form, which the battery proves.
+#[cfg(target_arch = "x86_64")]
+pub(crate) mod simd {
+    use core::arch::x86_64::*;
+
+    use super::{
+        ENEG126, EONE, EPOS128, EXP_BIAS, EXP_MASK, EXP_SHIFT, PNEXP0, PNEXP1, PNEXP2, PNEXP3,
+        PNEXP4, PNLOG0, PNLOG1, PNLOG2, PNLOG3, PNLOG4, PNLOG5,
+    };
+
+    /// Port of `sseSelect` (src/OpenColorIO/SSE.h:144-151 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    fn sse_select(mask: __m128, arg_true: __m128, arg_false: __m128) -> __m128 {
+        _mm_xor_ps(arg_false, _mm_and_ps(mask, _mm_xor_ps(arg_true, arg_false)))
+    }
+
+    /// Port of `sseLog2` (src/OpenColorIO/SSE.h:186-228 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn sse_log2(x: __m128) -> __m128 {
+        let emask = _mm_set1_epi32(EXP_MASK);
+        let mantissa = _mm_or_ps(_mm_andnot_ps(_mm_castsi128_ps(emask), x), _mm_set1_ps(EONE));
+
+        let mut log2 = _mm_mul_ps(_mm_set1_ps(PNLOG5), mantissa);
+        log2 = _mm_mul_ps(_mm_add_ps(log2, _mm_set1_ps(PNLOG4)), mantissa);
+        log2 = _mm_mul_ps(_mm_add_ps(log2, _mm_set1_ps(PNLOG3)), mantissa);
+        log2 = _mm_mul_ps(_mm_add_ps(log2, _mm_set1_ps(PNLOG2)), mantissa);
+        log2 = _mm_mul_ps(_mm_add_ps(log2, _mm_set1_ps(PNLOG1)), mantissa);
+        log2 = _mm_add_ps(log2, _mm_set1_ps(PNLOG0));
+
+        let exponent = _mm_sub_epi32(
+            _mm_srli_epi32::<{ EXP_SHIFT as i32 }>(_mm_and_si128(_mm_castps_si128(x), emask)),
+            _mm_set1_epi32(EXP_BIAS),
+        );
+
+        _mm_add_ps(log2, _mm_cvtepi32_ps(exponent))
+    }
+
+    /// Port of `sseExp2` (src/OpenColorIO/SSE.h:230-307 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn sse_exp2(x: __m128) -> __m128 {
+        let floor_x = _mm_add_epi32(
+            _mm_cvttps_epi32(x),
+            _mm_castps_si128(_mm_cmpnle_ps(_mm_setzero_ps(), x)),
+        );
+
+        let zf = _mm_castsi128_ps(_mm_slli_epi32::<{ EXP_SHIFT as i32 }>(_mm_add_epi32(
+            floor_x,
+            _mm_set1_epi32(EXP_BIAS),
+        )));
+
+        let iexp = _mm_cvtepi32_ps(floor_x);
+        let fraction = _mm_sub_ps(x, iexp);
+
+        let mut mexp = _mm_mul_ps(_mm_set1_ps(PNEXP4), fraction);
+        mexp = _mm_mul_ps(_mm_add_ps(mexp, _mm_set1_ps(PNEXP3)), fraction);
+        mexp = _mm_mul_ps(_mm_add_ps(mexp, _mm_set1_ps(PNEXP2)), fraction);
+        mexp = _mm_mul_ps(_mm_add_ps(mexp, _mm_set1_ps(PNEXP1)), fraction);
+        mexp = _mm_add_ps(mexp, _mm_set1_ps(PNEXP0));
+
+        let exp2 = _mm_mul_ps(zf, mexp);
+
+        // Handle underflow, then overflow.
+        let exp2 = _mm_andnot_ps(_mm_cmplt_ps(x, _mm_set1_ps(ENEG126)), exp2);
+        sse_select(
+            _mm_cmpge_ps(x, _mm_set1_ps(EPOS128)),
+            _mm_set1_ps(f32::INFINITY),
+            exp2,
+        )
+    }
+
+    /// Port of `ssePower` (src/OpenColorIO/SSE.h:309-339 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn sse_power(x: __m128, exp: __m128) -> __m128 {
+        let values = sse_exp2(_mm_mul_ps(exp, sse_log2(x)));
+
+        // Handle values where base is smaller or equal than zero
+        _mm_and_ps(values, _mm_cmpgt_ps(x, _mm_setzero_ps()))
+    }
+}
+
 #[cfg(test)]
 #[allow(unsafe_code)] // The tests compare lanes with the SSE2 instructions (core::arch).
 #[path = "sse_tests.rs"]

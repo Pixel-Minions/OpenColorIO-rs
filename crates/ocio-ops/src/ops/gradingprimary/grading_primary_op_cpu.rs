@@ -55,9 +55,17 @@
 //!
 //! The saturation's sums meet only NaNs with the same bits, or none at all: no output shows
 //! their orders.
+//!
+//! # SSE2 fast paths
+//!
+//! That lane code branches on every operand. Blocks of finite pixels with finite coefficients
+//! take the real SSE2 kernels of `grading_primary_op_cpu_sse2` instead, where no NaN can show
+//! an order (its `Coefficients::fast_path` says why); any other block takes the lanes.
 
 use std::sync::Arc;
 
+#[cfg(target_arch = "x86_64")]
+use super::grading_primary_op_cpu_sse2 as sse2;
 use super::grading_primary_op_data::GradingPrimaryOpData;
 use crate::dynamic_property::{
     DynamicPropertyGradingPrimaryImplRcPtr, DynamicPropertyRcPtr, PrimaryState,
@@ -67,6 +75,8 @@ use crate::math_utils::{sse_add, sse_max, sse_min, sse_mul, sse_sub};
 use crate::op::CpuOp;
 use crate::open_color_types::{DynamicPropertyType, GradingStyle, TransformDirection};
 use crate::sse::{EABS_MASK, ESIGN_MASK, sse_power};
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::blocks::for_each_block;
 
 /// "Dynamic property type not supported by GradingPrimary." (GradingPrimaryOpCPU.cpp:72 @
 /// v2.5.2).
@@ -472,6 +482,23 @@ fn pixels(rgba: &mut [f32]) -> &mut [[f32; 4]] {
     rgba.as_chunks_mut::<4>().0
 }
 
+/// Renders `rgba` with `exact`, the lanes, or block by block with `fast`, where the
+/// coefficients `c` allow it.
+#[cfg(target_arch = "x86_64")]
+#[inline]
+fn render(
+    rgba: &mut [f32],
+    c: &sse2::Coefficients,
+    fast: impl Fn(&mut [[f32; 4]]),
+    exact: impl Fn(&mut [[f32; 4]]),
+) {
+    if c.fast_path() {
+        for_each_block(pixels(rgba), fast, |block, _| exact(block));
+    } else {
+        exact(pixels(rgba));
+    }
+}
+
 /// The forward log style: brightness, contrast around the pivot, gamma between the black and
 /// white pivots, saturation, clamps.
 ///
@@ -509,21 +536,45 @@ impl CpuOp for GradingPrimaryLogFwdOpCpu {
 
         let apply_sat = v.saturation != 1.0;
         let o = LOG_FWD.of(apply_sat, !is_gamma_identity);
-        for px in pixels(rgba) {
-            let mut pixel = load(px);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                let mut pixel = load(px);
 
-            pixel = add(o.pixel_add, pixel, brightness);
-            pixel = apply_contrast(pixel, contrast, pivot);
-            if !is_gamma_identity {
-                pixel = apply_gamma(pixel, gamma, black_pivot, white_pivot);
-            }
-            if apply_sat {
-                pixel = apply_saturation(pixel, saturation, o);
-            }
-            pixel = apply_clamp(pixel, black_clamp, white_clamp);
+                pixel = add(o.pixel_add, pixel, brightness);
+                pixel = apply_contrast(pixel, contrast, pivot);
+                if !is_gamma_identity {
+                    pixel = apply_gamma(pixel, gamma, black_pivot, white_pivot);
+                }
+                if apply_sat {
+                    pixel = apply_saturation(pixel, saturation, o);
+                }
+                pixel = apply_clamp(pixel, black_clamp, white_clamp);
 
-            store_rgb(px, pixel);
+                store_rgb(px, pixel);
+            }
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let c = sse2::Coefficients {
+                add: brightness,
+                scale: contrast,
+                power: gamma,
+                pivot: pivot[0],
+                saturation: saturation[0],
+                black_pivot: black_pivot[0],
+                white_pivot: white_pivot[0],
+                black_clamp: black_clamp[0],
+                lin_contrast: false,
+                white_clamp: white_clamp[0],
+            };
+            let fast = |block: &mut [[f32; 4]]| {
+                sse2::render_log_fwd(block, &c, apply_sat, !is_gamma_identity)
+            };
+            render(rgba, &c, fast, exact);
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        exact(pixels(rgba));
     }
 
     base_dynamic_properties!();
@@ -568,21 +619,45 @@ impl CpuOp for GradingPrimaryLogRevOpCpu {
         let apply_sat = v.saturation != 1. && v.saturation != 0.;
         let sat_inv = splat((1. / v.saturation) as f32);
         let o = LOG_REV.of(apply_sat, !is_gamma_identity);
-        for px in pixels(rgba) {
-            let mut pixel = load(px);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                let mut pixel = load(px);
 
-            pixel = apply_clamp(pixel, clamp_b, clamp_w);
-            if apply_sat {
-                pixel = apply_saturation(pixel, sat_inv, o);
-            }
-            if !is_gamma_identity {
-                pixel = apply_gamma(pixel, gamma_inv, pivot_black, pivot_white);
-            }
-            pixel = apply_contrast(pixel, contrast_inv, actual_pivot);
-            pixel = add(o.pixel_add, pixel, brightness_inv);
+                pixel = apply_clamp(pixel, clamp_b, clamp_w);
+                if apply_sat {
+                    pixel = apply_saturation(pixel, sat_inv, o);
+                }
+                if !is_gamma_identity {
+                    pixel = apply_gamma(pixel, gamma_inv, pivot_black, pivot_white);
+                }
+                pixel = apply_contrast(pixel, contrast_inv, actual_pivot);
+                pixel = add(o.pixel_add, pixel, brightness_inv);
 
-            store_rgb(px, pixel);
+                store_rgb(px, pixel);
+            }
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let c = sse2::Coefficients {
+                add: brightness_inv,
+                scale: contrast_inv,
+                power: gamma_inv,
+                pivot: actual_pivot[0],
+                saturation: sat_inv[0],
+                black_pivot: pivot_black[0],
+                white_pivot: pivot_white[0],
+                black_clamp: clamp_b[0],
+                lin_contrast: false,
+                white_clamp: clamp_w[0],
+            };
+            let fast = |block: &mut [[f32; 4]]| {
+                sse2::render_log_rev(block, &c, apply_sat, !is_gamma_identity)
+            };
+            render(rgba, &c, fast, exact);
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        exact(pixels(rgba));
     }
 
     base_dynamic_properties!();
@@ -622,21 +697,45 @@ impl CpuOp for GradingPrimaryLinFwdOpCpu {
 
         let apply_sat = v.saturation != 1.0;
         let o = LIN_FWD.of(apply_sat, !is_contrast_identity);
-        for px in pixels(rgba) {
-            let mut pixel = load(px);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                let mut pixel = load(px);
 
-            pixel = add(o.pixel_add, pixel, offset);
-            pixel = mul(Src, pixel, exposure);
-            if !is_contrast_identity {
-                pixel = apply_lin_contrast(pixel, contrast, pivot);
-            }
-            if apply_sat {
-                pixel = apply_saturation(pixel, saturation, o);
-            }
-            pixel = apply_clamp(pixel, clamp_b, clamp_w);
+                pixel = add(o.pixel_add, pixel, offset);
+                pixel = mul(Src, pixel, exposure);
+                if !is_contrast_identity {
+                    pixel = apply_lin_contrast(pixel, contrast, pivot);
+                }
+                if apply_sat {
+                    pixel = apply_saturation(pixel, saturation, o);
+                }
+                pixel = apply_clamp(pixel, clamp_b, clamp_w);
 
-            store_rgb(px, pixel);
+                store_rgb(px, pixel);
+            }
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let c = sse2::Coefficients {
+                add: offset,
+                scale: exposure,
+                power: contrast,
+                pivot: pivot[0],
+                saturation: saturation[0],
+                black_pivot: 0.0,
+                white_pivot: 0.0,
+                black_clamp: clamp_b[0],
+                lin_contrast: true,
+                white_clamp: clamp_w[0],
+            };
+            let fast = |block: &mut [[f32; 4]]| {
+                sse2::render_lin_fwd(block, &c, apply_sat, !is_contrast_identity)
+            };
+            render(rgba, &c, fast, exact);
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        exact(pixels(rgba));
     }
 
     base_dynamic_properties!();
@@ -679,21 +778,44 @@ impl CpuOp for GradingPrimaryLinRevOpCpu {
         // Without saturation, both of upstream's loops apply the contrast.
         let apply_contrast = !apply_sat || !is_contrast_identity;
         let o = LIN_REV.of(apply_sat, apply_contrast);
-        for px in pixels(rgba) {
-            let mut pixel = load(px);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                let mut pixel = load(px);
 
-            pixel = apply_clamp(pixel, clamp_b, clamp_w);
-            if apply_sat {
-                pixel = apply_saturation(pixel, sat_inv, o);
-            }
-            if apply_contrast {
-                pixel = apply_lin_contrast(pixel, contrast_inv, pivot);
-            }
-            pixel = mul(Src, pixel, exposure_inv);
-            pixel = add(o.pixel_add, pixel, offset_inv);
+                pixel = apply_clamp(pixel, clamp_b, clamp_w);
+                if apply_sat {
+                    pixel = apply_saturation(pixel, sat_inv, o);
+                }
+                if apply_contrast {
+                    pixel = apply_lin_contrast(pixel, contrast_inv, pivot);
+                }
+                pixel = mul(Src, pixel, exposure_inv);
+                pixel = add(o.pixel_add, pixel, offset_inv);
 
-            store_rgb(px, pixel);
+                store_rgb(px, pixel);
+            }
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let c = sse2::Coefficients {
+                add: offset_inv,
+                scale: exposure_inv,
+                power: contrast_inv,
+                pivot: pivot[0],
+                saturation: sat_inv[0],
+                black_pivot: 0.0,
+                white_pivot: 0.0,
+                black_clamp: clamp_b[0],
+                lin_contrast: true,
+                white_clamp: clamp_w[0],
+            };
+            let fast =
+                |block: &mut [[f32; 4]]| sse2::render_lin_rev(block, &c, apply_sat, apply_contrast);
+            render(rgba, &c, fast, exact);
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        exact(pixels(rgba));
     }
 
     base_dynamic_properties!();
@@ -736,21 +858,45 @@ impl CpuOp for GradingPrimaryVidFwdOpCpu {
 
         let apply_sat = v.saturation != 1.0;
         let o = VID_FWD.of(apply_sat, !is_gamma_identity);
-        for px in pixels(rgba) {
-            let mut pixel = load(px);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                let mut pixel = load(px);
 
-            pixel = add(o.pixel_add, pixel, offset);
-            pixel = apply_contrast(pixel, slope, pivot_black);
-            if !is_gamma_identity {
-                pixel = apply_gamma(pixel, gamma, pivot_black, pivot_white);
-            }
-            if apply_sat {
-                pixel = apply_saturation(pixel, saturation, o);
-            }
-            pixel = apply_clamp(pixel, clamp_b, clamp_w);
+                pixel = add(o.pixel_add, pixel, offset);
+                pixel = apply_contrast(pixel, slope, pivot_black);
+                if !is_gamma_identity {
+                    pixel = apply_gamma(pixel, gamma, pivot_black, pivot_white);
+                }
+                if apply_sat {
+                    pixel = apply_saturation(pixel, saturation, o);
+                }
+                pixel = apply_clamp(pixel, clamp_b, clamp_w);
 
-            store_rgb(px, pixel);
+                store_rgb(px, pixel);
+            }
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let c = sse2::Coefficients {
+                add: offset,
+                scale: slope,
+                power: gamma,
+                pivot: pivot_black[0],
+                saturation: saturation[0],
+                black_pivot: pivot_black[0],
+                white_pivot: pivot_white[0],
+                black_clamp: clamp_b[0],
+                lin_contrast: false,
+                white_clamp: clamp_w[0],
+            };
+            let fast = |block: &mut [[f32; 4]]| {
+                sse2::render_log_fwd(block, &c, apply_sat, !is_gamma_identity)
+            };
+            render(rgba, &c, fast, exact);
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        exact(pixels(rgba));
     }
 
     base_dynamic_properties!();
@@ -792,21 +938,45 @@ impl CpuOp for GradingPrimaryVidRevOpCpu {
         let apply_sat = v.saturation != 1. && v.saturation != 0.;
         let sat_inv = splat((1. / v.saturation) as f32);
         let o = VID_REV.of(apply_sat, !is_gamma_identity);
-        for px in pixels(rgba) {
-            let mut pixel = load(px);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                let mut pixel = load(px);
 
-            pixel = apply_clamp(pixel, clamp_b, clamp_w);
-            if apply_sat {
-                pixel = apply_saturation(pixel, sat_inv, o);
-            }
-            if !is_gamma_identity {
-                pixel = apply_gamma(pixel, gamma_inv, pivot_black, pivot_white);
-            }
-            pixel = apply_contrast(pixel, slope_inv, pivot_black);
-            pixel = add(o.pixel_add, pixel, offset_inv);
+                pixel = apply_clamp(pixel, clamp_b, clamp_w);
+                if apply_sat {
+                    pixel = apply_saturation(pixel, sat_inv, o);
+                }
+                if !is_gamma_identity {
+                    pixel = apply_gamma(pixel, gamma_inv, pivot_black, pivot_white);
+                }
+                pixel = apply_contrast(pixel, slope_inv, pivot_black);
+                pixel = add(o.pixel_add, pixel, offset_inv);
 
-            store_rgb(px, pixel);
+                store_rgb(px, pixel);
+            }
+        };
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let c = sse2::Coefficients {
+                add: offset_inv,
+                scale: slope_inv,
+                power: gamma_inv,
+                pivot: pivot_black[0],
+                saturation: sat_inv[0],
+                black_pivot: pivot_black[0],
+                white_pivot: pivot_white[0],
+                black_clamp: clamp_b[0],
+                lin_contrast: false,
+                white_clamp: clamp_w[0],
+            };
+            let fast = |block: &mut [[f32; 4]]| {
+                sse2::render_log_rev(block, &c, apply_sat, !is_gamma_identity)
+            };
+            render(rgba, &c, fast, exact);
         }
+        #[cfg(not(target_arch = "x86_64"))]
+        exact(pixels(rgba));
     }
 
     base_dynamic_properties!();

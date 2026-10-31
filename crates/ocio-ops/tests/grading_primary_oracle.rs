@@ -575,6 +575,7 @@ impl Family for GpFamily {
     /// [`distinct_nans`]).
     fn extra_probes(&self, _: &GpParams, _: Direction) -> Vec<ProbeSet> {
         vec![
+            ProbeSet::FiniteRows,
             ProbeSet::NanBuffers { max_pixels: 8 },
             ProbeSet::Values {
                 name: "distinct NaNs".to_string(),

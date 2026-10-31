@@ -1575,7 +1575,7 @@ note = "p5-primary 5.2a: CreateGradingPrimaryOp; CreateGradingPrimaryTransform w
 [[file]]
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs", "crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu_sse2.rs"]
 status = "done"
 note = "p5-primary 5.2b-c: GradingPrimaryOpCPU, the SSE2 helpers, the six renderers (operand orders of both wheels' machine code, I-226, I-227, I-228) and GetGradingPrimaryCPURenderer; checked by tests/grading_primary_oracle.rs"
 
