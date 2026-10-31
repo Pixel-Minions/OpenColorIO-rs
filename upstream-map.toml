@@ -541,8 +541,9 @@ note = "see Platform.cpp"
 [[file]]
 path = "src/OpenColorIO/PrivateTypes.h"
 kind = "src"
-target = ["crates/ocio-ops/src/private_types.rs"]
-status = "todo"
+target = ["crates/ocio/src/config.rs", "crates/ocio/src/processor.rs"]
+status = "done"
+note = "P57: private container aliases are accounted for at their uses: StringMap as Config BTreeMaps (environment/roles/cache IDs), StringSet as Config and ProcessorMetadata BTreeSets, LookVec as Config::looks_list Vec<Arc<Look>>, ConstTransformVec as Config::all_internal_transforms Vec<&Transform>. StringBoolMap and TransformDirectionVec have no uses outside this declaration in the entire pinned upstream tree; no standalone Rust alias or runtime behavior is required."
 
 [[file]]
 path = "src/OpenColorIO/Processor.cpp"
@@ -630,8 +631,9 @@ note = "p1-transforms T0: Transform::validate's direction check (the typeid text
 [[file]]
 path = "src/OpenColorIO/TransformBuilder.h"
 kind = "src"
-target = ["crates/ocio/src/transform_builder.rs"]
-status = "todo"
+target = ["crates/ocio/src/transform.rs"]
+status = "done"
+note = "P57: the sole CreateTransform declaration is implemented by crate-private transform::create_transform (transform.rs:844), ported from Transform.cpp:310-383@v2.5.2 and called by the processor group-transform path. Family create-transform tests cover its dispatch. Replaces the obsolete nonexistent transform_builder.rs target."
 
 [[file]]
 path = "src/OpenColorIO/ViewTransform.cpp"
@@ -1192,8 +1194,8 @@ note = "1.3n1: AllocationData::getCacheID and operator<<; p1-transforms-fam1: Cr
 path = "src/OpenColorIO/ops/allocation/AllocationOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs", "crates/ocio-ops/src/ops/noop/no_ops.rs"]
-status = "partial"
-note = "1.3n1: AllocationData; CreateGpuAllocationNoOp in no_ops.rs, where NoOps.cpp defines it; not yet: CreateAllocationOps"
+status = "done"
+note = "P57: every declaration is implemented: AllocationData fields/default, get_cache_id and Display in allocation_op.rs; CreateGpuAllocationNoOp in no_ops.rs; create_allocation_ops (uniform/log2 in both directions) in allocation_op.rs:85. Covered by allocation_op_tests.rs, matrix_factories_oracle.rs and allocation_transform_oracle.rs; the prior not-yet note was stale."
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.cpp"
