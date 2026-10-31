@@ -18,16 +18,22 @@
     clippy::needless_range_loop
 )]
 
+pub mod cmscnvrt;
 pub mod cmserr;
 pub mod cmsgamma;
 pub mod cmsintrp;
 pub mod cmsio0;
+pub mod cmsio1;
 pub mod cmslut;
 pub mod cmsmtrx;
 pub mod cmsnamed;
 pub mod cmsopt;
+pub mod cmspack;
 pub mod cmspcs;
 pub mod cmsplugin;
+pub mod cmssamp;
 pub mod cmstypes;
+pub mod cmsvirt;
 pub mod cmswtpnt;
+pub mod cmsxform;
 pub mod types;
