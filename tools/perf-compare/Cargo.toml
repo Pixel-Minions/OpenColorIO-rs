@@ -1,0 +1,18 @@
+# The port side of perf_compare.py, outside the workspace so that no test shard has to place it.
+[package]
+name = "perf-port"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+half = "=2.7.1"
+ocio = { path = "../../crates/ocio" }
+ocio-ops = { path = "../../crates/ocio-ops" }
+serde_json = "=1.0.151"
+
+# The workspace root profile.
+[profile.release]
+debug = "line-tables-only"
