@@ -162,6 +162,10 @@ fn environment() {
         with_config(Case::new("logging_none", &ok)).env("OCIO_LOGGING_LEVEL", "none"),
         with_config(Case::new("logging_warning", &ok)).env("OCIO_LOGGING_LEVEL", "warning"),
         with_config(Case::new("logging_info", &ok)).env("OCIO_LOGGING_LEVEL", "info"),
+        with_config(Case::new("logging_debug", &ok)).env("OCIO_LOGGING_LEVEL", "debug"),
+        with_config(Case::new("logging_bogus", &ok)).env("OCIO_LOGGING_LEVEL", "bogus"),
+        Case::new("logging_debug_stopped_early", &["--file", "out"])
+            .env("OCIO_LOGGING_LEVEL", "debug"),
         with_config(Case::new("no_optimization_flag", &ok)).env("OCIO_OPTIMIZATION_FLAGS", "0"),
     ];
     let summary = sweep("ociowrite_environment", TOOL, PROGRAM, &cases);

@@ -11,10 +11,9 @@
 //!   is `&cout` on both platforms). What differs is only visible when both go to one pipe:
 //!   each stream's own bytes are the same however they are buffered.
 //!
-//! The library's default logging function writes to stderr as it is: that is right for the
-//! Python module, whose process has set its streams to binary, and wrong for a tool. So a tool
-//! starts with [`init`], and goes back to this logging function, not to the library's, with
-//! [`reset_to_default_logging_function`].
+//! The library writes to stderr as it is: that is right for the Python module, whose process
+//! has set its streams to binary, and wrong for a tool. So a tool starts with [`init`], which
+//! sends what the library writes to stderr through `std::cerr` here.
 //!
 //! An error of a write is ignored, as a C++ stream keeps it in its state bits and the tools
 //! don't look.
@@ -25,7 +24,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ocio_ops::logging::{LoggingFunction, set_logging_function};
+use ocio_ops::logging::set_stderr_sink;
 
 /// How much `std::cout` holds before it writes: only to keep memory small while a bake prints.
 const COUT_BUFFER: usize = 1 << 16;
@@ -177,23 +176,9 @@ pub fn args() -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// The tools' default logging function: `std::cerr << message`, as upstream's writes.
-///
-/// Port of `DefaultLoggingFunction` (src/OpenColorIO/Logging.cpp:64-68 @ v2.5.2), for a process
-/// whose stderr is a text stream.
-fn default_logging_function() -> LoggingFunction {
-    Arc::new(|message: &[u8]| cerr(message))
-}
-
-/// `ResetToDefaultLoggingFunction`, for a tool.
-pub fn reset_to_default_logging_function() {
-    // Only `None` is refused.
-    let _ = set_logging_function(Some(default_logging_function()));
-}
-
 /// What a tool does before anything else ([module documentation](self)).
 pub fn init() {
-    reset_to_default_logging_function();
+    set_stderr_sink(Arc::new(|text: &[u8]| cerr(text)));
 }
 
 /// `exit(code)`, and the return of `main`: `std::cout` is flushed, then the process ends.

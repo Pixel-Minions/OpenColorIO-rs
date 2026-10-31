@@ -63,10 +63,35 @@ fn lock() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// `std::cerr << text`: the bytes as they are. A failed write is ignored, as `std::cerr`
-/// ignores it.
+/// Where [`write_stderr`] writes instead of stderr. `None`, unless a tool set it.
+static STDERR_SINK: Mutex<Option<LoggingFunction>> = Mutex::new(None);
+
+/// Sends what the library writes to `std::cerr` to `sink`: the default logging function's
+/// lines, and the two messages about `OCIO_LOGGING_LEVEL`, which pass the logging function by.
+/// Without a sink they go to stderr as they are.
+///
+/// For the stand-alone tools (`ocio-tools`) only, which set it before the first logging call:
+/// their `std::cerr` is a text stream, which on Windows writes a carriage return before each line
+/// feed, where the Python module's is binary, so the library's bytes are the Python module's.
+/// It isn't upstream API, and the `ocio` crate doesn't re-export it.
+#[doc(hidden)]
+pub fn set_stderr_sink(sink: LoggingFunction) {
+    *STDERR_SINK.lock().unwrap_or_else(PoisonError::into_inner) = Some(sink);
+}
+
+/// `std::cerr << text`: the bytes as they are, or to the [`set_stderr_sink`] sink. A failed
+/// write is ignored, as `std::cerr` ignores it.
 fn write_stderr(text: &[u8]) {
-    let _ = std::io::stderr().lock().write_all(text);
+    let sink = STDERR_SINK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    match sink {
+        Some(sink) => sink(text),
+        None => {
+            let _ = std::io::stderr().lock().write_all(text);
+        }
+    }
 }
 
 impl State {
