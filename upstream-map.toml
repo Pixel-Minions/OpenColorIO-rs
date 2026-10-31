@@ -53,7 +53,7 @@ path = "src/OpenColorIO/AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/avx.rs"]
 status = "done"
-note = "S4: scalar profile. F16C lanes proven against the hardware for all 2^32 floats and 65,536 halves; AVXRGBAPack as per-value Load/Store"
+note = "S4: scalar profile. F16C lanes proven against the hardware for all 2^32 floats and 65,536 halves; AVXRGBAPack as per-value Load/Store. Phase 8: the real F32 Load and the real Stores (avx::packs), which the AVX2 kernels use too"
 
 [[file]]
 path = "src/OpenColorIO/AVX2.h"
@@ -67,7 +67,7 @@ path = "src/OpenColorIO/AVX512.h"
 kind = "src"
 target = ["crates/ocio-ops/src/avx512.rs", "crates/ocio-ops/src/avx.rs"]
 status = "done"
-note = "S4: scalar profile. AVX512RGBAPack as per-value Load/Store, with LoadMasked/StoreMasked; F16C lanes in avx.rs"
+note = "S4: scalar profile. AVX512RGBAPack as per-value Load/Store, with LoadMasked/StoreMasked; F16C lanes in avx.rs. Phase 8: the real F32 Load and the real Stores (avx512::packs)"
 
 [[file]]
 path = "src/OpenColorIO/Baker.cpp"
@@ -572,7 +572,7 @@ path = "src/OpenColorIO/SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/sse2.rs"]
 status = "done"
-note = "S4: scalar profile. The software half conversions (with sse2_blendv) proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; sse2_clamp and SSE2RGBAPack as per-value Load/Store (the transposes only move values), checked by the upstream SSE2 tests. x86 only; SSE2NEON (ARM) variants not ported. To do (p1-dispatch, 1.5b): PackDepth::max_value and is_float repeat BitDepthInfo's maxValue and isFloat (bit_depth_utils.rs); use BitDepthInfo"
+note = "S4: scalar profile. The software half conversions (with sse2_blendv) proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; sse2_clamp and SSE2RGBAPack as per-value Load/Store (the transposes only move values), checked by the upstream SSE2 tests. Phase 8: the real F32 Load and the real Stores (sse2::packs). x86 only; SSE2NEON (ARM) variants not ported. To do (p1-dispatch, 1.5b): PackDepth::max_value and is_float repeat BitDepthInfo's maxValue and isFloat (bit_depth_utils.rs); use BitDepthInfo"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.cpp"
@@ -1862,7 +1862,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx.rs"]
 status = "done"
-note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.h"
@@ -1876,7 +1876,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx2.rs"]
 status = "done"
-note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX2.h"
@@ -1890,7 +1890,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX512.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx512.rs"]
 status = "done"
-note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx512, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx512, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX512.h"
@@ -1904,7 +1904,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_SSE2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_sse2.rs"]
 status = "done"
-note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_sse2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_sse2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_SSE2.h"

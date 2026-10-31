@@ -304,8 +304,127 @@ pub mod blocks {
     }
 }
 
+/// The real `SSE2RGBAPack`s: four pixels, sixteen values. The kernels only load F32.
+#[cfg(target_arch = "x86_64")]
+pub(crate) mod packs {
+    use core::arch::x86_64::*;
+
+    use super::intrinsics::sse2_cvtps_ph;
+
+    /// Port of `sse2_clamp` (src/OpenColorIO/SSE2.h:85-89 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    fn clamp(value: __m128, max_value: __m128) -> __m128 {
+        _mm_min_ps(_mm_max_ps(value, _mm_setzero_ps()), max_value)
+    }
+
+    /// Port of `sse2RGBATranspose_4x4` (src/OpenColorIO/SSE2.h:91-104 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn transpose(rows: [__m128; 4]) -> [__m128; 4] {
+        let tmp0 = _mm_unpacklo_ps(rows[0], rows[1]);
+        let tmp2 = _mm_unpacklo_ps(rows[2], rows[3]);
+        let tmp1 = _mm_unpackhi_ps(rows[0], rows[1]);
+        let tmp3 = _mm_unpackhi_ps(rows[2], rows[3]);
+        [
+            _mm_movelh_ps(tmp0, tmp2),
+            _mm_movehl_ps(tmp2, tmp0), // Note movhlps swaps b with a which is different than unpckhpd
+            _mm_movelh_ps(tmp1, tmp3),
+            _mm_movehl_ps(tmp3, tmp1),
+        ]
+    }
+
+    /// Port of `SSE2RGBAPack<BIT_DEPTH_F32>::Load` (src/OpenColorIO/SSE2.h:375-384 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn load_f32(input: &[f32; 16]) -> [__m128; 4] {
+        // SAFETY: `input` holds the sixteen floats these read, at any alignment.
+        transpose(std::array::from_fn(|i| unsafe {
+            _mm_loadu_ps(input.as_ptr().add(4 * i))
+        }))
+    }
+
+    /// Port of `SSE2RGBAPack<BIT_DEPTH_F32>::Store` (src/OpenColorIO/SSE2.h:386-397 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn store_f32(out: &mut [f32; 16], rgba: [__m128; 4]) {
+        for (i, row) in transpose(rgba).into_iter().enumerate() {
+            // SAFETY: `out` holds the sixteen floats these write, at any alignment.
+            unsafe { _mm_storeu_ps(out.as_mut_ptr().add(4 * i), row) };
+        }
+    }
+
+    /// Port of `SSE2RGBAPack<BIT_DEPTH_UINT8>::Store` (src/OpenColorIO/SSE2.h:222-238 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn store_u8(out: &mut [u8; 16], [r, g, b, a]: [__m128; 4]) {
+        let max_value = _mm_set1_ps(255.0);
+
+        // NOTE note using cvtps which will round based on MXCSR register defaults to _MM_ROUND_NEAREST
+        let r = _mm_cvtps_epi32(clamp(r, max_value));
+        let g = _mm_cvtps_epi32(clamp(g, max_value));
+        let b = _mm_cvtps_epi32(clamp(b, max_value));
+        let a = _mm_cvtps_epi32(clamp(a, max_value));
+
+        let rgba = _mm_or_si128(r, _mm_slli_si128::<1>(g));
+        let rgba = _mm_or_si128(rgba, _mm_slli_si128::<2>(b));
+        let rgba = _mm_or_si128(rgba, _mm_slli_si128::<3>(a));
+
+        // SAFETY: `out` holds the sixteen bytes this writes, at any alignment.
+        unsafe { _mm_storeu_si128(out.as_mut_ptr().cast(), rgba) };
+    }
+
+    /// Port of `SSE2RGBAPack16<BD>::Store` (src/OpenColorIO/SSE2.h:260-278 @ v2.5.2), where
+    /// `max_value` is `BitDepthInfo<BD>::maxValue`.
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn store_u16(out: &mut [u16; 16], [r, g, b, a]: [__m128; 4], max_value: f32) {
+        let max_value = _mm_set1_ps(max_value);
+
+        let rrrr = _mm_cvtps_epi32(clamp(r, max_value));
+        let gggg = _mm_cvtps_epi32(clamp(g, max_value));
+        let bbbb = _mm_cvtps_epi32(clamp(b, max_value));
+        let aaaa = _mm_cvtps_epi32(clamp(a, max_value));
+
+        let rgrg_rgrg = _mm_or_si128(rrrr, _mm_slli_si128::<2>(gggg));
+        let baba_baba = _mm_or_si128(bbbb, _mm_slli_si128::<2>(aaaa));
+
+        let rgba_00_01 = _mm_unpacklo_epi32(rgrg_rgrg, baba_baba);
+        let rgba_02_03 = _mm_unpackhi_epi32(rgrg_rgrg, baba_baba);
+
+        // SAFETY: `out` holds the sixteen values these write, at any alignment.
+        unsafe {
+            _mm_storeu_si128(out.as_mut_ptr().cast(), rgba_00_01);
+            _mm_storeu_si128(out.as_mut_ptr().add(8).cast(), rgba_02_03);
+        }
+    }
+
+    /// Port of `SSE2RGBAPack<BIT_DEPTH_F16>::Store` (src/OpenColorIO/SSE2.h:344-370 @ v2.5.2),
+    /// its branch without SSE2NEON.
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn store_f16(out: &mut [half::f16; 16], rgba: [__m128; 4]) {
+        let [rgba0, rgba1, rgba2, rgba3] = transpose(rgba);
+
+        let rgba00_01 = sse2_cvtps_ph(rgba0);
+        let rgba02_03 = sse2_cvtps_ph(rgba1);
+        let rgba04_05 = sse2_cvtps_ph(rgba2);
+        let rgba06_07 = sse2_cvtps_ph(rgba3);
+
+        let low = _mm_xor_si128(rgba00_01, _mm_shuffle_epi32::<0b01_00_11_10>(rgba02_03));
+        let high = _mm_xor_si128(rgba04_05, _mm_shuffle_epi32::<0b01_00_11_10>(rgba06_07));
+
+        // SAFETY: `out` holds the sixteen values these write, at any alignment.
+        unsafe {
+            _mm_storeu_si128(out.as_mut_ptr().cast(), low);
+            _mm_storeu_si128(out.as_mut_ptr().add(8).cast(), high);
+        }
+    }
+}
+
 /// The same functions written with SSE2 intrinsics, instruction for instruction as in
-/// `SSE2.h`. They exist to prove the scalar lanes above against the hardware.
+/// `SSE2.h`. They exist to prove the scalar lanes above against the hardware, and the real
+/// pack of halves ([`packs`]) uses them.
 #[cfg(target_arch = "x86_64")]
 pub mod intrinsics {
     use core::arch::x86_64::*;
@@ -318,8 +437,9 @@ pub mod intrinsics {
     }
 
     /// Port of `sse2_cvtps_ph` (src/OpenColorIO/SSE2.h:111-153 @ v2.5.2).
+    #[inline]
     #[target_feature(enable = "sse2")]
-    fn sse2_cvtps_ph(a: __m128) -> __m128i {
+    pub(crate) fn sse2_cvtps_ph(a: __m128) -> __m128i {
         let mut x = _mm_castps_si128(a);
 
         let x_sgn = _mm_and_si128(x, _mm_set1_epi32(0x8000_0000u32 as i32));

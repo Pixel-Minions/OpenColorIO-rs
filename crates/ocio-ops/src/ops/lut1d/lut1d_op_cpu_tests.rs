@@ -20,6 +20,7 @@ use crate::cpu_info::{
 };
 use crate::math_utils::halfs_differ;
 use crate::ops::lut1d::lut1d_op_data::{HalfFlags, make_fast_lut1d_from_inverse};
+use ocio_testkit::probe;
 use ocio_testkit::upstream::check_close;
 
 fn message(r: Result<Arc<dyn CpuOp>>) -> String {
@@ -58,6 +59,101 @@ fn simd_modes() -> Vec<CpuInfo> {
         }
     }
     modes
+}
+
+/// The real SSE2, AVX, AVX2 and AVX-512 kernels this CPU can run give the bits of their exact
+/// lanes (PLAN.md, "equality tests against the scalar profile"), at every output bit depth, on
+/// rows with and without specials, of every length around their groups. The lanes are compared
+/// with the wheel in `tests/lut1d_renderer_oracle.rs`, on the CPU each one is dispatched on.
+#[test]
+fn real_kernels_match_their_lanes() {
+    fn bytes<T: ChannelType>(values: &[T]) -> Vec<u8> {
+        let size = size_of::<T>();
+        let mut out = vec![0u8; size_of_val(values)];
+        for (at, value) in out.chunks_mut(size).zip(values) {
+            value.write_ne(at);
+        }
+        out
+    }
+
+    fn check<O: LutOutput>(
+        lut: &Lut1DOpData,
+        kernel: Lut1DKernel,
+        rows: &[(String, Vec<f32>)],
+    ) -> usize {
+        #[cfg(target_arch = "x86_64")]
+        let runs_here = match kernel {
+            Lut1DKernel::Sse2 => true,
+            Lut1DKernel::Avx => lut1d_op_cpu_avx::simd::runs_here(),
+            Lut1DKernel::Avx2 => lut1d_op_cpu_avx2::simd::runs_here(),
+            Lut1DKernel::Avx512 => lut1d_op_cpu_avx512::simd::runs_here(),
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        let runs_here = false;
+        if !runs_here {
+            return 0;
+        }
+        let real = Lut1DFloatRenderer::<O>::new(lut, Some(kernel));
+        #[cfg(target_arch = "x86_64")]
+        assert!(real.kernel_lut().is_some(), "{kernel:?} doesn't run");
+        let mut lanes = Lut1DFloatRenderer::<O>::new(lut, Some(kernel));
+        lanes.simd = false;
+        let mut checked = 0;
+        for (name, row) in rows {
+            let mut a = vec![O::Type::default(); row.len()];
+            let mut b = a.clone();
+            real.apply_bit_depth(Pixels::F32(row), O::Type::pixels_mut(&mut a));
+            lanes.apply_bit_depth(Pixels::F32(row), O::Type::pixels_mut(&mut b));
+            assert_eq!(bytes(&a), bytes(&b), "{kernel:?} {:?}: {name}", O::PACK);
+            checked += 1;
+        }
+        checked
+    }
+
+    let mut smooth = Lut1DOpData::new(33).unwrap();
+    for (i, value) in smooth
+        .get_array_mut()
+        .get_values_mut()
+        .iter_mut()
+        .enumerate()
+    {
+        *value = (i as f32 / 98.0).sqrt() * 1.25 - 0.1;
+    }
+    // Neighbours whose difference overflows: `Inf * 0` on a node makes the default NaN.
+    let mut extreme = Lut1DOpData::new(17).unwrap();
+    for (i, value) in extreme
+        .get_array_mut()
+        .get_values_mut()
+        .iter_mut()
+        .enumerate()
+    {
+        *value = if i % 2 == 0 { f32::MAX } else { f32::MIN };
+    }
+
+    let mut rows = probe::finite_rows();
+    rows.extend(probe::row_length_buffers(33));
+    rows.extend(probe::nan_buffers(24));
+    rows.retain(|(_, row)| row.len() >= 2 * 4);
+    let mut checked = 0;
+    for lut in [&smooth, &extreme] {
+        for kernel in [
+            Lut1DKernel::Sse2,
+            Lut1DKernel::Avx,
+            Lut1DKernel::Avx2,
+            Lut1DKernel::Avx512,
+        ] {
+            checked += check::<Uint8>(lut, kernel, &rows);
+            checked += check::<Uint10>(lut, kernel, &rows);
+            checked += check::<Uint12>(lut, kernel, &rows);
+            checked += check::<Uint16>(lut, kernel, &rows);
+            checked += check::<F16>(lut, kernel, &rows);
+            checked += check::<F32>(lut, kernel, &rows);
+        }
+    }
+    // SSE2 at the least, at six bit depths, on every row of both tables.
+    #[cfg(target_arch = "x86_64")]
+    assert!(checked >= 2 * 6 * rows.len(), "{checked}");
+    let _ = checked;
 }
 
 /// `GetLut1DRenderer` picks a lookup for integer and half input that may use the LUT as it is,
