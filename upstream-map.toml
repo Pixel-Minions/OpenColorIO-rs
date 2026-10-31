@@ -2714,7 +2714,8 @@ note = "build system"
 path = "src/apps/ociochecklut/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociochecklut.rs"]
-status = "todo"
+status = "done"
+note = "built without OCIO_GPU_ENABLED, as both wheels are"
 
 [[file]]
 path = "src/apps/ocioconvert/CMakeLists.txt"

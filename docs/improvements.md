@@ -4370,6 +4370,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** search each line for the text. Such configs would then fail `ociocheck`.
 - **Status:** matched (card phase10-tools).
 
+### I-605. The tools' help and error output disagree with each other
+
+- **Upstream:** `--help` exits with 1 in `ociowrite`, `ociocheck` and `ociobakelut`
+  (`src/apps/ociowrite/main.cpp:73-77`, `ociocheck/main.cpp:131-136`,
+  `ociobakelut/main.cpp:125-130 @ v2.5.2`), and with 0 in `ociochecklut`
+  (`ociochecklut/main.cpp:216-233`). A bad command line prints its error on stderr in `ociowrite`
+  and on stdout in the other three. `ociochecklut` prints transforms on `std::cout`, so that a
+  `MatrixTransform` (I-73) raises the precision of every transform after it, for the rest of the
+  run, also between pixels with `-s`.
+- **Who notices:** scripts that test a tool's exit code or capture its help or errors.
+- **A fix:** exit with 0 from `--help`, send errors to stderr, restore the stream's precision.
+- **Status:** matched (card phase10-tools).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

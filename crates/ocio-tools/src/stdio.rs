@@ -24,6 +24,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use ocio::{GroupTransform, Transform};
 use ocio_ops::logging::set_stderr_sink;
 
 /// How much `std::cout` holds before it writes: only to keep memory small while a bake prints.
@@ -185,4 +186,28 @@ pub fn init() {
 pub fn exit(code: i32) -> ! {
     cout_flush();
     std::process::exit(code)
+}
+
+/// `std::cout << transform`, for a tool that prints several transforms: the text to write.
+///
+/// `operator<<` of a `MatrixTransform` leaves the stream's precision at 16 (docs/improvements.md,
+/// I-73), and `std::cout` lives as long as the tool, so what prints after a matrix prints with
+/// 16 digits. The library keeps that state only inside one text, a group's: so this holds what
+/// has been printed as a group, and a transform's text is what it adds to the group's.
+#[derive(Debug, Default)]
+pub struct TransformText {
+    printed: GroupTransform,
+}
+
+impl TransformText {
+    /// The text of `transform`, after everything this has been given.
+    pub fn of(&mut self, transform: &Transform) -> Vec<u8> {
+        const CHILD_PREFIX: usize = "\n        ".len();
+        let group_text = |group: &GroupTransform| Transform::Group(group.clone()).to_bytes();
+        let before = group_text(&self.printed).len();
+        self.printed.append_transform(transform.clone());
+        let text = group_text(&self.printed);
+        // Both texts end in the group's closing `>`.
+        text[before - 1 + CHILD_PREFIX..text.len() - 1].to_vec()
+    }
 }
