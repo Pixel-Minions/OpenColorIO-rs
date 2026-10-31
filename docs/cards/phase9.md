@@ -368,3 +368,6 @@ GenerateLinearScaleLut1D. Mark those five entries complete and list their transf
 implementation files. Correct the stale CreateTransform comment. Runtime code and
 tests are unchanged; normal CI is required before landing. Keep CDLOp.h and MatrixOp.h
 partial: their declared-but-undefined upstream overloads need separate accounting.
+
+P60 also audits PathUtils.h: all five declarations already map to path_utils.rs,
+including ParseColorSpaceFromString. Mark that header complete with no runtime changes.

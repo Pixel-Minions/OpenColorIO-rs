@@ -522,8 +522,8 @@ note = "p3-context 3.5f: SetComputeHashFunction, ResetComputeHashFunction, GetFa
 path = "src/OpenColorIO/PathUtils.h"
 kind = "src"
 target = ["crates/ocio/src/path_utils.rs"]
-status = "partial"
-note = "p3-context 3.5f: the declarations of the functions in path_utils.rs"
+status = "done"
+note = "p3-context 3.5f: the declarations of the functions in path_utils.rs; p60 Phase9 header completion audit: all five declarations are implemented in path_utils.rs, including ParseColorSpaceFromString. Existing platform hash/path behavior and fallible Rust results are preserved; no runtime code or test changes."
 
 [[file]]
 path = "src/OpenColorIO/Platform.cpp"
