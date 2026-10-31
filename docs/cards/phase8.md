@@ -80,6 +80,34 @@ Two things ocioperf shows that the table doesn't:
 - Line by line, the matrix ratio stays near the image's, but `lut3d_tetra_33` went from 5.06 to
   8.57 in one run. To check in the Lut3D chunk: it may be a per-call cost or noise.
 
+## Progress
+
+Same machine and method, at 3afae8dc. Ratios are port time over wheel time.
+
+| Case | Baseline | Now |
+|---|---:|---:|
+| `matrix`, two buffers | 9.03 | 1.36 |
+| `matrix`, ocioperf in place / line by line | 8.50 / 6.79 | 1.05 / 1.03 |
+| `matrix_diag` | 1.41 | 0.55 |
+| `lut1d`, two buffers | 7.07 | 1.23 |
+| `lut1d`, ocioperf in place / line by line | 7.11 / 6.70 | 1.13 / 1.06 |
+| `lut1d/f32-u8` | 4.49 | 1.65 |
+| `gp_log`, `gp_lin`, `gp_video` | 5.05-5.39 | 0.98-1.00 |
+| `gp_log_inv` | 6.98 | 0.99 |
+| `matrix/u8-u8` | 3.01 | 1.36 |
+| `chain_aces2_srgb` | 1.24 | 1.22 |
+
+What the kernels showed about the rest of the path:
+- **Two buffers.** Upstream's first op reads the source and writes the destination. The port copies
+  the row and renders in place, which costs about 0.25 ns/px (`matrix`: 1.05 in place, 1.36 and up
+  with two buffers). It needs a `CpuOp` method that renders from one buffer to another, with a
+  copy as its default: a new chunk, 12b below.
+- **Pixel by pixel.** `gp_log` takes 47 ns per `apply_rgba` against 14.5 (3.26): the state and
+  block set-up run per call. Chunk 14.
+- **Lut3D line by line.** `lut3d_tetra_33` costs twice as much per row in ocioperf's line-by-line
+  loop as in a whole image, again in the second run (10.07 against 4.91). So it isn't noise.
+  Chunk 5 looks for what runs per call.
+
 ## Why the port is slow
 
 Every "kernel" in the port is scalar code that reproduces one lane, including the Lut1D and Lut3D
@@ -133,6 +161,10 @@ Tests, in each kernel's chunk:
 - A mutation list in the commit message: at least a constant, an operand order, a boundary, and
   the block check removed.
 
+The gates can survive mutants: where a build's operand order happens to be the wheel's, or the
+op's clamp removes the NaN, dropping a gate changes no bit on that platform. They stay, as LLVM
+promises nothing about the order. Say so in the commit where it happens.
+
 ## Chunks, ranked by the measured gap
 
 Stop adding kernels once a family is within 10%.
@@ -151,6 +183,7 @@ Stop adding kernels once a family is within 10%.
 | 10 | Log | 2.41 | `LogOpCPU.cpp` |
 | 11 | Gamma | 2.17 | `GammaOpCPU.cpp` |
 | 12 | ExposureContrast | 2.12 | `ExposureContrastOpCPU.cpp` |
+| 12b | Two buffers: render from the source row to the destination row | 1.36, 1.23 | `ScanlineHelper.cpp`, `OpCPU` |
 | 13 | Pixel packing and bit-depth casts | 1.32-2.10 | `ImagePacking.cpp`, `CPUProcessor.cpp`, `BitDepthUtils.h` |
 | 14 | `apply_rgba` per pixel | 2.61 | `CPUProcessor.cpp` |
 | 15 | ACES 2 (scalar C++ in both builds, so this is about compiled code, not SIMD) | 1.29 | `ACES2/Transform.cpp` |
