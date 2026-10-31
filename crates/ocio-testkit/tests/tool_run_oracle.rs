@@ -267,6 +267,129 @@ fn attributes_are_set_on_input_files() {
     }
 }
 
+/// A zip archive's entry `name`: its external attributes, from the central directory.
+#[cfg(windows)]
+fn zip_external_attributes(zip: &[u8], name: &[u8]) -> u32 {
+    let u16_at = |p: usize| usize::from(u16::from_le_bytes([zip[p], zip[p + 1]]));
+    let u32_at = |p: usize| u32::from_le_bytes(zip[p..p + 4].try_into().unwrap());
+    let end = (0..zip.len() - 3)
+        .rev()
+        .find(|&p| u32_at(p) == 0x0605_4b50)
+        .expect("an end of central directory record");
+    let mut p = u32_at(end + 16) as usize;
+    for _ in 0..u16_at(end + 10) {
+        assert_eq!(u32_at(p), 0x0201_4b50);
+        let name_len = u16_at(p + 28);
+        if &zip[p + 46..p + 46 + name_len] == name {
+            return u32_at(p + 38);
+        }
+        p += 46 + name_len + u16_at(p + 30) + u16_at(p + 32);
+    }
+    panic!("no entry {}", String::from_utf8_lossy(name));
+}
+
+/// Each letter is its own attribute, and every letter counts. `ociocheck` can't tell them apart,
+/// since all three refuse a write; `ocioarchive` records what it finds in the archive
+/// (FILE_ATTRIBUTE_READONLY 1, FILE_ATTRIBUTE_HIDDEN 2, FILE_ATTRIBUTE_SYSTEM 4).
+#[cfg(windows)]
+#[test]
+fn attributes_are_the_letters_given() {
+    let config = b"ocio_profile_version: 2\n\nsearch_path: .\n\nroles:\n  default: raw\n\n\
+                   colorspaces:\n  - !<ColorSpace>\n    name: raw\n  - !<ColorSpace>\n    \
+                   name: l\n    from_scene_reference: !<FileTransform> {src: l.spi1d}\n";
+    let lut = b"Version 1\nFrom 0.0 1.0\nLength 2\nComponents 1\n{\n0.0\n1.0\n}\n";
+    for (letters, expected) in [
+        ("r", 1),
+        ("h", 2),
+        ("s", 4),
+        ("hs", 6),
+        ("sh", 6),
+        ("hr", 3),
+        ("rs", 5),
+        ("hsr", 7),
+    ] {
+        let r = run(
+            json!({"tool": "ocioarchive", "argv": ["o", "--iconfig", "a.ocio"],
+                   "cwd": cwd(&format!("letters_{letters}")),
+                   "files": [["a.ocio", 0], ["l.spi1d", 1]],
+                   "attributes": [["l.spi1d", letters]]}),
+            &[config, lut],
+        );
+        assert_eq!(exit_code(&r), 0, "{letters}");
+        let files = r.result["files"].as_array().unwrap();
+        assert_eq!(files.len(), 1, "{letters}: {files:?}");
+        assert_eq!(files[0]["path"], "o.ocioz");
+        let zip = &r.blobs[files[0]["contents"].as_u64().unwrap() as usize];
+        let attributes = zip_external_attributes(zip, b"l.spi1d");
+        assert_eq!(attributes & 7, expected, "{letters}");
+    }
+}
+
+/// What `attributes` refuses.
+#[cfg(windows)]
+#[test]
+fn attributes_refusals() {
+    let dir = cwd("attributes_refused");
+    let request = |attributes: Value| {
+        json!({"tool": "ociocheck", "argv": [], "cwd": dir, "files": [["a", 0]],
+               "attributes": attributes})
+    };
+    for (attributes, expected) in [
+        (json!("h"), "must be a list"),
+        (json!({}), "must be a list"),
+        (json!(1), "must be a list"),
+        (json!(["a"]), "bad entry of attributes"),
+        (json!([["a"]]), "bad entry of attributes"),
+        (json!([["a", "h", "s"]]), "bad entry of attributes"),
+        (json!([["b", "h"]]), "bad entry of attributes"),
+        (json!([["a", ""]]), "bad entry of attributes"),
+        (json!([["a", "x"]]), "bad entry of attributes"),
+        (json!([["a", "hx"]]), "bad entry of attributes"),
+        (json!([["a", "H"]]), "bad entry of attributes"),
+        (json!([["a", 1]]), "bad entry of attributes"),
+    ] {
+        let error = refused(request(attributes.clone()), &[b"x"]);
+        assert!(error.contains(expected), "{attributes}: {error}");
+        assert!(!std::path::Path::new(&dir).exists(), "{attributes}");
+    }
+}
+
+/// A file whose attributes the system won't set stops the run: `NUL` is a device, which takes the
+/// input's bytes and has no attributes.
+#[cfg(windows)]
+#[test]
+fn attributes_that_cannot_be_set_stop_the_run() {
+    let error = refused(
+        json!({"tool": "ociocheck", "argv": [], "cwd": cwd("attributes_device"),
+               "files": [["NUL", 0]], "attributes": [["NUL", "h"]]}),
+        &[b"x"],
+    );
+    assert!(error.contains("WinError"), "{error}");
+}
+
+/// `attributes` names inputs only: a path out of `cwd` is refused, and that file keeps its
+/// attributes.
+#[cfg(windows)]
+#[test]
+fn attributes_stay_inside_the_working_directory() {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 2;
+    let dir = cwd("attributes_outside");
+    let outside = PathBuf::from(&dir).with_file_name("attributes_outside.txt");
+    std::fs::write(&outside, "kept").unwrap();
+    let hidden = |path: &PathBuf| {
+        std::fs::metadata(path).unwrap().file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
+    };
+    assert!(!hidden(&outside));
+    let error = refused(
+        json!({"tool": "ociocheck", "argv": [], "cwd": dir, "files": [["a", 0]],
+               "attributes": [["../attributes_outside.txt", "h"]]}),
+        &[b"x"],
+    );
+    assert!(error.contains("bad entry of attributes"), "{error}");
+    assert!(!hidden(&outside));
+}
+
 /// `tool_run` gives a tool an empty stdin. No tool reads it, so this writes to it: /dev/stdin is
 /// /dev/null then, where any size fits, where a pipe nobody reads, the command's own stdin
 /// passed on, would never take this much.

@@ -4441,6 +4441,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ## Undefined behaviour upstream
 
+Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
+2026-09-30). The general rule above covers the rest, except where an entry says otherwise.
+
 ### U-1. 10- and 12-bit values above their maximum
 
 - **Upstream:** when the first op the optimizer leaves is a forward Lut1D, as the default
