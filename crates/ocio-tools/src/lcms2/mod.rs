@@ -19,6 +19,8 @@
 )]
 
 pub mod cmserr;
+pub mod cmsgamma;
+pub mod cmsintrp;
 pub mod cmsmtrx;
 pub mod cmspcs;
 pub mod cmswtpnt;
