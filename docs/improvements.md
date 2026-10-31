@@ -4383,6 +4383,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** exit with 0 from `--help`, send errors to stderr, restore the stream's precision.
 - **Status:** matched (card phase10-tools).
 
+### I-606. `ociobakelut` ends when a config doesn't load
+
+- **Upstream:** `src/apps/ociobakelut/main.cpp:261, 270 @ v2.5.2` calls `Config::CreateFromFile` and
+  `Config::CreateFromEnv` outside `main`'s `try` blocks, so a config that doesn't load is an
+  uncaught exception, and `std::terminate` ends the process. On Linux libstdc++ prints `terminate
+  called after throwing an instance of 'OpenColorIO_v2_5::Exception'` and a `what():` line, and the
+  process dies of SIGABRT. On Windows nothing is printed and the exit status is `0xC0000409`. What
+  `std::cout` still held is lost on both.
+- **Who notices:** anyone who gives `ociobakelut` a missing or broken config.
+- **A fix:** move the two calls inside the `try`, which would print the error and exit with 1.
+- **Status:** matched (card phase10-tools, `ociobakelut_oracle.rs`,
+  `an_exception_upstream_does_not_catch`).
+
 ## Undefined behaviour upstream
 
 ### U-1. 10- and 12-bit values above their maximum
@@ -6657,21 +6670,6 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   information from operating system."; SystemMonitors::get catches and debug-logs it while
   keeping its empty list, as upstream's exception boundary does. No uninitialized storage is
   read (`system_monitor_windows_ffi.rs`, `system_monitor_windows.rs`).
-
-### U-600. `ociobakelut` ends when a config doesn't load
-
-- **Upstream:** `src/apps/ociobakelut/main.cpp:261, 270 @ v2.5.2` calls `Config::CreateFromFile` and
-  `Config::CreateFromEnv` outside `main`'s `try` blocks, so a config that doesn't load is an
-  uncaught exception, and `std::terminate` ends the process: `0xC0000409` on Windows, SIGABRT and
-  the C++ runtime's message on Linux.
-- **Who notices:** anyone who gives `ociobakelut` a missing or broken config.
-- **A fix:** the port's: it prints `ERROR: ` with the exception's message and "See --help for more
-  info." on stderr, and exits with 1.
-- **Status:** matched by the owner's general rule (card phase10-tools, `ociobakelut_oracle.rs`,
-  `an_exception_upstream_does_not_catch`).
-
-Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
-2026-09-30). The general rule above covers the rest, except where an entry says otherwise.
 
 ### I-542. CPU/GPU special-value differences in the llvmpipe harness
 

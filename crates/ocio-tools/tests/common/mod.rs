@@ -11,8 +11,9 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -30,6 +31,10 @@ pub(crate) struct Case {
     pub(crate) argv: Vec<String>,
     pub(crate) env: Vec<(String, String)>,
     pub(crate) files: Vec<(String, Vec<u8>)>,
+    /// The wheel's tool ends here in `std::terminate`, and the port's must too.
+    pub(crate) dies: bool,
+    /// stderr goes into stdout's pipe: the bytes show the order they were written in.
+    pub(crate) merged: bool,
 }
 
 impl Case {
@@ -39,7 +44,19 @@ impl Case {
             argv: argv.iter().map(|s| s.to_string()).collect(),
             env: Vec::new(),
             files: Vec::new(),
+            dies: false,
+            merged: false,
         }
+    }
+
+    pub(crate) fn dies(mut self) -> Case {
+        self.dies = true;
+        self
+    }
+
+    pub(crate) fn merged(mut self) -> Case {
+        self.merged = true;
+        self
     }
 
     pub(crate) fn env(mut self, name: &str, value: impl Into<String>) -> Case {
@@ -108,7 +125,7 @@ fn wheel_outcomes(group: &str, tool: &str, cases: &[Case]) -> Vec<Outcome> {
                 cmd: "tool_run",
                 args: json!({
                     "tool": tool, "argv": case.argv, "cwd": cwd.to_str().unwrap(),
-                    "env": env, "files": files,
+                    "env": env, "files": files, "merge_stderr": case.merged,
                 }),
                 blobs: case
                     .files
@@ -186,7 +203,11 @@ fn port_outcome(group: &str, program: &str, index: usize, case: &Case) -> Outcom
     for (name, value) in &case.env {
         command.env(name, value);
     }
-    let output = command.output().unwrap();
+    let output = if case.merged {
+        merged_output(&mut command)
+    } else {
+        command.output().unwrap()
+    };
     let mut files = BTreeMap::new();
     walk(&cwd, &cwd, &mut files);
     for (path, contents) in &case.files {
@@ -196,10 +217,43 @@ fn port_outcome(group: &str, program: &str, index: usize, case: &Case) -> Outcom
     }
     let _ = std::fs::remove_dir_all(&cwd);
     Outcome {
-        exit_code: i64::from(output.status.code().unwrap_or(i32::MIN)),
+        exit_code: exit_code(output.status),
         stdout: output.stdout,
         stderr: output.stderr,
         files,
+    }
+}
+
+/// The exit status as `subprocess` reports it: the negative of the signal on Linux, and on
+/// Windows the unsigned value of an NTSTATUS failure code.
+fn exit_code(status: std::process::ExitStatus) -> i64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status
+            .code()
+            .map_or_else(|| -i64::from(status.signal().unwrap()), i64::from)
+    }
+    #[cfg(windows)]
+    {
+        i64::from(status.code().unwrap() as u32)
+    }
+}
+
+/// `command`'s output with one pipe for stdout and stderr: a duplicate of the write end is
+/// stderr, as `subprocess.STDOUT` does on the wheel's side.
+fn merged_output(command: &mut Command) -> Output {
+    let (mut reader, writer) = std::io::pipe().unwrap();
+    command.stdout(writer.try_clone().unwrap()).stderr(writer);
+    let mut child = command.spawn().unwrap();
+    // Dropped here, or the read below never ends.
+    command.stdout(Stdio::null()).stderr(Stdio::null());
+    let mut stdout = Vec::new();
+    reader.read_to_end(&mut stdout).unwrap();
+    Output {
+        status: child.wait().unwrap(),
+        stdout,
+        stderr: Vec::new(),
     }
 }
 
@@ -312,11 +366,11 @@ pub(crate) fn sweep(group: &str, tool: &str, program: &str, cases: &[Case]) -> S
     let mut report = String::new();
     let mut mismatches = 0;
     for (index, case) in cases.iter().enumerate() {
-        // A case the wheel doesn't finish has no result to compare with: its own test handles it.
-        assert_ne!(wheel[index].exit_code, i64::MIN, "{}", case.label);
-        assert!(
-            (0..=255).contains(&wheel[index].exit_code),
-            "{}: the wheel died with {}: {}",
+        let finished = (0..=255).contains(&wheel[index].exit_code);
+        assert_eq!(
+            finished,
+            !case.dies,
+            "{}: the wheel ended with {}: {}",
             case.label,
             wheel[index].exit_code,
             show(&wheel[index].stderr)

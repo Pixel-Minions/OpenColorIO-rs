@@ -525,7 +525,7 @@ fn run(argv: &[Vec<u8>]) -> i32 {
             Some(&Transform::Group(group_transform.clone())),
             ColorSpaceDirection::FromReference,
         ) {
-            return unhandled(&exception);
+            stdio::terminate(&exception);
         }
 
         if verbose {
@@ -572,7 +572,7 @@ fn run(argv: &[Vec<u8>]) -> i32 {
         };
         match loaded {
             Ok(config) => config,
-            Err(exception) => return unhandled(&exception),
+            Err(exception) => stdio::terminate(&exception),
         }
     };
 
@@ -610,14 +610,6 @@ fn run(argv: &[Vec<u8>]) -> i32 {
             see_help()
         }
     }
-}
-
-/// An exception that upstream's `main` doesn't catch where it happens, which ends its process
-/// (`std::terminate`). The port reports it (docs/improvements.md, U-600).
-fn unhandled(exception: &Exception) -> i32 {
-    cerr(b"ERROR: ");
-    cerr_line(exception.what());
-    see_help()
 }
 
 fn main() {

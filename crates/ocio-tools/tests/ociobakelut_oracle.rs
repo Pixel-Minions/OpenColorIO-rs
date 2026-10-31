@@ -5,8 +5,7 @@
 //!
 //! ICC output isn't ported (docs/cards/phase10-tools.md): a command line that gets as far as
 //! writing a profile is in [`icc_output_is_reported_as_not_ported`], and the ones the wheel
-//! refuses before that are compared like any other. A run the wheel doesn't survive is in
-//! [`an_exception_upstream_does_not_catch`].
+//! refuses before that are compared like any other.
 
 mod common;
 
@@ -702,12 +701,6 @@ fn stderr(outcome: &Outcome) -> String {
     String::from_utf8(outcome.stderr.clone()).unwrap()
 }
 
-/// Whether a run's exit code is the death of the process: a signal on Linux, an NTSTATUS
-/// failure code on Windows.
-fn died(outcome: &Outcome) -> bool {
-    !(0..=255).contains(&outcome.exit_code)
-}
-
 /// Where the wheel writes a profile, the port reports that it can't. Everything the tool prints
 /// before that point still matches, and nothing is left behind.
 #[test]
@@ -748,8 +741,9 @@ fn icc_output_is_reported_as_not_ported() {
 }
 
 /// `Config::CreateFromFile` and `CreateFromEnv` run outside `main`'s `try` blocks, so a config
-/// that doesn't load ends the wheel's process (docs/improvements.md, U-600). The port reports
-/// the error and exits with 1.
+/// that doesn't load is an uncaught exception, and the C++ runtime ends the process
+/// (docs/improvements.md, I-606). The port ends the same way. A line printed before it stays,
+/// because `std::endl` flushed it.
 #[test]
 fn an_exception_upstream_does_not_catch() {
     let bake = [
@@ -759,27 +753,35 @@ fn an_exception_upstream_does_not_catch() {
         "b",
         "--format",
         "spi1d",
-        "out.lut",
     ];
-    for (label, case) in [
-        (
+    let with = |extra: &[&'static str]| [&bake[..], extra].concat();
+    let cases = vec![
+        Case::new(
             "iconfig",
-            Case::new(
-                "iconfig",
-                &[&bake[..], &["--iconfig", "not_there.ocio"]].concat(),
-            ),
-        ),
-        ("env", Case::new("env", &bake).env("OCIO", "not_there.ocio")),
-        (
-            "broken",
-            Case::new("broken", &[&bake[..], &["--iconfig", "a.ocio"]].concat())
-                .file("a.ocio", "not a config"),
-        ),
-    ] {
-        let (wheel, port) = run_both("ociobakelut_uncaught", TOOL, PROGRAM, &case);
-        assert!(died(&wheel), "{label}: {}", wheel.exit_code);
-        assert_eq!(port.exit_code, 1, "{label}");
-        assert!(stderr(&port).starts_with("ERROR: "), "{}", stderr(&port));
-        assert!(port.files.is_empty(), "{label}");
-    }
+            &with(&["--iconfig", "not_there.ocio", "out.lut"]),
+        )
+        .dies(),
+        Case::new(
+            "verbose",
+            &with(&["--iconfig", "not_there.ocio", "--v", "out.lut"]),
+        )
+        .dies(),
+        Case::new("env", &with(&["out.lut"]))
+            .env("OCIO", "not_there.ocio")
+            .dies(),
+        Case::new("env_verbose", &with(&["--v", "out.lut"]))
+            .env("OCIO", "not_there.ocio")
+            .dies(),
+        Case::new("broken", &with(&["--iconfig", "a.ocio", "out.lut"]))
+            .file("a.ocio", "not a config")
+            .dies(),
+        Case::new(
+            "merged",
+            &with(&["--iconfig", "not_there.ocio", "--v", "out.lut"]),
+        )
+        .merged()
+        .dies(),
+    ];
+    let summary = sweep("ociobakelut_uncaught", TOOL, PROGRAM, &cases);
+    assert_eq!(summary.writing_files(), 0);
 }

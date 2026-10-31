@@ -24,7 +24,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ocio::{GroupTransform, Transform};
+use ocio::{Exception, ExceptionKind, GroupTransform, Transform};
 use ocio_ops::logging::set_stderr_sink;
 
 /// How much `std::cout` holds before it writes: only to keep memory small while a bake prints.
@@ -180,6 +180,40 @@ pub fn args() -> Vec<Vec<u8>> {
 /// What a tool does before anything else ([module documentation](self)).
 pub fn init() {
     set_stderr_sink(Arc::new(|text: &[u8]| cerr(text)));
+}
+
+/// The name C++ gives the type of `exception`, as libstdc++'s terminate handler prints it.
+#[cfg_attr(windows, allow(dead_code))]
+fn demangled_type_name(exception: &Exception) -> &'static str {
+    match exception.kind() {
+        ExceptionKind::MissingFile => "OpenColorIO_v2_5::ExceptionMissingFile",
+        ExceptionKind::LengthError => "std::length_error",
+        ExceptionKind::BadAlloc => "std::bad_alloc",
+        ExceptionKind::RegexError => "std::regex_error",
+        ExceptionKind::OutOfRange => "std::out_of_range",
+        ExceptionKind::SystemError => "std::system_error",
+        _ => "OpenColorIO_v2_5::Exception",
+    }
+}
+
+/// What the C++ runtime does with an exception no `catch` takes: `std::terminate`. What
+/// `std::cout` holds is lost, as neither `abort` nor Windows's fast fail flushes it.
+/// - **Linux:** libstdc++'s verbose handler writes two lines to stderr, then `abort`: SIGABRT.
+/// - **Windows:** nothing on stderr, and the process ends with `0xC0000409`. Rust's `abort` is
+///   the same fast fail.
+///
+/// docs/improvements.md, I-606.
+pub fn terminate(exception: &Exception) -> ! {
+    if !cfg!(windows) {
+        let name = demangled_type_name(exception);
+        let mut text =
+            format!("terminate called after throwing an instance of '{name}'\n  what():  ")
+                .into_bytes();
+        text.extend_from_slice(exception.what());
+        text.push(b'\n');
+        let _ = std::io::stderr().lock().write_all(&text);
+    }
+    std::process::abort()
 }
 
 /// `exit(code)`, and the return of `main`: `std::cout` is flushed, then the process ends.
