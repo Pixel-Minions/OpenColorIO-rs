@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The tools' output that depends on the CPU: pixels through `ociochecklut`, and the LUT values
-//! `ociobakelut` computes. On each CPU the wheel and the port pick the same kernels, so this
+//! and ICC profiles `ociobakelut` computes. On each CPU the wheel and the port pick the same kernels, so this
 //! target is in the `cpu-tests` alias (`.cargo/config.toml`), which CI runs on emulated CPUs. The
 //! full sweeps stay out of it: this one holds a few cases per kind of op, so that each CPU takes
 //! seconds natively and minutes under SDE.
@@ -91,4 +91,29 @@ fn values_through_ociobakelut() {
         "{}",
         summary.with_exit_code(0)
     );
+}
+
+/// A profile samples the processor at each node of its cube, so its bytes follow the kernels.
+#[test]
+fn profiles_through_ociobakelut() {
+    const TOOL: &str = "ociobakelut";
+    const PROGRAM: &str = env!("CARGO_BIN_EXE_ociobakelut");
+    let cases: Vec<Case> = FILES
+        .iter()
+        .map(|name| {
+            let file = test_file(name);
+            let argv = [
+                "--cubesize",
+                "5",
+                "--lut",
+                &file,
+                "--format",
+                "icc",
+                "out.icc",
+            ];
+            Case::new(*name, &argv).icc()
+        })
+        .collect();
+    let summary = sweep("tools_cpu_icc", TOOL, PROGRAM, &cases);
+    assert_eq!(summary.writing_files(), FILES.len());
 }

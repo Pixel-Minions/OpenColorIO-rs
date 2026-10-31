@@ -5,10 +5,7 @@
 //!
 //! Port of `src/apps/ociobakelut/main.cpp` @ v2.5.2.
 //!
-//! **ICC output isn't ported.** `SaveICCProfileToFile` (`ocioicc.cpp`) needs lcms2, which is a
-//! new dependency or a translation of third-party code: that is the owner's decision. Everything
-//! up to that call is ported, so a command line the wheel refuses is refused the same way, and
-//! one that would write a profile reports [`ICC_NOT_PORTED`] and exits with 1.
+//! ICC output is in [`ocio_tools::ocioicc`], on a translation of lcms2.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
@@ -21,11 +18,8 @@ use ocio::{
 use ocio_tools::argparse::{ArgParse, Param};
 use ocio_tools::c_numbers::atof;
 use ocio_tools::is_ocio_exception;
+use ocio_tools::ocioicc::save_icc_profile_to_file;
 use ocio_tools::stdio::{self, CoutWriter, OutputFile, cerr, cerr_line, cout, cout_line};
-
-/// What `--format icc` reports where the wheel would write the profile.
-const ICC_NOT_PORTED: &str = "ERROR: ICC output is not available in this port of ociobakelut \
-                              (SaveICCProfileToFile needs lcms2; docs/cards/phase10-tools.md).";
 
 /// `std::cerr << "See --help for more info." << std::endl`, and upstream's `return 1`.
 fn see_help() -> i32 {
@@ -168,6 +162,10 @@ struct Options {
     verbose: bool,
     outputfile: Vec<u8>,
     description_is_empty: bool,
+    description: Vec<u8>,
+    whitepointtemp: i32,
+    displayicc: Vec<u8>,
+    copyright: Vec<u8>,
 }
 
 /// The `format == "icc"` branch, up to the call of `SaveICCProfileToFile`.
@@ -185,6 +183,11 @@ fn icc(config: &Config, options: &Options) -> Result<i32, Exception> {
         usestdout,
         verbose,
         description_is_empty,
+        cubesize,
+        whitepointtemp,
+        displayicc,
+        description,
+        copyright,
         ..
     } = options;
 
@@ -226,10 +229,32 @@ fn icc(config: &Config, options: &Options) -> Result<i32, Exception> {
         config.processor_in_direction(&Transform::Look(transform), TransformDirection::Forward)?
     };
 
-    processor.optimized_cpu_processor(OptimizationFlags::LOSSLESS)?;
+    let cpuprocessor = processor.optimized_cpu_processor(OptimizationFlags::LOSSLESS)?;
 
-    cerr_line(ICC_NOT_PORTED);
-    Ok(1)
+    let description: &[u8] = if *description_is_empty {
+        outputfile
+    } else {
+        description
+    };
+
+    let saved = save_icc_profile_to_file(
+        outputfile,
+        &cpuprocessor,
+        if *cubesize < 2 { 32 } else { *cubesize }, // default
+        *whitepointtemp,
+        displayicc,
+        description,
+        copyright,
+        *verbose,
+    );
+
+    match saved {
+        Ok(()) => Ok(0),
+        Err(stop) => {
+            cerr_line(stop.message());
+            Ok(1)
+        }
+    }
 }
 
 /// The output of `main`'s last `try` block.
@@ -594,6 +619,10 @@ fn run(argv: &[Vec<u8>]) -> i32 {
         verbose,
         outputfile,
         description_is_empty: description.borrow().is_empty(),
+        description: description.borrow().clone(),
+        whitepointtemp: whitepointtemp.get(),
+        displayicc: displayicc.borrow().clone(),
+        copyright: copyright.borrow().clone(),
     };
 
     match bake(&config, &options) {
