@@ -1,4 +1,4 @@
-# Every upstream OpenColorIO file the port accounts for (PLAN.md Â§7).
+# Every upstream OpenColorIO file the port accounts for (PLAN.md §7).
 # Created by `cargo xtask upstream-map update`, which keeps existing entries; agents update
 # `target`, `status` and `note` as they port. status: todo | partial | done | n/a.
 # An n/a entry needs a note; n/a for anything other than build files, out-of-scope
@@ -212,7 +212,7 @@ path = "src/OpenColorIO/ContextVariableUtils.h"
 kind = "src"
 target = ["crates/ocio/src/context_variable_utils.rs", "crates/ocio/src/transforms/color_space_transform.rs", "crates/ocio/src/transforms/display_view_transform.rs", "crates/ocio/src/transforms/file_transform.rs", "crates/ocio/src/transforms/look_transform.rs", "crates/ocio/src/look.rs"]
 status = "done"
-note = "p3-context 3.5d: EnvMapKey, EnvMap, UsedEnvs and the declarations; the CollectContextVariables overloads of the classes not ported yet come with them; p59 Phase9 completion audit: EnvMapKey, EnvMap, UsedEnvs, token detection, environment loading and resolution are in context_variable_utils.rs. All eight CollectContextVariables declarations are implemented: generic/group dispatch there; color-space, display-view, file and look-transform collectors in the respective transform modules; Look overload in look.rs and ColorSpace overload in color_space_transform.rs. No unported transform remains in the dispatch."
+note = "p3-context 3.5d: EnvMapKey, EnvMap, UsedEnvs and the declarations; all context-variable collectors are present; p59 Phase9 completion audit: EnvMapKey, EnvMap, UsedEnvs, token detection, environment loading and resolution are in context_variable_utils.rs. All eight CollectContextVariables declarations are implemented: generic/group dispatch there; color-space, display-view, file and look-transform collectors in the respective transform modules; Look overload in look.rs and ColorSpace overload in color_space_transform.rs. No unported transform remains in the dispatch."
 
 [[file]]
 path = "src/OpenColorIO/CustomKeys.h"
@@ -240,7 +240,7 @@ path = "src/OpenColorIO/DynamicProperty.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/dynamic_property.rs"]
 status = "done"
-note = "1.2b, in ocio-ops because op data holds it: DynamicPropertyImpl, DynamicPropertyDoubleImpl, equals for two double properties, and operator== (on DynamicPropertyDoubleImpl and the DynamicPropertyRcPtr enum). The value is an AtomicU64 and the dynamic flag an AtomicBool, so an Arc handle can change them (PLAN.md Â§9). Checked by upstream's tests only. A mutation that drops the same-dynamic-state test in equals (D4 in the p1-foundations review) survives them: it changes only a comparison of a non-dynamic left operand with a dynamic right one, which upstream's test doesn't make; ExposureContrast (Phase 5) will pin it through the wheel. p2-rgbcurve 2.6b: DynamicPropertyGradingRGBCurveImpl (202-297) and its equals arm, the value and knots under an RwLock; p5-values 5.0a: DynamicPropertyGradingPrimaryImpl (139-200) and its equals arm, the style, direction, value and pre-render values under an RwLock (U-81, P5-1); 5.0b: DynamicPropertyGradingToneImpl (399-441) likewise; 5.0c: DynamicPropertyGradingHueCurveImpl (299-397) likewise, and DynamicPropertyValue::As* (18-47) as DynamicPropertyRcPtr::as_double, as_grading_primary, as_grading_rgb_curve, as_grading_hue_curve and as_grading_tone (P5-1). All of DynamicProperty.cpp is ported; ExposureContrast (WP 5.1) uses it"
+note = "1.2b, in ocio-ops because op data holds it: DynamicPropertyImpl, DynamicPropertyDoubleImpl, equals for two double properties, and operator== (on DynamicPropertyDoubleImpl and the DynamicPropertyRcPtr enum). The value is an AtomicU64 and the dynamic flag an AtomicBool, so an Arc handle can change them (PLAN.md §9). Checked by upstream's tests only. A mutation that drops the same-dynamic-state test in equals (D4 in the p1-foundations review) survives them: it changes only a comparison of a non-dynamic left operand with a dynamic right one, which upstream's test doesn't make; ExposureContrast (Phase 5) will pin it through the wheel. p2-rgbcurve 2.6b: DynamicPropertyGradingRGBCurveImpl (202-297) and its equals arm, the value and knots under an RwLock; p5-values 5.0a: DynamicPropertyGradingPrimaryImpl (139-200) and its equals arm, the style, direction, value and pre-render values under an RwLock (U-81, P5-1); 5.0b: DynamicPropertyGradingToneImpl (399-441) likewise; 5.0c: DynamicPropertyGradingHueCurveImpl (299-397) likewise, and DynamicPropertyValue::As* (18-47) as DynamicPropertyRcPtr::as_double, as_grading_primary, as_grading_rgb_curve, as_grading_hue_curve and as_grading_tone (P5-1). All of DynamicProperty.cpp is ported; ExposureContrast (WP 5.1) uses it"
 
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.h"
@@ -2666,7 +2666,7 @@ note = "build system"
 path = "src/apps/ocioarchive/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ociobakelut/CMakeLists.txt"
@@ -2726,7 +2726,7 @@ note = "build system"
 path = "src/apps/ocioconvert/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ociocpuinfo/CMakeLists.txt"
@@ -2738,7 +2738,7 @@ note = "build system"
 path = "src/apps/ociocpuinfo/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ociodisplay/CMakeLists.txt"
@@ -2750,7 +2750,7 @@ note = "build system"
 path = "src/apps/ociodisplay/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ociolutimage/CMakeLists.txt"
@@ -2762,7 +2762,7 @@ note = "build system"
 path = "src/apps/ociolutimage/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ociomakeclf/CMakeLists.txt"
@@ -2774,7 +2774,7 @@ note = "build system"
 path = "src/apps/ociomakeclf/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ociomergeconfigs/CMakeLists.txt"
@@ -2786,7 +2786,7 @@ note = "build system"
 path = "src/apps/ociomergeconfigs/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioperf/CMakeLists.txt"
@@ -2798,571 +2798,571 @@ note = "build system"
 path = "src/apps/ocioperf/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/main.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/__init__.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/config_cache.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/config_dock.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/constants.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/inspect/__init__.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/inspect/chromaticities_inspector.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/inspect/code_inspector.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/inspect/curve_inspector.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/inspect/log_inspector.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/inspect_dock.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/__init__.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/active_display_view_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/active_display_view_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/color_space_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/color_space_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/config_item_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/config_item_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/config_properties_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/config_properties_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/delegates.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/display_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/display_view_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/file_rule_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/file_rule_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/look_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/look_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/named_transform_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/named_transform_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/role_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/role_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/rule_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/shared_view_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/shared_view_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/utils.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/view_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/view_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/view_transform_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/view_transform_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/viewing_rule_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/items/viewing_rule_model.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/log_handlers.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/main_window.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/message_router.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/mode.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/processor_context.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/ref_space_manager.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/settings.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/setup.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/signal_router.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/style.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transform_manager.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/__init__.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/allocation_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/builtin_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/cdl_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/color_space_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/display_view_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/exponent_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/exponent_with_linear_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/exposure_contrast_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/file_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/fixed_function_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/log_affine_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/log_camera_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/log_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/look_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/matrix_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/range_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/transform_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/transform_edit_factory.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/transform_edit_stack.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/transforms/utils.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/undo.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/utils.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/viewer/__init__.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/viewer/image_plane.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/viewer/image_viewer.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/viewer/offscreen_viewer.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/viewer/utils.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/viewer_dock.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/__init__.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/check_box.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/combo_box.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/item_view.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/layout.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/line_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/list_widget.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/log_view.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/structure.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/table_widget.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/ocioview/widgets/text_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/tests/conftest.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ocioview/tests/items/test_color_space_edit.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/ociowrite/CMakeLists.txt"
@@ -3380,13 +3380,13 @@ status = "todo"
 path = "src/apps/pyocioamf/pyocioamf.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apps/pyociodisplay/pyociodisplay.py"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md Â§4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
 
 [[file]]
 path = "src/apputils/CMakeLists.txt"
@@ -3452,73 +3452,73 @@ note = "build system"
 path = "src/bindings/java/JNIBaker.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIColorSpace.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIConfig.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIContext.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIGlobals.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIGpuShaderDesc.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIImageDesc.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNILook.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIProcessor.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNITransforms.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIUtil.cpp"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/JNIUtil.h"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/LoadLibrary.java.in"
@@ -3536,193 +3536,193 @@ note = "build system"
 path = "src/bindings/java/org/OpenColorIO/Allocation.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/AllocationTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/Baker.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/BitDepth.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/CDLTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/ColorSpace.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/ColorSpaceDirection.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/ColorSpaceTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/Config.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/Context.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/DisplayTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/EnvironmentMode.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/ExceptionBase.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/ExceptionMissingFile.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/ExponentTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/FileTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/Globals.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/GpuLanguage.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/GpuShaderDesc.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/GroupTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/ImageDesc.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/Interpolation.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/LogTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/LoggingLevel.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/Look.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/LookTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/MatrixTransform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/PackedImageDesc.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/PlanarImageDesc.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/Processor.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/Transform.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/java/org/OpenColorIO/TransformDirection.java"
 kind = "binding"
 status = "n/a"
-note = "out of scope: only the Python binding is ported (PLAN.md Â§4)"
+note = "out of scope: only the Python binding is ported (PLAN.md §4)"
 
 [[file]]
 path = "src/bindings/python/CMakeLists.txt"
