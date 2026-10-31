@@ -223,6 +223,44 @@ pub fn sse2_rgba_pack_store(depth: PackDepth, value: f32) -> u32 {
     rgba_pack_store(depth, value, HalfConversion::Sse2)
 }
 
+/// One x86 scalar instruction each, for `math_utils::sse_add`, `sse_sub` and `sse_mul`.
+///
+/// An instruction gives the first operand's NaN where two meet, as C++'s `addss` does, without
+/// the test of a NaN that the same rule takes in Rust: LLVM's `fadd` and `fmul` are commutative,
+/// so `+` and `*` don't say which NaN comes out.
+#[cfg(target_arch = "x86_64")]
+pub mod scalar {
+    use core::arch::asm;
+
+    macro_rules! instruction {
+        ($name:ident, $ty:ty, $text:literal) => {
+            /// The instruction with `a` as its first source operand.
+            #[inline(always)]
+            pub fn $name(a: $ty, b: $ty) -> $ty {
+                let out: $ty;
+                // SAFETY: the instruction reads two registers and writes the first, and x86-64
+                // has SSE2.
+                unsafe {
+                    asm!(
+                        $text,
+                        inlateout(xmm_reg) a => out,
+                        in(xmm_reg) b,
+                        options(pure, nomem, nostack, preserves_flags)
+                    );
+                }
+                out
+            }
+        };
+    }
+
+    instruction!(addss, f32, "addss {0}, {1}");
+    instruction!(subss, f32, "subss {0}, {1}");
+    instruction!(mulss, f32, "mulss {0}, {1}");
+    instruction!(addsd, f64, "addsd {0}, {1}");
+    instruction!(subsd, f64, "subsd {0}, {1}");
+    instruction!(mulsd, f64, "mulsd {0}, {1}");
+}
+
 /// What the renderers' real SIMD fast paths share (`docs/cards/phase8.md`).
 ///
 /// Rust's `_mm_add_ps` and `_mm_mul_ps` are LLVM's commutative `fadd` and `fmul`, so they don't

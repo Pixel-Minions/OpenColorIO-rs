@@ -79,31 +79,95 @@ pub fn sse_min(a: f32, b: f32) -> f32 {
 pub trait SseFloat: Copy + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self> {
     /// Whether the value is a NaN.
     fn is_nan(self) -> bool;
-    /// The value with the quiet bit set: what the instructions return for a NaN operand.
-    fn quieted(self) -> Self;
+    /// `self + b`, the instruction with `self` first.
+    fn x86_add(self, b: Self) -> Self;
+    /// `self - b`, the instruction.
+    fn x86_sub(self, b: Self) -> Self;
+    /// `self * b`, the instruction with `self` first.
+    fn x86_mul(self, b: Self) -> Self;
 }
 
+#[cfg(target_arch = "x86_64")]
 impl SseFloat for f32 {
     #[inline]
     fn is_nan(self) -> bool {
         f32::is_nan(self)
     }
-    #[inline]
-    fn quieted(self) -> f32 {
-        f32::from_bits(self.to_bits() | 0x0040_0000)
+    #[inline(always)]
+    fn x86_add(self, b: f32) -> f32 {
+        crate::sse2::scalar::addss(self, b)
+    }
+    #[inline(always)]
+    fn x86_sub(self, b: f32) -> f32 {
+        crate::sse2::scalar::subss(self, b)
+    }
+    #[inline(always)]
+    fn x86_mul(self, b: f32) -> f32 {
+        crate::sse2::scalar::mulss(self, b)
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 impl SseFloat for f64 {
     #[inline]
     fn is_nan(self) -> bool {
         f64::is_nan(self)
     }
-    #[inline]
-    fn quieted(self) -> f64 {
-        f64::from_bits(self.to_bits() | 0x0008_0000_0000_0000)
+    #[inline(always)]
+    fn x86_add(self, b: f64) -> f64 {
+        crate::sse2::scalar::addsd(self, b)
+    }
+    #[inline(always)]
+    fn x86_sub(self, b: f64) -> f64 {
+        crate::sse2::scalar::subsd(self, b)
+    }
+    #[inline(always)]
+    fn x86_mul(self, b: f64) -> f64 {
+        crate::sse2::scalar::mulsd(self, b)
     }
 }
+
+/// The rule of the instructions, where there are none: the first operand's NaN, quieted.
+#[cfg(not(target_arch = "x86_64"))]
+macro_rules! sse_float {
+    ($t:ty, $quiet:expr) => {
+        impl SseFloat for $t {
+            #[inline]
+            fn is_nan(self) -> bool {
+                <$t>::is_nan(self)
+            }
+            #[inline]
+            fn x86_add(self, b: $t) -> $t {
+                if self.is_nan() {
+                    <$t>::from_bits(self.to_bits() | $quiet)
+                } else {
+                    self + b
+                }
+            }
+            #[inline]
+            fn x86_sub(self, b: $t) -> $t {
+                if self.is_nan() {
+                    <$t>::from_bits(self.to_bits() | $quiet)
+                } else {
+                    self - b
+                }
+            }
+            #[inline]
+            fn x86_mul(self, b: $t) -> $t {
+                if self.is_nan() {
+                    <$t>::from_bits(self.to_bits() | $quiet)
+                } else {
+                    self * b
+                }
+            }
+        }
+    };
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+sse_float!(f32, 0x0040_0000);
+#[cfg(not(target_arch = "x86_64"))]
+sse_float!(f64, 0x0008_0000_0000_0000);
 
 /// `a + b` as x86 computes it with `a` as the first source operand: one lane of
 /// `_mm_add_ps(a, b)` (`ADDPS`), or the `ADDSS`/`ADDSD` of a scalar C++ `a + b`. When both
@@ -115,9 +179,9 @@ impl SseFloat for f64 {
 /// writes the operand order of upstream's source with this function wherever two NaNs can
 /// meet. Division needs no helper: its operands cannot be swapped. Subtraction needs
 /// [`sse_sub`] where it subtracts a product.
-#[inline]
+#[inline(always)]
 pub fn sse_add<T: SseFloat>(a: T, b: T) -> T {
-    if a.is_nan() { a.quieted() } else { a + b }
+    a.x86_add(b)
 }
 
 /// `a - b` as x86 computes it: one lane of `_mm_sub_ps(a, b)` (`SUBPS`), or the
@@ -129,17 +193,17 @@ pub fn sse_add<T: SseFloat>(a: T, b: T) -> T {
 /// `x`'s NaN where the C++ `SUBSS` returns `a`'s. The port writes the operand order of the
 /// wheel's machine code with this function wherever two NaNs can meet in a subtraction of a
 /// product.
-#[inline]
+#[inline(always)]
 pub fn sse_sub<T: SseFloat>(a: T, b: T) -> T {
-    if a.is_nan() { a.quieted() } else { a - b }
+    a.x86_sub(b)
 }
 
 /// `a * b` as x86 computes it with `a` as the first source operand: one lane of
 /// `_mm_mul_ps(a, b)` (`MULPS`), or the `MULSS`/`MULSD` of a scalar C++ `a * b`. The NaN
 /// rules and the reason for this function are those of [`sse_add`].
-#[inline]
+#[inline(always)]
 pub fn sse_mul<T: SseFloat>(a: T, b: T) -> T {
-    if a.is_nan() { a.quieted() } else { a * b }
+    a.x86_mul(b)
 }
 
 /// The value x86 float→int32 conversions return for NaN and out-of-range inputs (Intel's
