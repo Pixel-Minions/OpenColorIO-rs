@@ -666,3 +666,14 @@ fn non_ascii_paths() {
     let summary = sweep("ociocheck_non_ascii", TOOL, PROGRAM, &cases);
     assert_eq!(summary.writing_files(), 1);
 }
+
+/// `--oconfig` over a file with Windows attributes.
+#[cfg(windows)]
+#[test]
+fn output_file_attributes() {
+    let argv = ["--iconfig", "a.ocio", "--oconfig", "o.ocio"];
+    let cases = common::output_attribute_cases("o.ocio", &argv, |case| case.file("a.ocio", good()));
+    let summary = sweep("ociocheck_attributes", TOOL, PROGRAM, &cases);
+    assert_eq!(summary.writing_files(), 0);
+    assert_eq!(summary.with_exit_code(0), cases.len());
+}

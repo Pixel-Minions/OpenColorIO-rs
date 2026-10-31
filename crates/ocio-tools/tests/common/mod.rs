@@ -33,6 +33,8 @@ pub(crate) struct Case {
     pub(crate) files: Vec<(String, Vec<u8>)>,
     /// The wheel's tool ends here in `std::terminate`, and the port's must too.
     pub(crate) dies: bool,
+    /// Windows attributes of input files: (path, letters of "hsr").
+    pub(crate) attributes: Vec<(String, String)>,
     /// stderr goes into stdout's pipe: the bytes show the order they were written in.
     pub(crate) merged: bool,
 }
@@ -45,8 +47,15 @@ impl Case {
             env: Vec::new(),
             files: Vec::new(),
             dies: false,
+            attributes: Vec::new(),
             merged: false,
         }
+    }
+
+    pub(crate) fn attribute(mut self, path: &str, letters: &str) -> Case {
+        self.attributes
+            .push((path.to_string(), letters.to_string()));
+        self
     }
 
     pub(crate) fn dies(mut self) -> Case {
@@ -125,7 +134,7 @@ fn wheel_outcomes(group: &str, tool: &str, cases: &[Case]) -> Vec<Outcome> {
                 cmd: "tool_run",
                 args: json!({
                     "tool": tool, "argv": case.argv, "cwd": cwd.to_str().unwrap(),
-                    "env": env, "files": files, "merge_stderr": case.merged,
+                    "env": env, "files": files, "merge_stderr": case.merged, "attributes": case.attributes,
                 }),
                 blobs: case
                     .files
@@ -189,6 +198,7 @@ fn port_outcome(group: &str, program: &str, index: usize, case: &Case) -> Outcom
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, contents).unwrap();
     }
+    set_attributes(&cwd, &case.attributes, '+');
     let mut command = Command::new(program);
     command
         .args(&case.argv)
@@ -215,12 +225,24 @@ fn port_outcome(group: &str, program: &str, index: usize, case: &Case) -> Outcom
             files.remove(path);
         }
     }
+    set_attributes(&cwd, &case.attributes, '-');
     let _ = std::fs::remove_dir_all(&cwd);
     Outcome {
         exit_code: exit_code(output.status),
         stdout: output.stdout,
         stderr: output.stderr,
         files,
+    }
+}
+
+/// `attrib` on input files, the way to set hidden and system attributes without `unsafe`.
+fn set_attributes(cwd: &Path, attributes: &[(String, String)], sign: char) {
+    for (path, letters) in attributes {
+        let mut attrib = Command::new("attrib");
+        for letter in letters.chars() {
+            attrib.arg(format!("{sign}{letter}"));
+        }
+        assert!(attrib.arg(cwd.join(path)).status().unwrap().success());
     }
 }
 
@@ -392,6 +414,24 @@ pub(crate) fn sweep(group: &str, tool: &str, program: &str, cases: &[Case]) -> S
         );
     }
     Summary { outcomes: wheel }
+}
+
+/// Windows only: `argv` writes the file `output`, which exists with each combination of
+/// attributes. The wheel refuses a hidden or a system file, and leaves it alone.
+#[cfg(windows)]
+pub(crate) fn output_attribute_cases(
+    output: &str,
+    argv: &[&str],
+    base: impl Fn(Case) -> Case,
+) -> Vec<Case> {
+    ["h", "s", "r", "hs", "hr", "sr"]
+        .iter()
+        .map(|letters| {
+            base(Case::new(format!("attribute_{letters}"), argv))
+                .file(output, "old")
+                .attribute(output, letters)
+        })
+        .collect()
 }
 
 /// Runs one case on both sides, for a test that doesn't expect them to match: a case the wheel

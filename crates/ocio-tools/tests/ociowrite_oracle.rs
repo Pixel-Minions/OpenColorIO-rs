@@ -380,3 +380,14 @@ fn configs_of_upstream_and_the_library() {
     let summary = sweep("ociowrite_configs", TOOL, PROGRAM, &cases);
     assert!(summary.writing_files() >= 3, "{}", summary.writing_files());
 }
+
+/// `--file` over a file with Windows attributes.
+#[cfg(windows)]
+#[test]
+fn output_file_attributes() {
+    let argv = ["--colorspaces", "linear", "log", "--file", "o.ctf"];
+    let cases = common::output_attribute_cases("o.ctf", &argv, with_config);
+    let summary = sweep("ociowrite_attributes", TOOL, PROGRAM, &cases);
+    assert_eq!(summary.writing_files(), 0);
+    assert_eq!(summary.with_exit_code(1), cases.len());
+}

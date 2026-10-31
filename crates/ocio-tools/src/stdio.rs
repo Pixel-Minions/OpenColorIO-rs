@@ -22,6 +22,8 @@ use std::borrow::Cow;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(windows)]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ocio::{Exception, ExceptionKind, GroupTransform, Transform};
@@ -48,10 +50,52 @@ pub fn text_mode(bytes: &[u8]) -> Cow<'_, [u8]> {
     Cow::Owned(out)
 }
 
+/// A standard stream as a plain file: writes go to the handle as bytes.
+///
+/// Rust's `Stdout` and `Stderr` turn what goes to a console into UTF-16, and refuse bytes that
+/// aren't UTF-8, which loses the rest of the write. The C runtime writes bytes, and the console
+/// reads them in its code page. So a tool writes through a duplicate of the handle, as a `File`,
+/// whatever the handle is. `None` where the process has no such stream.
+#[cfg(windows)]
+fn stream_file(stream: &impl std::os::windows::io::AsHandle) -> Option<File> {
+    let handle = stream.as_handle().try_clone_to_owned().ok()?;
+    Some(File::from(handle))
+}
+
 fn write_stdout(bytes: &[u8]) {
-    let mut stdout = std::io::stdout().lock();
-    let _ = stdout.write_all(bytes);
-    let _ = stdout.flush();
+    #[cfg(windows)]
+    {
+        static STDOUT: OnceLock<Option<File>> = OnceLock::new();
+        if let Some(mut file) = STDOUT
+            .get_or_init(|| stream_file(&std::io::stdout()))
+            .as_ref()
+        {
+            let _ = file.write_all(bytes);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let mut stdout = std::io::stdout().lock();
+        let _ = stdout.write_all(bytes);
+        let _ = stdout.flush();
+    }
+}
+
+fn write_stderr(bytes: &[u8]) {
+    #[cfg(windows)]
+    {
+        static STDERR: OnceLock<Option<File>> = OnceLock::new();
+        if let Some(mut file) = STDERR
+            .get_or_init(|| stream_file(&std::io::stderr()))
+            .as_ref()
+        {
+            let _ = file.write_all(bytes);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::io::stderr().lock().write_all(bytes);
+    }
 }
 
 /// `std::cout << text`.
@@ -91,9 +135,7 @@ pub fn cout_line(text: impl AsRef<[u8]>) {
 /// `std::cerr << text`.
 pub fn cerr(text: impl AsRef<[u8]>) {
     cout_flush();
-    let _ = std::io::stderr()
-        .lock()
-        .write_all(&text_mode(text.as_ref()));
+    write_stderr(&text_mode(text.as_ref()));
 }
 
 /// `std::cerr << text << std::endl`.
@@ -127,9 +169,27 @@ pub struct OutputFile {
 impl OutputFile {
     /// `std::ofstream f(path)`: creates the file, or empties it. `path` is as the command line
     /// gave it.
+    ///
+    /// On Windows the C runtime opens with `CREATE_ALWAYS` and normal attributes, which the
+    /// system refuses for a hidden or system file that exists. Rust's `File::create` opens
+    /// another way, which it allows, so the attributes are looked at first.
     pub fn create(path: &[u8]) -> std::io::Result<OutputFile> {
+        let path = path_from_bytes(path);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+            const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+            let refused = FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM;
+            if let Ok(metadata) = std::fs::metadata(&path)
+                && metadata.is_file()
+                && metadata.file_attributes() & refused != 0
+            {
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+        }
         Ok(OutputFile {
-            file: File::create(path_from_bytes(path))?,
+            file: File::create(path)?,
         })
     }
 }
@@ -211,7 +271,7 @@ pub fn terminate(exception: &Exception) -> ! {
                 .into_bytes();
         text.extend_from_slice(exception.what());
         text.push(b'\n');
-        let _ = std::io::stderr().lock().write_all(&text);
+        write_stderr(&text);
     }
     std::process::abort()
 }

@@ -785,3 +785,25 @@ fn an_exception_upstream_does_not_catch() {
     let summary = sweep("ociobakelut_uncaught", TOOL, PROGRAM, &cases);
     assert_eq!(summary.writing_files(), 0);
 }
+
+/// The output file with Windows attributes.
+#[cfg(windows)]
+#[test]
+fn output_file_attributes() {
+    let argv = [
+        "--iconfig",
+        "a.ocio",
+        "--inputspace",
+        "lin",
+        "--outputspace",
+        "log",
+        "--format",
+        "spi1d",
+        "--v",
+        "o.lut",
+    ];
+    let cases = common::output_attribute_cases("o.lut", &argv, with_config);
+    let summary = sweep("ociobakelut_attributes", TOOL, PROGRAM, &cases);
+    assert_eq!(summary.writing_files(), 0);
+    assert_eq!(summary.with_exit_code(1), cases.len());
+}
