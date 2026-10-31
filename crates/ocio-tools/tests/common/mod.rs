@@ -118,8 +118,10 @@ fn wheel_outcomes(group: &str, tool: &str, cases: &[Case]) -> Vec<Outcome> {
             }
         })
         .collect();
+    // Never from the cache: a file's inode can reach the output (`CacheID`, on Linux), and a
+    // Rocky Linux 9 container has its own inodes for the checkout.
     Oracle::get()
-        .batch(&calls, true)
+        .batch(&calls, false)
         .into_iter()
         .zip(cases)
         .map(|(response, case)| {
@@ -336,13 +338,4 @@ pub(crate) fn sweep(group: &str, tool: &str, program: &str, cases: &[Case]) -> S
         );
     }
     Summary { outcomes: wheel }
-}
-
-/// One case whose wheel run doesn't finish: the wheel's outcome is its crash, and the port's is
-/// a deliberate error. Returns (the wheel's, the port's).
-pub(crate) fn run_both(group: &str, tool: &str, program: &str, case: &Case) -> (Outcome, Outcome) {
-    let cases = std::slice::from_ref(case);
-    let wheel = wheel_outcomes(group, tool, cases).remove(0);
-    let port = port_outcome(group, program, 0, case);
-    (wheel, port)
 }

@@ -2702,7 +2702,7 @@ note = "build system"
 path = "src/apps/ociocheck/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociocheck.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/apps/ociochecklut/CMakeLists.txt"
@@ -3411,19 +3411,20 @@ status = "done"
 path = "src/apputils/logGuard.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/log_guard.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/apputils/logGuard.h"
 kind = "app"
 target = ["crates/ocio-tools/src/log_guard.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/apputils/measure.h"
 kind = "app"
 target = ["crates/ocio-tools/src/measure.rs"]
-status = "todo"
+status = "n/a"
+note = "used only by ocioconvert, ocioperf and ociolutimage, which are out of scope (PLAN.md §4)"
 
 [[file]]
 path = "src/apputils/strutil.cpp"

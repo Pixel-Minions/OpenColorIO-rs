@@ -4352,11 +4352,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** both test `OCIO::GetEnvVariable("OCIO")` as a pointer, which is never null
   (`src/OpenColorIO/Config.cpp:GetEnvVariable @ v2.5.2`), so their branch that says "You must
-  specify an input OCIO configuration" is dead (`src/apps/ociocheck/main.cpp:449-463`,
-  `src/apps/ociobakelut/main.cpp:262-278 @ v2.5.2`). Without `$OCIO` and without `--iconfig`
+  specify an input OCIO configuration" is dead (`src/apps/ociocheck/main.cpp:155-169`,
+  `src/apps/ociobakelut/main.cpp:263-278 @ v2.5.2`). Without `$OCIO` and without `--iconfig`
   they load `Config::CreateFromEnv`, the raw config, and report on that.
 - **Who notices:** anyone who runs them with no config: `ociocheck` passes.
 - **A fix:** test for an empty string. The message would then appear where it was meant to.
+- **Status:** matched (card phase10-tools).
+
+### I-603. `ociocheck` can't see an error in the validation log
+
+- **Upstream:** after `Config::validate`, `src/apps/ociocheck/main.cpp:639-650 @ v2.5.2` looks for
+  errors with `StringUtils::Contain(svec, "[OpenColorIO Error]")`. That compares whole lines,
+  and a log line always goes on after the prefix, so the test is never true and `Validation:
+  failed` comes only from an exception. The same comparison ignores case.
+- **Who notices:** configs whose validation logs an error without throwing: `ociocheck` prints
+  `Validation: passed`, and the log above it shows the error.
+- **A fix:** search each line for the text. Such configs would then fail `ociocheck`.
 - **Status:** matched (card phase10-tools).
 
 ## Undefined behaviour upstream

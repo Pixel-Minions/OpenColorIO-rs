@@ -25,7 +25,9 @@ Rocky Linux 9.
   and the version banner is the library's `2.5.2` on both sides. Absolute paths appear in the
   output (`Working Dir:`, error messages); the sweeps run the wheel's tool and the port's in
   the same directory, with the same arguments and environment, so that they need no
-  normalising at all.
+  normalising at all. On Linux `ociocheck`'s `CacheID` covers the inode of each file a config
+  refers to, so the sweeps read LUT files where they are, not from a copy made for each run, and
+  never replay the wheel's output from the oracle's cache.
 
 ## Chunks
 

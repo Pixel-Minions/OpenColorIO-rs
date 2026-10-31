@@ -7,6 +7,7 @@
 
 pub mod argparse;
 pub mod c_numbers;
+pub mod log_guard;
 pub mod stdio;
 
 use ocio::{Exception, ExceptionKind};
