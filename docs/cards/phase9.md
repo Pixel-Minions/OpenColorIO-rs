@@ -347,3 +347,14 @@ clippy and generated-file main-mode checks on Windows and Rocky Linux 9, debug a
 argument cannot be passed to `Config::add_named_transform(&NamedTransform)`. No owner boundary
 decision, new API, exclusion or policy change is made here. The count remains 1,188/1,191
 on the P27 prerequisite; a separate normal CI run gates this chunk before merge.
+
+## P59 context and group source-map audit (2026-10-31)
+
+Audited all functions and declarations in ContextVariableUtils.cpp/.h and
+GroupTransform.cpp/.h against the current Rust implementation. Their four map entries
+are complete: the generic collector handles all transform kinds, all eight header
+overloads exist, and group collection already visits every child in that dispatcher.
+Group writing and all three registry queries are also present. Corrected two stale
+module comments which still described those implemented features as future work.
+Existing I-11/U-58/I-73/I-178 decisions, every test and all runtime code are unchanged.
+The full normal CI gate is still required before this source-map chunk lands.

@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The group transform: a port of `src/OpenColorIO/transforms/GroupTransform.h` and
-//! `GroupTransform.cpp` @ v2.5.2, without `write` and its format registry queries (the file
-//! writers, Phase 4) or `CollectContextVariables` (the config, Phase 3).
+//! `GroupTransform.cpp` @ v2.5.2: model, op builder, text and file writing. The
+//! `CollectContextVariables` overload is in the context-variable dispatcher.
 
 use std::fmt;
 
