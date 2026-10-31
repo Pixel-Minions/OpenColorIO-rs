@@ -81,7 +81,7 @@ passed debug and release with every old Matrix rule still mandatory. The exact
 metadata remains in [the archive](archive/gpu-matrix-waivers-2026-10-27.toml).
 W0013 below remains the single non-finite GPU class; retired Matrix rules are rejected.
 The five finite exact pins W0014-W0018 are separately owner-approved on 2026-10-30.
-W0019, for the dev tools, is owner-approved on 2026-10-31.
+W0019 and W0020, for the dev tools, are owner-approved on 2026-10-31.
 
 ## W0003 — MatrixOps/matrix (retired 2026-10-29; historical evidence)
 
@@ -521,6 +521,14 @@ Deviation D-17 (`deviations.md`), `improvements.md` I-601. The wheel's tools get
 in the ANSI code page; the port's take them in Unicode and use UTF-8. ASCII arguments and Linux
 are not waived. No sweep passes a non-ASCII argument on Windows, so no check is relaxed in code:
 the waiver records what isn't compared. The measurements are in `waivers.toml` and D-17.
+
+## W0020 - Long file paths of the tools on Windows (owner approved 2026-10-31)
+
+Deviation D-18 (`deviations.md`), `improvements.md` I-608. The wheel's `.exe` files have no
+`longPathAware` manifest, so the system refuses their paths past `MAX_PATH`; the port's tools go
+through Rust's `std`, which handles such paths. Paths under 260 characters and Linux are not
+waived. No sweep passes such a path on Windows, so no check is relaxed in code: the waiver records
+what isn't compared. The measurements are in `waivers.toml` and D-18.
 
 ## P9-6 - Reviewed C++ tests not applicable (owner approved 2026-10-23)
 

@@ -4413,7 +4413,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   fail.
 - **A fix:** what the port does: upstream could add the manifest entry.
 - **Status:** not matched, by the owner's decision of 2026-10-31: deviation D-18
-  (`docs/deviations.md`). Linux has no such limit.
+  (`docs/deviations.md`), and waiver W0020. Linux has no such limit.
 
 ### I-609. `tool --stdout | head -c 3` with mid-size output, on Linux
 

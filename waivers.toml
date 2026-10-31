@@ -276,6 +276,14 @@ reason = "The wheel's main(int, const char **) gets arguments in the ANSI code p
 approved_by = "Project owner, explicit chat approval on 2026-10-31"
 date = "2026-10-31"
 
+[[waiver]]
+id = "W0020"
+scope = "Windows only: the tools ociocheck, ociochecklut, ociowrite and ociobakelut, for file paths of 260 characters and more (deviation D-18, docs/improvements.md I-608). Shorter paths and Linux are not waived"
+check = "Stdout, stderr, exit code and written files of those tools, against the wheel's tool on the same machine, for such paths only. No sweep passes such a path on Windows, so no check is relaxed in code: the waiver records what isn't compared. Every other case stays byte-exact"
+reason = "The wheel's .exe files have no longPathAware manifest, so the system refuses their paths past MAX_PATH even with LongPathsEnabled=1, while python.exe has the manifest and the same library handles such paths in the Python module. The port's tools go through Rust's std, which turns a long path into a verbatim one, and through the library's reads. Measured on Windows: the wheel writes at 259 characters and fails at 260, and the port writes both. Over the limit, ociowrite --file gives Could not open file and exit 1 in the wheel, and writes the file and exits 0 in the port; ociobakelut gives Non-writable file path and exit 1 in the wheel, and writes the file in the port; ociocheck --oconfig gives Error opening in the wheel and Wrote in the port; ociocheck --iconfig and ociochecklut can't read the file in the wheel and read it in the port. Matching would make the port fail on paths that work"
+approved_by = "Project owner, explicit chat approval on 2026-10-31"
+date = "2026-10-31"
+
 [[not_applicable]]
 test = "Platform/aligned_memory_test"
 reason = "P9-6 (owner decision2026-10-23): native C++ AlignedMalloc/AlignedFree allocation of1001 bytes at16-byte alignment. The current Rust renderer owns a Vec and uses unaligned loads; no corresponding C++ allocator API applies. Reopen if Phase8 introduces applicable aligned storage."
