@@ -1594,8 +1594,15 @@ fn port_whole_merge(case: &WholeCase) -> (Result<Vec<u8>>, Vec<u8>, Vec<u8>) {
 /// input-first and error-on-conflict options, the adjustment of the reference space, the
 /// overrides (active lists, search path, environment, inactive color spaces) and the family
 /// prefixes.
-#[test]
-fn whole_merges_match_the_wheel() {
+fn check_whole_merges(part: usize) {
+    // Full reference transcripts are retained in each part so the original matrix-wide
+    // coverage requirements below run unchanged on the selected emulated CPU. Serialize
+    // these large transcripts in native libtest too, to avoid multiplying peak memory.
+    static WHOLE_MERGE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _whole_merge = WHOLE_MERGE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(part < WHOLE_MERGE_PARTS);
     let cases = whole_cases();
     let requests: Vec<Value> = cases
         .iter()
@@ -1623,7 +1630,8 @@ fn whole_merges_match_the_wheel() {
     let mut adjusted_raised = 0;
     let mut adjusted_texts = std::collections::BTreeSet::new();
     let mut mismatches = Vec::new();
-    for (case, response) in cases.iter().zip(responses) {
+    let mut checked = 0;
+    for (index, (case, response)) in cases.iter().zip(responses).enumerate() {
         let response = response.unwrap_or_else(|e| panic!("{case:?}: {e}")).result;
         let calls = response["calls"].as_array().expect("the calls");
         let label = WHOLE_PAIRS[case.pair].label;
@@ -1654,6 +1662,44 @@ fn whole_merges_match_the_wheel() {
             }
         }
 
+        // All original coverage bounds apply to the complete reference matrix. The exact
+        // comparisons in the parts, together with the exhaustive/disjoint plan test below,
+        // imply the same port outcome counts and text sets. No comparison is sampled out:
+        // each original case executes its unchanged Rust merge in exactly one part.
+        if !wheel_log.is_empty() {
+            logged += 1;
+        }
+        if merge.get("exception").is_some() {
+            raised += 1;
+            if case.adjust_reference {
+                adjusted_raised += 1;
+            }
+        } else {
+            let text = serialize["result"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{label} {case:?}: {serialize}"))
+                .as_bytes()
+                .to_vec();
+            if case.pair >= FIRST_NAMED_TRANSFORMS_PAIR {
+                named_transform_texts.insert(text.clone());
+            } else if case.pair >= FIRST_COLORSPACES_PAIR {
+                colorspace_texts.insert(text.clone());
+            } else if case.pair >= FIRST_VIEW_TRANSFORMS_PAIR {
+                // (The base configs of these pairs have no group transforms: the input's
+                // view transforms with the reference space converters do.)
+                if case.adjust_reference && text.windows(17).any(|w| w == b"!<GroupTransform>") {
+                    adjusted_texts.insert(text.clone());
+                }
+                view_transform_texts.insert(text.clone());
+            } else if case.pair >= FIRST_DISPLAY_PAIR {
+                display_texts.insert(text.clone());
+            }
+            texts.insert(text);
+        }
+        if !whole_merge_in_part(index, part) {
+            continue;
+        }
+        checked += 1;
         let (result, port_log, port_load_log) = port_whole_merge(case);
         let wheel_load_log = [log(&calls[1]["log"]), log(&calls[2]["log"])]
             .concat()
@@ -1671,15 +1717,8 @@ fn whole_merges_match_the_wheel() {
                 String::from_utf8_lossy(&port_log)
             ));
         }
-        if !port_log.is_empty() {
-            logged += 1;
-        }
         match (merge.get("exception"), result) {
             (Some(e), Err(port)) => {
-                raised += 1;
-                if case.adjust_reference {
-                    adjusted_raised += 1;
-                }
                 if bytes(&e["message"]) != port.what() {
                     problems.push(format!("exception: wheel {e}, port {port}"));
                 }
@@ -1694,22 +1733,6 @@ fn whole_merges_match_the_wheel() {
                         String::from_utf8_lossy(&text)
                     ));
                 }
-                if case.pair >= FIRST_NAMED_TRANSFORMS_PAIR {
-                    named_transform_texts.insert(text.clone());
-                } else if case.pair >= FIRST_COLORSPACES_PAIR {
-                    colorspace_texts.insert(text.clone());
-                } else if case.pair >= FIRST_VIEW_TRANSFORMS_PAIR {
-                    // (The base configs of these pairs have no group transforms: the input's
-                    // view transforms with the reference space converters do.)
-                    if case.adjust_reference && text.windows(17).any(|w| w == b"!<GroupTransform>")
-                    {
-                        adjusted_texts.insert(text.clone());
-                    }
-                    view_transform_texts.insert(text.clone());
-                } else if case.pair >= FIRST_DISPLAY_PAIR {
-                    display_texts.insert(text.clone());
-                }
-                texts.insert(text);
             }
             (wheel, port) => problems.push(format!("outcome: wheel {wheel:?}, port {port:?}")),
         }
@@ -1721,8 +1744,19 @@ fn whole_merges_match_the_wheel() {
         mismatches.is_empty(),
         "{} of {} cases differ:\n{}",
         mismatches.len(),
-        cases.len(),
+        checked,
         mismatches.join("\n")
+    );
+    assert!(checked > 0);
+    assert_eq!(
+        checked,
+        (0..cases.len())
+            .filter(|&index| whole_merge_in_part(index, part))
+            .count()
+    );
+    println!(
+        "whole-merge part {part}/{WHOLE_MERGE_PARTS}: checked {checked} of {} original cases",
+        cases.len()
     );
     // Every outcome is reached: conflicts as exceptions and as warnings, and many different
     // merged configs.
@@ -1775,4 +1809,46 @@ fn whole_merges_match_the_wheel() {
     {
         assert!(count >= 10, "{count} merges logged \"{fragment}\"");
     }
+}
+
+fn whole_merge_in_part(index: usize, part: usize) -> bool {
+    index % WHOLE_MERGE_PARTS == part
+}
+
+// These are execution partitions of one synthetic oracle sweep, not upstream test markers.
+// Generating the test functions and partition inventory together prevents an unregistered part.
+macro_rules! whole_merge_parts {
+    ($($name:ident => $part:expr),+ $(,)?) => {
+        const WHOLE_MERGE_PARTS: usize = [$($part),+].len();
+
+        #[test]
+        fn whole_merge_parts_cover_original_cases_once() {
+            let parts = [$($part),+];
+            assert!(parts.into_iter().eq(0..WHOLE_MERGE_PARTS));
+            let cases = whole_cases();
+            let mut visits = vec![0; cases.len()];
+            for part in parts {
+                for (index, visited) in visits.iter_mut().enumerate() {
+                    if whole_merge_in_part(index, part) {
+                        *visited += 1;
+                    }
+                }
+            }
+            assert!(visits.iter().all(|&visited| visited == 1));
+        }
+
+        $(
+            #[test]
+            fn $name() {
+                check_whole_merges($part);
+            }
+        )+
+    };
+}
+
+whole_merge_parts! {
+    whole_merges_part_0 => 0,
+    whole_merges_part_1 => 1,
+    whole_merges_part_2 => 2,
+    whole_merges_part_3 => 3,
 }
