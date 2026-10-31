@@ -4344,7 +4344,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** Windows users with names or paths outside ASCII.
 - **A fix:** what the port does: it takes the arguments in Unicode and uses UTF-8 throughout.
 - **Status:** not matched, by the owner's decision of 2026-10-31: deviation D-17
-  (`docs/deviations.md`), with its measured table. Linux matches.
+  (`docs/deviations.md`), with its measured table, and waiver W0019. Linux matches.
 
 ### I-602. `ociocheck` and `ociobakelut` can't report a missing config
 
@@ -4436,8 +4436,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Who notices:** Windows users with paths past the limit: the port's tools work where the wheel's
   fail.
-- **A fix:** upstream could add the manifest entry, which is what the port's behaviour already is.
-- **Status:** open: not matched (card phase10-tools), for the owner.
+- **A fix:** what the port does: upstream could add the manifest entry.
+- **Status:** not matched, by the owner's decision of 2026-10-31: deviation D-18
+  (`docs/deviations.md`). Linux has no such limit.
 
 ## Undefined behaviour upstream
 
