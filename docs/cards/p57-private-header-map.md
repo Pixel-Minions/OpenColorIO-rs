@@ -13,3 +13,8 @@ introduced for an unused C++ typedef. This changes exactly three map entries and
 this card; the repository tool regenerates the dashboard at integration.
 No production source, test, comparison, fixture, oracle, dependency or waiver changes.
 No SIMD, app or apputils work is included. No SDE-matching changed path.
+
+The README's test table also retained205 GPU tests after all264 were merged. Correct
+that table, show the inherited P56 C++ accounting as1189ported+2reviewedN/A, and
+remove the stale remaining-GPU-execution/null-review text. Overall effort stays84%;
+these accounting corrections do not imply additional implementation work.
