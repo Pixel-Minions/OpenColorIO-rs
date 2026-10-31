@@ -1960,7 +1960,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs", "crates/ocio-ops/src/ops/lut3d/inv_lut3d.rs"]
 status = "done"
-note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129. p2-lut3d 2.2b: the forward renderers as the op's CpuOp, GetLut3DRenderer. p2-lut3d-inv 2.2d1: InvLut3DRenderer's RangeTree (78-196, 1080-1388) in inv_lut3d.rs; 2.2d2: invert_hypercube, extrapolate, InvLut3DRenderer (822-1078, 1424-1734) in inv_lut3d.rs, GetLut3DRenderer's inverse arm. A grid size of 1 is refused (U-65, upstream never returns)"
+note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129. p2-lut3d 2.2b: the forward renderers as the op's CpuOp, GetLut3DRenderer. p2-lut3d-inv 2.2d1: InvLut3DRenderer's RangeTree (78-196, 1080-1388) in inv_lut3d.rs; 2.2d2: invert_hypercube, extrapolate, InvLut3DRenderer (822-1078, 1424-1734) in inv_lut3d.rs, GetLut3DRenderer's inverse arm. A grid size of 1 is refused (U-65, upstream never returns). Phase 8: the SSE2 trilinear loop is real SSE2 (lut3d_op_cpu_sse2::simd)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.h"
@@ -1974,7 +1974,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (the only instantiation)"
+note = "S4: exact scalar profile of the F32 kernel (the only instantiation). Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.h"
@@ -1988,7 +1988,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx2.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); lane-identical to AVX-512, which matches the wheel"
+note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); lane-identical to AVX-512, which matches the wheel. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.h"
@@ -2002,7 +2002,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX512.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx512.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); the kernel the wheel runs on Zen 5, bit-identical on Windows and Rocky 9"
+note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); the kernel the wheel runs on Zen 5, bit-identical on Windows and Rocky 9. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX512.h"
@@ -2016,7 +2016,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_sse2.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (the only instantiation). x86 only; SSE2NEON (ARM) variants not ported"
+note = "S4: exact scalar profile of the F32 kernel (the only instantiation). x86 only; SSE2NEON (ARM) variants not ported. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.h"

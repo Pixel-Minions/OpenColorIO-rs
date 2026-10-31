@@ -12,6 +12,8 @@
 //! order"): the inputs are clamped (NaN becomes 0), the LUT values are sanitized, and the
 //! weights are in `[0, 1]`. The sums can overflow to an infinity, but never become NaN.
 
+#![allow(unsafe_code)]
+
 use crate::avx::avx_blendv_ps;
 use crate::avx2::mm256_fmadd_ps;
 use crate::math_utils::{sse_cvttps_epi32, sse_max, sse_min};
@@ -141,7 +143,7 @@ fn interp_tetrahedral_avx2(ctx: &Lut3DContextAvx2<'_>, r: f32, g: f32, b: f32) -
 /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.cpp:176-276 @ v2.5.2), in place. `lut3d` holds 4
 /// floats per entry. Alpha is never written, so it keeps every bit (see "Alpha" in
 /// [`super::lut3d_op_cpu`]).
-pub(crate) fn apply_tetrahedral_avx2(lut3d: &[f32], dim: i32, rgba: &mut [f32], num_pixels: i32) {
+pub(crate) fn apply_tetrahedral_lanes(lut3d: &[f32], dim: i32, rgba: &mut [f32], num_pixels: i32) {
     let lutmax = dim as f32 - 1.0;
     let scale = lutmax;
     let zero = 0.0f32;
@@ -164,5 +166,203 @@ pub(crate) fn apply_tetrahedral_avx2(lut3d: &[f32], dim: i32, rgba: &mut [f32], 
         px[0] = c[0];
         px[1] = c[1];
         px[2] = c[2];
+    }
+}
+
+/// The real kernel on whole groups of pixels, where it can run, and the lanes on the rest.
+pub(crate) fn apply_tetrahedral_avx2(lut3d: &[f32], dim: i32, rgba: &mut [f32], num_pixels: i32) {
+    let values = 4 * num_pixels as usize;
+    #[cfg(target_arch = "x86_64")]
+    let done = simd::tetrahedral(lut3d, dim, &mut rgba[..values]);
+    #[cfg(not(target_arch = "x86_64"))]
+    let done = 0;
+    apply_tetrahedral_lanes(lut3d, dim, &mut rgba[done..], ((values - done) / 4) as i32);
+}
+
+/// The real AVX2 kernel (`docs/cards/phase8.md`). Its lanes never mix, so it renders whole
+/// groups of 8 pixels, and the exact lanes above render the rest. No operand order can show:
+/// the clamp makes a NaN pixel 0, the table holds no NaN or infinity (`sanitize_float`), and the
+/// weights are in `[0, 1]`. So a product is finite, a sum can only overflow, and the only NaN
+/// left is the default NaN of an infinity minus an infinity, which nothing changes after.
+#[cfg(target_arch = "x86_64")]
+pub(super) mod simd {
+    use core::arch::x86_64::*;
+
+    use super::super::lut3d_op_cpu_sse2::simd::fits;
+    use crate::avx::packs::{load_f32, store_f32};
+
+    /// The context of `interp_tetrahedral_avx2`, in registers.
+    struct Context<'a> {
+        lut: &'a [f32],
+        lutmax: __m256,
+        lutsize: __m256,
+        lutsize2: __m256,
+    }
+
+    /// `gather_rgb_avx2` (Lut3DOpCPU_AVX2.cpp:27-30 @ v2.5.2).
+    ///
+    /// # Safety
+    ///
+    /// Each of `indices` has three floats of `lut` from it.
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    unsafe fn gather_rgb(lut: &[f32], indices: __m256i) -> [__m256; 3] {
+        let at = lut.as_ptr();
+        // SAFETY: the caller's.
+        unsafe {
+            [
+                _mm256_i32gather_ps::<4>(at, indices),
+                _mm256_i32gather_ps::<4>(at.add(1), indices),
+                _mm256_i32gather_ps::<4>(at.add(2), indices),
+            ]
+        }
+    }
+
+    /// Port of `interp_tetrahedral_avx2` (Lut3DOpCPU_AVX2.cpp:32-174 @ v2.5.2), for scaled and clamped `r`,
+    /// `g` and `b`.
+    #[inline]
+    #[target_feature(enable = "avx2,fma")]
+    fn interp_tetrahedral(ctx: &Context<'_>, r: __m256, g: __m256, b: __m256) -> [__m256; 3] {
+        let one_f = _mm256_set1_ps(1.0);
+        let four_f = _mm256_set1_ps(4.0);
+
+        let prev_r = _mm256_floor_ps(r);
+        let prev_g = _mm256_floor_ps(g);
+        let prev_b = _mm256_floor_ps(b);
+
+        // rgb delta values
+        let d_r = _mm256_sub_ps(r, prev_r);
+        let d_g = _mm256_sub_ps(g, prev_g);
+        let d_b = _mm256_sub_ps(b, prev_b);
+
+        let next_r = _mm256_min_ps(ctx.lutmax, _mm256_add_ps(prev_r, one_f));
+        let next_g = _mm256_min_ps(ctx.lutmax, _mm256_add_ps(prev_g, one_f));
+        let next_b = _mm256_min_ps(ctx.lutmax, _mm256_add_ps(prev_b, one_f));
+
+        // prescale indices
+        let prev_r = _mm256_mul_ps(prev_r, ctx.lutsize2);
+        let next_r = _mm256_mul_ps(next_r, ctx.lutsize2);
+
+        let prev_g = _mm256_mul_ps(prev_g, ctx.lutsize);
+        let next_g = _mm256_mul_ps(next_g, ctx.lutsize);
+
+        let prev_b = _mm256_mul_ps(prev_b, four_f);
+        let next_b = _mm256_mul_ps(next_b, four_f);
+
+        let gt_r = _mm256_cmp_ps::<_CMP_GT_OQ>(d_r, d_g); // r>g
+        let gt_g = _mm256_cmp_ps::<_CMP_GT_OQ>(d_g, d_b); // g>b
+        let gt_b = _mm256_cmp_ps::<_CMP_GT_OQ>(d_b, d_r); // b>r
+
+        // r> !b>r && r>g
+        let mask = _mm256_andnot_ps(gt_b, gt_r);
+        let cxxxa = _mm256_blendv_ps(prev_r, next_r, mask);
+
+        // r< !r>g && b>r
+        let mask = _mm256_andnot_ps(gt_r, gt_b);
+        let cxxxb = _mm256_blendv_ps(next_r, prev_r, mask);
+
+        // g> !r>g && g>b
+        let mask = _mm256_andnot_ps(gt_r, gt_g);
+        let cxxxa = _mm256_add_ps(cxxxa, _mm256_blendv_ps(prev_g, next_g, mask));
+
+        // g< !g>b && r>g
+        let mask = _mm256_andnot_ps(gt_g, gt_r);
+        let cxxxb = _mm256_add_ps(cxxxb, _mm256_blendv_ps(next_g, prev_g, mask));
+
+        // b> !g>b && b>r
+        let mask = _mm256_andnot_ps(gt_g, gt_b);
+        let cxxxa = _mm256_add_ps(cxxxa, _mm256_blendv_ps(prev_b, next_b, mask));
+
+        // b< !b>r && g>b
+        let mask = _mm256_andnot_ps(gt_b, gt_g);
+        let cxxxb = _mm256_add_ps(cxxxb, _mm256_blendv_ps(next_b, prev_b, mask));
+
+        let c000 = _mm256_add_ps(_mm256_add_ps(prev_r, prev_g), prev_b);
+        let c111 = _mm256_add_ps(_mm256_add_ps(next_r, next_g), next_b);
+
+        // sort delta r,g,b x0 >= x1 >= x2
+        let rg_min = _mm256_min_ps(d_r, d_g);
+        let rg_max = _mm256_max_ps(d_r, d_g);
+
+        let x2 = _mm256_min_ps(rg_min, d_b);
+        let mid = _mm256_max_ps(rg_min, d_b);
+
+        let x0 = _mm256_max_ps(rg_max, d_b);
+        let x1 = _mm256_min_ps(rg_max, mid);
+
+        // convert indices to int
+        let c000_idx = _mm256_cvttps_epi32(c000);
+        let cxxxa_idx = _mm256_cvttps_epi32(cxxxa);
+        let cxxxb_idx = _mm256_cvttps_epi32(cxxxb);
+        let c111_idx = _mm256_cvttps_epi32(c111);
+
+        // SAFETY: `fits`, and the inputs are clamped to `[0, lutmax]`: each index is an entry's.
+        let sample = unsafe { gather_rgb(ctx.lut, c000_idx) };
+
+        // (1-x0) * c000
+        let v = _mm256_sub_ps(one_f, x0);
+        let mut result = sample.map(|s| _mm256_mul_ps(s, v));
+
+        // SAFETY: as above.
+        let sample = unsafe { gather_rgb(ctx.lut, cxxxa_idx) };
+
+        // (x0-x1) * cxxxa
+        let v = _mm256_sub_ps(x0, x1);
+        result = std::array::from_fn(|c| _mm256_fmadd_ps(v, sample[c], result[c]));
+
+        // SAFETY: as above.
+        let sample = unsafe { gather_rgb(ctx.lut, cxxxb_idx) };
+
+        // (x1-x2) * cxxxb
+        let v = _mm256_sub_ps(x1, x2);
+        result = std::array::from_fn(|c| _mm256_fmadd_ps(v, sample[c], result[c]));
+
+        // SAFETY: as above.
+        let sample = unsafe { gather_rgb(ctx.lut, c111_idx) };
+
+        // x2 * c111
+        let v = x2;
+        std::array::from_fn(|c| _mm256_fmadd_ps(v, sample[c], result[c]))
+    }
+
+    /// The main loop of `applyTetrahedralAVX2Func<F32, F32>` (Lut3DOpCPU_AVX2.cpp:201-224 @ v2.5.2). Alpha's bits only
+    /// move through the transposes. Returns the number of values rendered.
+    #[target_feature(enable = "avx2,fma")]
+    fn tetrahedral_loop(lut3d: &[f32], dim: i32, rgba: &mut [f32]) -> usize {
+        let lutmax = dim as f32 - 1.0;
+        let scale = _mm256_set1_ps(lutmax);
+        let zero = _mm256_setzero_ps();
+        let ctx = Context {
+            lut: lut3d,
+            lutmax: _mm256_set1_ps(lutmax),
+            lutsize: _mm256_set1_ps(dim as f32 * 4.0),
+            lutsize2: _mm256_set1_ps(dim as f32 * dim as f32 * 4.0),
+        };
+        let (groups, _) = rgba.as_chunks_mut::<32>();
+        for group in groups.iter_mut() {
+            let [r, g, b, a] = load_f32(group);
+
+            // scale and clamp values
+            let r = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(r, scale), zero), ctx.lutmax);
+            let g = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(g, scale), zero), ctx.lutmax);
+            let b = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(b, scale), zero), ctx.lutmax);
+
+            let [r, g, b] = interp_tetrahedral(&ctx, r, g, b);
+
+            store_f32(group, [r, g, b, a]);
+        }
+        groups.len() * 32
+    }
+
+    /// See [`tetrahedral_loop`]; nothing where the CPU can't run it or the table doesn't fit.
+    pub(in super::super) fn tetrahedral(lut3d: &[f32], dim: i32, rgba: &mut [f32]) -> usize {
+        if !(std::arch::is_x86_feature_detected!("avx2")
+            && std::arch::is_x86_feature_detected!("fma"))
+            || !fits(lut3d, dim)
+        {
+            return 0;
+        }
+        // SAFETY: the CPU has AVX2.
+        unsafe { tetrahedral_loop(lut3d, dim, rgba) }
     }
 }

@@ -6,7 +6,8 @@
 //! (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:28-820 and 1736-1747 @ v2.5.2).
 //!
 //! **Numeric profiles.** Every C++ kernel is its own renderer here, written as exact scalar code
-//! that reproduces the kernel's arithmetic lane by lane:
+//! that reproduces the kernel's arithmetic lane by lane, and with its real instructions
+//! (`simd` in each kernel's file), which render whole groups of pixels where the CPU can run them:
 //!
 //! | Profile | C++ | Runs when |
 //! |---|---|---|
@@ -307,6 +308,20 @@ impl Lut3DRenderer {
     /// `GetLut3DIndices` and `LookupNearest4` (Lut3DOpCPU.cpp:204-264), in place. The C++ stores
     /// all four lanes and then restores alpha; alpha is simply never written here.
     fn apply_sse2(&self, rgba: &mut [f32]) {
+        #[cfg(target_arch = "x86_64")]
+        if super::lut3d_op_cpu_sse2::simd::trilinear(
+            &self.base.opt_lut,
+            self.base.dim as i32,
+            self.base.step,
+            rgba,
+        ) {
+            return;
+        }
+        self.apply_sse2_lanes(rgba);
+    }
+
+    /// The exact lanes of [`Lut3DRenderer::apply_sse2`].
+    fn apply_sse2_lanes(&self, rgba: &mut [f32]) {
         let lut = &self.base.opt_lut;
         let step = self.base.step;
         let max_idx = (self.base.dim - 1) as f32;
