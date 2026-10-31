@@ -370,6 +370,13 @@ impl Family for RgbCurveFamily {
     fn name(&self) -> String {
         "GradingRGBCurveTransform".to_string()
     }
+    fn extra_probes(
+        &self,
+        _: &RgbCurveParams,
+        _: ocio_testkit::battery::Direction,
+    ) -> Vec<ocio_testkit::probe::ProbeSet> {
+        vec![ocio_testkit::probe::ProbeSet::FiniteRows]
+    }
 
     fn cases(&self) -> Vec<Case<RgbCurveParams>> {
         explicit_cases()
