@@ -429,9 +429,10 @@ pub fn row_length_buffers(max_pixels: usize) -> Vec<(String, Vec<f32>)> {
 ///   the block that holds it takes the exact code and its neighbours the fast path, with the
 ///   special at either end of a block and in the middle of one, in each channel.
 ///
-/// The values cover a LUT's domain and past it, and values that overflow and underflow.
+/// The values cover a LUT's domain and past it, values that overflow and underflow, zeros of
+/// both signs and a few exact values.
 pub fn finite_rows() -> Vec<(String, Vec<f32>)> {
-    let values = random(
+    let mut values = random(
         0x0b47_7e27_0003,
         &[
             (RandomRange::Unit, 2048),
@@ -442,6 +443,10 @@ pub fn finite_rows() -> Vec<(String, Vec<f32>)> {
             (RandomRange::Finite, 512),
         ],
     );
+    // Exact values, where comparisons and signs of zero decide.
+    for _ in 0..64 {
+        values.extend([0.0, -0.0, 0.0, -0.0, 1.0, -1.0, 0.5, 0.18]);
+    }
     // A shuffled order, so that a block mixes the ranges.
     let mut rng = Rng::new(0x0b47_7e27_0004);
     let mut next = || values[(rng.next_u64() % values.len() as u64) as usize];
@@ -1041,7 +1046,7 @@ mod tests {
             ("neighbourhoods", 0x1636_2655_412e_6ab6),
             ("rows", 0xdca1_81b6_676b_a224),
             ("lut points", 0xde0c_0135_2f84_a084),
-            ("finite rows", 0x5afb_2ff2_5284_4186),
+            ("finite rows", 0xebd5_ffee_04b8_b3a6),
         ];
         assert_eq!(digests, expected, "{digests:#018x?}");
     }

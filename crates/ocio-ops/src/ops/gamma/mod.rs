@@ -5,6 +5,8 @@
 
 pub mod gamma_op;
 pub mod gamma_op_cpu;
+#[cfg(target_arch = "x86_64")]
+mod gamma_op_cpu_sse2;
 pub mod gamma_op_data;
 pub mod gamma_op_utils;
 

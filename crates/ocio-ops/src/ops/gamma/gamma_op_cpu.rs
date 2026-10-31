@@ -31,15 +31,25 @@
 //! machine code uses another order (a comment cites it). Where the two compilers chose
 //! different orders, the port keeps the source order (waiver W0002). Rust's `*` and `+` would
 //! leave the order to LLVM. (The sign factor of the scalar mirror styles is never NaN.)
+//!
+//! # SSE2 fast paths
+//!
+//! Those lanes branch on every operand. With finite coefficients, blocks of finite pixels take
+//! the real SSE2 kernels of `gamma_op_cpu_sse2`, which says why no operand order shows there.
+//! Any other block takes the lanes.
 
 use std::sync::Arc;
 
+#[cfg(target_arch = "x86_64")]
+use super::gamma_op_cpu_sse2 as sse2;
 use super::gamma_op_data::{GammaOpData, GammaStyle, SHORT_PARAMS};
 use super::gamma_op_utils::{RendererParams, compute_params_fwd, compute_params_rev};
 use crate::exception::{Exception, Result};
 use crate::math_utils::{sse_add, sse_mul, std_max};
 use crate::op::CpuOp;
 use crate::sse::{EABS_MASK, ESIGN_MASK, sse_power};
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::blocks::for_each_block;
 
 /// The Gamma renderer for the op's style: the SSE kernel when `fast_power`
 /// (`OPTIMIZATION_FAST_LOG_EXP_POW`) is set, the math-library one otherwise.
@@ -94,6 +104,22 @@ pub fn get_gamma_renderer(gamma: &GammaOpData, fast_power: bool) -> Result<Arc<d
             Arc::new(GammaBasicPassThruOpCpu::new(gamma))
         }
     })
+}
+
+/// Whether the four channels' moncurve coefficients are finite, as the real kernels need.
+#[cfg(target_arch = "x86_64")]
+fn moncurve_finite(params: &[RendererParams; 4]) -> bool {
+    params.iter().all(|p| {
+        [p.gamma, p.offset, p.break_pnt, p.slope, p.scale]
+            .iter()
+            .all(|v| v.is_finite())
+    })
+}
+
+/// Whether the four exponents are finite, as the real kernels need.
+#[cfg(target_arch = "x86_64")]
+fn gamma_finite(gamma: &[f32; 4]) -> bool {
+    gamma.iter().all(|v| v.is_finite())
 }
 
 /// The RGBA pixels of a buffer.
@@ -218,11 +244,20 @@ impl CpuOp for GammaBasicOpCpuSse {
     /// @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         let gamma = self.0.gamma;
-        for px in pixels(rgba) {
-            for c in 0..4 {
-                px[c] = sse_power(px[c], gamma[c]);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                for c in 0..4 {
+                    px[c] = sse_power(px[c], gamma[c]);
+                }
             }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if gamma_finite(&gamma) {
+            let fast = |block: &mut [[f32; 4]]| sse2::basic(block, &gamma);
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 
@@ -276,14 +311,23 @@ impl CpuOp for GammaBasicMirrorOpCpuSse {
     /// @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         let gamma = self.0.gamma;
-        for px in pixels(rgba) {
-            for c in 0..4 {
-                let sign_pix = px[c].to_bits() & ESIGN_MASK;
-                let abs_pix = f32::from_bits(px[c].to_bits() & EABS_MASK);
-                let pixel = sse_power(abs_pix, gamma[c]);
-                px[c] = f32::from_bits(sign_pix | pixel.to_bits());
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                for c in 0..4 {
+                    let sign_pix = px[c].to_bits() & ESIGN_MASK;
+                    let abs_pix = f32::from_bits(px[c].to_bits() & EABS_MASK);
+                    let pixel = sse_power(abs_pix, gamma[c]);
+                    px[c] = f32::from_bits(sign_pix | pixel.to_bits());
+                }
             }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if gamma_finite(&gamma) {
+            let fast = |block: &mut [[f32; 4]]| sse2::basic_mirror(block, &gamma);
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 
@@ -340,14 +384,23 @@ impl CpuOp for GammaBasicPassThruOpCpuSse {
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:422-447 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         let gamma = self.0.gamma;
-        for px in pixels(rgba) {
-            for c in 0..4 {
-                let pixel = px[c];
-                let data = sse_power(pixel, gamma[c]);
-                // breakPnt is 0: flag = _mm_cmpgt_ps(pixel, breakPnt).
-                px[c] = if pixel > 0.0f32 { data } else { pixel };
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                for c in 0..4 {
+                    let pixel = px[c];
+                    let data = sse_power(pixel, gamma[c]);
+                    // breakPnt is 0: flag = _mm_cmpgt_ps(pixel, breakPnt).
+                    px[c] = if pixel > 0.0f32 { data } else { pixel };
+                }
             }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if gamma_finite(&gamma) {
+            let fast = |block: &mut [[f32; 4]]| sse2::basic_pass_thru(block, &gamma);
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 
@@ -428,15 +481,24 @@ impl CpuOp for GammaMoncurveOpCpuFwdSse {
     /// Port of `GammaMoncurveOpCPUFwdSSE::apply` (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:484-522
     /// @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
-        for px in pixels(rgba) {
-            for (v, p) in px.iter_mut().zip(&self.0.params) {
-                let pixel = *v;
-                let mut data = sse_add(sse_mul(pixel, p.scale), p.offset);
-                data = sse_power(data, p.gamma);
-                let flag = pixel > p.break_pnt;
-                *v = if flag { data } else { sse_mul(pixel, p.slope) };
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                for (v, p) in px.iter_mut().zip(&self.0.params) {
+                    let pixel = *v;
+                    let mut data = sse_add(sse_mul(pixel, p.scale), p.offset);
+                    data = sse_power(data, p.gamma);
+                    let flag = pixel > p.break_pnt;
+                    *v = if flag { data } else { sse_mul(pixel, p.slope) };
+                }
             }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if moncurve_finite(&self.0.params) {
+            let fast = |block: &mut [[f32; 4]]| sse2::moncurve_fwd(block, &self.0.params);
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 
@@ -501,15 +563,24 @@ impl CpuOp for GammaMoncurveOpCpuRevSse {
     /// Port of `GammaMoncurveOpCPURevSSE::apply` (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:573-611
     /// @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
-        for px in pixels(rgba) {
-            for (v, p) in px.iter_mut().zip(&self.0.params) {
-                let pixel = *v;
-                let mut data = sse_power(pixel, p.gamma);
-                data = sse_mul(data, p.scale) - p.offset;
-                let flag = pixel > p.break_pnt;
-                *v = if flag { data } else { sse_mul(pixel, p.slope) };
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                for (v, p) in px.iter_mut().zip(&self.0.params) {
+                    let pixel = *v;
+                    let mut data = sse_power(pixel, p.gamma);
+                    data = sse_mul(data, p.scale) - p.offset;
+                    let flag = pixel > p.break_pnt;
+                    *v = if flag { data } else { sse_mul(pixel, p.slope) };
+                }
             }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if moncurve_finite(&self.0.params) {
+            let fast = |block: &mut [[f32; 4]]| sse2::moncurve_rev(block, &self.0.params);
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 
@@ -580,24 +651,33 @@ impl CpuOp for GammaMoncurveMirrorOpCpuFwdSse {
     /// Port of `GammaMoncurveMirrorOpCPUFwdSSE::apply`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:662-704 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
-        for px in pixels(rgba) {
-            for (v, p) in px.iter_mut().zip(&self.0.params) {
-                let sign_pix = v.to_bits() & ESIGN_MASK;
-                let abs_pix = f32::from_bits(v.to_bits() & EABS_MASK);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                for (v, p) in px.iter_mut().zip(&self.0.params) {
+                    let sign_pix = v.to_bits() & ESIGN_MASK;
+                    let abs_pix = f32::from_bits(v.to_bits() & EABS_MASK);
 
-                let mut data = sse_add(sse_mul(abs_pix, p.scale), p.offset);
-                data = sse_power(data, p.gamma);
+                    let mut data = sse_add(sse_mul(abs_pix, p.scale), p.offset);
+                    data = sse_power(data, p.gamma);
 
-                let flagbrk = abs_pix > p.break_pnt;
-                data = if flagbrk {
-                    data
-                } else {
-                    sse_mul(abs_pix, p.slope)
-                };
+                    let flagbrk = abs_pix > p.break_pnt;
+                    data = if flagbrk {
+                        data
+                    } else {
+                        sse_mul(abs_pix, p.slope)
+                    };
 
-                *v = f32::from_bits(sign_pix | data.to_bits());
+                    *v = f32::from_bits(sign_pix | data.to_bits());
+                }
             }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if moncurve_finite(&self.0.params) {
+            let fast = |block: &mut [[f32; 4]]| sse2::moncurve_mirror_fwd(block, &self.0.params);
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 
@@ -666,24 +746,33 @@ impl CpuOp for GammaMoncurveMirrorOpCpuRevSse {
     /// Port of `GammaMoncurveMirrorOpCPURevSSE::apply`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:758-800 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
-        for px in pixels(rgba) {
-            for (v, p) in px.iter_mut().zip(&self.0.params) {
-                let sign_pix = v.to_bits() & ESIGN_MASK;
-                let abs_pix = f32::from_bits(v.to_bits() & EABS_MASK);
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                for (v, p) in px.iter_mut().zip(&self.0.params) {
+                    let sign_pix = v.to_bits() & ESIGN_MASK;
+                    let abs_pix = f32::from_bits(v.to_bits() & EABS_MASK);
 
-                let mut data = sse_power(abs_pix, p.gamma);
-                data = sse_mul(data, p.scale) - p.offset;
+                    let mut data = sse_power(abs_pix, p.gamma);
+                    data = sse_mul(data, p.scale) - p.offset;
 
-                let flagbrk = abs_pix > p.break_pnt;
-                data = if flagbrk {
-                    data
-                } else {
-                    sse_mul(abs_pix, p.slope)
-                };
+                    let flagbrk = abs_pix > p.break_pnt;
+                    data = if flagbrk {
+                        data
+                    } else {
+                        sse_mul(abs_pix, p.slope)
+                    };
 
-                *v = f32::from_bits(sign_pix | data.to_bits());
+                    *v = f32::from_bits(sign_pix | data.to_bits());
+                }
             }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if moncurve_finite(&self.0.params) {
+            let fast = |block: &mut [[f32; 4]]| sse2::moncurve_mirror_rev(block, &self.0.params);
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 
