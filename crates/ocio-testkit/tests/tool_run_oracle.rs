@@ -390,6 +390,99 @@ fn attributes_stay_inside_the_working_directory() {
     assert!(!hidden(&outside));
 }
 
+/// The wheel's tools with a pipe nobody reads, on both dispositions of SIGPIPE: SIGPIPE's number
+/// is 13 on Linux, and a shell reports it as 128 + 13.
+#[cfg(unix)]
+#[test]
+fn sigpipe_reaches_a_tool() {
+    for (closed, tool, argv) in [
+        ("stdout", "ociocheck", vec!["--help"]),
+        ("stderr", "ociowrite", vec!["--file", "o.txt"]),
+    ] {
+        let r = run(
+            json!({"tool": tool, "argv": argv, "cwd": cwd("sigpipe"), "closed_pipe": closed}),
+            &[],
+        );
+        assert_eq!(r.result["exit_code"], -13, "{}", r.result);
+        assert_eq!(r.result["crashed"]["returncode"], -13);
+        let r = run(
+            json!({"tool": tool, "argv": argv, "cwd": cwd("sigpipe"), "closed_pipe": closed,
+                   "sigpipe_ignored": true}),
+            &[],
+        );
+        assert_eq!(exit_code(&r), 1);
+    }
+}
+
+/// `tool | head -c 3`, with more output than a pipe holds, so that timing doesn't decide it.
+#[cfg(unix)]
+#[test]
+fn head_closes_the_pipe() {
+    let r = run(
+        json!({"tool": "ociobakelut", "cwd": cwd("head"), "head_bytes": 3,
+               "argv": ["--iconfig", "a.ocio", "--inputspace", "raw", "--outputspace", "raw",
+                        "--format", "spi3d", "--cubesize", "33", "--stdout"],
+               "files": [["a.ocio", 0]]}),
+        &[CONFIG.as_bytes()],
+    );
+    assert_eq!(exit_code(&r), 141);
+    assert_eq!(stdout(&r), b"");
+}
+
+#[cfg(unix)]
+#[test]
+fn pipe_keys_refusals() {
+    let dir = cwd("pipe_refused");
+    for (extra, expected) in [
+        (json!({"closed_pipe": "stdin"}), "closed_pipe"),
+        (json!({"closed_pipe": 1}), "closed_pipe"),
+        (json!({"sigpipe_ignored": 1}), "sigpipe_ignored"),
+        (json!({"head_bytes": 0}), "head_bytes"),
+        (json!({"head_bytes": "3"}), "head_bytes"),
+        (
+            json!({"closed_pipe": "stdout", "merge_stderr": true}),
+            "merge_stderr",
+        ),
+        (
+            json!({"head_bytes": 3, "merge_stderr": true}),
+            "merge_stderr",
+        ),
+        (
+            json!({"head_bytes": 3, "closed_pipe": "stdout"}),
+            "head_bytes",
+        ),
+        (
+            json!({"head_bytes": 3, "sigpipe_ignored": true}),
+            "head_bytes",
+        ),
+    ] {
+        let mut args = json!({"tool": "ociocheck", "argv": [], "cwd": dir});
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let error = refused(args, &[]);
+        assert!(error.contains(expected), "{extra}: {error}");
+    }
+}
+
+/// Windows has no SIGPIPE.
+#[cfg(windows)]
+#[test]
+fn pipe_keys_are_refused() {
+    for extra in [
+        json!({"closed_pipe": "stdout"}),
+        json!({"sigpipe_ignored": true}),
+        json!({"head_bytes": 3}),
+    ] {
+        let mut args = json!({"tool": "ociocheck", "argv": [], "cwd": cwd("pipe_keys")});
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let error = refused(args, &[]);
+        assert!(error.contains("Linux"), "{extra}: {error}");
+    }
+}
+
 /// `tool_run` gives a tool an empty stdin. No tool reads it, so this writes to it: /dev/stdin is
 /// /dev/null then, where any size fits, where a pipe nobody reads, the command's own stdin
 /// passed on, would never take this much.

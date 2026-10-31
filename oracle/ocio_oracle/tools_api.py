@@ -34,6 +34,9 @@ TIMEOUT_SECONDS = 600
 # (0xC0000005, an access violation), where a tool's own exit code is 0 or 1.
 _NTSTATUS_ERROR = 0xC0000000
 
+# `tool | head -c n`, its arguments being n and the tool's command line.
+_HEAD_LINE = '"${@:2}" | head -c "$1" > /dev/null; exit "${PIPESTATUS[0]}"'
+
 # SetFileAttributesW's values.
 _ATTRIBUTES = {"r": 0x1, "h": 0x2, "s": 0x4}
 _FILE_ATTRIBUTE_NORMAL = 0x80
@@ -157,6 +160,27 @@ def _clear_attributes(cwd, attributes):
             kernel32.SetFileAttributesW(os.path.join(cwd, *name.split("/")), _FILE_ATTRIBUTE_NORMAL)
 
 
+def _pipe_keys(args):
+    """The keys of how a tool meets a pipe: `closed_pipe`, `sigpipe_ignored`, `head_bytes`,
+    checked. Linux only: Windows has no SIGPIPE."""
+    closed = args.get("closed_pipe")
+    ignored = check_bool("tool_run: sigpipe_ignored", args.get("sigpipe_ignored", False))
+    head = args.get("head_bytes")
+    if closed is None and head is None and not ignored:
+        return closed, ignored, head
+    if os.name == "nt":
+        raise ValueError("tool_run: closed_pipe, sigpipe_ignored and head_bytes are Linux's")
+    if closed not in (None, "stdout", "stderr"):
+        raise ValueError(f"tool_run: closed_pipe must be stdout or stderr, not {closed!r}")
+    if head is not None and (type(head) is not int or head <= 0):
+        raise ValueError(f"tool_run: head_bytes must be positive, not {head!r}")
+    if (head is not None or closed) and args.get("merge_stderr"):
+        raise ValueError("tool_run: merge_stderr goes with neither closed_pipe nor head_bytes")
+    if head is not None and (closed or ignored):
+        raise ValueError("tool_run: head_bytes goes with neither closed_pipe nor sigpipe_ignored")
+    return closed, ignored, head
+
+
 def _exit(returncode):
     """The tool's exit code, and how it died, if it died: a signal on Linux (Python reports the
     signal's negative number), an NTSTATUS failure code on Windows."""
@@ -173,8 +197,12 @@ def tool_run(args, blobs):
            index], ...], optional, "attributes": [[relative path of an input, letters of
            "hsr"], ...], optional, Windows only, "merge_stderr": true to send stderr into the
            stdout pipe, so that the bytes show the order they were written in, optional,
-           "timeout_seconds": a number, optional, TIMEOUT_SECONDS without it}. The tool's
-           environment is the oracle's allowlist (child_env.py) plus `env`; its stdin is empty.
+           "timeout_seconds": a number, optional, TIMEOUT_SECONDS without it, and on Linux:
+           "closed_pipe": "stdout" or "stderr", optional, that stream is a pipe whose read end
+           is closed, "sigpipe_ignored": true for a tool that starts with SIGPIPE ignored,
+           optional, "head_bytes": n, optional, the shell line `tool | head -c n`, whose
+           exit_code is the tool's PIPESTATUS}. The tool's environment is the oracle's
+           allowlist (child_env.py) plus `env`; its stdin is empty.
 
     Returns {"exit_code": int, "crashed": null or how it died, "timed_out": bool, "stdout":
     blob index, "stderr": blob index, "files": [{"path", "contents": blob index}]}, `files`
@@ -182,7 +210,8 @@ def tool_run(args, blobs):
     `crashed`, and such a response is never cached (ocio_testkit oracle.rs, `cacheable`).
     """
     check_keys("tool_run", args, {"tool", "argv", "cwd", "env", "files", "attributes",
-                                  "merge_stderr", "timeout_seconds"})
+                                  "merge_stderr", "timeout_seconds", "closed_pipe",
+                                  "sigpipe_ignored", "head_bytes"})
     program = _program(args.get("tool"))
     argv = _strings("argv", args.get("argv"))
     cwd = args.get("cwd")
@@ -191,20 +220,34 @@ def tool_run(args, blobs):
     attributes = _attributes(args.get("attributes", []), inputs)
     merge_stderr = check_bool("tool_run: merge_stderr", args.get("merge_stderr", False))
     timeout = _timeout(args.get("timeout_seconds", TIMEOUT_SECONDS))
+    closed, ignored, head = _pipe_keys(args)
     _prepare(cwd, inputs)
     try:
         if attributes:
             _set_attributes(cwd, attributes)
         try:
-            run = subprocess.run([program] + argv, cwd=cwd, env=allowed_environment(env),
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
-                                 timeout=timeout, check=False)
+            streams = {"stdout": subprocess.PIPE,
+                       "stderr": subprocess.STDOUT if merge_stderr else subprocess.PIPE}
+            command = [program] + argv
+            if head is not None:
+                command = ["/bin/bash", "-c", _HEAD_LINE, "bash", str(head)] + command
+            if closed:
+                read_end, streams[closed] = os.pipe()
+                os.close(read_end)
+            try:
+                # Python ignores SIGPIPE: the tool inherits that, or `restore_signals` gives it
+                # the default.
+                run = subprocess.run(command, cwd=cwd, env=allowed_environment(env),
+                                     stdin=subprocess.DEVNULL, timeout=timeout, check=False,
+                                     restore_signals=not ignored, **streams)
+            finally:
+                if closed:
+                    os.close(streams[closed])
         except subprocess.TimeoutExpired as error:
             out = [error.stdout or b"", error.stderr or b""]
             return {"exit_code": None, "crashed": {"timeout_seconds": timeout},
                     "timed_out": True, "stdout": 0, "stderr": 1, "files": []}, out
-        out = [run.stdout, run.stderr or b""]
+        out = [run.stdout or b"", run.stderr or b""]
         files = _written(cwd, inputs, out)
         result = {**_exit(run.returncode), "timed_out": False, "stdout": 0, "stderr": 1,
                   "files": files}
