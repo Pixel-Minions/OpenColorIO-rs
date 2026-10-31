@@ -29,6 +29,11 @@ Rocky Linux 9.
   refers to, so the sweeps read LUT files where they are, not from a copy made for each run, and
   never replay the wheel's output from the oracle's cache.
 
+- SIGPIPE on Linux: a C++ tool keeps the disposition it inherits, and Rust's runtime overwrites
+  it before `main`. `crates/ocio-tools/src/sigpipe.rs` reads it first, in an `.init_array`
+  constructor, and puts the default back if that is what the process started with. It is the
+  only `unsafe` in the crate (owner, 2026-10-31).
+
 ## Chunks
 
 | # | Chunk | Upstream | Checks |

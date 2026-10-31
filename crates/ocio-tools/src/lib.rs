@@ -3,11 +3,13 @@
 
 //! What the developer tools share: `src/bin` holds the tools, and these modules what they use
 //! of upstream's `src/apputils`, with the C runtime's streams and number parsing (Phase 10).
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod argparse;
 pub mod c_numbers;
 pub mod log_guard;
+#[cfg(target_os = "linux")]
+mod sigpipe;
 pub mod stdio;
 
 use ocio::{Exception, ExceptionKind};

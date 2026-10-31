@@ -4394,31 +4394,6 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched (card phase10-tools, `ociobakelut_oracle.rs`,
   `an_exception_upstream_does_not_catch`).
 
-### I-607. SIGPIPE ends the C++ tools, not the port's
-
-- **Upstream:** the tools run with the default action of SIGPIPE, so a write to a pipe nobody reads
-  kills the process. Rust's runtime ignores SIGPIPE at startup, the write fails, and the port's
-  `stdio` ignores the failure as a C++ stream does, so the tool goes on. Measured in Rocky Linux 9
-  with the pipe's read end already closed:
-
-  | Case | Wheel | Port |
-  |---|---|---|
-  | `ociocheck --oconfig o.ocio`, stdout closed | killed by signal 13, no `o.ocio` | exit 0, writes `o.ocio` |
-  | `--help` (`ociocheck`, `ociobakelut`), stdout closed | signal 13 | exit 1 |
-  | `ociowrite`, stderr closed | signal 13 | exit 1 |
-  | `ociochecklut -t`, `ociobakelut --stdout`, stdout closed | signal 13 | exit 0 |
-  | Shell: `ociobakelut --stdout \| head -c 3` | `PIPESTATUS` 141 | 0 |
-
-  If the parent ignores SIGPIPE, all of these are the same on both sides. `ociocheck ... | head -c
-  3` gave 0 on both, since its output is short and timing decides it. Windows has no SIGPIPE.
-- **Who notices:** scripts on Linux that close a tool's output early and read its exit status, or
-  that rely on `--oconfig` not being written then.
-- **A fix:** none for upstream, whose behaviour is the usual one for a filter. To match it the
-  port's tools need the default action back, which takes a signal call (`unsafe`, which
-  `ocio-tools` forbids) or an unstable compiler flag.
-- **Status:** open: not matched (card phase10-tools), for the owner, who decides whether a small
-  `unsafe` signal call is allowed in `ocio-tools`.
-
 ### I-608. Windows paths over `MAX_PATH` in the tools
 
 - **Upstream:** the wheel's `.exe` files have no `longPathAware` manifest, so the system refuses

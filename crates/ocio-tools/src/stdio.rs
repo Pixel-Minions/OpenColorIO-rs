@@ -239,6 +239,8 @@ pub fn args() -> Vec<Vec<u8>> {
 
 /// What a tool does before anything else ([module documentation](self)).
 pub fn init() {
+    #[cfg(target_os = "linux")]
+    crate::sigpipe::restore();
     set_stderr_sink(Arc::new(|text: &[u8]| cerr(text)));
 }
 

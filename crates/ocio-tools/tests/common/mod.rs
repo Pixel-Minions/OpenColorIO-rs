@@ -37,6 +37,12 @@ pub(crate) struct Case {
     pub(crate) attributes: Vec<(String, String)>,
     /// stderr goes into stdout's pipe: the bytes show the order they were written in.
     pub(crate) merged: bool,
+    /// This stream, `stdout` or `stderr`, is a pipe nobody reads.
+    pub(crate) closed_pipe: Option<&'static str>,
+    /// The tool starts with SIGPIPE ignored.
+    pub(crate) sigpipe_ignored: bool,
+    /// The shell line `tool | head -c n`.
+    pub(crate) head_bytes: Option<u32>,
 }
 
 impl Case {
@@ -49,7 +55,25 @@ impl Case {
             dies: false,
             attributes: Vec::new(),
             merged: false,
+            closed_pipe: None,
+            sigpipe_ignored: false,
+            head_bytes: None,
         }
+    }
+
+    pub(crate) fn closed_pipe(mut self, stream: &'static str) -> Case {
+        self.closed_pipe = Some(stream);
+        self
+    }
+
+    pub(crate) fn sigpipe_ignored(mut self) -> Case {
+        self.sigpipe_ignored = true;
+        self
+    }
+
+    pub(crate) fn head_bytes(mut self, n: u32) -> Case {
+        self.head_bytes = Some(n);
+        self
     }
 
     pub(crate) fn attribute(mut self, path: &str, letters: &str) -> Case {
@@ -130,12 +154,23 @@ fn wheel_outcomes(group: &str, tool: &str, cases: &[Case]) -> Vec<Outcome> {
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_str()))
                 .collect();
+            let mut args = json!({
+                "tool": tool, "argv": case.argv, "cwd": cwd.to_str().unwrap(),
+                "env": env, "files": files, "merge_stderr": case.merged,
+                "attributes": case.attributes,
+            });
+            if let Some(stream) = case.closed_pipe {
+                args["closed_pipe"] = json!(stream);
+            }
+            if case.sigpipe_ignored {
+                args["sigpipe_ignored"] = json!(true);
+            }
+            if let Some(n) = case.head_bytes {
+                args["head_bytes"] = json!(n);
+            }
             BatchCall {
                 cmd: "tool_run",
-                args: json!({
-                    "tool": tool, "argv": case.argv, "cwd": cwd.to_str().unwrap(),
-                    "env": env, "files": files, "merge_stderr": case.merged, "attributes": case.attributes,
-                }),
+                args,
                 blobs: case
                     .files
                     .iter()
@@ -199,12 +234,8 @@ fn port_outcome(group: &str, program: &str, index: usize, case: &Case) -> Outcom
         std::fs::write(path, contents).unwrap();
     }
     set_attributes(&cwd, &case.attributes, '+');
-    let mut command = Command::new(program);
-    command
-        .args(&case.argv)
-        .current_dir(&cwd)
-        .env_clear()
-        .stdin(Stdio::null());
+    let mut command = port_command(program, case);
+    command.current_dir(&cwd).env_clear().stdin(Stdio::null());
     for name in ALLOWED_VARIABLES {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);
@@ -212,6 +243,15 @@ fn port_outcome(group: &str, program: &str, index: usize, case: &Case) -> Outcom
     }
     for (name, value) in &case.env {
         command.env(name, value);
+    }
+    if let Some(stream) = case.closed_pipe {
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        if stream == "stdout" {
+            command.stdout(writer);
+        } else {
+            command.stderr(writer);
+        }
     }
     let output = if case.merged {
         merged_output(&mut command)
@@ -233,6 +273,24 @@ fn port_outcome(group: &str, program: &str, index: usize, case: &Case) -> Outcom
         stderr: output.stderr,
         files,
     }
+}
+
+/// What runs `case` in the port's `program`, with SIGPIPE as `Command` leaves it, the default,
+/// unless the case says otherwise. A shell gives the two other starts without `unsafe`.
+fn port_command(program: &str, case: &Case) -> Command {
+    let mut command;
+    if let Some(n) = case.head_bytes {
+        const HEAD_LINE: &str = r#""${@:2}" | head -c "$1" > /dev/null; exit "${PIPESTATUS[0]}""#;
+        command = Command::new("/bin/bash");
+        command.args(["-c", HEAD_LINE, "bash", &n.to_string(), program]);
+    } else if case.sigpipe_ignored {
+        command = Command::new("/bin/sh");
+        command.args(["-c", r#"trap "" PIPE; exec "$@""#, "sh", program]);
+    } else {
+        command = Command::new(program);
+    }
+    command.args(&case.argv);
+    command
 }
 
 /// `attrib` on input files, the way to set hidden and system attributes without `unsafe`.
