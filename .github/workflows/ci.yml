@@ -80,7 +80,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: p47-${{ runner.os }}-nhm
+          name: p47-${{ runner.os }}-${{ matrix.case }}
           path: |
             kept/p47-budget/
             kept/sde-cpu-tests/
