@@ -289,3 +289,52 @@ fn every_file_of_upstream() {
         summary.with_exit_code(1)
     );
 }
+
+/// A matrix with an offset, whose text shows a pixel's value in the bits past 7 digits.
+const MINUS_ONE: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+     <ProcessList version=\"1.3\" id=\"a\">\n\
+     <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\"><Array dim=\"3 4 3\">\
+     1 0 0 -1 0 1 0 -1 0 0 1 -1</Array></Matrix>\n\
+     </ProcessList>\n";
+
+/// `strtof`, not a `double` cast to `float`: a value just above the middle of two floats is
+/// the higher one, where its `double`, exactly the middle, rounds to the even one.
+#[test]
+fn pixels_read_as_float() {
+    let values = [
+        "1.00000005960464477539062500001",
+        "1.00000017881393432617187500001",
+        "1.0000000596046447",
+        "1.00000011920928955078125",
+        "0.99999997019767761230468750001",
+    ];
+    let cases: Vec<Case> = values
+        .iter()
+        .map(|value| {
+            Case::new(*value, &["a.ctf", "-v", value, value, value]).file("a.ctf", MINUS_ONE)
+        })
+        .collect();
+    sweep("ociochecklut_float_text", TOOL, PROGRAM, &cases);
+}
+
+/// One pipe for stdout and stderr.
+#[test]
+fn order_of_stdout_and_stderr() {
+    let lut = lut();
+    let lut = lut.as_str();
+    let multiple_ops = multiple_ops();
+    let cases: Vec<Case> = [
+        Case::new("gpu_after_version", &["-v", lut, "--gpu"]),
+        Case::new("error_after_version", &["-v", "not_there.spi1d"]),
+        Case::new("pixel_refused", &["-v", lut, "1", "2"]),
+        Case::new(
+            "log_on_stdout",
+            &[multiple_ops.as_str(), "-s", "1", "2", "3"],
+        )
+        .env("OCIO_LOGGING_LEVEL", "debug"),
+    ]
+    .into_iter()
+    .map(Case::merged)
+    .collect();
+    sweep("ociochecklut_order", TOOL, PROGRAM, &cases);
+}

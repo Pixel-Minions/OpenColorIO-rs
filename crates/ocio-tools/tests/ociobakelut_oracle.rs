@@ -717,6 +717,7 @@ fn icc_output_is_reported_as_not_ported() {
         ("space", vec!["--outputspace", "log", "out.icc"]),
         ("view", vec!["--displayview", "sRGB", "Film", "out.icc"]),
         ("verbose", vec!["--outputspace", "log", "--v", "out.icc"]),
+        ("debug", vec!["--outputspace", "log", "out.icc"]),
         (
             "shaper",
             vec!["--outputspace", "log", "--shaperspace", "gamma", "out.icc"],
@@ -724,7 +725,11 @@ fn icc_output_is_reported_as_not_ported() {
     ] {
         let mut argv = select.to_vec();
         argv.extend(extra);
-        let case = with_config(Case::new(label, &argv));
+        let mut case = with_config(Case::new(label, &argv));
+        // The optimizer's lines are how the CPU processor upstream makes here shows.
+        if label == "debug" {
+            case = case.env("OCIO_LOGGING_LEVEL", "debug");
+        }
         let (wheel, port) = run_both("ociobakelut_icc", TOOL, PROGRAM, &case);
         assert_eq!(wheel.exit_code, 0, "{label}: {}", stderr(&wheel));
         assert!(wheel.files.contains_key("out.icc"), "{label}");
@@ -806,4 +811,130 @@ fn output_file_attributes() {
     let summary = sweep("ociobakelut_attributes", TOOL, PROGRAM, &cases);
     assert_eq!(summary.writing_files(), 0);
     assert_eq!(summary.with_exit_code(1), cases.len());
+}
+
+/// The options of `parse_luts` with one dash, which `ArgParse` takes too.
+#[test]
+fn cdl_options_with_one_dash() {
+    let ccc = test_file("cdl_test1.ccc");
+    let chains: Vec<(&str, Vec<&str>)> = vec![
+        ("slope", vec!["-slope", "1.1", "1", "0.9"]),
+        ("offset", vec!["-offset", "0.1", "0", "0"]),
+        ("offset10", vec!["-offset10", "10", "0", "0"]),
+        ("power", vec!["-power", "1.1", "1", "1"]),
+        ("sat", vec!["-sat", "0.5"]),
+        ("cccid", vec!["-cccid", "cc0001", "-lut", &ccc]),
+    ];
+    let mut cases = Vec::new();
+    for (label, chain) in &chains {
+        let stdout = [&chain[..], &["--format", "spi1d", "--stdout"]].concat();
+        cases.push(Case::new(format!("{label}_stdout"), &stdout));
+        let verbose = [&chain[..], &["--format", "spi1d", "--v", "out.lut"]].concat();
+        cases.push(Case::new(format!("{label}_verbose"), &verbose));
+    }
+    let summary = sweep("ociobakelut_one_dash", TOOL, PROGRAM, &cases);
+    assert!(
+        summary.with_exit_code(0) >= 8,
+        "{}",
+        summary.with_exit_code(0)
+    );
+}
+
+/// Sizes go through `atoi`, which stops at what isn't a digit.
+#[test]
+fn sizes_as_text() {
+    let lut = test_file("lut1d_1.spi1d");
+    let mut cases = Vec::new();
+    for format in formats() {
+        for size in ["0", "1e3", "0x10", " 7", "7.9", "+5", "-2"] {
+            let argv = [
+                "--lut",
+                &lut,
+                "--format",
+                &format,
+                "--cubesize",
+                size,
+                "--stdout",
+            ];
+            cases.push(Case::new(format!("{format} cube {size}"), &argv));
+            let argv = [
+                "--iconfig",
+                "a.ocio",
+                "--inputspace",
+                "lin",
+                "--outputspace",
+                "gamma",
+                "--shaperspace",
+                "log",
+                "--format",
+                &format,
+                "--shapersize",
+                size,
+                "--cubesize",
+                "3",
+                "--stdout",
+            ];
+            cases.push(with_config(Case::new(
+                format!("{format} shaper {size}"),
+                &argv,
+            )));
+        }
+    }
+    let summary = sweep("ociobakelut_sizes", TOOL, PROGRAM, &cases);
+    assert!(
+        summary.with_exit_code(0) >= 20,
+        "{}",
+        summary.with_exit_code(0)
+    );
+}
+
+/// `--offset10`'s value is a double divided in double, which a format of many digits shows.
+#[test]
+fn offset10_in_double() {
+    let mut cases = Vec::new();
+    for value in ["10.1", "7.3", "33.3", "101.7", "0.1", "511.9"] {
+        let argv = [
+            "--offset10",
+            value,
+            value,
+            value,
+            "--format",
+            "Color Transform Format",
+            "--stdout",
+        ];
+        cases.push(Case::new(value, &argv));
+    }
+    let summary = sweep("ociobakelut_offset10", TOOL, PROGRAM, &cases);
+    assert_eq!(summary.with_exit_code(0), cases.len());
+}
+
+/// One pipe for stdout and stderr: `--v` leaves text in `std::cout` with no flush, and what
+/// `std::cerr` writes next must come after it.
+#[test]
+fn order_of_stdout_and_stderr() {
+    let lut = test_file("lut1d_1.spi1d");
+    let cases = vec![
+        Case::new(
+            "error_after_unflushed_text",
+            &["--lut", &lut, "--format", "nope", "--v", "o.lut"],
+        ),
+        with_config(Case::new(
+            "error_after_lines",
+            &[
+                "--iconfig",
+                "a.ocio",
+                "--inputspace",
+                "nope",
+                "--outputspace",
+                "log",
+                "--format",
+                "spi1d",
+                "--v",
+                "o.lut",
+            ],
+        )),
+        Case::new("refused_after_unflushed_text", &["--lut", &lut, "--v"]),
+    ];
+    let cases: Vec<Case> = cases.into_iter().map(Case::merged).collect();
+    sweep("ociobakelut_order", TOOL, PROGRAM, &cases);
 }

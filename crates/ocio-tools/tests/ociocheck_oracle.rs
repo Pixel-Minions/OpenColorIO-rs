@@ -677,3 +677,62 @@ fn output_file_attributes() {
     assert_eq!(summary.writing_files(), 0);
     assert_eq!(summary.with_exit_code(0), cases.len());
 }
+
+/// Interop IDs with several colons, or with nothing on one side: the first colon decides.
+#[test]
+fn interop_id_colons() {
+    let ids = [
+        "a:b:data", "a:data:b", ":data", "data:", ":", "a:", "a::data", "DATA", "x:DATA",
+    ];
+    let cases: Vec<Case> = ids
+        .iter()
+        .map(|id| {
+            config_case(
+                id,
+                good_with(
+                    "aliases: [lin_ap0_scene]\n    interop_id: lin_ap0_scene",
+                    &format!("interop_id: \"{id}\""),
+                ),
+            )
+        })
+        .collect();
+    sweep("ociocheck_interop_colons", TOOL, PROGRAM, &cases);
+}
+
+/// Names that aren't ASCII, and one that isn't UTF-8, go through the streams as bytes.
+#[test]
+fn names_as_bytes() {
+    let config = [
+        good().as_bytes(),
+        b"  - !<ColorSpace>\n    name: \"caf\xc3\xa9\"\n",
+        b"  - !<ColorSpace>\n    name: bad\xff\n",
+        b"  - !<ColorSpace>\n    name: \"a\\r\\nb\"\n",
+    ]
+    .concat();
+    let cases = vec![
+        config_case("stdout", config.clone()),
+        config_case("merged", config.clone()).merged(),
+        with_files(Case::new(
+            "written",
+            &["--iconfig", "a.ocio", "--oconfig", "o.ocio"],
+        ))
+        .file("a.ocio", config),
+    ];
+    let summary = sweep("ociocheck_bytes", TOOL, PROGRAM, &cases);
+    assert!(summary.outcomes.iter().any(|o| o.stdout.contains(&0xff)));
+}
+
+/// One pipe for stdout and stderr: the library's log, on stderr, between the tool's lines.
+#[test]
+fn order_of_stdout_and_stderr() {
+    let cases: Vec<Case> = [
+        Case::new("no_config", &[]),
+        config_case("warnings_while_loading", good()),
+        config_case("debug", good()).env("OCIO_LOGGING_LEVEL", "debug"),
+        Case::new("help", &["--help"]),
+    ]
+    .into_iter()
+    .map(Case::merged)
+    .collect();
+    sweep("ociocheck_order", TOOL, PROGRAM, &cases);
+}

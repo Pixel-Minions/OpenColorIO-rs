@@ -391,3 +391,45 @@ fn output_file_attributes() {
     assert_eq!(summary.writing_files(), 0);
     assert_eq!(summary.with_exit_code(1), cases.len());
 }
+
+/// A description with line ends of its own: a text stream adds `\\r` before each `\\n`, also
+/// after one that is there.
+#[test]
+fn line_ends_in_printed_text() {
+    let config = CONFIG.replace(
+        "description: A config for the sweep.",
+        "description: \"a\\r\\nb\\rc\\n\"",
+    );
+    assert_ne!(config, CONFIG);
+    let argv = ["--v", "--colorspaces", "linear", "log", "--file", "o.ctf"];
+    let cases = vec![
+        with_config(Case::new("description", &argv))
+            .file("b.ocio", config)
+            .env("OCIO", "b.ocio"),
+        with_config(Case::new(
+            "unknown_name",
+            &["--colorspaces", "linear", "a\r\nb", "--file", "o.ctf"],
+        )),
+    ];
+    sweep("ociowrite_line_ends", TOOL, PROGRAM, &cases);
+}
+
+/// One pipe for stdout and stderr.
+#[test]
+fn order_of_stdout_and_stderr() {
+    let cases = vec![
+        Case::new("no_arguments", &[]),
+        with_config(Case::new("verbose_refused", &["--v", "--file", "o.ctf"])),
+        with_config(Case::new(
+            "verbose_error",
+            &["--v", "--colorspaces", "linear", "nope", "--file", "o.ctf"],
+        )),
+        with_config(Case::new(
+            "debug_log",
+            &["--colorspaces", "linear", "log", "--file", "o.ctf"],
+        ))
+        .env("OCIO_LOGGING_LEVEL", "debug"),
+    ];
+    let cases: Vec<Case> = cases.into_iter().map(Case::merged).collect();
+    sweep("ociowrite_order", TOOL, PROGRAM, &cases);
+}
