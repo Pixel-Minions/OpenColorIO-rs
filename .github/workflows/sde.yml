@@ -13,6 +13,11 @@ name: SDE
 #
 # SDE is downloaded from Intel's mirror under Intel's license (accepted by the owner), and
 # scripts/sde.sh checks its SHA256 before using it. The archive is cached between runs.
+# Kernel jobs retain Cargo's complete selected target/name manifest and run each test in a
+# fresh emulator (scripts/sde_cpu_tests.py). Four bounded partitions retain the full plan;
+# the profile joiner rejects missing/duplicate cases and checks actual raw pass logs.
+# This resets SDE's cumulative thread budget;
+# the split whole-config test keeps all original cases and exact comparisons.
 #
 # On Windows, SDE now and then crashes the oracle (exit code 0xC0000005, "The pipe is being
 # closed" while the request is written) as it starts: importing PyOpenColorIO calls
@@ -30,6 +35,11 @@ on:
       - "crates/ocio-testkit/**"
       - "oracle/**"
       - "scripts/sde.sh"
+      - "crates/ocio/**"
+      - "crates/ocio-gpu/**"
+      - "scripts/sde_join_shards.py"
+      - "scripts/diagnostics/p41_shard_controls.py"
+      - "scripts/sde_cpu_tests.py"
       - ".cargo/config.toml"
       - ".github/workflows/sde.yml"
 
@@ -55,15 +65,16 @@ env:
   SKIP_LUT_SWEEP: --skip lut1d_transform_matches_the_wheel_at_every_format_and_level --skip lut3d_transform_matches_the_wheel_at_every_format_and_level
 
 jobs:
-  windows:
-    name: SDE ${{ matrix.cpu }}${{ matrix.part == 'lut-sweep' && ' LUT sweep' || '' }} (Windows)
+  windows-kernels:
+    name: SDE ${{ matrix.cpu }} kernel shard${{ matrix.shard }} (Windows)
     runs-on: windows-2025
-    timeout-minutes: ${{ matrix.part == 'lut-sweep' && 360 || 240 }}
+    timeout-minutes: 240
     strategy:
       fail-fast: false
+      max-parallel: 6
       matrix:
         cpu: [nhm, snb, hsw, skl, skx]
-        part: [kernels, lut-sweep]
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -88,25 +99,69 @@ jobs:
       - name: CPU tests on an emulated ${{ matrix.cpu }}
         shell: bash
         run: |
-          if [ "${{ matrix.part }}" = lut-sweep ]; then
-            scripts/sde.sh ${{ matrix.cpu }} cargo test --release -p ocio --test api_formats_oracle --no-fail-fast -- $LUT_SWEEP
-          else
-            scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast -- $SKIP_LUT_SWEEP
-          fi
+          export OCIO_RS_SDE_SHARD="${{ matrix.shard }}/4"
+          scripts/sde.sh ${{ matrix.cpu }} python scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- $SKIP_LUT_SWEEP
+      - name: SDE logs
+        if: failure()
+        shell: bash
+        run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sde-${{ matrix.cpu }}-Windows-kernel-shard-${{ matrix.shard }}
+          path: kept/sde-cpu-tests/
+          retention-days: 30
+
+  windows-lut:
+    name: SDE ${{ matrix.cpu }} LUT sweep (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        cpu: [nhm, snb, hsw, skl, skx]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.7"
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sde
+      - name: Intel SDE archive
+        uses: actions/cache@v4
+        with:
+          path: target/sde-archives
+          key: sde-10.13.1-2026-07-28-windows
+      - name: Oracle environment and test build (native)
+        run: |
+          cargo xtask oracle info
+          cargo cpu-tests --release --no-run
+      - name: CPU tests on an emulated ${{ matrix.cpu }}
+        shell: bash
+        run: |
+          scripts/sde.sh ${{ matrix.cpu }} cargo test --release -p ocio --test api_formats_oracle --no-fail-fast -- $LUT_SWEEP
       - name: SDE logs
         if: failure()
         shell: bash
         run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
 
-  rocky9:
-    name: SDE ${{ matrix.cpu }}${{ matrix.part == 'lut-sweep' && ' LUT sweep' || '' }} (Rocky Linux 9)
+  rocky9-kernels:
+    name: SDE ${{ matrix.cpu }} kernel shard${{ matrix.shard }} (Rocky Linux 9)
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ matrix.part == 'lut-sweep' && 360 || 240 }}
+    timeout-minutes: 240
     strategy:
       fail-fast: false
+      max-parallel: 6
       matrix:
         cpu: [nhm, snb, hsw, skl, skx]
-        part: [kernels, lut-sweep]
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -128,15 +183,82 @@ jobs:
             export OCIO_RS_TIER=quick
             cargo xtask oracle info
             cargo cpu-tests --release --no-run
-            if [ "${{ matrix.part }}" = lut-sweep ]; then
-              scripts/sde.sh ${{ matrix.cpu }} cargo test --release -p ocio --test api_formats_oracle --no-fail-fast -- ${{ env.LUT_SWEEP }}
-            else
-              scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast -- ${{ env.SKIP_LUT_SWEEP }}
-            fi
+            export OCIO_RS_SDE_SHARD="${{ matrix.shard }}/4"
+            scripts/sde.sh ${{ matrix.cpu }} python3 scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- ${{ env.SKIP_LUT_SWEEP }}
           '
       - name: SDE logs
         if: failure()
         run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sde-${{ matrix.cpu }}-Rocky-kernel-shard-${{ matrix.shard }}
+          path: kept/sde-cpu-tests/
+          retention-days: 30
+
+  rocky9-lut:
+    name: SDE ${{ matrix.cpu }} LUT sweep (Rocky Linux 9)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        cpu: [nhm, snb, hsw, skl, skx]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Intel SDE archive
+        uses: actions/cache@v4
+        with:
+          path: target/sde-archives
+          key: sde-10.13.1-2026-07-28-linux
+      - name: Build the reference image
+        run: docker build -t ocio-rs-rocky9:1 docker/rocky9
+      # SDE (Pin) traces the processes it emulates; Ubuntu's Yama default only lets a process
+      # trace its own descendants. This is a throwaway VM.
+      - name: Allow SDE to trace processes
+        run: sudo sysctl -w kernel.yama.ptrace_scope=0
+      - name: CPU tests on an emulated ${{ matrix.cpu }}
+        run: |
+          scripts/rocky9.sh bash -ec '
+            export OCIO_RS_TIER=quick
+            cargo xtask oracle info
+            cargo cpu-tests --release --no-run
+            scripts/sde.sh ${{ matrix.cpu }} cargo test --release -p ocio --test api_formats_oracle --no-fail-fast -- ${{ env.LUT_SWEEP }}
+          '
+      - name: SDE logs
+        if: failure()
+        run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
+
+  kernels:
+    name: SDE ${{ matrix.cpu }} (${{ matrix.system == 'Rocky' && 'Rocky Linux 9' || 'Windows' }})
+    if: always()
+    needs: [windows-kernels, rocky9-kernels]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [nhm, snb, hsw, skl, skx]
+        system: [Windows, Rocky]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-*
+          path: kept/sde-shard-inputs
+      - name: Every original target and selected test passed exactly once
+        run: |
+          python3 scripts/sde_join_shards.py kept/sde-cpu-tests-joined/profile             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-0             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-1             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-2             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-manifest
+          path: kept/sde-cpu-tests-joined/
+          retention-days: 30
 
   # The limits of nested transforms and CTF references (docs/improvements.md, U-58 and U-76)
   # hold on a 1 MiB thread at every optimization level: the depth tests at opt-level 0, where
