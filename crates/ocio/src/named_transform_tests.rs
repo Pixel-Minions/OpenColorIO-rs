@@ -4,7 +4,8 @@
 //! Tests of the named transform: `tests/cpu/NamedTransform_tests.cpp` @v2.5.2.
 //! The representable parts of `basic` include model/copy/text, static GetTransform and
 //! Config error checks. The C++ null shared-pointer argument cannot be passed to the
-//! existing reference-typed API, so `basic` stays uncounted pending owner scope review.
+//! existing reference-typed API. P56 covers the complete original `basic` through the
+//! production Python binding in ocio-py/tests/look_view_named_oracle.rs, including None.
 //! The complete `alias` and Config/processor tests below retain their original markers.
 //! Text is also compared with the wheel in `tests/model_objects_oracle.rs`.
 use ocio_testkit::upstream::check_throw_what;
@@ -13,7 +14,7 @@ use super::*;
 use crate::MatrixTransform;
 
 /// Existing-API checks of upstream's `basic` (NamedTransform_tests.cpp:12-62 @v2.5.2).
-/// Its C++ null-argument assertion remains unrepresented; do not add a full port marker.
+/// The full marker is on P56's production-Python-API translation, including its null argument.
 #[test]
 fn basic_existing_rust_api() {
     let _env = crate::test_env::EnvGuard::new();

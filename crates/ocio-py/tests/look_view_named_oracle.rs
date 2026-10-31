@@ -560,3 +560,59 @@ fn where_the_wheel_copies_a_null_transform_the_port_raises() {
         py.run(&c, None, None).unwrap_or_else(|e| panic!("{e}"));
     });
 }
+
+/// Port of `OCIO_ADD_TEST(NamedTransform, basic)` @ v2.5.2.
+/// Source: tests/cpu/NamedTransform_tests.cpp:12-62. Run every original assertion through
+/// the existing production Python API, whose None argument represents the null shared pointer.
+/// Expected text and exception fragments below are copied from the upstream C++ test.
+#[test]
+fn upstream_named_transform_basic_through_existing_public_api() {
+    common::start_python();
+    Python::attach(|py| {
+        let code = std::ffi::CString::new(
+            r#"import copy
+import PyOpenColorIO as OCIO
+
+nt = OCIO.NamedTransform()
+assert nt is not None
+assert nt.getName() == ""
+assert nt.getTransform(OCIO.TRANSFORM_DIR_FORWARD) is None
+assert nt.getTransform(OCIO.TRANSFORM_DIR_INVERSE) is None
+nt.setName("NewName")
+assert nt.getName() == "NewName"
+
+mat = OCIO.MatrixTransform()
+nt.setTransform(mat, OCIO.TRANSFORM_DIR_FORWARD)
+forward = nt.getTransform(OCIO.TRANSFORM_DIR_FORWARD)
+assert isinstance(forward, OCIO.MatrixTransform)
+assert nt.getTransform(OCIO.TRANSFORM_DIR_FORWARD) is not mat
+assert nt.getTransform(OCIO.TRANSFORM_DIR_INVERSE) is None
+actual_forward = OCIO.NamedTransform.GetTransform(nt, OCIO.TRANSFORM_DIR_FORWARD)
+assert isinstance(actual_forward, OCIO.MatrixTransform)
+actual_inverse = OCIO.NamedTransform.GetTransform(nt, OCIO.TRANSFORM_DIR_INVERSE)
+assert isinstance(actual_inverse, OCIO.MatrixTransform)
+assert str(nt) == '<NamedTransform name=NewName,\n    forward=\n        <MatrixTransform direction=forward, fileindepth=unknown, fileoutdepth=unknown, matrix=[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], offset=[0, 0, 0, 0]>>'
+
+config = copy.deepcopy(OCIO.Config.CreateRaw())
+def check_throw_what(value, fragment):
+    try:
+        config.addNamedTransform(value)
+    except OCIO.Exception as error:
+        assert fragment in str(error), str(error)
+    else:
+        raise AssertionError("expected OCIO.Exception: " + fragment)
+
+invalid = None
+check_throw_what(invalid, 'Named transform is null')
+invalid = OCIO.NamedTransform()
+check_throw_what(invalid, 'Named transform must have a non-empty name')
+invalid.setName("name")
+check_throw_what(invalid, 'Named transform must define at least one transform')
+"#,
+        )
+        .unwrap();
+        let globals = PyDict::new(py);
+        py.run(&code, Some(&globals), None)
+            .unwrap_or_else(|error| panic!("{error}"));
+    });
+}

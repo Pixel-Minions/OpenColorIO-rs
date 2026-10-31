@@ -513,3 +513,18 @@ hash manifest are preserved outside target. The debugger's local source commit i
 370cd592; its branch/worktree is not modified or pushed. See
 [implementation and evidence](gpu-finite-exact-pins.md). Full normal CI on the final
 landing remains required; source approval is not a runtime pass.
+
+
+## P9-6 - Reviewed C++ tests not applicable (owner approved 2026-10-23)
+
+The existing decision in [the Phase9 card](cards/phase9.md#owner-decisions) approves:
+
+| Original test | Reason |
+|---|---|
+| `Platform/aligned_memory_test` | Native C++ AlignedMalloc/AlignedFree; the current Rust renderer uses Vec storage and unaligned loads. Reopen if Phase8 introduces applicable aligned storage. |
+| `UnitTest/windows_debug` | Native Windows debug CRT test-harness setup and isspace(INT_MAX), outside the color library and Rust test runner. |
+
+P56 records those exact decisions in the reviewed list. No runtime comparison or
+existing pixel/GPU waiver changes. NamedTransform/basic is covered separately by
+all its original assertions through the existing production Python API, including
+Config.addNamedTransform(None); it is not excluded.

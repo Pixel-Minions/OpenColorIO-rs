@@ -4510,8 +4510,8 @@ note = "All 13 tests: clamp (S2); is_scalar_equal_to_zero, float_diff_keep_denor
 path = "tests/cpu/NamedTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/named_transform_tests.rs"]
-status = "partial"
-note = "P25 completes alias (NamedTransform_tests.cpp:64-211), including Config cloning, lookup/canonical names, replacement and all three collision errors with original literals. P28 adds every remaining existing-API basic assertion (copied-object identity, static forward/inverse GetTransform and Config name/transform errors); basic stays uncounted because its C++ null shared-pointer argument cannot be passed to the reference-typed API. No boundary exclusion is approved here. p3-model-objects (3.4c) checks its model-only part in named_transform_tests.rs. p3-validate 3.8: named_transform_io, colorspace_transform_named_transform, inactive_named_transform_precedence. p3-builders 3.2a: static_get_transform; 3.2d: named_transform_processor, named_transform_validation, inactive_named_transforms"
+status = "done"
+note = "P25 completes alias (NamedTransform_tests.cpp:64-211), including Config cloning, lookup/canonical names, replacement and all three collision errors with original literals. P28 adds every remaining existing-API basic assertion (copied-object identity, static forward/inverse GetTransform and Config name/transform errors); basic stays uncounted because its C++ null shared-pointer argument cannot be passed to the reference-typed API. No boundary exclusion is approved here. p3-model-objects (3.4c) checks its model-only part in named_transform_tests.rs. p3-validate 3.8: named_transform_io, colorspace_transform_named_transform, inactive_named_transform_precedence. p3-builders 3.2a: static_get_transform; 3.2d: named_transform_processor, named_transform_validation, inactive_named_transforms; P56 completes basic (12-62) through the existing production Python API, including the null argument as None, all clone/static-GetTransform/type/text checks and all original Config refusals. P25 completes alias (64-211). No new Rust API or test helper; the original direct Rust representable checks remain too."
 
 [[file]]
 path = "tests/cpu/OCIOZArchive_tests.cpp"
@@ -4552,8 +4552,8 @@ note = "p3-context 3.5f: compute_hash"
 path = "tests/cpu/Platform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/platform_tests.rs"]
-status = "partial"
-note = "string_compare; envVariable, getenv, setenv (without their checks through the Windows API, deviation D-5), create_temp_filename, utf8_utf16_convert (p3-context 3.5a). aligned_memory_test waits for AlignedMalloc"
+status = "done"
+note = "string_compare; envVariable, getenv, setenv (without their checks through the Windows API, deviation D-5), create_temp_filename, utf8_utf16_convert (p3-context 3.5a). aligned_memory_test waits for AlignedMalloc; P56 records aligned_memory_test as the already owner-approved P9-6 not-applicable C++ allocator check (2026-10-23; waivers.toml); reopen if Phase8 adds applicable aligned storage. All other original tests are ported; environment Windows-API checks remain within approved D-5."
 
 [[file]]
 path = "tests/cpu/Processor_tests.cpp"
@@ -4601,7 +4601,8 @@ note = "see UnitTestLogUtils.cpp"
 path = "tests/cpu/UnitTestMain.cpp"
 kind = "test-support"
 target = ["crates/ocio-testkit/src/upstream/unit_test_main.rs"]
-status = "todo"
+status = "partial"
+note = "P56 records the only OCIO_ADD_TEST here, UnitTest/windows_debug, as the already owner-approved P9-6 not-applicable native CRT harness check (2026-10-23; waivers.toml). The native C++ test-runner main/CLI is not separately ported; Rust libtest drives the translated suite."
 
 [[file]]
 path = "tests/cpu/UnitTestOptimFlags.cpp"
