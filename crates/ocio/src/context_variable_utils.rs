@@ -3,8 +3,8 @@
 
 //! Context variables: a port of `src/OpenColorIO/ContextVariableUtils.cpp` and `.h` @ v2.5.2:
 //! the variables' map and its order, finding, loading and resolving them, and
-//! `CollectContextVariables` for the transform classes in the port. The overloads of the
-//! classes that use context variables come with those classes.
+//! `CollectContextVariables` dispatch for every transform kind. The overloads of the five
+//! context-using kinds live with those transforms; all other kinds use none.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
