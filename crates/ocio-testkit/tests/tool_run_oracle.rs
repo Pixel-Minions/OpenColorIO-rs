@@ -92,9 +92,11 @@ fn zero_exit_code_and_argv_reach_the_tool() {
     assert_eq!(exit_code(&r), 0);
     let out = stdout(&r);
     assert!(contains(out, &text("Loading in/a.ocio\n")));
-    // The tool ran in `cwd`: the config's directory is under it.
+    // The tool ran in `cwd`, whatever CARGO_TARGET_DIR's separators: `in`'s directory is
+    // this test's, in the system's spelling.
+    let working = format!("{0}zero{0}in", std::path::MAIN_SEPARATOR);
     assert!(
-        contains(out, format!("Working Dir: {dir}").as_bytes()),
+        contains(out, b"Working Dir: ") && contains(out, &text(&format!("{working}\n"))),
         "{}",
         String::from_utf8_lossy(out)
     );
@@ -145,11 +147,182 @@ fn a_changed_input_is_reported() {
     assert_ne!(written.as_slice(), CONFIG.as_bytes());
 }
 
+/// `0xC0000409`, which a process that fails fast ends with on Windows, as the C++ runtime's
+/// `std::terminate` does in the wheel's tools; the negative of SIGABRT's number on Linux.
+const DIED_IN_TERMINATE: i64 = if cfg!(windows) { 0xC000_0409 } else { -6 };
+
+#[test]
+fn a_tool_that_dies_is_reported() {
+    // ociobakelut/main.cpp:261: the config loads outside every `try`.
+    let r = run(
+        json!({"tool": "ociobakelut", "cwd": cwd("dies"),
+               "argv": ["--iconfig", "not_there.ocio", "--inputspace", "a", "--outputspace", "b",
+                        "--format", "spi1d", "out.lut"]}),
+        &[],
+    );
+    assert_eq!(r.result["exit_code"], DIED_IN_TERMINATE, "{}", r.result);
+    assert_eq!(r.result["crashed"]["returncode"], DIED_IN_TERMINATE);
+    assert_eq!(r.result["timed_out"], false);
+}
+
+#[test]
+fn a_normal_failure_is_not_a_crash() {
+    let r = run(
+        json!({"tool": "ociowrite", "argv": ["--help"], "cwd": cwd("not_a_crash")}),
+        &[],
+    );
+    assert_eq!(exit_code(&r), 1);
+}
+
+#[test]
+fn output_bytes_are_not_decoded() {
+    // ociocheck/main.cpp:451: the color spaces' names, as the config has them: UTF-8, and a byte
+    // that isn't.
+    let config = [
+        CONFIG.as_bytes(),
+        b"  - !<ColorSpace>\n    name: caf\xc3\xa9\n",
+        b"  - !<ColorSpace>\n    name: bad\xff\n",
+    ]
+    .concat();
+    let r = run(
+        json!({"tool": "ociocheck", "argv": ["--iconfig", "a.ocio"], "cwd": cwd("bytes"),
+               "files": [["a.ocio", 0]]}),
+        &[&config],
+    );
+    assert_eq!(exit_code(&r), 0);
+    assert!(contains(stdout(&r), &text("caf\u{e9}\nbad")));
+    assert!(contains(stdout(&r), b"bad\xff"));
+}
+
+#[test]
+fn a_tool_that_runs_too_long_is_stopped() {
+    let dir = cwd("timeout");
+    let r = run(
+        json!({"tool": "ociocheck", "argv": ["--iconfig", "ocio://default"], "cwd": dir,
+               "timeout_seconds": 0.001}),
+        &[],
+    );
+    assert_eq!(r.result["timed_out"], true, "{}", r.result);
+    assert_eq!(r.result["exit_code"], Value::Null);
+    assert_eq!(r.result["crashed"]["timeout_seconds"], 0.001);
+    assert_eq!(r.result["files"], json!([]));
+    assert!(!std::path::Path::new(&dir).exists());
+}
+
+#[test]
+fn several_written_files_are_sorted() {
+    // ocioarchive: `--extract` writes the archive's files, not in this order.
+    let archive = ocio_testkit::paths::upstream_dir()
+        .join("tests/data/files/configs/context_test1/context_test1_windows.ocioz");
+    let archive = std::fs::read(archive).unwrap();
+    let r = run(
+        json!({"tool": "ocioarchive", "argv": ["--extract", "a.ocioz", "--dir", "out"],
+               "cwd": cwd("sorted"), "files": [["a.ocioz", 0]]}),
+        &[&archive],
+    );
+    assert_eq!(exit_code(&r), 0);
+    let files = r.result["files"].as_array().unwrap();
+    let paths: Vec<&str> = files.iter().map(|f| f["path"].as_str().unwrap()).collect();
+    assert!(paths.len() >= 5, "{paths:?}");
+    let mut sorted = paths.clone();
+    sorted.sort_unstable();
+    assert_eq!(paths, sorted);
+}
+
+#[test]
+fn stderr_can_share_the_stdout_pipe() {
+    // ociobakelut/main.cpp:216-221, 399-401: stdout's text, then stderr's.
+    let lut = ocio_testkit::paths::upstream_dir().join("tests/data/files/lut1d_1.spi1d");
+    let r = run(
+        json!({"tool": "ociobakelut", "cwd": cwd("merged"), "merge_stderr": true,
+               "argv": ["--lut", lut.to_str().unwrap(), "--format", "nope", "--v", "out.lut"]}),
+        &[],
+    );
+    assert_eq!(exit_code(&r), 1);
+    assert_eq!(stderr(&r), b"");
+    let out = stdout(&r);
+    assert!(out.starts_with(b"[OpenColorIO DEBUG]: Specified Transform:"));
+    assert!(out.ends_with(&text("See --help for more info.\n")));
+}
+
+/// A file's attributes reach the tool: `std::ofstream` refuses a hidden file on Windows, and
+/// the command can still remove what it made.
+#[cfg(windows)]
+#[test]
+fn attributes_are_set_on_input_files() {
+    for letters in ["h", "s", "r", "hsr"] {
+        let dir = cwd(&format!("attributes_{letters}"));
+        let r = run(
+            json!({"tool": "ociocheck", "cwd": dir,
+                   "argv": ["--iconfig", "a.ocio", "--oconfig", "o.ocio"],
+                   "files": [["a.ocio", 0], ["o.ocio", 1]],
+                   "attributes": [["o.ocio", letters]]}),
+            &[CONFIG.as_bytes(), b"old"],
+        );
+        assert_eq!(exit_code(&r), 0);
+        let refused = text("Error opening o.ocio for writing.\n");
+        assert!(contains(stdout(&r), &refused), "{letters}");
+        assert_eq!(r.result["files"], json!([]), "{letters}");
+        assert!(!std::path::Path::new(&dir).exists());
+    }
+}
+
+/// `tool_run` gives a tool an empty stdin. No tool reads it, so this writes to it: /dev/stdin is
+/// /dev/null then, where any size fits, where a pipe nobody reads, the command's own stdin
+/// passed on, would never take this much.
+#[cfg(unix)]
+#[test]
+fn stdin_is_empty() {
+    let r = run(
+        json!({"tool": "ociobakelut", "cwd": cwd("stdin"), "timeout_seconds": 60,
+               "argv": ["--iconfig", "a.ocio", "--inputspace", "raw", "--outputspace", "raw",
+                        "--format", "spi3d", "--cubesize", "33", "/dev/stdin"],
+               "files": [["a.ocio", 0]]}),
+        &[CONFIG.as_bytes()],
+    );
+    assert_eq!(exit_code(&r), 0);
+}
+
 #[test]
 fn refusals() {
     let dir = cwd("refused");
     for (args, expected) in [
-        (json!({"tool": "nope", "argv": [], "cwd": dir}), "tool"),
+        (
+            json!({"tool": "nope", "argv": [], "cwd": dir}),
+            "must be a tool's name",
+        ),
+        (
+            json!({"tool": "ociocheck;x", "argv": [], "cwd": dir}),
+            "must be a tool's name",
+        ),
+        (
+            json!({"tool": "OpenColorIO_2_5", "argv": [], "cwd": dir}),
+            "must be a tool's name",
+        ),
+        (
+            json!({"tool": 1, "argv": [], "cwd": dir}),
+            "must be a tool's name",
+        ),
+        (
+            json!({"tool": "ociocheck", "argv": [], "cwd": dir, "files": [["a\\b", 0]]}),
+            "bad path",
+        ),
+        (
+            json!({"tool": "ociocheck", "argv": [], "cwd": dir, "files": [["a:b", 0]]}),
+            "bad path",
+        ),
+        (
+            json!({"tool": "ociocheck", "argv": [], "cwd": dir, "timeout_seconds": 0}),
+            "timeout_seconds",
+        ),
+        (
+            json!({"tool": "ociocheck", "argv": [], "cwd": dir, "merge_stderr": 1}),
+            "merge_stderr",
+        ),
+        (
+            json!({"tool": "ociocheck", "argv": [], "cwd": dir, "attributes": [["a", "h"]]}),
+            "attributes",
+        ),
         (
             json!({"tool": "ocionope", "argv": [], "cwd": dir}),
             "no tool",
@@ -195,4 +368,16 @@ fn refusals() {
     let error = refused(json!({"tool": "ociocheck", "argv": [], "cwd": dir}), &[]);
     assert!(error.contains("empty"), "{error}");
     assert_eq!(std::fs::read_to_string(&kept).unwrap(), "kept");
+}
+
+/// Attributes are Windows's: elsewhere a request for them can't be met.
+#[cfg(unix)]
+#[test]
+fn attributes_are_refused_elsewhere() {
+    let error = refused(
+        json!({"tool": "ociocheck", "argv": [], "cwd": cwd("attributes"),
+               "files": [["a", 0]], "attributes": [["a", "h"]]}),
+        &[b"x"],
+    );
+    assert!(error.contains("on Windows"), "{error}");
 }

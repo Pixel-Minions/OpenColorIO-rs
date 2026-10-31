@@ -22,16 +22,21 @@ import subprocess
 
 import PyOpenColorIO as OCIO
 
-from .checks import check_keys
+from .checks import check_bool, check_keys
 from .child_env import allowed_environment
 from .commands import command
 
-# The longest a tool may run: the largest bake of a sweep takes seconds.
+# The longest a tool may run, unless the request says otherwise: the largest bake of a sweep
+# takes seconds.
 TIMEOUT_SECONDS = 600
 
 # On Windows, exit codes from here up are NTSTATUS failure codes: the process died
 # (0xC0000005, an access violation), where a tool's own exit code is 0 or 1.
 _NTSTATUS_ERROR = 0xC0000000
+
+# SetFileAttributesW's values.
+_ATTRIBUTES = {"r": 0x1, "h": 0x2, "s": 0x4}
+_FILE_ATTRIBUTE_NORMAL = 0x80
 
 
 def _program(tool):
@@ -112,6 +117,46 @@ def _written(cwd, inputs, out):
     return files
 
 
+def _timeout(value):
+    """`value`, refused unless it is a positive number of seconds."""
+    if type(value) not in (int, float) or value <= 0:
+        raise ValueError(f"tool_run: timeout_seconds must be positive, not {value!r}")
+    return value
+
+
+def _attributes(value, inputs):
+    """`value`, [[relative path, letters], ...], checked: an input file, and letters of "hsr"
+    (hidden, system, read-only). Windows only: other systems have no such attributes."""
+    if not isinstance(value, list) or (value and os.name != "nt"):
+        raise ValueError(f"tool_run: attributes must be a list, on Windows: {value!r}")
+    for item in value:
+        if not (isinstance(item, list) and len(item) == 2 and item[0] in inputs
+                and isinstance(item[1], str) and item[1] and set(item[1]) <= set("hsr")):
+            raise ValueError(f"tool_run: bad entry of attributes: {item!r}")
+    return value
+
+
+def _set_attributes(cwd, attributes):
+    """Gives input files their attributes, which the tools' file opening looks at."""
+    import ctypes
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.SetFileAttributesW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong]
+    for name, letters in attributes:
+        value = sum(_ATTRIBUTES[letter] for letter in letters)
+        if not kernel32.SetFileAttributesW(os.path.join(cwd, *name.split("/")), value):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _clear_attributes(cwd, attributes):
+    """Takes attributes off again: a read-only file can't be removed."""
+    if attributes:
+        import ctypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.SetFileAttributesW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong]
+        for name, _ in attributes:
+            kernel32.SetFileAttributesW(os.path.join(cwd, *name.split("/")), _FILE_ATTRIBUTE_NORMAL)
+
+
 def _exit(returncode):
     """The tool's exit code, and how it died, if it died: a signal on Linux (Python reports the
     signal's negative number), an NTSTATUS failure code on Windows."""
@@ -125,35 +170,45 @@ def tool_run(args, blobs):
 
     args: {"tool": a name such as "ociocheck", "argv": [its arguments], "cwd": an absolute path,
            empty or missing, "env": {name: value}, optional, "files": [[relative path, blob
-           index], ...], optional}. The tool's environment is the oracle's allowlist
-           (child_env.py) plus `env`; its stdin is empty.
+           index], ...], optional, "attributes": [[relative path of an input, letters of
+           "hsr"], ...], optional, Windows only, "merge_stderr": true to send stderr into the
+           stdout pipe, so that the bytes show the order they were written in, optional,
+           "timeout_seconds": a number, optional, TIMEOUT_SECONDS without it}. The tool's
+           environment is the oracle's allowlist (child_env.py) plus `env`; its stdin is empty.
 
     Returns {"exit_code": int, "crashed": null or how it died, "timed_out": bool, "stdout":
     blob index, "stderr": blob index, "files": [{"path", "contents": blob index}]}, `files`
-    being what is new or changed under `cwd`. The exit code isn't named `returncode`, so that
-    an exit code of 1, what most of a sweep gives, is cached; a tool that died, or that timed
-    out, reports `crashed` and isn't (ocio_testkit oracle.rs, `cacheable`).
+    being what is new or changed under `cwd`. A tool that dies, or that times out, reports
+    `crashed`, and such a response is never cached (ocio_testkit oracle.rs, `cacheable`).
     """
-    check_keys("tool_run", args, {"tool", "argv", "cwd", "env", "files"})
+    check_keys("tool_run", args, {"tool", "argv", "cwd", "env", "files", "attributes",
+                                  "merge_stderr", "timeout_seconds"})
     program = _program(args.get("tool"))
     argv = _strings("argv", args.get("argv"))
     cwd = args.get("cwd")
     env = _environment(args.get("env", {}))
     inputs = _inputs(args.get("files", []), blobs)
+    attributes = _attributes(args.get("attributes", []), inputs)
+    merge_stderr = check_bool("tool_run: merge_stderr", args.get("merge_stderr", False))
+    timeout = _timeout(args.get("timeout_seconds", TIMEOUT_SECONDS))
     _prepare(cwd, inputs)
     try:
+        if attributes:
+            _set_attributes(cwd, attributes)
         try:
             run = subprocess.run([program] + argv, cwd=cwd, env=allowed_environment(env),
-                                 stdin=subprocess.DEVNULL, capture_output=True,
-                                 timeout=TIMEOUT_SECONDS, check=False)
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
+                                 timeout=timeout, check=False)
         except subprocess.TimeoutExpired as error:
             out = [error.stdout or b"", error.stderr or b""]
-            return {"exit_code": None, "crashed": {"timeout_seconds": TIMEOUT_SECONDS},
+            return {"exit_code": None, "crashed": {"timeout_seconds": timeout},
                     "timed_out": True, "stdout": 0, "stderr": 1, "files": []}, out
-        out = [run.stdout, run.stderr]
+        out = [run.stdout, run.stderr or b""]
         files = _written(cwd, inputs, out)
         result = {**_exit(run.returncode), "timed_out": False, "stdout": 0, "stderr": 1,
                   "files": files}
         return result, out
     finally:
+        _clear_attributes(cwd, attributes)
         shutil.rmtree(cwd)
