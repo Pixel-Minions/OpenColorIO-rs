@@ -81,9 +81,11 @@ jobs:
         shard:
           - windows-debug-formats
           - windows-debug-heavy
+          - windows-debug-grading
           - windows-debug-rest
           - windows-release-formats
           - windows-release-heavy
+          - windows-release-grading
           - windows-release-rest
     steps:
       - uses: actions/checkout@v5
@@ -165,9 +167,11 @@ jobs:
         shard:
           - linux-debug-formats
           - linux-debug-heavy
+          - linux-debug-grading
           - linux-debug-rest
           - linux-release-formats
           - linux-release-heavy
+          - linux-release-grading
           - linux-release-rest
     steps:
       - name: Free runner disk
