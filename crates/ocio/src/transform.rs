@@ -836,10 +836,9 @@ fn build_leaf_ops(
 /// Appends to `group` the transform that `op` renders: nothing for the no-op types; for each op
 /// type, its class's `Create<Class>Transform`, which comes with the class.
 ///
-/// Every op type the port has so far has its transform class; a family that adds an op type adds
-/// its arm (a "not ported yet" error until its class comes). Upstream's own error for an op
-/// type without one names the op's C++ class with `typeid`, which differs between the
-/// wheels; every op type has a transform in 2.5.2, so it can't happen.
+/// All 14 transform-producing op families have their transform class. Upstream's own error
+/// for an op type without one names the op's C++ class with `typeid`, which differs between
+/// the wheels; every renderable op type has a transform in 2.5.2, so it can't happen.
 ///
 /// Port of `CreateTransform` (src/OpenColorIO/Transform.cpp:310-383 @ v2.5.2). Internal to the
 /// processors (crate-private).
