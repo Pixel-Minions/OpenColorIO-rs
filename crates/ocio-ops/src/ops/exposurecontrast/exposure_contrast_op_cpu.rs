@@ -36,13 +36,20 @@
 //! style uses the default 0.088 whatever the op's (docs/improvements.md, I-217). Ported as it
 //! is.
 
+//!
+//! # SSE2 fast paths
+//!
+//! With finite coefficients, blocks of finite pixels take the real SSE2 kernels of
+//! `exposure_contrast_op_cpu_sse2`, which says why no operand order shows there. Any other
+//! block takes the lanes, in each wheel's operand order.
+
 use std::sync::Arc;
 
 use super::exposure_contrast_op_data::{ExposureContrastOpData, ExposureContrastOpStyle, ec};
 use crate::dynamic_property::{DynamicPropertyDoubleImplRcPtr, DynamicPropertyRcPtr};
 use crate::exception::{Exception, Result};
 use crate::math_utils::{sse_add, sse_mul, sse_sub, std_max, std_powf};
-use crate::op::CpuOp;
+use crate::op::{CpuOp, Pixels, PixelsMut};
 use crate::open_color_types::DynamicPropertyType;
 use crate::sse::sse_power;
 
@@ -171,22 +178,120 @@ fn scale_channel(px: f32, factor: f32) -> f32 {
 /// contrast of 1, `out[i] = in[i] * factor`, in each wheel's operand order
 /// ([`scale_channel`]).
 fn scale_rgb(rgba: &mut [f32], factor: f32) {
-    for px in rgba.as_chunks_mut::<4>().0 {
-        px[0] = scale_channel(px[0], factor);
-        px[1] = scale_channel(px[1], factor);
-        px[2] = scale_channel(px[2], factor);
-    }
+    let exact = |block: &mut [[f32; 4]]| {
+        for px in block {
+            px[0] = scale_channel(px[0], factor);
+            px[1] = scale_channel(px[1], factor);
+            px[2] = scale_channel(px[2], factor);
+        }
+    };
+    render(
+        rgba,
+        factor.is_finite(),
+        |block| sse2_scale(block, factor),
+        exact,
+    );
 }
 
 /// The color lanes of the SSE2 power branch, alpha left alone:
 /// `_mm_mul_ps(ssePower(_mm_mul_ps(data, scale), power), factor)`.
 fn power_rgb(rgba: &mut [f32], scale: f32, power: f32, factor: f32) {
-    for px in rgba.as_chunks_mut::<4>().0 {
+    let exact = |block: &mut [[f32; 4]]| {
+        for px in block {
+            for v in &mut px[..3] {
+                *v = sse_mul(sse_power(sse_mul(*v, scale), power), factor);
+            }
+        }
+    };
+    let finite = scale.is_finite() && power.is_finite() && factor.is_finite();
+    render(
+        rgba,
+        finite,
+        |block| sse2_power(block, scale, power, factor),
+        exact,
+    );
+}
+
+/// `in * contrast + offset` on the color channels, in the wheels' order: the product first.
+fn linear_rgb(rgba: &mut [f32], contrast: f32, offset: f32) {
+    let finite = contrast.is_finite() && offset.is_finite();
+    render(
+        rgba,
+        finite,
+        |block| sse2_linear(block, contrast, offset),
+        |block| linear_exact(block, contrast, offset),
+    );
+}
+
+/// The lanes of [`linear_rgb`].
+fn linear_exact(block: &mut [[f32; 4]], contrast: f32, offset: f32) {
+    for px in block {
         for v in &mut px[..3] {
-            *v = sse_mul(sse_power(sse_mul(*v, scale), power), factor);
+            *v = sse_add(sse_mul(*v, contrast), offset);
         }
     }
 }
+
+/// [`linear_rgb`] between two buffers, as the C++ renders the first op of a chain: without a
+/// copy of the input where the real kernel runs.
+fn linear_between(input: Pixels<'_>, output: PixelsMut<'_>, contrast: f32, offset: f32) {
+    let (Pixels::F32(input), PixelsMut::F32(output)) = (input, output) else {
+        panic!("the renderers process float pixels only");
+    };
+    #[cfg(target_arch = "x86_64")]
+    if contrast.is_finite() && offset.is_finite() {
+        crate::sse2::blocks::for_each_block_to(
+            input.as_chunks::<4>().0,
+            output.as_chunks_mut::<4>().0,
+            |from, to| sse2_linear_to(from, to, contrast, offset),
+            |block, _| linear_exact(block, contrast, offset),
+        );
+        return;
+    }
+    output.copy_from_slice(input);
+    linear_exact(output.as_chunks_mut::<4>().0, contrast, offset);
+}
+
+/// Renders `rgba` with `exact`, or block by block with `fast` where `finite` allows it.
+#[cfg(target_arch = "x86_64")]
+#[inline]
+fn render(
+    rgba: &mut [f32],
+    finite: bool,
+    fast: impl Fn(&mut [[f32; 4]]),
+    exact: impl Fn(&mut [[f32; 4]]),
+) {
+    let pixels = rgba.as_chunks_mut::<4>().0;
+    if finite {
+        crate::sse2::blocks::for_each_block(pixels, fast, |block, _| exact(block));
+    } else {
+        exact(pixels);
+    }
+}
+
+/// [`render`] where the real kernels don't compile.
+#[cfg(not(target_arch = "x86_64"))]
+#[inline]
+fn render(
+    rgba: &mut [f32],
+    _finite: bool,
+    _fast: impl Fn(&mut [[f32; 4]]),
+    exact: impl Fn(&mut [[f32; 4]]),
+) {
+    exact(rgba.as_chunks_mut::<4>().0);
+}
+
+#[cfg(target_arch = "x86_64")]
+use super::exposure_contrast_op_cpu_sse2::{
+    linear as sse2_linear, linear_to as sse2_linear_to, power as sse2_power, scale as sse2_scale,
+};
+
+#[cfg(not(target_arch = "x86_64"))]
+fn sse2_scale(_: &mut [[f32; 4]], _: f32) {}
+#[cfg(not(target_arch = "x86_64"))]
+fn sse2_power(_: &mut [[f32; 4]], _: f32, _: f32, _: f32) {}
+#[cfg(not(target_arch = "x86_64"))]
+fn sse2_linear(_: &mut [[f32; 4]], _: f32, _: f32) {}
 
 /// Implements [`CpuOp`]'s dynamic property methods with the renderer's base.
 macro_rules! base_dynamic_properties {
@@ -411,10 +516,12 @@ impl EcLogarithmicRenderer {
     }
 }
 
-impl CpuOp for EcLogarithmicRenderer {
-    /// Port of `ECLogarithmicRenderer::apply` (ExposureContrastOpCPU.cpp:577-632 @ v2.5.2),
-    /// its `OCIO_USE_SSE2` branch.
-    fn apply(&self, rgba: &mut [f32]) {
+impl EcLogarithmicRenderer {
+    /// `contrast` and `offset` of `out = in * contrast + offset`.
+    ///
+    /// Port of the first lines of `ECLogarithmicRenderer::apply`
+    /// (ExposureContrastOpCPU.cpp:577-602 @ v2.5.2).
+    fn line(&self) -> (f32, f32) {
         let exposure_val = sse_mul(
             self.base.exposure.get_value() as f32,
             self.base.log_exposure_step,
@@ -429,13 +536,22 @@ impl CpuOp for EcLogarithmicRenderer {
         // out = ( (in + expos) - pivot ) * contrast + pivot
         // Rearrange as:
         // out = [in * contrast] + [(expos - pivot) * contrast + pivot]
-        for px in rgba.as_chunks_mut::<4>().0 {
-            for v in &mut px[..3] {
-                // out = ( in * contrast ) + offset, the wheel's _mm_add_ps with the product
-                // first.
-                *v = sse_add(sse_mul(*v, contrast_val), offset_val);
-            }
-        }
+        (contrast_val, offset_val)
+    }
+}
+
+impl CpuOp for EcLogarithmicRenderer {
+    /// Port of `ECLogarithmicRenderer::apply` (ExposureContrastOpCPU.cpp:577-632 @ v2.5.2),
+    /// its `OCIO_USE_SSE2` branch.
+    fn apply(&self, rgba: &mut [f32]) {
+        let (contrast_val, offset_val) = self.line();
+        // out = ( in * contrast ) + offset, the wheel's _mm_add_ps with the product first.
+        linear_rgb(rgba, contrast_val, offset_val);
+    }
+
+    fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
+        let (contrast_val, offset_val) = self.line();
+        linear_between(input, output, contrast_val, offset_val);
     }
 
     base_dynamic_properties!();
@@ -461,9 +577,12 @@ impl EcLogarithmicRevRenderer {
     }
 }
 
-impl CpuOp for EcLogarithmicRevRenderer {
-    /// Port of `ECLogarithmicRevRenderer::apply` (ExposureContrastOpCPU.cpp:659-685 @ v2.5.2).
-    fn apply(&self, rgba: &mut [f32]) {
+impl EcLogarithmicRevRenderer {
+    /// `inv_contrast` and `neg_offset` of `out = in * inv_contrast + neg_offset`.
+    ///
+    /// Port of the first lines of `ECLogarithmicRevRenderer::apply`
+    /// (ExposureContrastOpCPU.cpp:659-676 @ v2.5.2).
+    fn line(&self) -> (f32, f32) {
         let exposure_val = sse_mul(
             self.base.exposure.get_value() as f32,
             self.base.log_exposure_step,
@@ -477,12 +596,21 @@ impl CpuOp for EcLogarithmicRevRenderer {
             exposure_val,
         );
 
-        for px in rgba.as_chunks_mut::<4>().0 {
-            for v in &mut px[..3] {
-                // out = ( in * inv_contrast ) + neg_offset
-                *v = sse_add(sse_mul(*v, inv_contrast_val), neg_offset_val);
-            }
-        }
+        (inv_contrast_val, neg_offset_val)
+    }
+}
+
+impl CpuOp for EcLogarithmicRevRenderer {
+    /// Port of `ECLogarithmicRevRenderer::apply` (ExposureContrastOpCPU.cpp:659-685 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        let (inv_contrast_val, neg_offset_val) = self.line();
+        // out = ( in * inv_contrast ) + neg_offset
+        linear_rgb(rgba, inv_contrast_val, neg_offset_val);
+    }
+
+    fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
+        let (inv_contrast_val, neg_offset_val) = self.line();
+        linear_between(input, output, inv_contrast_val, neg_offset_val);
     }
 
     base_dynamic_properties!();

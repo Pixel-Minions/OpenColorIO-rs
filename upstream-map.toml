@@ -1285,7 +1285,7 @@ note = "p5-ec 5.1b: CreateExposureContrastOp; p5-transforms 5.5a: CreateExposure
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu.rs", "crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu_sse2.rs"]
 status = "done"
 
 [[file]]

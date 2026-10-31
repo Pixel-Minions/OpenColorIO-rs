@@ -273,6 +273,13 @@ impl Family for EcFamily {
     fn name(&self) -> String {
         "ExposureContrastTransform".to_string()
     }
+    fn extra_probes(
+        &self,
+        _: &EcParams,
+        _: ocio_testkit::battery::Direction,
+    ) -> Vec<ocio_testkit::probe::ProbeSet> {
+        vec![ocio_testkit::probe::ProbeSet::FiniteRows]
+    }
 
     fn cases(&self) -> Vec<Case<EcParams>> {
         explicit_cases()
