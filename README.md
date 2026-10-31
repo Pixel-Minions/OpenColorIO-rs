@@ -8,14 +8,14 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and Python.
 
-> **Status: under development, about 84% done.** Milestones M0 (the op engine and the analytic
+> **Status: under development, about 93% done.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker), M3 (dynamic properties,
 > grading and app helpers), and M4 (the `PyOpenColorIO` Python module) are complete.
 > CPU results and generated GPU shaders match the official library. All 384 upstream
 > Python tests pass unmodified; SystemMonitors and complete module metadata are checked
 > on Windows and Rocky Linux 9, within the approved [D-16 scope](docs/deviations.md).
-> Next: remaining library tests, legacy GPU parity, SIMD performance, tools and release work
+> Next: remaining library tests, legacy GPU parity, SIMD performance, `ociobakelut` ICC output and release work
 > (M5). See [Progress](#progress).
 
 ## How precise: byte for byte
