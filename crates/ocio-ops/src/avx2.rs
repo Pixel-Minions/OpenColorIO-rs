@@ -17,6 +17,29 @@ pub fn mm256_fmadd_ps(a: f32, b: f32, c: f32) -> f32 {
     a.mul_add(b, c)
 }
 
+/// [`crate::sse2::blocks::block_is_finite`], two pixels at a time.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+pub(crate) fn block_is_finite(pixels: &[[f32; 4]]) -> bool {
+    use core::arch::x86_64::*;
+
+    let (pairs, last) = pixels.as_chunks::<2>();
+    let exponent = _mm256_set1_epi32(0x7f80_0000);
+    let mut largest = _mm256_setzero_si256();
+    for pair in pairs {
+        // SAFETY: `pair` holds the 32 bytes this reads, at any alignment.
+        let value = unsafe { _mm256_loadu_si256(pair.as_ptr().cast()) };
+        largest = _mm256_max_epi16(largest, _mm256_and_si256(value, exponent));
+    }
+    for pixel in last {
+        // SAFETY: `pixel` holds the 16 bytes this reads, at any alignment.
+        let value = unsafe { _mm_loadu_si128(pixel.as_ptr().cast()) };
+        let value = _mm256_zextsi128_si256(value);
+        largest = _mm256_max_epi16(largest, _mm256_and_si256(value, exponent));
+    }
+    _mm256_movemask_epi8(_mm256_cmpeq_epi32(largest, exponent)) == 0
+}
+
 /// One value of `AVX2RGBAPack<BD>::Load` (src/OpenColorIO/AVX2.h:70-300 @ v2.5.2): as
 /// [`crate::sse2::rgba_pack_load`], with F16C for halves.
 pub fn avx2_rgba_pack_load(depth: crate::sse2::PackDepth, raw: u32) -> f32 {

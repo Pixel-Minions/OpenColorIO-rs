@@ -12,6 +12,8 @@
 //! kernel's arithmetic exactly. The [`intrinsics`] module transcribes the same functions with
 //! the real SSE2 instructions, to prove the scalar lanes against the hardware.
 //!
+//! The [`blocks`] module holds what the real SIMD fast paths share (`docs/cards/phase8.md`).
+//!
 //! `unsafe` is allowed in this module for SIMD intrinsics only.
 #![allow(unsafe_code)]
 
@@ -219,6 +221,87 @@ pub fn sse2_rgba_pack_load(depth: PackDepth, raw: u32) -> f32 {
 /// One value of `SSE2RGBAPack<BD>::Store` (src/OpenColorIO/SSE2.h:198-401 @ v2.5.2).
 pub fn sse2_rgba_pack_store(depth: PackDepth, value: f32) -> u32 {
     rgba_pack_store(depth, value, HalfConversion::Sse2)
+}
+
+/// What the renderers' real SIMD fast paths share (`docs/cards/phase8.md`).
+///
+/// Rust's `_mm_add_ps` and `_mm_mul_ps` are LLVM's commutative `fadd` and `fmul`, so they don't
+/// fix which NaN comes out where two meet, as x86's `addps` and C++'s intrinsics do. A renderer
+/// therefore keeps its exact lanes, and sends a block of pixels to its fast path only when
+/// every value in the block is finite. The renderer's own coefficients must be finite too.
+/// Then the only NaN its arithmetic can make is x86's default NaN, and which of two default
+/// NaNs comes out doesn't change a bit.
+///
+/// A block holding a NaN or an infinity takes the exact lanes.
+#[cfg(target_arch = "x86_64")]
+pub mod blocks {
+    use core::arch::x86_64::*;
+
+    /// The pixels of a block. One special value sends all of its block to the exact lanes.
+    pub const BLOCK_PIXELS: usize = 32;
+
+    /// A pixel as an SSE register.
+    #[inline]
+    pub fn load(pixel: &[f32; 4]) -> __m128 {
+        // SAFETY: `pixel` holds the four floats `_mm_loadu_ps` reads, at any alignment, and
+        // x86-64 has SSE.
+        unsafe { _mm_loadu_ps(pixel.as_ptr()) }
+    }
+
+    /// Writes an SSE register to a pixel.
+    #[inline]
+    pub fn store(pixel: &mut [f32; 4], value: __m128) {
+        // SAFETY: `pixel` holds the four floats `_mm_storeu_ps` writes, at any alignment, and
+        // x86-64 has SSE.
+        unsafe { _mm_storeu_ps(pixel.as_mut_ptr(), value) }
+    }
+
+    /// Whether every value of `pixels` is finite: its exponent bits aren't all ones.
+    #[inline]
+    pub fn block_is_finite(pixels: &[[f32; 4]]) -> bool {
+        if std::arch::is_x86_feature_detected!("avx2") {
+            // SAFETY: the CPU has AVX2.
+            return unsafe { crate::avx2::block_is_finite(pixels) };
+        }
+        block_is_finite_sse2(pixels)
+    }
+
+    /// [`block_is_finite`] for every x86-64 CPU, one pixel at a time.
+    #[inline]
+    pub fn block_is_finite_sse2(pixels: &[[f32; 4]]) -> bool {
+        #[inline]
+        #[target_feature(enable = "sse2")]
+        fn check(pixels: &[[f32; 4]]) -> bool {
+            // The exponent is in the upper 16 bits of each value, where 0x7f80 is the largest
+            // signed value the mask leaves, so one maximum keeps it (the lower 16 are 0).
+            let exponent = _mm_set1_epi32(0x7f80_0000);
+            let mut largest = _mm_setzero_si128();
+            for pixel in pixels {
+                let bits = _mm_and_si128(_mm_castps_si128(load(pixel)), exponent);
+                largest = _mm_max_epi16(largest, bits);
+            }
+            _mm_movemask_epi8(_mm_cmpeq_epi32(largest, exponent)) == 0
+        }
+        // SAFETY: x86-64 has SSE2.
+        unsafe { check(pixels) }
+    }
+
+    /// Cuts `pixels` into blocks: `fast` renders the finite ones, `exact` the others, with the
+    /// index in `pixels` of the block's first pixel.
+    #[inline]
+    pub fn for_each_block(
+        pixels: &mut [[f32; 4]],
+        mut fast: impl FnMut(&mut [[f32; 4]]),
+        mut exact: impl FnMut(&mut [[f32; 4]], usize),
+    ) {
+        for (index, block) in pixels.chunks_mut(BLOCK_PIXELS).enumerate() {
+            if block_is_finite(block) {
+                fast(block);
+            } else {
+                exact(block, index * BLOCK_PIXELS);
+            }
+        }
+    }
 }
 
 /// The same functions written with SSE2 intrinsics, instruction for instruction as in

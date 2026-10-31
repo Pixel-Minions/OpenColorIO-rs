@@ -29,14 +29,26 @@
 //!
 //! The port computes each operation with [`sse_mul`] and [`sse_add`] in those orders, per
 //! platform (PLAN.md D12) and, on Windows, per loop.
+//!
+//! # SSE2 fast paths
+//!
+//! Those lanes branch on every operand. With finite coefficients, a block of finite pixels takes
+//! the real SSE2 kernels of `matrix_op_cpu_sse2` instead (`crate::sse2::blocks`): the only NaN
+//! they can make is x86's default NaN (`Inf * 0` and `Inf - Inf`, after an overflow), and nothing
+//! here changes its sign, so the operand orders above can't show. Any other block takes the
+//! lanes, at its pixels' indices in the row, which the Windows order depends on.
 
 use std::sync::Arc;
 
+#[cfg(target_arch = "x86_64")]
+use super::matrix_op_cpu_sse2 as sse2;
 use super::matrix_op_data::MatrixOpData;
 use crate::exception::{Exception, Result};
 use crate::math_utils::{sse_add, sse_mul};
 use crate::op::CpuOp;
 use crate::open_color_types::TransformDirection;
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::blocks::for_each_block;
 
 /// Whether the wheel's `apply` of `num_pixels` pixels processes the one at `index` in MSVC's
 /// loop that finishes the last `num_pixels % 4` pixels, after its four-pixel loop. Always
@@ -62,6 +74,21 @@ impl ScaleRenderer {
             scale: [m[0] as f32, m[5] as f32, m[10] as f32, m[15] as f32],
         }
     }
+
+    /// The exact lanes, for `pixels`, which start at pixel `first` of a row of `num_pixels`.
+    fn apply_exact(&self, pixels: &mut [[f32; 4]], first: usize, num_pixels: usize) {
+        let s = &self.scale;
+        for (index, px) in pixels.iter_mut().enumerate() {
+            px[0] = sse_mul(px[0], s[0]);
+            px[1] = sse_mul(px[1], s[1]);
+            px[2] = if in_msvc_remainder(first + index, num_pixels) {
+                sse_mul(s[2], px[2])
+            } else {
+                sse_mul(px[2], s[2])
+            };
+            px[3] = sse_mul(px[3], s[3]);
+        }
+    }
 }
 
 impl CpuOp for ScaleRenderer {
@@ -69,17 +96,17 @@ impl CpuOp for ScaleRenderer {
     /// operand orders (module docs).
     fn apply(&self, rgba: &mut [f32]) {
         let num_pixels = rgba.len() / 4;
-        let s = &self.scale;
-        for (index, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            px[0] = sse_mul(px[0], s[0]);
-            px[1] = sse_mul(px[1], s[1]);
-            px[2] = if in_msvc_remainder(index, num_pixels) {
-                sse_mul(s[2], px[2])
-            } else {
-                sse_mul(px[2], s[2])
-            };
-            px[3] = sse_mul(px[3], s[3]);
+        let pixels = rgba.as_chunks_mut::<4>().0;
+        #[cfg(target_arch = "x86_64")]
+        if all_finite(&self.scale) {
+            for_each_block(
+                pixels,
+                |block| sse2::scale(block, &self.scale),
+                |block, first| self.apply_exact(block, first, num_pixels),
+            );
+            return;
         }
+        self.apply_exact(pixels, 0, num_pixels);
     }
 }
 
@@ -106,18 +133,14 @@ impl ScaleWithOffsetRenderer {
             offset: [o[0] as f32, o[1] as f32, o[2] as f32, o[3] as f32],
         }
     }
-}
 
-impl CpuOp for ScaleWithOffsetRenderer {
-    /// Port of `ScaleWithOffsetRenderer::apply` (MatrixOpCPU.cpp:125-140 @ v2.5.2), with the
-    /// wheels' operand orders (module docs).
-    fn apply(&self, rgba: &mut [f32]) {
-        let num_pixels = rgba.len() / 4;
+    /// The exact lanes, for `pixels`, which start at pixel `first` of a row of `num_pixels`.
+    fn apply_exact(&self, pixels: &mut [[f32; 4]], first: usize, num_pixels: usize) {
         let (s, o) = (&self.scale, &self.offset);
-        for (index, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        for (index, px) in pixels.iter_mut().enumerate() {
             px[0] = sse_add(sse_mul(px[0], s[0]), o[0]);
             px[1] = sse_add(sse_mul(px[1], s[1]), o[1]);
-            let blue = if in_msvc_remainder(index, num_pixels) {
+            let blue = if in_msvc_remainder(first + index, num_pixels) {
                 sse_mul(s[2], px[2])
             } else {
                 sse_mul(px[2], s[2])
@@ -126,6 +149,31 @@ impl CpuOp for ScaleWithOffsetRenderer {
             px[3] = sse_add(sse_mul(px[3], s[3]), o[3]);
         }
     }
+}
+
+impl CpuOp for ScaleWithOffsetRenderer {
+    /// Port of `ScaleWithOffsetRenderer::apply` (MatrixOpCPU.cpp:125-140 @ v2.5.2), with the
+    /// wheels' operand orders (module docs).
+    fn apply(&self, rgba: &mut [f32]) {
+        let num_pixels = rgba.len() / 4;
+        let pixels = rgba.as_chunks_mut::<4>().0;
+        #[cfg(target_arch = "x86_64")]
+        if all_finite(&self.scale) && all_finite(&self.offset) {
+            for_each_block(
+                pixels,
+                |block| sse2::scale_with_offset(block, &self.scale, &self.offset),
+                |block, first| self.apply_exact(block, first, num_pixels),
+            );
+            return;
+        }
+        self.apply_exact(pixels, 0, num_pixels);
+    }
+}
+
+/// Whether every value is finite, as a fast path needs (module docs).
+#[cfg(target_arch = "x86_64")]
+fn all_finite(values: &[f32; 4]) -> bool {
+    values.iter().all(|v| v.is_finite())
 }
 
 /// The matrix's columns as the renderers keep them: `columns[j][i]` is `m[i][j]`, the
@@ -190,6 +238,18 @@ impl MatrixWithOffsetRenderer {
             offset: [o[0] as f32, o[1] as f32, o[2] as f32, o[3] as f32],
         }
     }
+
+    /// The exact lanes, for `pixels`, which start at pixel `first` of a row of `num_pixels`.
+    fn apply_exact(&self, pixels: &mut [[f32; 4]], first: usize, num_pixels: usize) {
+        for (index, px) in pixels.iter_mut().enumerate() {
+            let remainder = in_msvc_remainder(first + index, num_pixels);
+            let input = *px;
+            for (i, out) in px.iter_mut().enumerate() {
+                let [rm0, gm1, bm2, am3] = products(input, &self.columns, i);
+                *out = sse_add(matrix_sum(rm0, gm1, bm2, am3, remainder), self.offset[i]);
+            }
+        }
+    }
 }
 
 impl CpuOp for MatrixWithOffsetRenderer {
@@ -198,14 +258,17 @@ impl CpuOp for MatrixWithOffsetRenderer {
     /// docs).
     fn apply(&self, rgba: &mut [f32]) {
         let num_pixels = rgba.len() / 4;
-        for (index, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let remainder = in_msvc_remainder(index, num_pixels);
-            let input = *px;
-            for (i, out) in px.iter_mut().enumerate() {
-                let [rm0, gm1, bm2, am3] = products(input, &self.columns, i);
-                *out = sse_add(matrix_sum(rm0, gm1, bm2, am3, remainder), self.offset[i]);
-            }
+        let pixels = rgba.as_chunks_mut::<4>().0;
+        #[cfg(target_arch = "x86_64")]
+        if self.columns.iter().all(all_finite) && all_finite(&self.offset) {
+            for_each_block(
+                pixels,
+                |block| sse2::matrix_with_offset(block, &self.columns, &self.offset),
+                |block, first| self.apply_exact(block, first, num_pixels),
+            );
+            return;
         }
+        self.apply_exact(pixels, 0, num_pixels);
     }
 }
 
@@ -225,6 +288,18 @@ impl MatrixRenderer {
             columns: columns(mat),
         }
     }
+
+    /// The exact lanes, for `pixels`, which start at pixel `first` of a row of `num_pixels`.
+    fn apply_exact(&self, pixels: &mut [[f32; 4]], first: usize, num_pixels: usize) {
+        for (index, px) in pixels.iter_mut().enumerate() {
+            let remainder = in_msvc_remainder(first + index, num_pixels);
+            let input = *px;
+            for (i, out) in px.iter_mut().enumerate() {
+                let [rm0, gm1, bm2, am3] = products(input, &self.columns, i);
+                *out = matrix_sum(rm0, gm1, bm2, am3, remainder);
+            }
+        }
+    }
 }
 
 impl CpuOp for MatrixRenderer {
@@ -232,14 +307,17 @@ impl CpuOp for MatrixRenderer {
     /// the wheels' operand orders (module docs).
     fn apply(&self, rgba: &mut [f32]) {
         let num_pixels = rgba.len() / 4;
-        for (index, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-            let remainder = in_msvc_remainder(index, num_pixels);
-            let input = *px;
-            for (i, out) in px.iter_mut().enumerate() {
-                let [rm0, gm1, bm2, am3] = products(input, &self.columns, i);
-                *out = matrix_sum(rm0, gm1, bm2, am3, remainder);
-            }
+        let pixels = rgba.as_chunks_mut::<4>().0;
+        #[cfg(target_arch = "x86_64")]
+        if self.columns.iter().all(all_finite) {
+            for_each_block(
+                pixels,
+                |block| sse2::matrix(block, &self.columns),
+                |block, first| self.apply_exact(block, first, num_pixels),
+            );
+            return;
         }
+        self.apply_exact(pixels, 0, num_pixels);
     }
 }
 
