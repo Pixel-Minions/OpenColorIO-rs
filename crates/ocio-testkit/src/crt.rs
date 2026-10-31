@@ -58,6 +58,8 @@ mod ffi {
         pub(super) fn strtod(s: *const c_char, end: *mut *mut c_char) -> c_double;
         pub(super) fn strtof(s: *const c_char, end: *mut *mut c_char) -> c_float;
         pub(super) fn strtol(s: *const c_char, end: *mut *mut c_char, base: c_int) -> c_long;
+        pub(super) fn atoi(s: *const c_char) -> c_int;
+        pub(super) fn atof(s: *const c_char) -> c_double;
         pub(super) fn strtoul(s: *const c_char, end: *mut *mut c_char, base: c_int) -> c_ulong;
         pub(super) fn frexp(x: c_double, exp: *mut c_int) -> c_double;
         pub(super) fn pow(x: c_double, y: c_double) -> c_double;
@@ -336,6 +338,29 @@ pub fn strtod_c(input: &[u8]) -> Strto<f64> {
 pub fn strtof_c(input: &[u8]) -> Strto<f32> {
     // SAFETY: as in `strtod_c`.
     strto(input, |s, end| unsafe { ffi::strtof(s, end) })
+}
+
+/// `input` as a C string: the bytes up to the first NUL (or all of them), and a NUL.
+fn c_string_of_bytes(input: &[u8]) -> Vec<u8> {
+    let len = input.iter().position(|&b| b == 0).unwrap_or(input.len());
+    let mut buf = Vec::with_capacity(len + 1);
+    buf.extend_from_slice(&input[..len]);
+    buf.push(0);
+    buf
+}
+
+/// `atoi(input)` in the "C" locale.
+pub fn atoi_c(input: &[u8]) -> i32 {
+    let buf = c_string_of_bytes(input);
+    // SAFETY: `buf` is NUL-terminated.
+    unsafe { ffi::atoi(buf.as_ptr().cast::<c_char>()) }
+}
+
+/// `atof(input)` in the "C" locale.
+pub fn atof_c(input: &[u8]) -> f64 {
+    let buf = c_string_of_bytes(input);
+    // SAFETY: `buf` is NUL-terminated.
+    unsafe { ffi::atof(buf.as_ptr().cast::<c_char>()) }
 }
 
 /// `strtol(input, &end, base)` in the "C" locale. `long` is 32 bits on Windows and 64 bits

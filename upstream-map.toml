@@ -2678,19 +2678,22 @@ note = "build system"
 path = "src/apps/ociobakelut/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociobakelut.rs"]
-status = "todo"
+status = "partial"
+note = "all but the call of SaveICCProfileToFile, which ocioicc.cpp holds"
 
 [[file]]
 path = "src/apps/ociobakelut/ocioicc.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociobakelut.rs"]
 status = "todo"
+note = "needs lcms2 or a translation of it: the owner decides (docs/cards/phase10-tools.md)"
 
 [[file]]
 path = "src/apps/ociobakelut/ocioicc.h"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociobakelut.rs"]
 status = "todo"
+note = "needs lcms2 or a translation of it: the owner decides (docs/cards/phase10-tools.md)"
 
 [[file]]
 path = "src/apps/ociocheck/CMakeLists.txt"
@@ -2702,7 +2705,7 @@ note = "build system"
 path = "src/apps/ociocheck/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociocheck.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/apps/ociochecklut/CMakeLists.txt"
@@ -2714,7 +2717,8 @@ note = "build system"
 path = "src/apps/ociochecklut/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociochecklut.rs"]
-status = "todo"
+status = "done"
+note = "built without OCIO_GPU_ENABLED, as both wheels are"
 
 [[file]]
 path = "src/apps/ocioconvert/CMakeLists.txt"
@@ -3374,7 +3378,7 @@ note = "build system"
 path = "src/apps/ociowrite/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociowrite.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/apps/pyocioamf/pyocioamf.py"
@@ -3398,43 +3402,48 @@ note = "build system"
 path = "src/apputils/argparse.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/argparse.rs"]
-status = "todo"
+status = "done"
+note = "command_line, found and error_message are left out: no ported tool calls them"
 
 [[file]]
 path = "src/apputils/argparse.h"
 kind = "app"
 target = ["crates/ocio-tools/src/argparse.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/apputils/logGuard.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/log_guard.rs"]
-status = "todo"
+status = "done"
+note = "clear and empty are left out: no ported tool calls them"
 
 [[file]]
 path = "src/apputils/logGuard.h"
 kind = "app"
 target = ["crates/ocio-tools/src/log_guard.rs"]
-status = "todo"
+status = "done"
+note = "clear and empty are left out: no ported tool calls them"
 
 [[file]]
 path = "src/apputils/measure.h"
 kind = "app"
 target = ["crates/ocio-tools/src/measure.rs"]
-status = "todo"
+status = "n/a"
+note = "used only by ocioconvert, ocioperf and ociolutimage, which are out of scope (PLAN.md §4)"
 
 [[file]]
 path = "src/apputils/strutil.cpp"
 kind = "app"
-target = ["crates/ocio-tools/src/strutil.rs"]
-status = "todo"
+target = ["crates/ocio-tools/src/argparse.rs"]
+status = "done"
+note = "vformat only formats ArgParse::error messages, which argparse.rs puts together directly"
 
 [[file]]
 path = "src/apputils/strutil.h"
 kind = "app"
-target = ["crates/ocio-tools/src/strutil.rs"]
-status = "todo"
+target = ["crates/ocio-tools/src/argparse.rs"]
+status = "done"
 
 [[file]]
 path = "src/bindings/CMakeLists.txt"

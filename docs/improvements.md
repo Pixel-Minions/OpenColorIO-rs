@@ -4317,6 +4317,129 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in p9-monitors (9.3a), `system_monitor_windows.rs`, including the fallback;
   same-machine monitor-list and instantiated-config checks in `config_monitor_tests.rs`.
 
+## Dev tools
+
+### I-600. The tools' argument parser
+
+- **Upstream:** `ArgParse` (`src/apputils/argparse.cpp:319-363, 214-254 @ v2.5.2`) takes
+  whatever follows an option as its parameters, without looking at it: `--file --v` writes to a
+  file named `--v`. Numbers go through `atoi` and `atof`, which give 0 for text that isn't a
+  number and don't report it. Past 32 bits, `atoi` differs per platform, since `long` does:
+  UCRT clamps to `INT_MAX`, and glibc clamps to a 64-bit `long` and then keeps the low 32 bits.
+  An argument starting with `-` and a letter is always an option, so `ociochecklut x.cube -inf 0
+  0` fails with `Invalid option`, where `-1 0 0` is a pixel. One dash and two are interchangeable
+  (`-file`, `--t`), and `--` and `---x` are invalid options.
+- **Who notices:** anyone who mistypes a command line; a script that passes `-inf`.
+- **A fix:** refuse a missing parameter and text that isn't a number. That changes what the
+  tools accept.
+- **Status:** matched (card phase10-tools).
+
+### I-601. The tools' non-ASCII arguments on Windows
+
+- **Upstream:** `main(int, const char **)` receives the arguments in the Windows ANSI code page,
+  whatever the characters. They print in that code page, a path passed to `std::ofstream` is
+  read in that code page, and one passed to the library is read as UTF-8
+  (`Platform::Utf8ToUtf16`), so a non-ASCII path that the tools can write may not be one the
+  library can read. On Linux the bytes pass through.
+- **Who notices:** Windows users with names or paths outside ASCII.
+- **A fix:** what the port does: it takes the arguments in Unicode and uses UTF-8 throughout.
+- **Status:** not matched, by the owner's decision of 2026-10-31: deviation D-17
+  (`docs/deviations.md`), with its measured table, and waiver W0019. Linux matches.
+
+### I-602. `ociocheck` and `ociobakelut` can't report a missing config
+
+- **Upstream:** both test `OCIO::GetEnvVariable("OCIO")` as a pointer, which is never null
+  (`src/OpenColorIO/Config.cpp:GetEnvVariable @ v2.5.2`), so their branch that says "You must
+  specify an input OCIO configuration" is dead (`src/apps/ociocheck/main.cpp:155-169`,
+  `src/apps/ociobakelut/main.cpp:263-278 @ v2.5.2`). Without `$OCIO` and without `--iconfig`
+  they load `Config::CreateFromEnv`, the raw config, and report on that.
+- **Who notices:** anyone who runs them with no config: `ociocheck` passes.
+- **A fix:** test for an empty string. The message would then appear where it was meant to.
+- **Status:** matched (card phase10-tools).
+
+### I-603. `ociocheck` can't see an error in the validation log
+
+- **Upstream:** after `Config::validate`, `src/apps/ociocheck/main.cpp:639-650 @ v2.5.2` looks for
+  errors with `StringUtils::Contain(svec, "[OpenColorIO Error]")`. That compares whole lines,
+  and a log line always goes on after the prefix, so the test is never true and `Validation:
+  failed` comes only from an exception. The same comparison ignores case.
+- **Who notices:** configs whose validation logs an error without throwing: `ociocheck` prints
+  `Validation: passed`, and the log above it shows the error.
+- **A fix:** search each line for the text. Such configs would then fail `ociocheck`.
+- **Status:** matched (card phase10-tools).
+
+### I-605. The tools' help and error output disagree with each other
+
+- **Upstream:** `--help` exits with 1 in `ociowrite`, `ociocheck` and `ociobakelut`
+  (`src/apps/ociowrite/main.cpp:73-77`, `ociocheck/main.cpp:131-136`,
+  `ociobakelut/main.cpp:125-130 @ v2.5.2`), and with 0 in `ociochecklut`
+  (`ociochecklut/main.cpp:216-233`). A bad command line prints its error on stderr in `ociowrite`
+  and on stdout in the other three. `ociochecklut` prints transforms on `std::cout`, so that a
+  `MatrixTransform` (I-73) raises the precision of every transform after it, for the rest of the
+  run, also between pixels with `-s`.
+- **Who notices:** scripts that test a tool's exit code or capture its help or errors.
+- **A fix:** exit with 0 from `--help`, send errors to stderr, restore the stream's precision.
+- **Status:** matched (card phase10-tools).
+
+### I-606. `ociobakelut` ends when a config doesn't load
+
+- **Upstream:** `src/apps/ociobakelut/main.cpp:261, 270 @ v2.5.2` calls `Config::CreateFromFile` and
+  `Config::CreateFromEnv` outside `main`'s `try` blocks, so a config that doesn't load is an
+  uncaught exception, and `std::terminate` ends the process. On Linux libstdc++ prints `terminate
+  called after throwing an instance of 'OpenColorIO_v2_5::Exception'` and a `what():` line, and the
+  process dies of SIGABRT. On Windows nothing is printed and the exit status is `0xC0000409`. What
+  `std::cout` still held is lost on both.
+- **Who notices:** anyone who gives `ociobakelut` a missing or broken config.
+- **A fix:** move the two calls inside the `try`, which would print the error and exit with 1.
+- **Status:** matched (card phase10-tools, `ociobakelut_oracle.rs`,
+  `an_exception_upstream_does_not_catch`).
+
+### I-608. Windows paths over `MAX_PATH` in the tools
+
+- **Upstream:** the wheel's `.exe` files have no `longPathAware` manifest, so the system refuses
+  their paths of 260 characters and more, even with `LongPathsEnabled=1`. `python.exe` has that
+  manifest, so the same library handles such paths in the Python module. The port's tools go through
+  Rust's `std`, which turns a long path into a verbatim one, and through the library's reads.
+  Measured on Windows with an output or input path of about 330 characters:
+
+  | Case | Wheel | Port |
+  |---|---|---|
+  | `ociowrite --file` | "Could not open file", exit 1 | writes the file, exit 0 |
+  | `ociobakelut` output | "Non-writable file path", exit 1 | writes the file |
+  | `ociocheck --oconfig` | "Error opening" | "Wrote" |
+  | `ociocheck --iconfig`, `ociochecklut` | can't read the file | reads it |
+
+- **Who notices:** Windows users with paths past the limit: the port's tools work where the wheel's
+  fail.
+- **A fix:** what the port does: upstream could add the manifest entry.
+- **Status:** not matched, by the owner's decision of 2026-10-31: deviation D-18
+  (`docs/deviations.md`), and waiver W0020. Linux has no such limit.
+
+### I-609. `tool --stdout | head -c 3` with mid-size output, on Linux
+
+- **Upstream:** a C++ tool whose reader goes away while it still has output to write dies of
+  SIGPIPE, and a shell reports 141. The port's tools inherit SIGPIPE as the C++ tools do
+  (`crates/ocio-tools/src/sigpipe.rs`), so the closed-pipe and ignored cases match the wheel. One
+  difference remains, in a shell pipeline where `head` stops reading while the tool is running.
+  Measured in Rocky Linux 9, `PIPESTATUS`, wheel and port:
+
+  | Output | Wheel | Port |
+  |---|---|---|
+  | `ociobakelut` spi1d, up to 3.1 KB | 0 | 0 |
+  | spi3d, cube 5, 4.1 KB | 141 in 27 of 30 | 0 in 30 of 30 |
+  | spi1d, 4.7 KB | 141 in 30 of 30 | 0 in 30 of 30 |
+  | spi1d 12 to 62 KB, spi3d cube 9, 24 KB | 141 in 30 of 30 | 0 in 30 of 30 |
+  | spi1d 93 KB, spi3d 74 KB and up | 141 | 141 |
+  | `ociochecklut --help`, 1.5 KB | racy: 141 in 26 of 30 | 141 in 2 of 30 |
+
+- **Who notices:** scripts on Linux that read the status of a tool cut off by `head`, for outputs
+  of a few to about 90 KB. The bytes `head` passes on are the same.
+- **A fix:** none known. The cause is unproven: a `COUT_BUFFER` of 4096 or 1024 and splitting
+  writes at 4096 bytes changed nothing. The likely cause is timing: the wheel writes while it
+  formats, and the port may write in one burst.
+- **Status:** open: not matched (card phase10-tools). The closed-pipe and ignored cases match, and
+  `sigpipe_oracle.rs` compares them with the wheel.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

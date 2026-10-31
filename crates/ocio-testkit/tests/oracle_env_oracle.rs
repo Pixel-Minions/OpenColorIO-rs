@@ -94,7 +94,7 @@ fn the_oracle_and_its_children_see_only_allowed_variables() {
 }
 
 /// The modules of the oracle that start processes, each with `subprocess.run`.
-const STARTS_PROCESSES: [&str; 10] = [
+const STARTS_PROCESSES: [&str; 11] = [
     "env_api.py",
     "file_rules_api.py",
     "foundations.py",
@@ -105,6 +105,7 @@ const STARTS_PROCESSES: [&str; 10] = [
     "py_eval_api.py",
     "py_suite_api.py",
     "py_surface_api.py",
+    "tools_api.py",
 ];
 
 /// The other ways Python starts a process, which the oracle's sources never use.

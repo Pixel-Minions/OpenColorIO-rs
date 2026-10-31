@@ -96,7 +96,8 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 /// them, `sse_tests.rs`, coordinator's decision 2026-10-21), the test kit's FFI to the
 /// platform C runtime (the reference for C formatting and parsing), the one file that calls
 /// `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as minizip-ng does (owner
-/// decisions 2026-10-17), the one Windows monitor FFI file (P9-3, owner2026-10-23), and,
+/// decisions 2026-10-17), the one Windows monitor FFI file (P9-3, owner2026-10-23), the one
+/// Linux file that gives the tools the SIGPIPE they inherit (owner, 2026-10-31), and,
 /// for the Python binding, the crate `ocio-py-ffi`, one file that
 /// calls `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
 /// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), `PyType_GetSlot` for four number
@@ -113,6 +114,8 @@ fn unsafe_allowed(rel: &str) -> bool {
         || rel == "crates/ocio-testkit/src/crt.rs"
         || rel == "crates/ocio/src/minizip/os_windows_ffi.rs"
         || rel == "crates/ocio/src/system_monitor_windows_ffi.rs"
+        // Inherit SIGPIPE as the C++ tools do (owner, 2026-10-31), one Linux file.
+        || rel == "crates/ocio-tools/src/sigpipe.rs"
         // P7-2 (owner, 2026-10-25): the test-only EGL/OpenGL harness, two files.
         || rel == "crates/ocio-gpu-exec/src/oglapp.rs"
         || rel == "crates/ocio-gpu-exec/src/glsl.rs"
@@ -2838,6 +2841,7 @@ workspace = true
         for rel in [
             "crates/ocio-testkit/src/crt.rs",
             "crates/ocio/src/minizip/os_windows_ffi.rs",
+            "crates/ocio-tools/src/sigpipe.rs",
             "crates/ocio-gpu-exec/src/oglapp.rs",
             "crates/ocio-gpu-exec/src/glsl.rs",
             "crates/ocio-ops/src/sse.rs",
