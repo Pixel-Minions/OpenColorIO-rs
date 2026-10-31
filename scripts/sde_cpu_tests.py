@@ -22,6 +22,19 @@ PREFIX_KEY = 'OCIO_RS_SDE_EXEC_PREFIX_JSON'
 REPORT_KEY = 'OCIO_RS_SDE_EXEC_REPORT_ROOT'
 SHARD_KEY = 'OCIO_RS_SDE_SHARD'
 
+# Original quick-tier input plans in crates/ocio/tests/legacy_gpu_oracle.rs:
+# 1680 / 2000 / 1680 / 1680 requests, rather than hash-only 0 / 980 / 2000 / 4060.
+# Leave the previously heaviest observed bucket (2) the boundary/refusal-heavy cases.
+LEGACY_FOUR_WAY = {
+    'small_legacy_lattices_and_cache_order_match_native_wheel': 0,
+    'legacy_allocation_cuts_and_file_boundaries_match_native_wheel': 1,
+    'legacy_mixed_lut_range_and_alpha_lattices_match_native_wheel': 1,
+    'legacy_large_lattice_values_match_native_wheel': 1,
+    'legacy_boundary_edges_match_native_wheel': 2,
+    'ordinary_after_legacy_keeps_native_cached_shader_and_texture_values': 2,
+    'legacy_dynamic_positions_and_snapshot_values_match_native_wheel': 3,
+}
+
 
 def shard_spec(text):
     if text is None:
@@ -45,6 +58,8 @@ def selected_shard(metadata, names, shard):
         return names
     key = target_key(metadata)
     def belongs(name):
+        if shard['Count'] == 4 and key == 'ocio/test/legacy_gpu_oracle' and name in LEGACY_FOUR_WAY:
+            return LEGACY_FOUR_WAY[name] == shard['Index']
         digest = hashlib.sha256((key + '\0' + name).encode()).digest()
         return int.from_bytes(digest[:8], 'little') % shard['Count'] == shard['Index']
     return [name for name in names if belongs(name)]
