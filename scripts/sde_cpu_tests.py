@@ -22,11 +22,15 @@ PREFIX_KEY = 'OCIO_RS_SDE_EXEC_PREFIX_JSON'
 REPORT_KEY = 'OCIO_RS_SDE_EXEC_REPORT_ROOT'
 SHARD_KEY = 'OCIO_RS_SDE_SHARD'
 
-# Original quick-tier input plans in crates/ocio/tests/legacy_gpu_oracle.rs:
+# Original quick-tier input plans (P55 divides only P32 into four420-request executions) in crates/ocio/tests/legacy_gpu_oracle.rs:
 # 1680 / 2000 / 1680 / 1680 requests, rather than hash-only 0 / 980 / 2000 / 4060.
 # Leave the previously heaviest observed bucket (2) the boundary/refusal-heavy cases.
 LEGACY_FOUR_WAY = {
-    'small_legacy_lattices_and_cache_order_match_native_wheel': 0,
+    'small_legacy_lattices_and_cache_order_match_native_wheel_part0': 0,
+    'small_legacy_lattices_and_cache_order_match_native_wheel_part1': 0,
+    'small_legacy_lattices_and_cache_order_match_native_wheel_part2': 0,
+    'small_legacy_lattices_and_cache_order_match_native_wheel_part3': 0,
+    'small_legacy_parts_cover_original_requests_once': 0,
     'legacy_allocation_cuts_and_file_boundaries_match_native_wheel': 1,
     'legacy_mixed_lut_range_and_alpha_lattices_match_native_wheel': 1,
     'legacy_large_lattice_values_match_native_wheel': 1,
