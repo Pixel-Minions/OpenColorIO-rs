@@ -610,9 +610,8 @@ fn port_requested(chain: &Chain, job: &Job, ordinary_last: bool) -> Outcome {
     Outcome::Gpu { processor, shader }
 }
 
-#[test]
-fn small_legacy_lattices_and_cache_order_match_native_wheel() {
-    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+// The original complete P32 generator is retained before selecting any execution part.
+fn small_legacy_plan() -> (Vec<Chain>, Vec<Job>) {
     let chains = chains();
     let mut jobs = Vec::new();
     for chain in 0..chains.len() {
@@ -633,7 +632,102 @@ fn small_legacy_lattices_and_cache_order_match_native_wheel() {
         }
     }
     assert_eq!(jobs.len(), 1680, "the complete P32 input plan");
-    compare_jobs("P32", &chains, &jobs);
+    (chains, jobs)
+}
+
+fn small_legacy_part(jobs: Vec<Job>, part: usize) -> Vec<Job> {
+    assert!(part < 4, "one of the four complete execution parts");
+    assert_eq!(jobs.len(), 1680, "retain the original complete P32 plan");
+    let selected = jobs
+        .into_iter()
+        .skip(part * 420)
+        .take(420)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected.len(),
+        420,
+        "each original request belongs to one part"
+    );
+    selected
+}
+
+fn compare_small_legacy_part(part: usize) {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let (chains, jobs) = small_legacy_plan();
+    let selected = small_legacy_part(jobs, part);
+    println!("P32 execution part {part}/4; complete original plan 1680 requests");
+    // Keep P32's original no-dynamic checks and all exact comparisons in compare_jobs.
+    compare_jobs("P32", &chains, &selected);
+}
+
+#[test]
+fn small_legacy_lattices_and_cache_order_match_native_wheel_part0() {
+    compare_small_legacy_part(0);
+}
+
+#[test]
+fn small_legacy_lattices_and_cache_order_match_native_wheel_part1() {
+    compare_small_legacy_part(1);
+}
+
+#[test]
+fn small_legacy_lattices_and_cache_order_match_native_wheel_part2() {
+    compare_small_legacy_part(2);
+}
+
+#[test]
+fn small_legacy_lattices_and_cache_order_match_native_wheel_part3() {
+    compare_small_legacy_part(3);
+}
+
+#[test]
+fn small_legacy_parts_cover_original_requests_once() {
+    let (_, jobs) = small_legacy_plan();
+    let key = |j: &Job| (j.chain, j.level, j.edge, j.before, j.language);
+    let original = jobs.iter().map(key).collect::<Vec<_>>();
+    let mut expected = std::collections::BTreeSet::new();
+    // Original P32 domains (the complete generator above, before execution partitioning).
+    for chain in 0..4 {
+        for level in 0..7 {
+            for edge in [2, 3] {
+                for before in 0..3 {
+                    for language in 0..10 {
+                        assert!(expected.insert((chain, level, edge, before, language)));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        expected.len(),
+        1680,
+        "all original P32 Cartesian-product inputs"
+    );
+    assert_eq!(
+        original
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected
+    );
+    let mut observed = Vec::new();
+    for part in 0..4 {
+        let (_, full) = small_legacy_plan();
+        observed.extend(small_legacy_part(full, part).iter().map(key));
+    }
+    assert_eq!(
+        observed, original,
+        "four parts preserve every original input and its order"
+    );
+    assert_eq!(
+        observed
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        1680
+    );
+    println!("P32 input audit: all 1680 original requests exactly once in four ordered parts");
 }
 
 #[test]
@@ -968,7 +1062,13 @@ fn compare_batches(
     let mut compared = 0;
     let mut refusals = 0;
     let mut measured_dynamic = 0;
-    for batch in jobs.chunks(batch_size) {
+    for (batch_index, batch) in jobs.chunks(batch_size).enumerate() {
+        println!(
+            "{chunk}: starting original request batch {}..{} of {}",
+            batch_index * batch_size,
+            batch_index * batch_size + batch.len(),
+            jobs.len()
+        );
         let calls = batch
             .iter()
             .map(|job| BatchCall {
