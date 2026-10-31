@@ -5,6 +5,7 @@
 //! of upstream's `src/apputils`, with the C runtime's streams and number parsing (Phase 10).
 #![forbid(unsafe_code)]
 
+pub mod argparse;
 pub mod c_numbers;
 pub mod stdio;
 

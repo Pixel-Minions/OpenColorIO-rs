@@ -4317,6 +4317,48 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in p9-monitors (9.3a), `system_monitor_windows.rs`, including the fallback;
   same-machine monitor-list and instantiated-config checks in `config_monitor_tests.rs`.
 
+## Dev tools
+
+### I-600. The tools' argument parser
+
+- **Upstream:** `ArgParse` (`src/apputils/argparse.cpp:319-363, 214-254 @ v2.5.2`) takes
+  whatever follows an option as its parameters, without looking at it: `--file --v` writes to a
+  file named `--v`. Numbers go through `atoi` and `atof`, which give 0 for text that isn't a
+  number and don't report it. Past 32 bits, `atoi` differs per platform, since `long` does:
+  UCRT clamps to `INT_MAX`, and glibc clamps to a 64-bit `long` and then keeps the low 32 bits.
+  An argument starting with `-` and a letter is always an option, so `ociochecklut x.cube -inf 0
+  0` fails with `Invalid option`, where `-1 0 0` is a pixel. One dash and two are interchangeable
+  (`-file`, `--t`), and `--` and `---x` are invalid options.
+- **Who notices:** anyone who mistypes a command line; a script that passes `-inf`.
+- **A fix:** refuse a missing parameter and text that isn't a number. That changes what the
+  tools accept.
+- **Status:** matched (card phase10-tools).
+
+### I-601. The tools' non-ASCII arguments on Windows
+
+- **Upstream:** `main(int, const char **)` receives the arguments in the Windows ANSI code page,
+  whatever the characters. They print in that code page, a path passed to `std::ofstream` is
+  read in that code page, and one passed to the library is read as UTF-8
+  (`Platform::Utf8ToUtf16`), so a non-ASCII path that the tools can write may not be one the
+  library can read. On Linux the bytes pass through.
+- **Who notices:** Windows users with names or paths outside ASCII.
+- **A fix:** the port takes the arguments in Unicode and uses UTF-8 throughout, which is what it
+  does now, so it differs from the wheel here: a Rust tool can't reach the ANSI code page
+  without FFI, which `ocio-tools` doesn't have. Printed text differs in those bytes, and such a
+  path that the wheel's library fails on works in the port.
+- **Status:** open: not matched (card phase10-tools), for the owner. Linux matches.
+
+### I-602. `ociocheck` and `ociobakelut` can't report a missing config
+
+- **Upstream:** both test `OCIO::GetEnvVariable("OCIO")` as a pointer, which is never null
+  (`src/OpenColorIO/Config.cpp:GetEnvVariable @ v2.5.2`), so their branch that says "You must
+  specify an input OCIO configuration" is dead (`src/apps/ociocheck/main.cpp:449-463`,
+  `src/apps/ociobakelut/main.cpp:262-278 @ v2.5.2`). Without `$OCIO` and without `--iconfig`
+  they load `Config::CreateFromEnv`, the raw config, and report on that.
+- **Who notices:** anyone who runs them with no config: `ociocheck` passes.
+- **A fix:** test for an empty string. The message would then appear where it was meant to.
+- **Status:** matched (card phase10-tools).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
