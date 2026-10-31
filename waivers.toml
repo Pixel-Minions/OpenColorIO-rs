@@ -267,3 +267,13 @@ shading_language_version = "4.50"
 egl_vendor = "Mesa Project"
 egl_version = "1.5"
 max_texture_size = 16384
+
+[[not_applicable]]
+test = "Platform/aligned_memory_test"
+reason = "P9-6 (owner decision2026-10-23): native C++ AlignedMalloc/AlignedFree allocation of1001 bytes at16-byte alignment. The current Rust renderer owns a Vec and uses unaligned loads; no corresponding C++ allocator API applies. Reopen if Phase8 introduces applicable aligned storage."
+approved_by = "owner (P9-6, 2026-10-23)"
+
+[[not_applicable]]
+test = "UnitTest/windows_debug"
+reason = "P9-6 (owner decision2026-10-23): the upstream Windows debug C++ test runner suppresses CRT dialogs and calls isspace(INT_MAX). This is native test-harness behavior, outside the OCIO color library and Rust libtest runner."
+approved_by = "owner (P9-6, 2026-10-23)"
