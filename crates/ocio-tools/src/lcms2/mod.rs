@@ -21,9 +21,13 @@
 pub mod cmserr;
 pub mod cmsgamma;
 pub mod cmsintrp;
+pub mod cmsio0;
 pub mod cmslut;
 pub mod cmsmtrx;
+pub mod cmsnamed;
 pub mod cmsopt;
 pub mod cmspcs;
+pub mod cmsplugin;
+pub mod cmstypes;
 pub mod cmswtpnt;
 pub mod types;
