@@ -5637,37 +5637,43 @@ note = "tests of out-of-scope components"
 path = "tests/python/AllocationTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 6 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/BakerTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/BuiltinConfigRegistryTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 4 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/BuiltinTransformRegistryTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 4 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/BuiltinTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 5 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/CDLTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 20 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/CMakeLists.txt"
@@ -5679,293 +5685,330 @@ note = "build system"
 path = "tests/python/CPUProcessorTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 14 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ColorSpaceHelpersTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 5 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ColorSpaceTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 21 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ColorSpaceTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 6 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ConfigTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 25 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ConstantsTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 1 upstream test function recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ContextTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/DisplayViewHelpersTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 3 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/DisplayViewTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 13 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ExponentTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 8 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ExponentWithLinearTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 10 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ExposureContrastTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 16 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/FileRulesTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 11 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/FileTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 11 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/FixedFunctionTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 9 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/FormatMetadataTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 3 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/GpuShaderDescTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 6 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/GradingDataTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/GradingHueCurveTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 9 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/GradingPrimaryTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 8 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/GradingRGBCurveTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 8 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/GradingToneTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/GroupTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 9 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/LegacyViewingPipelineTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 8 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/LogCameraTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 12 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/LogTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/LookTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 10 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/LookTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 6 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/Lut1DTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 11 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/Lut3DTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 9 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/MatrixTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/MergeConfigsTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 8 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/MixingHelpersTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "waits for Phase 6: the Python module runs upstream's Python suite unmodified"
+status = "done"
+note = "P54: 5 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/NamedTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 17 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/OCIOZArchiveTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 6 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/OpenColorIOTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/OpenColorIOTestSuite.py"
 kind = "test-python"
-target = ["run unmodified against ocio-py"]
-status = "todo"
+target = ["xtask/src/py.rs"]
+status = "partial"
+note = "P54: driver_modules/modules_of_driver consume the unchanged get_test_modules inventory (48 modules); py-suite runs those modules unmodified in fresh processes and verifies all 384 functions against the wheel. The standalone driver CLI and its single-process suite path have not been separately validated; do not count them as complete."
 
 [[file]]
 path = "tests/python/ProcessorCacheTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 1 upstream test function recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ProcessorTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/RangeTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 3 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/TransformsBaseTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 1 upstream test function recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/TransformsTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/UnitTestUtils.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: reused unmodified by the upstream test modules; its assertions, float comparisons, logging helpers and test-data paths run through the same isolated Python suite runner in xtask/src/py.rs."
 
 [[file]]
 path = "tests/python/ViewTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 8 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/ViewingRulesTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: 6 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included."
 
 [[file]]
 path = "tests/python/__init__.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
+status = "done"
+note = "P54: the pinned upstream package initializer contains only the license header and no executable statements; reused unchanged with the upstream Python sources."
 
 [[file]]
 path = "tests/python/requirements.txt"
 kind = "test-python"
-target = ["run unmodified against ocio-py"]
-status = "todo"
+target = ["oracle/pyproject.toml", "oracle/uv.lock"]
+status = "done"
+note = "P54: upstream requires numpy; the Python test environment provisions the pinned numpy==2.3.5 from oracle/pyproject.toml and oracle/uv.lock (xtask/src/py.rs). No dependency or lock-file change."
 
 [[file]]
 path = "tests/testutils/CMakeLists.txt"
