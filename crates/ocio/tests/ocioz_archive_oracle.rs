@@ -503,7 +503,8 @@ colorspaces:\n  - !<ColorSpace> {name: raw}\n";
         let e = config.archive(&mut Vec::new()).unwrap_err();
         let expected = format!(
             "Could not archive {}: its name is longer than minizip-ng reads.",
-            dir.join(&names[0]).to_str().unwrap()
+            // The system's spelling, whatever CARGO_TARGET_DIR's separators.
+            dir.join(&names[0]).to_str().unwrap().replace('/', "\\")
         );
         assert_eq!(e.what(), expected.as_bytes(), "{label}");
     }

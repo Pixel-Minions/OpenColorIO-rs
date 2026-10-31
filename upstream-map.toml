@@ -3416,12 +3416,14 @@ path = "src/apputils/logGuard.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/log_guard.rs"]
 status = "done"
+note = "clear and empty are left out: no ported tool calls them"
 
 [[file]]
 path = "src/apputils/logGuard.h"
 kind = "app"
 target = ["crates/ocio-tools/src/log_guard.rs"]
 status = "done"
+note = "clear and empty are left out: no ported tool calls them"
 
 [[file]]
 path = "src/apputils/measure.h"

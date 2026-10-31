@@ -4342,11 +4342,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`Platform::Utf8ToUtf16`), so a non-ASCII path that the tools can write may not be one the
   library can read. On Linux the bytes pass through.
 - **Who notices:** Windows users with names or paths outside ASCII.
-- **A fix:** the port takes the arguments in Unicode and uses UTF-8 throughout, which is what it
-  does now, so it differs from the wheel here: a Rust tool can't reach the ANSI code page
-  without FFI, which `ocio-tools` doesn't have. Printed text differs in those bytes, and such a
-  path that the wheel's library fails on works in the port.
-- **Status:** open: not matched (card phase10-tools), for the owner. Linux matches.
+- **A fix:** what the port does: it takes the arguments in Unicode and uses UTF-8 throughout.
+- **Status:** not matched, by the owner's decision of 2026-10-31: deviation D-17
+  (`docs/deviations.md`), with its measured table. Linux matches.
 
 ### I-602. `ociocheck` and `ociobakelut` can't report a missing config
 
@@ -4395,6 +4393,51 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** move the two calls inside the `try`, which would print the error and exit with 1.
 - **Status:** matched (card phase10-tools, `ociobakelut_oracle.rs`,
   `an_exception_upstream_does_not_catch`).
+
+### I-607. SIGPIPE ends the C++ tools, not the port's
+
+- **Upstream:** the tools run with the default action of SIGPIPE, so a write to a pipe nobody reads
+  kills the process. Rust's runtime ignores SIGPIPE at startup, the write fails, and the port's
+  `stdio` ignores the failure as a C++ stream does, so the tool goes on. Measured in Rocky Linux 9
+  with the pipe's read end already closed:
+
+  | Case | Wheel | Port |
+  |---|---|---|
+  | `ociocheck --oconfig o.ocio`, stdout closed | killed by signal 13, no `o.ocio` | exit 0, writes `o.ocio` |
+  | `--help` (`ociocheck`, `ociobakelut`), stdout closed | signal 13 | exit 1 |
+  | `ociowrite`, stderr closed | signal 13 | exit 1 |
+  | `ociochecklut -t`, `ociobakelut --stdout`, stdout closed | signal 13 | exit 0 |
+  | Shell: `ociobakelut --stdout \| head -c 3` | `PIPESTATUS` 141 | 0 |
+
+  If the parent ignores SIGPIPE, all of these are the same on both sides. `ociocheck ... | head -c
+  3` gave 0 on both, since its output is short and timing decides it. Windows has no SIGPIPE.
+- **Who notices:** scripts on Linux that close a tool's output early and read its exit status, or
+  that rely on `--oconfig` not being written then.
+- **A fix:** none for upstream, whose behaviour is the usual one for a filter. To match it the
+  port's tools need the default action back, which takes a signal call (`unsafe`, which
+  `ocio-tools` forbids) or an unstable compiler flag.
+- **Status:** open: not matched (card phase10-tools), for the owner, who decides whether a small
+  `unsafe` signal call is allowed in `ocio-tools`.
+
+### I-608. Windows paths over `MAX_PATH` in the tools
+
+- **Upstream:** the wheel's `.exe` files have no `longPathAware` manifest, so the system refuses
+  their paths of 260 characters and more, even with `LongPathsEnabled=1`. `python.exe` has that
+  manifest, so the same library handles such paths in the Python module. The port's tools go through
+  Rust's `std`, which turns a long path into a verbatim one, and through the library's reads.
+  Measured on Windows with an output or input path of about 330 characters:
+
+  | Case | Wheel | Port |
+  |---|---|---|
+  | `ociowrite --file` | "Could not open file", exit 1 | writes the file, exit 0 |
+  | `ociobakelut` output | "Non-writable file path", exit 1 | writes the file |
+  | `ociocheck --oconfig` | "Error opening" | "Wrote" |
+  | `ociocheck --iconfig`, `ociochecklut` | can't read the file | reads it |
+
+- **Who notices:** Windows users with paths past the limit: the port's tools work where the wheel's
+  fail.
+- **A fix:** upstream could add the manifest entry, which is what the port's behaviour already is.
+- **Status:** open: not matched (card phase10-tools), for the owner.
 
 ## Undefined behaviour upstream
 

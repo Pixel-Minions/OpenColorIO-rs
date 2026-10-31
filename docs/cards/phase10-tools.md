@@ -43,8 +43,8 @@ Rocky Linux 9.
 
 ## Stopped for the owner
 
-ICC output in `ociobakelut` (`ocioicc.cpp`): needs lcms2 or a translation of it. The format
-reports a clear error until the owner decides.
+ICC output in `ociobakelut` (`ocioicc.cpp`): the owner chose translating lcms2 to Rust, on its own
+later card, once the source is approved. Until then the format reports a clear error.
 
 What was measured for that decision: `ocioicc.cpp` uses lcms2 for its pipeline, CLUT and tone
 curve stages, its transforms (`cmsCreateTransform`, `cmsDoTransform`) and its writer. Two runs of

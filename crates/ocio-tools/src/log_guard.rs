@@ -2,6 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Trapping log messages: a port of `src/apputils/logGuard.h` and `logGuard.cpp` @ v2.5.2.
+//!
+//! Left out, since no ported tool calls them: `clear` and `empty`.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
