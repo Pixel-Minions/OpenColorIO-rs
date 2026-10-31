@@ -4415,6 +4415,31 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** not matched, by the owner's decision of 2026-10-31: deviation D-18
   (`docs/deviations.md`). Linux has no such limit.
 
+### I-609. `tool --stdout | head -c 3` with mid-size output, on Linux
+
+- **Upstream:** a C++ tool whose reader goes away while it still has output to write dies of
+  SIGPIPE, and a shell reports 141. The port's tools inherit SIGPIPE as the C++ tools do
+  (`crates/ocio-tools/src/sigpipe.rs`), so the closed-pipe and ignored cases match the wheel. One
+  difference remains, in a shell pipeline where `head` stops reading while the tool is running.
+  Measured in Rocky Linux 9, `PIPESTATUS`, wheel and port:
+
+  | Output | Wheel | Port |
+  |---|---|---|
+  | `ociobakelut` spi1d, up to 3.1 KB | 0 | 0 |
+  | spi3d, cube 5, 4.1 KB | 141 in 27 of 30 | 0 in 30 of 30 |
+  | spi1d, 4.7 KB | 141 in 30 of 30 | 0 in 30 of 30 |
+  | spi1d 12 to 62 KB, spi3d cube 9, 24 KB | 141 in 30 of 30 | 0 in 30 of 30 |
+  | spi1d 93 KB, spi3d 74 KB and up | 141 | 141 |
+  | `ociochecklut --help`, 1.5 KB | racy: 141 in 26 of 30 | 141 in 2 of 30 |
+
+- **Who notices:** scripts on Linux that read the status of a tool cut off by `head`, for outputs
+  of a few to about 90 KB. The bytes `head` passes on are the same.
+- **A fix:** none known. The cause is unproven: a `COUT_BUFFER` of 4096 or 1024 and splitting
+  writes at 4096 bytes changed nothing. The likely cause is timing: the wheel writes while it
+  formats, and the port may write in one burst.
+- **Status:** open: not matched (card phase10-tools). The closed-pipe and ignored cases match, and
+  `sigpipe_oracle.rs` compares them with the wheel.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

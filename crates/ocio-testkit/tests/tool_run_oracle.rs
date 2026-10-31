@@ -429,6 +429,46 @@ fn head_closes_the_pipe() {
     assert_eq!(stdout(&r), b"");
 }
 
+/// `closed_pipe` closes the stream it names: the other one is still reported. The tool goes on
+/// past the closed pipe because SIGPIPE is ignored (ociowrite/main.cpp:73-77, 275-279).
+#[cfg(unix)]
+#[test]
+fn the_other_stream_stays_open() {
+    let r = run(
+        json!({"tool": "ociowrite", "argv": ["--file", "o.ctf"], "cwd": cwd("other_stream"),
+               "closed_pipe": "stdout", "sigpipe_ignored": true}),
+        &[],
+    );
+    assert_eq!(exit_code(&r), 1);
+    assert_eq!(stdout(&r), b"");
+    let refused = b"Colorspaces or (display,view) pair must be specified as source.\n";
+    assert!(stderr(&r).ends_with(refused));
+
+    let r = run(
+        json!({"tool": "ociowrite", "argv": ["--help"], "cwd": cwd("other_stream"),
+               "closed_pipe": "stderr", "sigpipe_ignored": true}),
+        &[],
+    );
+    assert_eq!(exit_code(&r), 1);
+    assert_eq!(stderr(&r), b"");
+    assert!(stdout(&r).starts_with(b"ociowrite -- write a color transformation to a file\n"));
+}
+
+/// `head_bytes` is the size `head` takes: with room for all of the tool's output, `head` reads
+/// it to the end and the tool finishes, where `head_closes_the_pipe` gets 141.
+#[cfg(unix)]
+#[test]
+fn head_takes_the_size_given() {
+    let r = run(
+        json!({"tool": "ociobakelut", "cwd": cwd("head_size"), "head_bytes": 1_000_000_000,
+               "argv": ["--iconfig", "a.ocio", "--inputspace", "raw", "--outputspace", "raw",
+                        "--format", "spi3d", "--cubesize", "33", "--stdout"],
+               "files": [["a.ocio", 0]]}),
+        &[CONFIG.as_bytes()],
+    );
+    assert_eq!(exit_code(&r), 0);
+}
+
 #[cfg(unix)]
 #[test]
 fn pipe_keys_refusals() {

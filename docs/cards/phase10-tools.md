@@ -33,6 +33,8 @@ Rocky Linux 9.
   it before `main`. `crates/ocio-tools/src/sigpipe.rs` reads it first, in an `.init_array`
   constructor, and puts the default back if that is what the process started with. It is the
   only `unsafe` in the crate (owner, 2026-10-31).
+  The closed-pipe and ignored cases match the wheel. `tool --stdout | head -c 3` with mid-size
+  output doesn't always: I-609.
 
 ## Chunks
 
