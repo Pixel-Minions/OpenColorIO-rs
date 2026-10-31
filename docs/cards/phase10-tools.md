@@ -45,3 +45,11 @@ Rocky Linux 9.
 
 ICC output in `ociobakelut` (`ocioicc.cpp`): needs lcms2 or a translation of it. The format
 reports a clear error until the owner decides.
+
+What was measured for that decision: `ocioicc.cpp` uses lcms2 for its pipeline, CLUT and tone
+curve stages, its transforms (`cmsCreateTransform`, `cmsDoTransform`) and its writer. Two runs of
+the wheel give the same 394,092 bytes but for the seconds of the header's creation time (and the
+description, which defaults to the file name), so a comparison would need only that one field
+masked. A command line that gets as far as writing a profile prints what the wheel prints before
+that point, then the error, and exits with 1 (`ociobakelut_oracle.rs`,
+`icc_output_is_reported_as_not_ported`).

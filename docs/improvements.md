@@ -4385,6 +4385,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ## Undefined behaviour upstream
 
+### U-600. `ociobakelut` ends when a config doesn't load
+
+- **Upstream:** `src/apps/ociobakelut/main.cpp:261, 270 @ v2.5.2` calls `Config::CreateFromFile` and
+  `Config::CreateFromEnv` outside `main`'s `try` blocks, so a config that doesn't load is an
+  uncaught exception, and `std::terminate` ends the process: `0xC0000409` on Windows, SIGABRT and
+  the C++ runtime's message on Linux.
+- **Who notices:** anyone who gives `ociobakelut` a missing or broken config.
+- **A fix:** the port's: it prints `ERROR: ` with the exception's message and "See --help for more
+  info." on stderr, and exits with 1.
+- **Status:** matched by the owner's general rule (card phase10-tools, `ociobakelut_oracle.rs`,
+  `an_exception_upstream_does_not_catch`).
+
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
 2026-09-30). The general rule above covers the rest, except where an entry says otherwise.
 

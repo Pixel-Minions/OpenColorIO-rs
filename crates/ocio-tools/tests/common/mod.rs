@@ -339,3 +339,11 @@ pub(crate) fn sweep(group: &str, tool: &str, program: &str, cases: &[Case]) -> S
     }
     Summary { outcomes: wheel }
 }
+
+/// Runs one case on both sides, for a test that doesn't expect them to match: a case the wheel
+/// doesn't survive, or that the port deliberately refuses. Returns (the wheel's, the port's).
+pub(crate) fn run_both(group: &str, tool: &str, program: &str, case: &Case) -> (Outcome, Outcome) {
+    let wheel = wheel_outcomes(group, tool, std::slice::from_ref(case)).remove(0);
+    let port = port_outcome(group, program, 0, case);
+    (wheel, port)
+}

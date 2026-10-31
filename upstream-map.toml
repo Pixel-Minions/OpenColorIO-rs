@@ -2678,19 +2678,22 @@ note = "build system"
 path = "src/apps/ociobakelut/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociobakelut.rs"]
-status = "todo"
+status = "partial"
+note = "all but the call of SaveICCProfileToFile, which ocioicc.cpp holds"
 
 [[file]]
 path = "src/apps/ociobakelut/ocioicc.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociobakelut.rs"]
 status = "todo"
+note = "needs lcms2 or a translation of it: the owner decides (docs/cards/phase10-tools.md)"
 
 [[file]]
 path = "src/apps/ociobakelut/ocioicc.h"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociobakelut.rs"]
 status = "todo"
+note = "needs lcms2 or a translation of it: the owner decides (docs/cards/phase10-tools.md)"
 
 [[file]]
 path = "src/apps/ociocheck/CMakeLists.txt"
