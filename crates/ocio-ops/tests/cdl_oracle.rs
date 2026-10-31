@@ -88,6 +88,9 @@ impl Family for CdlFamily {
     fn name(&self) -> String {
         "CDLTransform".to_string()
     }
+    fn extra_probes(&self, _: &Cdl, _: Direction) -> Vec<ocio_testkit::probe::ProbeSet> {
+        vec![ocio_testkit::probe::ProbeSet::FiniteRows]
+    }
     fn cases(&self) -> Vec<Case<Cdl>> {
         self.cases.clone()
     }

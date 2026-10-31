@@ -31,13 +31,23 @@
 //! lanes with two shuffles: GCC adds `luma + shuffled` as the source does, MSVC
 //! `shuffled + luma` (`CDLRendererFwdSSE<false>::apply` at 0x1801763ce and 0x1801763dc;
 //! Linux 0x33081d and 0x330827). The port follows each wheel there ([`luma_sse`]).
+//!
+//! # SSE2 fast paths
+//!
+//! The fast-math lanes branch on every operand. Blocks of finite pixels with finite parameters
+//! take the real SSE2 kernels of `cdl_op_cpu_sse2`, which says why no operand order shows there.
+//! Any other block takes the lanes.
 
 use std::sync::Arc;
 
+#[cfg(target_arch = "x86_64")]
+use super::cdl_op_cpu_sse2 as sse2;
 use super::cdl_op_data::{CdlOpData, CdlOpStyle};
 use crate::math_utils::{clamp, is_nan, sse_add, sse_max, sse_min, sse_mul, std_max};
 use crate::op::CpuOp;
 use crate::sse::{EONE, EZERO, sse_power, sse_select};
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::blocks::for_each_block;
 
 /// `RcpMinValue` (src/OpenColorIO/ops/cdl/CDLOpCPU.cpp:18 @ v2.5.2).
 const RCP_MIN_VALUE: f32 = 1e-2;
@@ -126,6 +136,16 @@ impl RenderParams {
     /// Port of `RenderParams::isNoClamp` (CDLOpCPU.h:34 @ v2.5.2).
     pub fn is_no_clamp(&self) -> bool {
         self.is_no_clamp
+    }
+
+    /// Whether every parameter is finite, as the real SSE2 kernels need.
+    #[cfg(target_arch = "x86_64")]
+    fn all_finite(&self) -> bool {
+        [self.slope, self.offset, self.power]
+            .iter()
+            .flatten()
+            .all(|v| v.is_finite())
+            && self.saturation.is_finite()
     }
 
     /// Port of `RenderParams::setSlope` (CDLOpCPU.cpp:33-39 @ v2.5.2).
@@ -442,19 +462,30 @@ impl<const CLAMP: bool> CpuOp for CdlRendererFwdSse<CLAMP> {
         let p = &self.params;
         let (slope, offset, power) = (p.get_slope(), p.get_offset(), p.get_power());
         let saturation = p.get_saturation();
-        for px in pixels(rgba) {
-            let mut pix: Lanes = *px;
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                let mut pix: Lanes = *px;
 
-            pix = lanes(|i| sse_mul(pix[i], slope[i]));
-            pix = lanes(|i| sse_add(pix[i], offset[i]));
+                pix = lanes(|i| sse_mul(pix[i], slope[i]));
+                pix = lanes(|i| sse_add(pix[i], offset[i]));
 
-            apply_power_sse::<CLAMP>(&mut pix, power);
+                apply_power_sse::<CLAMP>(&mut pix, power);
 
-            apply_saturation_sse(&mut pix, saturation);
-            apply_clamp_sse::<CLAMP>(&mut pix);
+                apply_saturation_sse(&mut pix, saturation);
+                apply_clamp_sse::<CLAMP>(&mut pix);
 
-            px[..3].copy_from_slice(&pix[..3]);
+                px[..3].copy_from_slice(&pix[..3]);
+            }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if p.all_finite() {
+            let fast = |block: &mut [[f32; 4]]| {
+                sse2::render_fwd::<CLAMP>(block, slope, offset, power, saturation)
+            };
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 
@@ -527,20 +558,31 @@ impl<const CLAMP: bool> CpuOp for CdlRendererRevSse<CLAMP> {
         let p = &self.params;
         let (slope, offset, power) = (p.get_slope(), p.get_offset(), p.get_power());
         let saturation = p.get_saturation();
-        for px in pixels(rgba) {
-            let mut pix: Lanes = *px;
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                let mut pix: Lanes = *px;
 
-            apply_clamp_sse::<CLAMP>(&mut pix);
-            apply_saturation_sse(&mut pix, saturation);
+                apply_clamp_sse::<CLAMP>(&mut pix);
+                apply_saturation_sse(&mut pix, saturation);
 
-            apply_power_sse::<CLAMP>(&mut pix, power);
+                apply_power_sse::<CLAMP>(&mut pix, power);
 
-            pix = lanes(|i| sse_add(pix[i], offset[i]));
-            pix = lanes(|i| sse_mul(pix[i], slope[i]));
-            apply_clamp_sse::<CLAMP>(&mut pix);
+                pix = lanes(|i| sse_add(pix[i], offset[i]));
+                pix = lanes(|i| sse_mul(pix[i], slope[i]));
+                apply_clamp_sse::<CLAMP>(&mut pix);
 
-            px[..3].copy_from_slice(&pix[..3]);
+                px[..3].copy_from_slice(&pix[..3]);
+            }
+        };
+        #[cfg(target_arch = "x86_64")]
+        if p.all_finite() {
+            let fast = |block: &mut [[f32; 4]]| {
+                sse2::render_rev::<CLAMP>(block, slope, offset, power, saturation)
+            };
+            for_each_block(pixels(rgba), fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels(rgba));
     }
 }
 

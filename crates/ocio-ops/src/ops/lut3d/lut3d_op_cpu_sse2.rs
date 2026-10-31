@@ -208,6 +208,7 @@ pub(crate) fn apply_tetrahedral_sse2(lut3d: &[f32], dim: i32, rgba: &mut [f32], 
 pub(super) mod simd {
     use core::arch::x86_64::*;
 
+    use crate::sse2::blocks::store_rgb;
     use crate::sse2::packs::{load_f32, store_f32, transpose};
 
     /// The context of `interp_tetrahedral_sse2`, in registers.
@@ -458,16 +459,6 @@ pub(super) mod simd {
     #[target_feature(enable = "sse2")]
     fn lerp(a: __m128, b: __m128, one_minus_w: __m128, w: __m128) -> __m128 {
         _mm_add_ps(_mm_mul_ps(a, one_minus_w), _mm_mul_ps(b, w))
-    }
-
-    /// Writes red, green and blue of a pixel: the C++ writes alpha back over the result.
-    #[inline]
-    #[target_feature(enable = "sse2")]
-    fn store_rgb(pixel: &mut [f32; 4], value: __m128) {
-        let mut lanes = [0.0f32; 4];
-        // SAFETY: `lanes` holds the four floats this writes, at any alignment.
-        unsafe { _mm_storeu_ps(lanes.as_mut_ptr(), value) };
-        pixel[..3].copy_from_slice(&lanes[..3]);
     }
 
     /// The `OCIO_USE_SSE2` loop of `Lut3DRenderer::apply` (Lut3DOpCPU.cpp:640-739 @ v2.5.2).

@@ -18,7 +18,7 @@
 use core::arch::x86_64::*;
 
 use crate::sse::simd::sse_power;
-use crate::sse2::blocks::load;
+use crate::sse2::blocks::{load, store_rgb};
 
 /// What an `apply` reads, for the kernels.
 #[derive(Debug, Clone, Copy)]
@@ -157,24 +157,6 @@ fn apply_saturation(pix: __m128, saturation: __m128) -> __m128 {
 #[target_feature(enable = "sse2")]
 fn apply_clamp(pix: __m128, black_clamp: __m128, white_clamp: __m128) -> __m128 {
     _mm_min_ps(_mm_max_ps(pix, black_clamp), white_clamp)
-}
-
-/// Writes red, green and blue. The C++ writes alpha back over the result: the port leaves it.
-#[inline]
-#[target_feature(enable = "sse2")]
-fn store_rgb(pixel: &mut [f32; 4], value: __m128) {
-    let [r, g, b, _] = *pixel_array(&value);
-    pixel[0] = r;
-    pixel[1] = g;
-    pixel[2] = b;
-}
-
-/// The lanes of a register.
-#[inline]
-#[target_feature(enable = "sse2")]
-fn pixel_array(value: &__m128) -> &[f32; 4] {
-    // SAFETY: `__m128` is four floats, more aligned than an array of them.
-    unsafe { &*(value as *const __m128).cast() }
 }
 
 /// The log and video styles forward: the loops of `GradingPrimaryLogFwdOpCPU::apply`

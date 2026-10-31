@@ -256,6 +256,15 @@ pub mod blocks {
         unsafe { _mm_storeu_ps(pixel.as_mut_ptr(), value) }
     }
 
+    /// Writes red, green and blue of a register to a pixel. Alpha isn't written.
+    #[inline]
+    pub fn store_rgb(pixel: &mut [f32; 4], value: __m128) {
+        let mut lanes = [0.0f32; 4];
+        // SAFETY: `lanes` holds the four floats this writes, at any alignment, and x86-64 has SSE.
+        unsafe { _mm_storeu_ps(lanes.as_mut_ptr(), value) };
+        pixel[..3].copy_from_slice(&lanes[..3]);
+    }
+
     /// Whether every value of `pixels` is finite: its exponent bits aren't all ones.
     #[inline]
     pub fn block_is_finite(pixels: &[[f32; 4]]) -> bool {

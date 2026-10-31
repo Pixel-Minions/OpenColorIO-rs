@@ -5,6 +5,8 @@
 
 pub mod cdl_op;
 pub mod cdl_op_cpu;
+#[cfg(target_arch = "x86_64")]
+mod cdl_op_cpu_sse2;
 pub mod cdl_op_data;
 
 pub use cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};

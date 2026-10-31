@@ -451,7 +451,7 @@ pub(crate) mod simd {
     /// Port of `sseSelect` (src/OpenColorIO/SSE.h:144-151 @ v2.5.2).
     #[inline]
     #[target_feature(enable = "sse2")]
-    fn sse_select(mask: __m128, arg_true: __m128, arg_false: __m128) -> __m128 {
+    pub(crate) fn sse_select(mask: __m128, arg_true: __m128, arg_false: __m128) -> __m128 {
         _mm_xor_ps(arg_false, _mm_and_ps(mask, _mm_xor_ps(arg_true, arg_false)))
     }
 
