@@ -41,6 +41,7 @@ on:
       - "scripts/diagnostics/p41_shard_controls.py"
       - "scripts/diagnostics/p46_join_order_controls.py"
       - "scripts/sde_cpu_tests.py"
+      - "scripts/sde_native_warmup.py"
       - ".cargo/config.toml"
       - ".github/workflows/sde.yml"
 
@@ -97,6 +98,8 @@ jobs:
         run: |
           cargo xtask oracle info
           cargo cpu-tests --release --no-run
+      - name: Build the source-keyed legacy client natively
+        run: python scripts/sde_native_warmup.py
       - name: CPU tests on an emulated ${{ matrix.cpu }}
         shell: bash
         run: |
@@ -183,6 +186,7 @@ jobs:
           scripts/rocky9.sh bash -ec '
             export OCIO_RS_TIER=quick
             cargo xtask oracle info
+            python3 scripts/sde_native_warmup.py
             cargo cpu-tests --release --no-run
             export OCIO_RS_SDE_SHARD="${{ matrix.shard }}/4"
             scripts/sde.sh ${{ matrix.cpu }} python3 scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- ${{ env.SKIP_LUT_SWEEP }}
