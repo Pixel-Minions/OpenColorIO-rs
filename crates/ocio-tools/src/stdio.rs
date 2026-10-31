@@ -1,0 +1,203 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! The C++ standard streams of the tools: `std::cout`, `std::cerr` and `std::ofstream`.
+//!
+//! - They are text streams: the C runtime writes each `\n` as `\r\n` on Windows, in the tools'
+//!   output and in the files they write, also after a `\r` that is already there. Rust writes
+//!   bytes as they are, so this module does the translation ([`text_mode`]).
+//! - `std::cout` keeps what it is given until `std::endl`, a flush, or the program's end;
+//!   `std::cerr` writes each insertion at once, and flushes `std::cout` first (`cerr.tie()`
+//!   is `&cout` on both platforms). What differs is only visible when both go to one pipe:
+//!   each stream's own bytes are the same however they are buffered.
+//!
+//! The library's default logging function writes to stderr as it is: that is right for the
+//! Python module, whose process has set its streams to binary, and wrong for a tool. So a tool
+//! starts with [`init`], and goes back to this logging function, not to the library's, with
+//! [`reset_to_default_logging_function`].
+//!
+//! An error of a write is ignored, as a C++ stream keeps it in its state bits and the tools
+//! don't look.
+
+use std::borrow::Cow;
+use std::fs::File;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use ocio_ops::logging::{LoggingFunction, set_logging_function};
+
+/// How much `std::cout` holds before it writes: only to keep memory small while a bake prints.
+const COUT_BUFFER: usize = 1 << 16;
+
+/// What `std::cout` holds, already translated.
+static COUT: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+
+/// `bytes` as a text stream writes them to the file: on Windows, `\r\n` for each `\n`.
+pub fn text_mode(bytes: &[u8]) -> Cow<'_, [u8]> {
+    if !cfg!(windows) || !bytes.contains(&b'\n') {
+        return Cow::Borrowed(bytes);
+    }
+    let mut out = Vec::with_capacity(bytes.len() + bytes.len() / 16);
+    for &c in bytes {
+        if c == b'\n' {
+            out.push(b'\r');
+        }
+        out.push(c);
+    }
+    Cow::Owned(out)
+}
+
+fn write_stdout(bytes: &[u8]) {
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout.write_all(bytes);
+    let _ = stdout.flush();
+}
+
+/// `std::cout << text`.
+pub fn cout(text: impl AsRef<[u8]>) {
+    let mut held = COUT.lock().unwrap_or_else(PoisonError::into_inner);
+    held.extend_from_slice(&text_mode(text.as_ref()));
+    if held.len() >= COUT_BUFFER {
+        write_stdout(&held);
+        held.clear();
+    }
+}
+
+/// `std::cout << c`.
+pub fn cout_char(c: u8) {
+    cout([c]);
+}
+
+/// `std::cout << std::flush`.
+pub fn cout_flush() {
+    let mut held = COUT.lock().unwrap_or_else(PoisonError::into_inner);
+    write_stdout(&held);
+    held.clear();
+}
+
+/// `std::cout << std::endl`.
+pub fn cout_endl() {
+    cout(b"\n");
+    cout_flush();
+}
+
+/// `std::cout << text << std::endl`.
+pub fn cout_line(text: impl AsRef<[u8]>) {
+    cout(text);
+    cout_endl();
+}
+
+/// `std::cerr << text`.
+pub fn cerr(text: impl AsRef<[u8]>) {
+    cout_flush();
+    let _ = std::io::stderr()
+        .lock()
+        .write_all(&text_mode(text.as_ref()));
+}
+
+/// `std::cerr << text << std::endl`.
+pub fn cerr_line(text: impl AsRef<[u8]>) {
+    cerr(text);
+    cerr(b"\n");
+}
+
+/// `std::cout`, for what writes to an `std::ostream &`.
+#[derive(Debug)]
+pub struct CoutWriter;
+
+impl Write for CoutWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        cout(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        cout_flush();
+        Ok(())
+    }
+}
+
+/// `std::ofstream`: a text stream on a file.
+#[derive(Debug)]
+pub struct OutputFile {
+    file: File,
+}
+
+impl OutputFile {
+    /// `std::ofstream f(path)`: creates the file, or empties it. `path` is as the command line
+    /// gave it.
+    pub fn create(path: &[u8]) -> std::io::Result<OutputFile> {
+        Ok(OutputFile {
+            file: File::create(path_from_bytes(path))?,
+        })
+    }
+}
+
+impl Write for OutputFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write_all(&text_mode(buf))?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+/// The bytes of an argument as a path.
+#[cfg(unix)]
+fn path_from_bytes(path: &[u8]) -> PathBuf {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    PathBuf::from(OsStr::from_bytes(path))
+}
+
+/// The bytes of an argument as a path: the UTF-8 of [`args`].
+#[cfg(windows)]
+fn path_from_bytes(path: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(path).into_owned())
+}
+
+/// `argv`, as bytes: as they are on Linux, in UTF-8 on Windows. (Upstream's `main` gets the
+/// ANSI code page's bytes on Windows: docs/improvements.md, I-601.)
+pub fn args() -> Vec<Vec<u8>> {
+    std::env::args_os()
+        .map(|arg| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::ffi::OsStringExt;
+                arg.into_vec()
+            }
+            #[cfg(windows)]
+            {
+                arg.to_string_lossy().into_owned().into_bytes()
+            }
+        })
+        .collect()
+}
+
+/// The tools' default logging function: `std::cerr << message`, as upstream's writes.
+///
+/// Port of `DefaultLoggingFunction` (src/OpenColorIO/Logging.cpp:64-68 @ v2.5.2), for a process
+/// whose stderr is a text stream.
+fn default_logging_function() -> LoggingFunction {
+    Arc::new(|message: &[u8]| cerr(message))
+}
+
+/// `ResetToDefaultLoggingFunction`, for a tool.
+pub fn reset_to_default_logging_function() {
+    // Only `None` is refused.
+    let _ = set_logging_function(Some(default_logging_function()));
+}
+
+/// What a tool does before anything else ([module documentation](self)).
+pub fn init() {
+    reset_to_default_logging_function();
+}
+
+/// `exit(code)`, and the return of `main`: `std::cout` is flushed, then the process ends.
+pub fn exit(code: i32) -> ! {
+    cout_flush();
+    std::process::exit(code)
+}

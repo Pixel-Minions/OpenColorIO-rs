@@ -33,9 +33,9 @@ Rocky Linux 9.
 |---|---|---|---|
 | 1 | This card | | |
 | 2 | Oracle: `tool_run` (`oracle/ocio_oracle/tools_api.py`), on its own | | contract test against the real binaries |
-| 3 | `argparse`, `strutil`, `stdio`, `c_numbers` | `src/apputils/argparse.*`, `strutil.*` | `crt.rs` for the numbers; parsing checks through the tools |
-| 4 | `log_guard` with `ociowrite` | `src/apputils/logGuard.*`, `src/apps/ociowrite/main.cpp` | sweep: configs × options, bad arguments |
-| 5 | `ociocheck` | `src/apps/ociocheck/main.cpp` | sweep: upstream's configs, built-in configs, broken configs, `--oconfig` |
+| 3 | `stdio`, `c_numbers` | the C runtime | `crt.rs` for the numbers |
+| 4 | `argparse`, `strutil`, with `ociowrite`, the first tool to exercise them | `src/apputils/argparse.*`, `strutil.*`, `src/apps/ociowrite/main.cpp` | sweep: configs and options, bad arguments |
+| 5 | `log_guard`, with `ociocheck` | `src/apputils/logGuard.*`, `src/apps/ociocheck/main.cpp` | sweep: upstream configs, built-in configs, broken configs, `--oconfig` |
 | 6 | `ociochecklut` | `src/apps/ociochecklut/main.cpp` | sweep: upstream's LUT files, pixels, `-t`, `-s`, `-v`, `--inv` |
 | 7 | `ociobakelut` (not ICC) | `src/apps/ociobakelut/main.cpp` | sweep: configs and LUTs × formats × options |
 

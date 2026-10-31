@@ -11,6 +11,11 @@ publish.workspace = true
 
 [dependencies]
 ocio.workspace = true
+ocio-ops.workspace = true
+
+[dev-dependencies]
+ocio-testkit.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
