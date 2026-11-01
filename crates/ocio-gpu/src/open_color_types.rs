@@ -5,7 +5,10 @@
 //! uses. The public `ocio` crate re-exports them.
 //!
 //! So far: `GpuLanguage`, with `GpuLanguageToString` from `src/OpenColorIO/ParseUtils.cpp`,
-//! and `UniformDataType`.
+//! `GpuLanguageFromString`, and `UniformDataType`.
+
+use ocio_ops::utils::string_utils::{c_str, lower};
+use ocio_ops::{Exception, Result};
 
 /// A language OCIO writes shader programs in.
 ///
@@ -74,6 +77,33 @@ pub fn gpu_language_to_string(language: GpuLanguage) -> &'static str {
         GpuLanguage::Msl2_0 => "msl_2",
         GpuLanguage::Osl1 => "osl_1",
     }
+}
+
+/// Parses a nullable C-string argument: bytes end at the first NUL.
+///
+/// Uses the same byte/nullable/error shape as the other ParseUtils conversions.
+///
+/// Port of `GpuLanguageFromString` (src/OpenColorIO/ParseUtils.cpp:277-296 @ v2.5.2).
+pub fn gpu_language_from_string(s: Option<&[u8]>) -> Result<GpuLanguage> {
+    use GpuLanguage::*;
+    let p = s.map_or(&[][..], c_str);
+    Ok(match lower(p).as_slice() {
+        b"cg" => Cg,
+        b"glsl_1.2" => Glsl1_2,
+        b"glsl_1.3" => Glsl1_3,
+        b"glsl_4.0" => Glsl4_0,
+        b"glsl_vk_4.6" => GlslVk4_6,
+        b"glsl_es_1.0" => GlslEs1_0,
+        b"glsl_es_3.0" => GlslEs3_0,
+        b"hlsl_sm_5.0" => HlslSm5_0,
+        b"osl_1" => Osl1,
+        b"msl_2" => Msl2_0,
+        _ => {
+            return Err(Exception::new(
+                [b"Unsupported GPU shader language: '".as_slice(), p, b"'."].concat(),
+            ));
+        }
+    })
 }
 
 /// The type of a uniform's value.
