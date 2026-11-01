@@ -522,8 +522,8 @@ note = "p3-context 3.5f: SetComputeHashFunction, ResetComputeHashFunction, GetFa
 path = "src/OpenColorIO/PathUtils.h"
 kind = "src"
 target = ["crates/ocio/src/path_utils.rs"]
-status = "partial"
-note = "p3-context 3.5f: the declarations of the functions in path_utils.rs"
+status = "done"
+note = "p3-context 3.5f: the declarations of the functions in path_utils.rs; p60 Phase9 header completion audit: all five declarations are implemented in path_utils.rs, including ParseColorSpaceFromString. Existing platform hash/path behavior and fallible Rust results are preserved; no runtime code or test changes."
 
 [[file]]
 path = "src/OpenColorIO/Platform.cpp"
@@ -626,8 +626,8 @@ note = "p3-model-objects (3.4a)"
 path = "src/OpenColorIO/Transform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transform.rs"]
-status = "partial"
-note = "p1-transforms T0: Transform::validate's direction check (the typeid text unreachable), BuildOps, operator<< and CreateTransform as exhaustive matches over enum Transform, with the classes ported so far; each class adds its arms (p5-transforms 5.5a: ExposureContrast); p3-builders 3.2d: a nesting limit of 256 levels where upstream overflows the stack (U-58) in BuildOps"
+status = "done"
+note = "p1-transforms T0: Transform::validate's direction check (the typeid text unreachable), BuildOps, operator<< and CreateTransform as exhaustive matches over enum Transform, with the classes ported so far; each class adds its arms (p5-transforms 5.5a: ExposureContrast); p3-builders 3.2d: a nesting limit of 256 levels where upstream overflows the stack (U-58) in BuildOps; p60 Phase9 completion audit: all 23 upstream BuildOps and text-dispatch types exactly match the complete Transform enum and existing Rust dispatches. All 14 CreateTransform op families exist, with no-op/reference handling as documented. Base validation retains the existing typed-direction decision, and U-58/I-73 remain unchanged. No remaining transform class arm is unported."
 
 [[file]]
 path = "src/OpenColorIO/TransformBuilder.h"
@@ -1417,9 +1417,9 @@ note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs"]
-status = "partial"
-note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). p1-transforms-fam2 (1.8d): CreateGammaTransform and BuildExponentWithLinearOp in exponent_with_linear_transform.rs, BuildExponentOp in exponent_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4)"
+target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
+status = "done"
+note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). p1-transforms-fam2 (1.8d): CreateGammaTransform and BuildExponentWithLinearOp in exponent_with_linear_transform.rs, BuildExponentOp in exponent_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4); p60 Phase9 completion audit: all 2 declarations are implemented: CreateGammaOp as create_gamma_op, CreateGammaTransform as create_gamma_transform. The op and transform-side targets are listed explicitly; no new behavior or API."
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.cpp"
@@ -1769,9 +1769,9 @@ note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/log/log_op.rs"]
-status = "partial"
-note = "1.3l3: CreateLogOp; p1-transforms-fam2 (1.8e): the three BuildLogOp and CreateLogTransform, in crates/ocio/src/transforms/log_transform.rs"
+target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio/src/transforms/log_transform.rs"]
+status = "done"
+note = "1.3l3: CreateLogOp; p1-transforms-fam2 (1.8e): the three BuildLogOp and CreateLogTransform, in crates/ocio/src/transforms/log_transform.rs; p60 Phase9 completion audit: all 4 declarations are implemented: CreateLogOp as create_log_op_from_parameters, CreateLogOp as create_log_op_from_base, CreateLogOp as create_log_op, CreateLogTransform as create_log_transform. The op and transform-side targets are listed explicitly; no new behavior or API."
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpCPU.cpp"
@@ -1839,9 +1839,9 @@ note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombi
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs"]
-status = "partial"
-note = "p1-optimizer B: CreateLut1DOp and GenerateIdentityLut1D"
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs"]
+status = "done"
+note = "p1-optimizer B: CreateLut1DOp and GenerateIdentityLut1D; p60 Phase9 completion audit: all 4 declarations are implemented: GenerateIdentityLut1D as generate_identity_lut1d, GenerateLinearScaleLut1D as generate_linear_scale_lut1d, CreateLut1DOp as create_lut1d_op, CreateLut1DTransform as create_lut1d_transform. The op and transform-side targets are listed explicitly; no new behavior or API."
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp"
@@ -2133,9 +2133,9 @@ note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op:
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/range/range_op.rs"]
-status = "partial"
-note = "see RangeOp.cpp"
+target = ["crates/ocio-ops/src/ops/range/range_op.rs", "crates/ocio/src/transforms/range_transform.rs"]
+status = "done"
+note = "see RangeOp.cpp; p60 Phase9 completion audit: all 3 declarations are implemented: CreateRangeOp as create_range_op_from_values, CreateRangeOp as create_range_op, CreateRangeTransform as create_range_transform. The op and transform-side targets are listed explicitly; no new behavior or API."
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpCPU.cpp"
