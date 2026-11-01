@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ocio_testkit::oracle::{ALLOWED_VARIABLES, BatchCall, Oracle};
 use ocio_testkit::paths;
@@ -86,8 +87,9 @@ impl Case {
 
     /// The case writes ICC profiles. Bytes 24 to 35 of a profile are its creation time (ICC.1
     /// section 7.2.1, `dateTimeNumber`; `_cmsWriteHeader` puts `Icc->Created` there): a test can't
-    /// run both tools in one second, so that field alone is compared by being a date close to
-    /// the wheel's. `creation_time_is_all_that_varies` shows on the wheel that nothing else does.
+    /// run both tools in one second, so that field alone is compared by being a date within the
+    /// run that wrote it. `creation_time_is_all_that_varies` shows on the wheel that nothing else
+    /// does.
     pub(crate) fn icc(mut self) -> Case {
         self.icc = true;
         self
@@ -474,15 +476,50 @@ fn icc_creation_time(profile: &[u8]) -> Option<i64> {
     } else {
         (year, month - 3)
     };
-    let days = 365 * y + y / 4 - y / 100 + y / 400 + (153 * m + 2) / 5 + day - 1;
+    let days = 365 * y + y / 4 - y / 100 + y / 400 + (153 * m + 2) / 5 + day - 1 - 719468;
     valid.then_some(days * 86400 + hours * 3600 + minutes * 60 + seconds)
 }
 
-/// `files` with the creation times out of the profiles, or how they are wrong: a port's must be a
-/// date, not before the wheel's, by no more than a run of a sweep.
+/// The seconds since 1970 now.
+fn seconds_now() -> i64 {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    i64::try_from(now.as_secs()).unwrap()
+}
+
+/// When a sweep's runs took place, in seconds since 1970. A run takes as long as its machine
+/// makes it take: more than an hour for the larger sweeps, in CI and under emulation.
+#[derive(Clone, Copy)]
+struct RunTimes {
+    /// Before the wheel's run.
+    started: i64,
+    /// Between the two runs.
+    wheel_finished: i64,
+    /// After the port's run.
+    finished: i64,
+}
+
+impl RunTimes {
+    /// How far behind `seconds_now` the clock of `time()` can be: on both platforms that clock
+    /// only ticks every few milliseconds, which can put it in the second before.
+    const CLOCK_TICK: i64 = 1;
+
+    /// Whether a profile of the wheel's run can have the date `time`.
+    fn in_wheel_run(&self, time: i64) -> bool {
+        (self.started - Self::CLOCK_TICK..=self.wheel_finished).contains(&time)
+    }
+
+    /// Whether a profile of the port's run can have the date `time`.
+    fn in_port_run(&self, time: i64) -> bool {
+        (self.wheel_finished - Self::CLOCK_TICK..=self.finished).contains(&time)
+    }
+}
+
+/// `files` with the creation times out of the profiles, or how they are wrong: each must be a
+/// date within the run that wrote it.
 fn without_creation_time(
     wheel: &mut BTreeMap<String, Vec<u8>>,
     port: &mut BTreeMap<String, Vec<u8>>,
+    runs: RunTimes,
 ) -> String {
     let mut text = String::new();
     for (path, wheel_file) in wheel.iter_mut() {
@@ -492,7 +529,7 @@ fn without_creation_time(
         let times = (icc_creation_time(wheel_file), icc_creation_time(port_file));
         match times {
             (Some(wheel_time), Some(port_time))
-                if (0..=3600).contains(&(port_time - wheel_time)) =>
+                if runs.in_wheel_run(wheel_time) && runs.in_port_run(port_time) =>
             {
                 wheel_file[ICC_CREATION_TIME].fill(0);
                 port_file[ICC_CREATION_TIME].fill(0);
@@ -534,7 +571,7 @@ fn said(outcome: &Outcome, message: &str) -> bool {
 }
 
 /// What differs between the runs of `case`, or nothing.
-fn case_differences(case: &Case, wheel: &Outcome, port: &Outcome) -> String {
+fn case_differences(case: &Case, wheel: &Outcome, port: &Outcome, runs: RunTimes) -> String {
     let died = !(0..=255).contains(&wheel.exit_code);
     match case.stop {
         Some(Stop::Always(message)) => return stop_differences(wheel, port, message),
@@ -553,7 +590,7 @@ fn case_differences(case: &Case, wheel: &Outcome, port: &Outcome) -> String {
         return differences(wheel, port);
     }
     let (mut wheel, mut port) = (wheel.clone(), port.clone());
-    let times = without_creation_time(&mut wheel.files, &mut port.files);
+    let times = without_creation_time(&mut wheel.files, &mut port.files, runs);
     times + &differences(&wheel, &port)
 }
 
@@ -587,8 +624,15 @@ pub(crate) fn sweep(group: &str, tool: &str, program: &str, cases: &[Case]) -> S
     labels.dedup();
     assert_eq!(labels.len(), total, "{group}: two cases have one label");
 
+    let started = seconds_now();
     let wheel = wheel_outcomes(group, tool, cases);
+    let wheel_finished = seconds_now();
     let port = port_outcomes(group, program, cases);
+    let runs = RunTimes {
+        started,
+        wheel_finished,
+        finished: seconds_now(),
+    };
     assert_eq!(wheel.len(), cases.len());
     let mut report = String::new();
     let mut mismatches = 0;
@@ -611,7 +655,7 @@ pub(crate) fn sweep(group: &str, tool: &str, program: &str, cases: &[Case]) -> S
             wheel[index].exit_code,
             show(&wheel[index].stderr)
         );
-        let text = case_differences(case, &wheel[index], &port[index]);
+        let text = case_differences(case, &wheel[index], &port[index], runs);
         if !text.is_empty() {
             mismatches += 1;
             report += &format!("{} {:?}\n{text}\n", case.label, case.argv);
