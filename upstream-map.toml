@@ -507,9 +507,9 @@ note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
 kind = "src"
-target = ["crates/ocio-ops/src/parse_utils.rs"]
-status = "partial"
-note = "p3-context 3.5c: the declarations of the functions ported in parse_utils.rs"
+target = ["crates/ocio-ops/src/parse_utils.rs", "crates/ocio/src/parse_utils.rs"]
+status = "done"
+note = "P69 complete private declaration audit: parsing/numeric/vector/XML helpers are implemented in ocio-ops/parse_utils.rs, with nextline in ocio/parse_utils.rs. Public GPU-language conversion is declared in OpenColorTypes.h rather than this private header and is mapped separately."
 
 [[file]]
 path = "src/OpenColorIO/PathUtils.cpp"
@@ -2154,16 +2154,16 @@ note = "see RangeOpCPU.cpp"
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpData.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/range/range_op_data.rs"]
-status = "partial"
-note = "1.3r1: everything but the constructor from a CTF IndexMapping (67-103), which comes with the CTF reader in ocio-formats; checked against the wheel through RangeTransform (tests/range_op_data_oracle.rs: validation messages, the scale, offset and inverse bit for bit through convertToMatrix, equality)"
+target = ["crates/ocio-ops/src/ops/range/range_op_data.rs", "crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
+status = "done"
+note = "P69 completes the stale target mapping: the CTF IndexMapping constructor is already range_from_index_mapping in ocio/fileformats/ctf/ctf_reader_helper.rs:3031. Range data/validation/math/equality/inverse behavior is in range_op_data.rs. No constructor, scale or offset behavior is added."
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpData.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/range/range_op_data.rs"]
-status = "partial"
-note = "see RangeOpData.cpp"
+target = ["crates/ocio-ops/src/ops/range/range_op_data.rs", "crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
+status = "done"
+note = "P69 complete declaration mapping: Range data APIs are in range_op_data.rs, and the CTF IndexMapping construction is the existing range_from_index_mapping helper in ctf_reader_helper.rs. The former partial note was a missing target, not missing code."
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpGPU.cpp"
@@ -2234,9 +2234,9 @@ note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the p
 [[file]]
 path = "src/OpenColorIO/transforms/CDLTransform.h"
 kind = "src"
-target = ["crates/ocio/src/transforms/cdl_transform.rs"]
-status = "partial"
-note = "p1-transforms-fam2 (1.8f): the class and the METADATA_*_DESCRIPTION names; p4-cdl 4.4d: CDLTransformMap and CDLTransformVec (in fileformats/cdl/)"
+target = ["crates/ocio/src/transforms/cdl_transform.rs", "crates/ocio/src/fileformats/cdl/cdl_parser.rs", "crates/ocio/src/fileformats/cdl/cdl_reader_helper.rs", "crates/ocio/src/fileformats/cdl/cdl_writer.rs", "crates/ocio/src/fileformats/cdl/mod.rs"]
+status = "done"
+note = "P69 complete declaration audit: the transform class/metadata API is implemented in cdl_transform.rs; CDLTransformMap/Vec and shared CDL handles are represented in the existing CDL readers. Add those existing reader targets."
 
 [[file]]
 path = "src/OpenColorIO/transforms/ColorSpaceTransform.cpp"
@@ -2298,15 +2298,15 @@ note = "p5-transforms 5.5a: the class (createEditableCopy is Clone), make*Dynami
 path = "src/OpenColorIO/transforms/FileTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/file_transform.rs", "crates/ocio/src/transforms/file_format.rs"]
-status = "partial"
-note = "p3-transforms (3.1c): the class (28-144) and its operator<< (166-185), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2a: CollectContextVariables (224-298); p4-registry 4.1a: the format statics (146-164) and the format registry (315-554) and FileFormat's defaults (556-593) in file_format.rs, checked against the wheel in crates/ocio/tests/file_formats_registry_oracle.rs; 4.1b: getLutData (187-221; p4-baker 4.9a: its ConfigIOProxy branch), CollectContextVariables (224-298; the one port of it, merged with 3.2a's in the Phase 4 group), LoadFileUncached (595-776), the file cache (778-893) and BuildFileTransformOps (895-970), the loader's errors and debug log checked against the wheel in crates/ocio/tests/file_transform_load_oracle.rs"
+status = "done"
+note = "P69 complete source audit: FileTransform model/text/format queries, getLutData and context collection, format registry/defaults, uncached loading, the shared file cache and BuildFileTransformOps through upstream line970 are implemented in the listed modules. Previous partial status was stale; no cache/loading/format behavior changes."
 
 [[file]]
 path = "src/OpenColorIO/transforms/FileTransform.h"
 kind = "src"
-target = ["crates/ocio/src/transforms/file_transform.rs", "crates/ocio/src/transforms/file_format.rs"]
-status = "partial"
-note = "p4-registry 4.1a: FormatInfo, FileFormat and FormatRegistry (53-157) in file_format.rs; 4.1b: CachedFile (23-33, its getCDLGroup with the CDL formats), FileFormat::read and buildFileOps, GetCachedFileAndFormat and ClearFileTransformCaches"
+target = ["crates/ocio/src/transforms/file_transform.rs", "crates/ocio/src/transforms/file_format.rs", "crates/ocio/src/fileformats/cdl/cdl_parser.rs", "crates/ocio/src/fileformats/cdl/cdl_reader_helper.rs", "crates/ocio/src/fileformats/cdl/cdl_writer.rs", "crates/ocio/src/fileformats/cdl/mod.rs"]
+status = "done"
+note = "P69 complete declaration audit: CachedFile and its default CDL error, FileFormat/FormatInfo/registry/default flags/read/build methods, cache access/clear and all defined file builders are implemented in the listed modules. CDL-group retrieval is supplied by the existing CDL readers."
 
 [[file]]
 path = "src/OpenColorIO/transforms/FixedFunctionTransform.cpp"
