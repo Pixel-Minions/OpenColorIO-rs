@@ -416,7 +416,7 @@ OCIOPERF_LABELS = {
 
 def ocioperf_table(args, root, cases):
     """The wheel's own ocioperf against the port, on ocioperf's 4K image (PLAN.md Phase 8)."""
-    tool = Path(OCIO.__file__).parent / "bin" / "ocioperf.exe"
+    tool = Path(OCIO.__file__).parent / "bin" / ("ocioperf.exe" if sys.platform == "win32" else "ocioperf")
     plan = {"width": 3840, "height": 2160, "iters": args.iters, "ocioperf": True, "cases": cases}
     plan_path = root / "plan-ocioperf.json"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")

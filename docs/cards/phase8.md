@@ -80,33 +80,59 @@ Two things ocioperf shows that the table doesn't:
 - Line by line, the matrix ratio stays near the image's, but `lut3d_tetra_33` went from 5.06 to
   8.57 in one run. To check in the Lut3D chunk: it may be a per-call cost or noise.
 
-## Progress
+## Where it ended
 
-Same machine and method, at 3afae8dc. Ratios are port time over wheel time.
+Same method, two buffers at 1920x1080, Windows on the machine above. Linux is Rocky Linux 9 in
+Docker on the same machine, against the Linux wheel: compare its ratios, not its times. In all 99
+cases of both tables the output's digest equals the wheel's. Ratios are port time over wheel time;
+the baseline is Windows.
 
-| Case | Baseline | Now |
-|---|---:|---:|
-| `matrix`, two buffers | 9.03 | 1.36 |
-| `matrix`, ocioperf in place / line by line | 8.50 / 6.79 | 1.05 / 1.03 |
-| `matrix_diag` | 1.41 | 0.55 |
-| `lut1d`, two buffers | 7.07 | 1.23 |
-| `lut1d`, ocioperf in place / line by line | 7.11 / 6.70 | 1.13 / 1.06 |
-| `lut1d/f32-u8` | 4.49 | 1.65 |
-| `gp_log`, `gp_lin`, `gp_video` | 5.05-5.39 | 0.98-1.00 |
-| `gp_log_inv` | 6.98 | 0.99 |
-| `matrix/u8-u8` | 3.01 | 1.36 |
-| `chain_aces2_srgb` | 1.24 | 1.22 |
+| Case | Baseline | Windows | Linux, in Docker |
+|---|---:|---:|---:|
+| `matrix` | 9.03 | 0.92 | 0.93 |
+| `lut1d` | 7.07 | 1.08 | 1.13 |
+| `lut1d/f32-u8` | 4.49 | 0.69 | |
+| `gp_log`, `gp_lin`, `gp_video` | 5.05-5.39 | 0.99-1.00 | 1.04-1.06 |
+| `gp_log_inv` | 6.98 | 0.99 | 1.06 |
+| `lut3d_tetra_33` | 5.09 | 0.94 | 1.39 |
+| `lut3d_linear_33` | 3.59 | 0.86 | 1.03 |
+| `cdl_asc`, `cdl_no_clamp` | 4.12-4.24 | 1.02 | 1.07-1.09 |
+| `ff_lin_to_pq` | 3.48 | 1.00 | 1.01 |
+| `gt_log`, `gt_lin` | 2.85, 2.25 | 1.04, 0.88 | 1.35, 1.28 |
+| `hc_log` | 2.25 | 0.86 | 0.67 |
+| `log_camera`, `log_affine`, `log_base2` | 1.85-2.41 | 1.01, 1.06, 1.08 | 0.95, 1.00, 1.01 |
+| `rc_log`, `rc_lin` | 2.11, 1.64 | 1.05, 0.99 | 0.91, 0.99 |
+| `exponent` (gamma) | 2.17 | 1.04 | 1.12 |
+| `ec_log`, `ec_linear` | 2.12, 1.65 | 0.95, 1.00 | 0.88, 1.11 |
+| `ff_red_mod_10` | | 1.12 | 1.11 |
+| `ff_aces2_sdr`, `chain_aces2_srgb` | 1.29, 1.24 | 0.92, 0.93 | 1.00 |
+| `noop/u8-u8` | 1.37 | 0.29 | 0.43 |
 
-What the kernels showed about the rest of the path:
-- **Two buffers.** Upstream's first op reads the source and writes the destination. The port copies
-  the row and renders in place, which costs about 0.25 ns/px (`matrix`: 1.05 in place, 1.36 and up
-  with two buffers). It needs a `CpuOp` method that renders from one buffer to another, with a
-  copy as its default: a new chunk, 12b below.
-- **Pixel by pixel.** `gp_log` takes 47 ns per `apply_rgba` against 14.5 (3.26): the state and
-  block set-up run per call. Chunk 14.
-- **Lut3D line by line.** `lut3d_tetra_33` costs twice as much per row in ocioperf's line-by-line
-  loop as in a whole image, again in the second run (10.07 against 4.91). So it isn't noise.
-  Chunk 5 looks for what runs per call.
+ocioperf's four loops on 3840x2160, Windows, in place / two buffers / line by line / pixel by pixel:
+`matrix` 0.95 / 1.03 / 0.97 / 0.90; `log_camera` 0.99 / 0.97 / 0.98 / 1.78; `gp_log` 0.95 / 1.04 /
+0.98 / 3.09; `lut1d` 1.08 / 1.17 / 1.05 / 1.09 (1.02-1.05 in other runs); `lut3d_tetra_33` 0.95 / 1.09 /
+0.91 / 1.07.
+
+Above 1.10:
+- **`apply_rgba`, Log and GradingPrimary** (Windows and Linux): the kernels spend their set-up per
+  call. Whole images, rows and every other family are within 10%.
+- **`ff_red_mod_10`** (both): scalar C++ on both sides, with no SIMD to port.
+- **`lut1d/u10-f32`, 1.13** (both): U-1's scan of each row, which upstream doesn't have.
+- **Linux only**, where GCC's scalar code is much faster than MSVC's, so that a port that matches
+  the Windows wheel lags: `gt_*` 1.23-1.35, `range` 1.92, `ff_glow_10` 1.78, `ff_rgb_to_hsv` 1.29,
+  `ff_rgb_to_hsy_log` 1.20. `lut3d_tetra_*` 1.39 and `lut1d_inv`, `lut1d_half` 1.38-1.47 are the first
+  op's row copy: ocioperf's in place loop is 1.01, and the integer depths are 0.83-1.07. A kernel
+  from one buffer to another would close that one, as chunk 12b did for Matrix, Lut1D and Log.
+
+What the work showed:
+- **The instructions themselves.** `addps`, `mulps` and the scalar forms through `asm!` have the
+  operand order fixed, as the C++ has. `sse_add` and `sse_mul` as instructions took the scalar
+  families to the wheel's speed without other changes, and the Matrix and EC-log kernels as
+  instructions need no block check and no finite coefficients. This is the better design where
+  a kernel's order is uniform: the block check stays on the kernels written before it.
+- **Loop placement.** The Matrix loops took 0.93 to 1.28 of the wheel's time depending on where the
+  build put them, so `sse2::blocks::align_loop` fixes the place. Code above that loop doesn't move it.
+- **Parallel apply** is `CpuProcessor::apply_threaded` and `apply_src_dst_threaded`.
 
 ## Why the port is slow
 
@@ -188,8 +214,11 @@ Stop adding kernels once a family is within 10%.
 | 14 | `apply_rgba` per pixel | 2.61 | `CPUProcessor.cpp` |
 | 15 | ACES 2 (scalar C++ in both builds, so this is about compiled code, not SIMD) | 1.29 | `ACES2/Transform.cpp` |
 
-## Parallel apply: an owner decision
+## Parallel apply
 
-PLAN.md lists it, and upstream's CPU apply isn't threaded. It needs a new API shape or a new
-dependency (rayon), so nothing is added here without the owner's decision. The options are in
-the Phase 8 report.
+Owner decision 2026-10-31: an additive method on `std::thread::scope` with an explicit thread count,
+no new dependency, nothing in the Python module. `CpuProcessor::apply_threaded` and
+`apply_src_dst_threaded` give the serial apply's bytes for every thread count: rows are independent,
+and the serial apply stays where they can't be parted or where U-1's error can stop at a row. With 8
+threads, on 1920x1080: 7.6 times the serial speed for ACES 2 and GradingTone, 5.9 for Lut3D, 4.4 for
+Log, 2.0 for Matrix, at the memory's bandwidth.

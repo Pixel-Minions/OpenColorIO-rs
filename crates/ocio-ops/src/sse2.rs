@@ -311,13 +311,22 @@ pub mod blocks {
     /// The pixels of a block. One special value sends all of its block to the exact lanes.
     pub const BLOCK_PIXELS: usize = 32;
 
-    /// Aligns the code that follows to 32 bytes. A loop of a few cycles a pixel that crosses a
-    /// boundary of the CPU's fetch windows, which changes from build to build, can take a third
-    /// longer. It runs once before such a loop.
+    /// Puts the loop that follows at byte 48 of a 64-byte line, wherever the build lays out the
+    /// code around it. LLVM aligns a loop to 16 bytes after the few bytes that set it up, so the
+    /// padding ends 32 bytes into a line. A loop of 60 to 70 bytes and a few cycles a pixel
+    /// depends on that place: on the Zen 5 of the speed table (`docs/cards/phase8.md`) the Matrix
+    /// kernels take 0.93-0.96 of the wheel's time there, and up to 1.28 at bytes 0 and 16. It
+    /// runs once before the loop.
     #[inline(always)]
     pub fn align_loop() {
-        // SAFETY: the directive only pads the code with no-ops.
-        unsafe { core::arch::asm!(".p2align 5", options(nomem, nostack, preserves_flags)) };
+        // SAFETY: the directives only pad the code with no-ops.
+        unsafe {
+            core::arch::asm!(
+                ".p2align 6",
+                ".nops 32",
+                options(nomem, nostack, preserves_flags)
+            )
+        };
     }
 
     /// A pixel as an SSE register.
