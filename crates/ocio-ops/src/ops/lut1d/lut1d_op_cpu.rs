@@ -500,6 +500,17 @@ where
             return Ok(());
         };
         let max = self.max_index();
+        // Tables with an entry per value of the input's type have no code past them.
+        if max >= (1usize << (8 * size_of::<I::Type>())) - 1 {
+            return Ok(());
+        }
+        // One pass over the row, in place of a test per value: the bits of every code.
+        let bits = input.as_chunks::<4>().0.iter().fold(0, |bits, px| {
+            bits | px[0].lookup_index() | px[1].lookup_index() | px[2].lookup_index()
+        });
+        if bits <= max {
+            return Ok(());
+        }
         for px in input.as_chunks::<4>().0 {
             if px[..3].iter().any(|v| v.lookup_index() > max) {
                 return Err(self.past_the_lut());
@@ -711,6 +722,26 @@ impl<O: LutOutput> Lut1DFloatRenderer<O> {
         )
     }
 
+    /// The kernel's exact lanes on `rgba`, in place.
+    fn lanes_in_place(&self, kernel: Lut1DKernel, rgba: &mut [f32]) {
+        for px in rgba.as_chunks_mut::<4>().0 {
+            let rgb = self.kernel_rgb(kernel, px);
+            for c in 0..3 {
+                px[c] = O::from_pack(kernel.store(O::PACK, rgb[c])).to_float();
+            }
+        }
+    }
+
+    /// The real `kernel` from F32 to F32: the number of values it rendered.
+    fn simd_between(&self, kernel: Lut1DKernel, input: &[f32], output: &mut [f32]) -> usize {
+        #[cfg(target_arch = "x86_64")]
+        if let Some(lut) = self.kernel_lut() {
+            return kernel.render(&lut, O::PACK, input, PixelsMut::F32(output));
+        }
+        let _ = (kernel, input, output);
+        0
+    }
+
     /// The real `kernel` on `rgba`, in place: the number of values it rendered.
     fn simd_in_place(&self, kernel: Lut1DKernel, rgba: &mut [f32]) -> usize {
         #[cfg(target_arch = "x86_64")]
@@ -835,12 +866,7 @@ impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
         );
         if let Some(kernel) = self.kernel_for(rgba.len()) {
             let done = self.simd_in_place(kernel, rgba);
-            for px in rgba[done..].as_chunks_mut::<4>().0 {
-                let rgb = self.kernel_rgb(kernel, px);
-                for c in 0..3 {
-                    px[c] = O::from_pack(kernel.store(O::PACK, rgb[c])).to_float();
-                }
-            }
+            self.lanes_in_place(kernel, &mut rgba[done..]);
             return;
         }
         for px in rgba.as_chunks_mut::<4>().0 {
@@ -857,13 +883,16 @@ impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
             panic!("{self:?} got {in_name} to {out_name}");
         };
         let kernel = self.kernel_for(input.len());
-        if kernel.is_some() && O::BIT_DEPTH == BitDepth::F32 {
+        if let Some(kernel) = kernel
+            && O::BIT_DEPTH == BitDepth::F32
+        {
             // F32 to F32: the input's alpha is the output's; the rest in place.
             let PixelsMut::F32(output) = output else {
                 panic!("{self:?} got {in_name} to {out_name}");
             };
-            output.copy_from_slice(input);
-            self.apply(output);
+            let done = self.simd_between(kernel, input, output);
+            output[done..].copy_from_slice(&input[done..]);
+            self.lanes_in_place(kernel, &mut output[done..]);
             return;
         }
         let Some(output) = O::Type::from_pixels_mut(output) else {

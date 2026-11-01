@@ -18,33 +18,6 @@ use core::arch::x86_64::*;
 
 use crate::sse2::blocks::{load, store};
 
-/// `in * m_scale`, on `block` in place.
-pub(super) fn scale(block: &mut [[f32; 4]], scale: &[f32; 4]) {
-    #[target_feature(enable = "sse2")]
-    fn kernel(block: &mut [[f32; 4]], scale: &[f32; 4]) {
-        let scale = load(scale);
-        for pixel in block {
-            store(pixel, _mm_mul_ps(load(pixel), scale));
-        }
-    }
-    // SAFETY: x86-64 has SSE2.
-    unsafe { kernel(block, scale) }
-}
-
-/// `in * m_scale + m_offset`, on `block` in place.
-pub(super) fn scale_with_offset(block: &mut [[f32; 4]], scale: &[f32; 4], offset: &[f32; 4]) {
-    #[target_feature(enable = "sse2")]
-    fn kernel(block: &mut [[f32; 4]], scale: &[f32; 4], offset: &[f32; 4]) {
-        let scale = load(scale);
-        let offset = load(offset);
-        for pixel in block {
-            store(pixel, _mm_add_ps(_mm_mul_ps(load(pixel), scale), offset));
-        }
-    }
-    // SAFETY: x86-64 has SSE2.
-    unsafe { kernel(block, scale, offset) }
-}
-
 /// `(m0 * r + m1 * g) + (m2 * b + m3 * a)`.
 #[inline]
 #[target_feature(enable = "sse2")]
@@ -62,33 +35,76 @@ fn times(pixel: __m128, m: &[__m128; 4]) -> __m128 {
     _mm_add_ps(_mm_add_ps(rm0, gm1), _mm_add_ps(bm2, am3))
 }
 
-/// The pixels of `block`, in place, times the matrix of the four `columns`.
-pub(super) fn matrix(block: &mut [[f32; 4]], columns: &[[f32; 4]; 4]) {
-    #[target_feature(enable = "sse2")]
-    fn kernel(block: &mut [[f32; 4]], columns: &[[f32; 4]; 4]) {
-        let m = columns.each_ref().map(load);
-        for pixel in block {
-            store(pixel, times(load(pixel), &m));
+/// `in * m_scale`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Scale<'a>(pub(super) &'a [f32; 4]);
+
+/// `in * m_scale + m_offset`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ScaleWithOffset<'a>(pub(super) &'a [f32; 4], pub(super) &'a [f32; 4]);
+
+/// The pixel times the matrix of the four columns.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Matrix<'a>(pub(super) &'a [[f32; 4]; 4]);
+
+/// The pixel times the matrix of the four columns, plus the offsets.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct MatrixWithOffset<'a>(pub(super) &'a [[f32; 4]; 4], pub(super) &'a [f32; 4]);
+
+/// Generates a kernel's two loops, in place and between two buffers.
+macro_rules! kernel {
+    ($name:ident, $self:ident, ($($setup:tt)*), $pixel:ident => $body:expr) => {
+        impl $name<'_> {
+            /// The kernel on `block`, in place.
+            pub(super) fn render(&self, block: &mut [[f32; 4]]) {
+                #[target_feature(enable = "sse2")]
+                fn run($self: &$name<'_>, block: &mut [[f32; 4]]) {
+                    $($setup)*
+                    for pixel in block {
+                        let $pixel = load(pixel);
+                        store(pixel, $body);
+                    }
+                }
+                // SAFETY: x86-64 has SSE2.
+                unsafe { run(self, block) }
+            }
+
+            /// The kernel from `input` to `output`.
+            pub(super) fn render_to(&self, input: &[[f32; 4]], output: &mut [[f32; 4]]) {
+                #[target_feature(enable = "sse2")]
+                fn run($self: &$name<'_>, input: &[[f32; 4]], output: &mut [[f32; 4]]) {
+                    $($setup)*
+                    for (from, to) in input.iter().zip(output) {
+                        let $pixel = load(from);
+                        store(to, $body);
+                    }
+                }
+                // SAFETY: x86-64 has SSE2.
+                unsafe { run(self, input, output) }
+            }
         }
-    }
-    // SAFETY: x86-64 has SSE2.
-    unsafe { kernel(block, columns) }
+    };
 }
 
-/// The pixels of `block`, in place, times the matrix of the four `columns`, plus `offset`.
-pub(super) fn matrix_with_offset(
-    block: &mut [[f32; 4]],
-    columns: &[[f32; 4]; 4],
-    offset: &[f32; 4],
-) {
-    #[target_feature(enable = "sse2")]
-    fn kernel(block: &mut [[f32; 4]], columns: &[[f32; 4]; 4], offset: &[f32; 4]) {
-        let m = columns.each_ref().map(load);
-        let offset = load(offset);
-        for pixel in block {
-            store(pixel, _mm_add_ps(times(load(pixel), &m), offset));
-        }
-    }
-    // SAFETY: x86-64 has SSE2.
-    unsafe { kernel(block, columns, offset) }
-}
+kernel!(Scale, this, (let scale = load(this.0);), pixel => _mm_mul_ps(pixel, scale));
+
+kernel!(
+    ScaleWithOffset,
+    this,
+    (let scale = load(this.0); let offset = load(this.1);),
+    pixel => _mm_add_ps(_mm_mul_ps(pixel, scale), offset)
+);
+
+kernel!(
+    Matrix,
+    this,
+    (let m = this.0.each_ref().map(load);),
+    pixel => times(pixel, &m)
+);
+
+kernel!(
+    MatrixWithOffset,
+    this,
+    (let m = this.0.each_ref().map(load); let offset = load(this.1);),
+    pixel => _mm_add_ps(times(pixel, &m), offset)
+);

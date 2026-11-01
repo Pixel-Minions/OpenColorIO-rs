@@ -32,6 +32,7 @@
 
 use std::hint::black_box;
 
+use ocio_ops::op::{Pixels, PixelsMut};
 use ocio_ops::open_color_types::TransformDirection;
 use ocio_ops::ops::matrix::MatrixOpData;
 use ocio_ops::ops::matrix::matrix_op_cpu::get_matrix_renderer;
@@ -456,7 +457,12 @@ fn every_width_matches_the_wheel_bit_for_bit() {
                     .collect();
                 let mut port = pixels.clone();
                 renderer.apply(&mut port);
+                // The C++ renders between two buffers, as the port's first op of a chain does.
+                let mut between = vec![0.0f32; pixels.len()];
+                renderer.apply_bit_depth(Pixels::F32(pixels), PixelsMut::F32(&mut between));
+                let between: Vec<u32> = between.iter().map(|v| v.to_bits()).collect();
                 let port: Vec<u32> = port.iter().map(|v| v.to_bits()).collect();
+                assert_eq!(port, between, "{what}: in place and between two buffers");
                 if port != wheel {
                     let first = port.iter().zip(&wheel).position(|(p, w)| p != w).unwrap();
                     failures.push(format!(

@@ -161,6 +161,23 @@ pub(super) mod simd {
         groups.len() * 16
     }
 
+    /// From F32 to F32, where alpha moves through the packs (`inBD == outBD`).
+    #[target_feature(enable = "sse2")]
+    fn between(lut: &KernelLut<'_>, input: &[f32], output: &mut [f32]) -> usize {
+        let scale = _mm_set1_ps(lut.scale);
+        let lut_max = _mm_set1_ps(lut.lut_max);
+        let (groups, _) = input.as_chunks::<16>();
+        let (outputs, _) = output.as_chunks_mut::<16>();
+        for (group, out) in groups.iter().zip(outputs) {
+            let [r, g, b, a] = load_f32(group);
+            let r = apply_lut_sse2(lut.r, r, scale, lut_max);
+            let g = apply_lut_sse2(lut.g, g, scale, lut_max);
+            let b = apply_lut_sse2(lut.b, b, scale, lut_max);
+            store_f32(out, [r, g, b, a]);
+        }
+        groups.len() * 16
+    }
+
     #[target_feature(enable = "sse2")]
     fn to_output(
         lut: &KernelLut<'_>,
@@ -175,7 +192,7 @@ pub(super) mod simd {
                 convert(lut, input, out, |o, rgba| store_u16(o, rgba, max_value))
             }
             PixelsMut::F16(out) => convert(lut, input, out, |o, rgba| store_f16(o, rgba)),
-            PixelsMut::F32(_) => 0,
+            PixelsMut::F32(out) => between(lut, input, out),
         }
     }
 
@@ -185,7 +202,7 @@ pub(super) mod simd {
         unsafe { in_place(lut, rgba) }
     }
 
-    /// Renders each group of `input` to `output`, of the bit depth `depth`, other than F32.
+    /// Renders each group of `input` to `output`, of the bit depth `depth`.
     /// Returns the number of values rendered.
     pub(in super::super) fn render(
         lut: &KernelLut<'_>,

@@ -45,10 +45,10 @@ use super::matrix_op_cpu_sse2 as sse2;
 use super::matrix_op_data::MatrixOpData;
 use crate::exception::{Exception, Result};
 use crate::math_utils::{sse_add, sse_mul};
-use crate::op::CpuOp;
+use crate::op::{CpuOp, Pixels, PixelsMut};
 use crate::open_color_types::TransformDirection;
 #[cfg(target_arch = "x86_64")]
-use crate::sse2::blocks::for_each_block;
+use crate::sse2::blocks::{for_each_block, for_each_block_to};
 
 /// Whether the wheel's `apply` of `num_pixels` pixels processes the one at `index` in MSVC's
 /// loop that finishes the last `num_pixels % 4` pixels, after its four-pixel loop. Always
@@ -99,14 +99,38 @@ impl CpuOp for ScaleRenderer {
         let pixels = rgba.as_chunks_mut::<4>().0;
         #[cfg(target_arch = "x86_64")]
         if all_finite(&self.scale) {
+            let kernel = sse2::Scale(&self.scale);
             for_each_block(
                 pixels,
-                |block| sse2::scale(block, &self.scale),
+                |block| kernel.render(block),
                 |block, first| self.apply_exact(block, first, num_pixels),
             );
             return;
         }
         self.apply_exact(pixels, 0, num_pixels);
+    }
+
+    /// The C++ reads one buffer and writes the other, without a copy.
+    fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
+        let (in_name, out_name) = (input.type_name(), output.type_name());
+        let (Pixels::F32(input), PixelsMut::F32(output)) = (input, output) else {
+            panic!("{self:?} processes float pixels only, not {in_name} to {out_name}");
+        };
+        let num_pixels = input.len() / 4;
+        let (from, to) = (input.as_chunks::<4>().0, output.as_chunks_mut::<4>().0);
+        #[cfg(target_arch = "x86_64")]
+        if all_finite(&self.scale) {
+            let kernel = sse2::Scale(&self.scale);
+            for_each_block_to(
+                from,
+                to,
+                |from, to| kernel.render_to(from, to),
+                |block, first| self.apply_exact(block, first, num_pixels),
+            );
+            return;
+        }
+        to.copy_from_slice(from);
+        self.apply_exact(to, 0, num_pixels);
     }
 }
 
@@ -159,14 +183,38 @@ impl CpuOp for ScaleWithOffsetRenderer {
         let pixels = rgba.as_chunks_mut::<4>().0;
         #[cfg(target_arch = "x86_64")]
         if all_finite(&self.scale) && all_finite(&self.offset) {
+            let kernel = sse2::ScaleWithOffset(&self.scale, &self.offset);
             for_each_block(
                 pixels,
-                |block| sse2::scale_with_offset(block, &self.scale, &self.offset),
+                |block| kernel.render(block),
                 |block, first| self.apply_exact(block, first, num_pixels),
             );
             return;
         }
         self.apply_exact(pixels, 0, num_pixels);
+    }
+
+    /// The C++ reads one buffer and writes the other, without a copy.
+    fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
+        let (in_name, out_name) = (input.type_name(), output.type_name());
+        let (Pixels::F32(input), PixelsMut::F32(output)) = (input, output) else {
+            panic!("{self:?} processes float pixels only, not {in_name} to {out_name}");
+        };
+        let num_pixels = input.len() / 4;
+        let (from, to) = (input.as_chunks::<4>().0, output.as_chunks_mut::<4>().0);
+        #[cfg(target_arch = "x86_64")]
+        if all_finite(&self.scale) && all_finite(&self.offset) {
+            let kernel = sse2::ScaleWithOffset(&self.scale, &self.offset);
+            for_each_block_to(
+                from,
+                to,
+                |from, to| kernel.render_to(from, to),
+                |block, first| self.apply_exact(block, first, num_pixels),
+            );
+            return;
+        }
+        to.copy_from_slice(from);
+        self.apply_exact(to, 0, num_pixels);
     }
 }
 
@@ -261,14 +309,38 @@ impl CpuOp for MatrixWithOffsetRenderer {
         let pixels = rgba.as_chunks_mut::<4>().0;
         #[cfg(target_arch = "x86_64")]
         if self.columns.iter().all(all_finite) && all_finite(&self.offset) {
+            let kernel = sse2::MatrixWithOffset(&self.columns, &self.offset);
             for_each_block(
                 pixels,
-                |block| sse2::matrix_with_offset(block, &self.columns, &self.offset),
+                |block| kernel.render(block),
                 |block, first| self.apply_exact(block, first, num_pixels),
             );
             return;
         }
         self.apply_exact(pixels, 0, num_pixels);
+    }
+
+    /// The C++ reads one buffer and writes the other, without a copy.
+    fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
+        let (in_name, out_name) = (input.type_name(), output.type_name());
+        let (Pixels::F32(input), PixelsMut::F32(output)) = (input, output) else {
+            panic!("{self:?} processes float pixels only, not {in_name} to {out_name}");
+        };
+        let num_pixels = input.len() / 4;
+        let (from, to) = (input.as_chunks::<4>().0, output.as_chunks_mut::<4>().0);
+        #[cfg(target_arch = "x86_64")]
+        if self.columns.iter().all(all_finite) && all_finite(&self.offset) {
+            let kernel = sse2::MatrixWithOffset(&self.columns, &self.offset);
+            for_each_block_to(
+                from,
+                to,
+                |from, to| kernel.render_to(from, to),
+                |block, first| self.apply_exact(block, first, num_pixels),
+            );
+            return;
+        }
+        to.copy_from_slice(from);
+        self.apply_exact(to, 0, num_pixels);
     }
 }
 
@@ -310,14 +382,38 @@ impl CpuOp for MatrixRenderer {
         let pixels = rgba.as_chunks_mut::<4>().0;
         #[cfg(target_arch = "x86_64")]
         if self.columns.iter().all(all_finite) {
+            let kernel = sse2::Matrix(&self.columns);
             for_each_block(
                 pixels,
-                |block| sse2::matrix(block, &self.columns),
+                |block| kernel.render(block),
                 |block, first| self.apply_exact(block, first, num_pixels),
             );
             return;
         }
         self.apply_exact(pixels, 0, num_pixels);
+    }
+
+    /// The C++ reads one buffer and writes the other, without a copy.
+    fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
+        let (in_name, out_name) = (input.type_name(), output.type_name());
+        let (Pixels::F32(input), PixelsMut::F32(output)) = (input, output) else {
+            panic!("{self:?} processes float pixels only, not {in_name} to {out_name}");
+        };
+        let num_pixels = input.len() / 4;
+        let (from, to) = (input.as_chunks::<4>().0, output.as_chunks_mut::<4>().0);
+        #[cfg(target_arch = "x86_64")]
+        if self.columns.iter().all(all_finite) {
+            let kernel = sse2::Matrix(&self.columns);
+            for_each_block_to(
+                from,
+                to,
+                |from, to| kernel.render_to(from, to),
+                |block, first| self.apply_exact(block, first, num_pixels),
+            );
+            return;
+        }
+        to.copy_from_slice(from);
+        self.apply_exact(to, 0, num_pixels);
     }
 }
 
