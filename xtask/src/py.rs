@@ -24,6 +24,8 @@
 //! inherits runs once per class), and each passes. `py-port/passing.txt` lists the functions
 //! that pass: a listed function that doesn't fails the command; `--update` rewrites the list.
 //! The list only grows: `cargo xtask ci` holds its length to the base's docs/ratchet.toml.
+//! After these isolated modules pass, the original driver also runs as one process with
+//! both packages, plus its module-selection and unknown-module CLI paths (P73).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -39,8 +41,9 @@ cargo xtask py-suite [--update] [--release] [--no-build]
     Builds the module (as py-build; --no-build: the one in target/py), runs upstream's Python
     suite against it (each module of tests/python/OpenColorIOTestSuite.py in a new process of
     target/py-port), writes each test's outcome to target/py-suite.json, and fails when a test
-    function py-port/passing.txt lists doesn't pass. --update: rewrite the list with the
-    functions that pass (it may only grow).
+    function py-port/passing.txt lists doesn't pass. Also runs the original single-process
+    driver and its selection/error CLI against both packages; logs in target/py-driver.json.
+    --update: rewrite the list with the functions that pass (it may only grow).
 
 cargo xtask py-check
     CI's step for the Python module: clippy (-D warnings) of ocio-py and ocio-py-ffi and the
@@ -357,6 +360,7 @@ pub(crate) fn py_suite(args: &[&str]) -> Result<(), String> {
         }
         return Err(why);
     }
+    crate::py_driver::run(&layout, &tests, &expected)?;
     if update {
         let path = layout.root.join(crate::parity::PASSING_PYTHON);
         let text: String = passing.iter().map(|f| format!("{f}\n")).collect();
