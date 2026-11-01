@@ -72,8 +72,12 @@ impl Group {
 }
 
 /// 68.9 minutes in debug on Windows (run 39641166482), dominated by one test: `builtin_transform`
-/// (see the module documentation).
-const FORMATS: &[(&str, &str)] = &[("ocio", "api_formats_oracle")];
+/// (see the module documentation). The ICC sweeps of `ociobakelut` took 87 minutes on Rocky
+/// release at the full tier (run 41284214313), which made `rest` the longest job by far.
+const FORMATS: &[(&str, &str)] = &[
+    ("ocio", "api_formats_oracle"),
+    ("ocio-tools", "ociobakelut_icc_oracle"),
+];
 
 /// Windows debug minutes (run 39641166482): 15.3, 9.0, 7.9 and 3.8.
 const HEAVY: &[(&str, &str)] = &[
@@ -567,6 +571,11 @@ mod tests {
                 dir: "xtask".into(),
                 targets: vec![target("xtask", "bin", false)],
             },
+            Package {
+                name: "ocio-tools".into(),
+                dir: "crates/ocio-tools".into(),
+                targets: vec![target("ociobakelut_icc_oracle", "test", false)],
+            },
         ]
     }
 
@@ -616,7 +625,9 @@ mod tests {
                 "--workspace",
                 "--no-fail-fast",
                 "--test",
-                "api_formats_oracle"
+                "api_formats_oracle",
+                "--test",
+                "ociobakelut_icc_oracle"
             ])]
         );
         assert_eq!(
