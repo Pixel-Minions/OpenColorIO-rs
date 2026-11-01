@@ -4440,6 +4440,87 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** open: not matched (card phase10-tools). The closed-pipe and ignored cases match, and
   `sigpipe_oracle.rs` compares them with the wheel.
 
+### I-650. `--cubesize` of 256 and over writes no profile, and exits with 0
+
+- **Upstream:** `cmsStageAllocCLut16bit` returns null from a cube of 256 up (`CubeSize`,
+  src/cmslut.c:461-480 @ lcms2.17, stops at `UINT_MAX / dim`). `ocioicc.cpp:161-166` doesn't look:
+  the pipeline loses its CLUT, `Type_LUTA2B_Write` refuses the four stages left, and
+  `cmsSaveProfileToFile` removes the file. The tool prints "OCIO Error: LUT is not suitable to be
+  saved as LutAToB" and "OCIO Error: Couldn't write type 'mAB '", then its usual lines, and exits
+  with 0 (`main.cpp:348`, the function returns `void`).
+- **Who notices:** anyone who asks for a cube over 255, and scripts that trust the exit code.
+- **A fix:** check the stage and the save, and exit with 1.
+- **Status:** matched (card phase10-icc).
+
+### I-651. A profile that can't be saved leaves the exit code at 0
+
+- **Upstream:** `ocioicc.cpp:219` ignores what `cmsSaveProfileToFile` returns. A directory that
+  doesn't exist gives "OCIO Error: Couldn't create 'x'" on stderr, no file, and exit 0, and with
+  `--v`, "[OpenColorIO INFO]: Finished".
+- **Who notices:** scripts that trust the exit code.
+- **A fix:** exit with 1.
+- **Status:** matched (card phase10-icc).
+
+### I-652. A profile's header names the platform that wrote it
+
+- **Upstream:** `cmsCreateProfilePlaceholder` (src/cmsio0.c:547-551 @ lcms2.17) sets `MSFT` when
+  built for Windows and `APPL` elsewhere, so the wheels' tools write different bytes at offset 40
+  for one input. It is the only byte range that differs between the platforms' profiles, but for
+  the rounding the math libraries bring.
+- **Who notices:** nobody, unless profiles from both platforms are compared byte by byte.
+- **A fix:** none needed; a fixed value would differ from one wheel.
+- **Status:** matched, per platform (card phase10-icc).
+
+### I-653. Tag offsets past 2 GB fail differently on Windows and Linux
+
+- **Upstream:** `FileSeek` passes `(long) offset` to `fseek` (src/cmsio0.c:336 @ lcms2.17). `long`
+  has 32 bits on Windows, so an offset from 2^31 up is negative and refused: "Seek error; probably
+  corrupted file". On Linux the seek works, and the read after it fails: "Read error. Got 0 bytes,
+  block should be of 8 bytes". A corrupted `--displayicc` is the only way to get there.
+- **Who notices:** nobody who isn't reading the error text of a broken profile.
+- **A fix:** one text, or none.
+- **Status:** matched, per platform (card phase10-icc).
+
+### I-654. The profile holds Lab in the v2 encoding, in a v4 tag
+
+- **Upstream:** `ocioicc.cpp:139-142` samples through `TYPE_LabV2_16`, and writes the values to a
+  profile of version 4.2, where `A2B0` and `B2A0` are `lutAToBType` and `lutBToAType`, with Lab in
+  the v4 encoding. So L* of 100 is stored as 0xFF00 and read by anyone as about 99.6, and a* and b*
+  move the same way.
+- **Who notices:** whoever uses the profile: colors are off by about 0.4 in L*.
+- **A fix:** sample through `TYPE_Lab_16`, which changes every profile's CLUTs.
+- **Status:** matched (card phase10-icc).
+
+### I-655. The sampler's cast of a NaN
+
+- **Upstream:** `(cmsUInt16Number)std::max(std::min(pix[0] * 65535.f, 65535.f), 0.f)`
+  (`ocioicc.cpp:68-70`) lets a NaN through both comparisons, and the cast is undefined in C++. Both
+  wheels convert with `cvttss2si`, which gives 0x80000000, of which the cast keeps 0. So NaN from
+  the processor becomes black, on both platforms.
+- **Who notices:** transforms that give NaN at a node of the cube.
+- **A fix:** none needed; the cast could be made explicit.
+- **Status:** matched (card phase10-icc).
+
+### I-656. lcms2's interpolators overflow `int` on steep tables
+
+- **Upstream:** `TetrahedralInterp16` and `Eval4Inputs` add products of 16-bit differences and
+  16-bit fractions (src/cmsintrp.c:773 @ lcms2.17, under `CMS_NO_SANITIZE`). With neighbouring nodes
+  at 0 and 0xFFFF the sum passes 2^31. Signed overflow is undefined, and both wheels' machine code
+  wraps, so the result is a value of the wrong size, the same on both.
+- **Who notices:** a display profile with a CLUT of extreme neighbours.
+- **A fix:** compute in 64 bits, which changes those nodes' neighbourhoods.
+- **Status:** matched, with wrapping arithmetic (card phase10-icc).
+
+### I-657. Non-ASCII text in a profile's description
+
+- **Upstream:** `cmsMLUsetASCII` (src/cmsnamed.c:336-364 @ lcms2.17) takes each byte of
+  `--description`, `--copyright` or the output's name as a signed `char`, so a byte over 0x7F
+  becomes U+FFxx in the file. UTF-8 text turns into a run of unrelated characters.
+- **Who notices:** names outside ASCII, in any UI that shows the profile's description.
+- **A fix:** `cmsMLUsetUTF8`, which changes the bytes of those profiles.
+- **Status:** matched on Linux (card phase10-icc). On Windows the arguments are UTF-8 in the port
+  and the ANSI code page in the wheel (I-601).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -6717,6 +6798,89 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   information from operating system."; SystemMonitors::get catches and debug-logs it while
   keeping its empty list, as upstream's exception boundary does. No uninitialized storage is
   read (`system_monitor_windows_ffi.rs`, `system_monitor_windows.rs`).
+
+### U-650. `cmsSignalError` under MSVC can read past its message on long ones
+
+- **Upstream:** `lcms2_internal.h:103-105` makes `vsnprintf` the C runtime's `_vsnprintf` under
+  MSVC, which writes no terminator when it fills the size it is given. `cmsSignalError` passes 1023
+  for a buffer of 1024 it doesn't clear (src/cmserr.c:513-518 @ lcms2.17), so a message of 1023
+  characters or more ends only if the buffer's last byte, which nobody set, is zero; if not, it runs
+  on into what follows on the stack until a zero byte. A message that long needs a file name of
+  about 1000 characters: "File '...' not found", "Couldn't create '...'". The byte was zero in all
+  of 108 runs on the Windows wheel, with names of 1000 to 3000 characters, so the message stopped at
+  1023.
+- **Who notices:** Windows users of paths that long, which `fopen` can't open anyway (I-608), if
+  the byte isn't zero.
+- **A fix:** clear the last byte. The GCC build keeps 1022 characters and a terminator.
+- **Status:** the port keeps 1023 characters on Windows and 1022 on Linux, and stops there, which
+  matches both wheels as measured, and is tested on both (`long_messages`). A run where the wheel's
+  byte isn't zero wouldn't match.
+
+### U-651. A bad `--whitepoint` writes a `chad` tag from a white point nobody set
+
+- **Upstream:** `cmsWhitePointFromTemp` fails outside 4000 to 25000 K, and `ocioicc.cpp:102-103` goes
+  on with the uninitialized local `cmsCIExyY whitePoint`. Both wheels print "OCIO Error:
+  cmsWhitePointFromTemp: invalid temp", and exit with 0. That point reaches only the `chad` tags
+  (src/cmsvirt.c:145-149 @ lcms2.17) of the output and of the Lab profile, whose tag the tool's
+  perceptual transforms don't read. So with the time masked, the only bytes of the output that
+  differ from a good profile's are the 36 of its `chad` values, as measured with 8 temperatures,
+  3 runs each, on both wheels. Their values, in 48 more runs at 3999, 25001, 0 and 100000: all
+  zeros in every run on Windows; on Linux 0x80000000 nine times in 35 runs, and 0, 0x13d0, 0xa5b, 0,
+  0xa3d7, 0x547b, 0x10000, 0x4ccd, 0x999a in the other 13, at every temperature and at random.
+- **Who notices:** anyone who mistypes a temperature, and gets a profile with exit 0.
+- **A fix:** refuse the value, which is what the port does.
+- **Status:** the port stops, with exit 1 and no profile, by the owner's decision of 2026-10-31,
+  although the wheel exits with 0 with one bad tag, and its read is of an uninitialised local in its
+  own frame, not of memory outside it. It can't be matched: the two wheels write different values,
+  and the Linux wheel's change from run to run. The port says all the wheel says up to the save,
+  with what the save reports about the tags: the display profile's errors, and "Couldn't write
+  type" where a cube of 256 and over gives no CLUT. Where the wheel's tool dies on a null transform,
+  the port stops as in U-652. If not, it prints "ERROR: the whitepoint must be between 4000 and
+  25000 to write an ICC profile.", and exits with 1 (`Stop::WhitePoint`). So a cube of 256 and over,
+  where the wheel saves nothing and exits with 0, exits with 1 as well. The port doesn't open the
+  output, so it doesn't report a path it couldn't create, and leaves a file already there alone.
+  So where the output can't be created at a cube of 256 and over, the wheel says "Couldn't create" and
+  nothing about the tags, while the port reports the tags ("LUT is not suitable to be saved as
+  LutAToB", "Couldn't write type 'mAB '"). Under `--v` the port doesn't print the wheel's
+  `[OpenColorIO INFO]: Finished`, which comes after the save.
+
+### U-652. A display profile that gives no transform kills the tool
+
+- **Upstream:** `ocioicc.cpp:139-142` doesn't look at what `cmsCreateTransform` returns, and the
+  samplers call `cmsDoTransform` on the null it can be, which reads `p->InputFormat` at the null
+  pointer: 0xC0000005 on Windows, SIGSEGV on Linux. A `--displayicc` that doesn't open, or isn't a
+  profile, or isn't RGB (gray, CMYK, named), or can't be linked, ends so. lcms2's errors are on
+  stderr by then. If only the second transform is missing, the `A2B0` tag has been sampled.
+- **Who notices:** anyone who passes such a profile.
+- **A fix:** check the transforms, and report it, which is what the port does.
+- **Status:** the port prints what the wheel printed, then "ERROR: no transform between the
+  display profile and Lab: the ICC profile can't be written.", and exits with 1
+  (`Stop::NullTransform`). stdout may hold more than the wheel's, whose `std::cout` is lost with the
+  process.
+
+### U-653. Float CLUTs of 2 or 4 and more inputs read past their table
+
+- **Upstream:** `BilinearInterpFloat` and `Eval4InputsFloat` to `Eval15InputsFloat` take the cell
+  with `_cmsQuickFloor` (src/cmsintrp.c:380, 1053, 1132 @ lcms2.17), which works on 16 fractional
+  bits and rounds at that precision, where `TetrahedralInterpFloat` uses `floor`. So an input within
+  about 2^-17/domain under 1.0 (the domain is the grid's size less one) lands on the last node, and
+  the next node is read past the end of the table, with a negative weight of that size: the tests
+  place the width between 1.5e-6 and 3e-6 for a domain of 4, and between 3e-6 and 6e-6 for a domain
+  of 2. The same goes for the second of two inputs when the first is on the last node, and with
+  five inputs and more for an inner input on the last row of the level above, even with a weight of
+  0 there. The wheel goes on with what the memory there holds. Measured with grid (5,7), first
+  input 1-2^-24, on the Windows wheel: 50 runs, over 5 sizes of a tag nothing reads, gave six
+  results, one of them in about 3 of 4 runs at every size. Grid (128,128) died with 0xC0000005 in 3
+  of 20 runs, and a CLUT of five inputs and grid 3 died so in 1 of 72 runs of its test. The Linux
+  wheel gave one result and no death in 10 runs at each of those sizes and in 20 at grid (128,128).
+  Its result at grid (5,7) isn't the Windows wheel's usual one; at (128,128) it is.
+- **Who notices:** a real display profile is very unlikely to hit it. It takes a `mpet` tag with a
+  `clut` element of 2 or of 4 and more inputs on an RGB device, and a node of the cube that comes to
+  within 2^-17/domain of 1 through a matrix or a curve before the CLUT: an input of exactly 1.0 is
+  safe.
+- **A fix:** use `floor`, as the three-input one does.
+- **Status:** the port prints what the wheel printed, then "ERROR: the display profile's table is
+  read past its end: the ICC profile can't be written.", and exits with 1 (`Stop::OutOfBounds`).
 
 ### I-542. CPU/GPU special-value differences in the llvmpipe harness
 

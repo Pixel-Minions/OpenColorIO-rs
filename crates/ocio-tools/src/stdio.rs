@@ -174,24 +174,30 @@ impl OutputFile {
     /// system refuses for a hidden or system file that exists. Rust's `File::create` opens
     /// another way, which it allows, so the attributes are looked at first.
     pub fn create(path: &[u8]) -> std::io::Result<OutputFile> {
-        let path = path_from_bytes(path);
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::MetadataExt;
-            const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
-            const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
-            let refused = FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM;
-            if let Ok(metadata) = std::fs::metadata(&path)
-                && metadata.is_file()
-                && metadata.file_attributes() & refused != 0
-            {
-                return Err(std::io::ErrorKind::PermissionDenied.into());
-            }
-        }
         Ok(OutputFile {
-            file: File::create(path)?,
+            file: create_file(path)?,
         })
     }
+}
+
+/// `fopen(path, "wb")`, or what `std::ofstream` opens with. `path` is as the command line gave
+/// it.
+pub fn create_file(path: &[u8]) -> std::io::Result<File> {
+    let path = path_from_bytes(path);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+        let refused = FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM;
+        if let Ok(metadata) = std::fs::metadata(&path)
+            && metadata.is_file()
+            && metadata.file_attributes() & refused != 0
+        {
+            return Err(std::io::ErrorKind::PermissionDenied.into());
+        }
+    }
+    File::create(path)
 }
 
 impl Write for OutputFile {
@@ -207,7 +213,7 @@ impl Write for OutputFile {
 
 /// The bytes of an argument as a path.
 #[cfg(unix)]
-fn path_from_bytes(path: &[u8]) -> PathBuf {
+pub fn path_from_bytes(path: &[u8]) -> PathBuf {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     PathBuf::from(OsStr::from_bytes(path))
@@ -215,7 +221,7 @@ fn path_from_bytes(path: &[u8]) -> PathBuf {
 
 /// The bytes of an argument as a path: the UTF-8 of [`args`].
 #[cfg(windows)]
-fn path_from_bytes(path: &[u8]) -> PathBuf {
+pub fn path_from_bytes(path: &[u8]) -> PathBuf {
     PathBuf::from(String::from_utf8_lossy(path).into_owned())
 }
 

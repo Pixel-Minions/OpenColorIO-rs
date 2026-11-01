@@ -3,13 +3,12 @@
 
 //! `ociobakelut` against the wheel's: stdout, stderr, exit code and the LUT it writes.
 //!
-//! ICC output isn't ported (docs/cards/phase10-tools.md): a command line that gets as far as
-//! writing a profile is in [`icc_output_is_reported_as_not_ported`], and the ones the wheel
+//! ICC output has its own target, `ociobakelut_icc_oracle`. The command lines the wheel
 //! refuses before that are compared like any other.
 
 mod common;
 
-use common::{Case, Outcome, run_both, sweep, test_file};
+use common::{Case, sweep, test_file};
 use ocio::Baker;
 
 const TOOL: &str = "ociobakelut";
@@ -694,55 +693,6 @@ fn icc_refusals() {
     ];
     let summary = sweep("ociobakelut_icc_refusals", TOOL, PROGRAM, &cases);
     assert_eq!(summary.with_exit_code(1), cases.len());
-}
-
-/// The text of `outcome`'s stderr.
-fn stderr(outcome: &Outcome) -> String {
-    String::from_utf8(outcome.stderr.clone()).unwrap()
-}
-
-/// Where the wheel writes a profile, the port reports that it can't. Everything the tool prints
-/// before that point still matches, and nothing is left behind.
-#[test]
-fn icc_output_is_reported_as_not_ported() {
-    let select = [
-        "--iconfig",
-        "a.ocio",
-        "--inputspace",
-        "lin",
-        "--format",
-        "icc",
-    ];
-    for (label, extra) in [
-        ("space", vec!["--outputspace", "log", "out.icc"]),
-        ("view", vec!["--displayview", "sRGB", "Film", "out.icc"]),
-        ("verbose", vec!["--outputspace", "log", "--v", "out.icc"]),
-        ("debug", vec!["--outputspace", "log", "out.icc"]),
-        (
-            "shaper",
-            vec!["--outputspace", "log", "--shaperspace", "gamma", "out.icc"],
-        ),
-    ] {
-        let mut argv = select.to_vec();
-        argv.extend(extra);
-        let mut case = with_config(Case::new(label, &argv));
-        // The optimizer's lines are how the CPU processor upstream makes here shows.
-        if label == "debug" {
-            case = case.env("OCIO_LOGGING_LEVEL", "debug");
-        }
-        let (wheel, port) = run_both("ociobakelut_icc", TOOL, PROGRAM, &case);
-        assert_eq!(wheel.exit_code, 0, "{label}: {}", stderr(&wheel));
-        assert!(wheel.files.contains_key("out.icc"), "{label}");
-        assert_eq!(port.exit_code, 1, "{label}");
-        assert!(port.files.is_empty(), "{label}");
-        assert!(wheel.stdout.starts_with(&port.stdout), "{label}");
-        let reported = stderr(&port);
-        assert!(
-            reported.contains("ICC output is not available"),
-            "{reported}"
-        );
-        assert!(reported.starts_with(&stderr(&wheel)), "{reported}");
-    }
 }
 
 /// `Config::CreateFromFile` and `CreateFromEnv` run outside `main`'s `try` blocks, so a config

@@ -13,3 +13,6 @@
 [submodule "upstream/minizip-ng"]
 	path = upstream/minizip-ng
 	url = https://github.com/zlib-ng/minizip-ng
+[submodule "upstream/Little-CMS"]
+	path = upstream/Little-CMS
+	url = https://github.com/mm2/Little-CMS

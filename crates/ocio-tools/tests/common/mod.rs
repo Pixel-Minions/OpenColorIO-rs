@@ -43,6 +43,27 @@ pub(crate) struct Case {
     pub(crate) sigpipe_ignored: bool,
     /// The shell line `tool | head -c n`.
     pub(crate) head_bytes: Option<u32>,
+    /// The files written are ICC profiles: their creation time isn't compared, see [`Case::icc`].
+    pub(crate) icc: bool,
+    /// Where the wheel leaves its memory, the port's deliberate error instead, see
+    /// [`Case::stops`].
+    pub(crate) stop: Option<Stop>,
+}
+
+/// When a case ends in a deliberate error of the port (CLAUDE.md, rule 1).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Stop {
+    /// Always: the wheel finishes, with bytes that come from memory nobody set.
+    Always(&'static str),
+    /// If the wheel's tool dies: whether it does is up to the case's profile.
+    IfTheWheelDies(&'static str),
+    /// If the wheel's tool dies, with the first message; or if the port says the second, that
+    /// the wheel reads memory it doesn't own, which the wheel then does whether it dies or not.
+    /// [`Summary::port_stops`] counts the second.
+    Profile {
+        dies: &'static str,
+        reads_outside: &'static str,
+    },
 }
 
 impl Case {
@@ -58,7 +79,27 @@ impl Case {
             closed_pipe: None,
             sigpipe_ignored: false,
             head_bytes: None,
+            icc: false,
+            stop: None,
         }
+    }
+
+    /// The case writes ICC profiles. Bytes 24 to 35 of a profile are its creation time (ICC.1
+    /// section 7.2.1, `dateTimeNumber`; `_cmsWriteHeader` puts `Icc->Created` there): a test can't
+    /// run both tools in one second, so that field alone is compared by being a date close to
+    /// the wheel's. `creation_time_is_all_that_varies` shows on the wheel that nothing else does.
+    pub(crate) fn icc(mut self) -> Case {
+        self.icc = true;
+        self
+    }
+
+    /// The wheel goes where the port can't follow (docs/improvements.md): the port must print
+    /// what the wheel printed up to there, then the message, write nothing, and exit with 1. One
+    /// stdout must start the other: what `std::cout` holds when the wheel's process dies is
+    /// lost, and a wheel that goes on prints more.
+    pub(crate) fn stops(mut self, stop: Stop) -> Case {
+        self.stop = Some(stop);
+        self
     }
 
     pub(crate) fn closed_pipe(mut self, stream: &'static str) -> Case {
@@ -135,7 +176,7 @@ fn case_dir(group: &str, index: usize) -> PathBuf {
 }
 
 /// Runs `cases` in the wheel's `tool`.
-fn wheel_outcomes(group: &str, tool: &str, cases: &[Case]) -> Vec<Outcome> {
+pub(crate) fn wheel_outcomes(group: &str, tool: &str, cases: &[Case]) -> Vec<Outcome> {
     let calls: Vec<BatchCall<'_>> = cases
         .iter()
         .enumerate()
@@ -412,10 +453,116 @@ fn differences(wheel: &Outcome, port: &Outcome) -> String {
     text
 }
 
+/// Where a profile's creation time is (ICC.1 section 7.2.1).
+pub(crate) const ICC_CREATION_TIME: std::ops::Range<usize> = 24..36;
+
+/// The seconds since 1970 of a `dateTimeNumber`, after checking that it is a date.
+fn icc_creation_time(profile: &[u8]) -> Option<i64> {
+    let field = profile.get(ICC_CREATION_TIME)?;
+    let number = |i: usize| i64::from(u16::from_be_bytes([field[i], field[i + 1]]));
+    let (year, month, day) = (number(0), number(2), number(4));
+    let (hours, minutes, seconds) = (number(6), number(8), number(10));
+    let valid = (2026..3000).contains(&year)
+        && (1..=12).contains(&month)
+        && (1..=31).contains(&day)
+        && (0..24).contains(&hours)
+        && (0..60).contains(&minutes)
+        && (0..61).contains(&seconds);
+    // Days from a civil date: the proleptic Gregorian calendar.
+    let (y, m) = if month <= 2 {
+        (year - 1, month + 9)
+    } else {
+        (year, month - 3)
+    };
+    let days = 365 * y + y / 4 - y / 100 + y / 400 + (153 * m + 2) / 5 + day - 1;
+    valid.then_some(days * 86400 + hours * 3600 + minutes * 60 + seconds)
+}
+
+/// `files` with the creation times out of the profiles, or how they are wrong: a port's must be a
+/// date, not before the wheel's, by no more than a run of a sweep.
+fn without_creation_time(
+    wheel: &mut BTreeMap<String, Vec<u8>>,
+    port: &mut BTreeMap<String, Vec<u8>>,
+) -> String {
+    let mut text = String::new();
+    for (path, wheel_file) in wheel.iter_mut() {
+        let Some(port_file) = port.get_mut(path) else {
+            continue;
+        };
+        let times = (icc_creation_time(wheel_file), icc_creation_time(port_file));
+        match times {
+            (Some(wheel_time), Some(port_time))
+                if (0..=3600).contains(&(port_time - wheel_time)) =>
+            {
+                wheel_file[ICC_CREATION_TIME].fill(0);
+                port_file[ICC_CREATION_TIME].fill(0);
+            }
+            _ => text += &format!("  {path}: creation times {times:?}\n"),
+        }
+    }
+    text
+}
+
+/// What is wrong with a deliberate error of the port, or nothing.
+fn stop_differences(wheel: &Outcome, port: &Outcome, message: &str) -> String {
+    let mut text = String::new();
+    if port.exit_code != 1 {
+        text += &format!("  the port ended with {}, not 1\n", port.exit_code);
+    }
+    if !port.files.is_empty() {
+        text += &format!(
+            "  the port wrote {:?}\n",
+            port.files.keys().collect::<Vec<_>>()
+        );
+    }
+    if !port.stdout.starts_with(&wheel.stdout) && !wheel.stdout.starts_with(&port.stdout) {
+        text += &describe("stdout", &wheel.stdout, &port.stdout).unwrap_or_default();
+    }
+    let eol = if cfg!(windows) { "\r\n" } else { "\n" };
+    let expected = [&wheel.stderr[..], message.as_bytes(), eol.as_bytes()].concat();
+    text += &describe("stderr", &expected, &port.stderr).unwrap_or_default();
+    text
+}
+
+/// Whether `outcome`'s stderr ends with the line `message`.
+fn said(outcome: &Outcome, message: &str) -> bool {
+    let eol: &[u8] = if cfg!(windows) { b"\r\n" } else { b"\n" };
+    outcome
+        .stderr
+        .strip_suffix(eol)
+        .is_some_and(|text| text.ends_with(message.as_bytes()))
+}
+
+/// What differs between the runs of `case`, or nothing.
+fn case_differences(case: &Case, wheel: &Outcome, port: &Outcome) -> String {
+    let died = !(0..=255).contains(&wheel.exit_code);
+    match case.stop {
+        Some(Stop::Always(message)) => return stop_differences(wheel, port, message),
+        Some(Stop::IfTheWheelDies(message)) if died => {
+            return stop_differences(wheel, port, message);
+        }
+        Some(Stop::Profile { reads_outside, .. }) if said(port, reads_outside) => {
+            return stop_differences(wheel, port, reads_outside);
+        }
+        Some(Stop::Profile { dies, .. }) if died => {
+            return stop_differences(wheel, port, dies);
+        }
+        _ => {}
+    }
+    if !case.icc {
+        return differences(wheel, port);
+    }
+    let (mut wheel, mut port) = (wheel.clone(), port.clone());
+    let times = without_creation_time(&mut wheel.files, &mut port.files);
+    times + &differences(&wheel, &port)
+}
+
 /// What the wheel's runs of a sweep gave: how a test checks that the cases do what they are for.
 #[derive(Debug)]
 pub(crate) struct Summary {
     pub(crate) outcomes: Vec<Outcome>,
+    /// How many cases of [`Stop::Profile`] the port ended with its second message.
+    pub(crate) port_stops: usize,
 }
 
 impl Summary {
@@ -445,17 +592,26 @@ pub(crate) fn sweep(group: &str, tool: &str, program: &str, cases: &[Case]) -> S
     assert_eq!(wheel.len(), cases.len());
     let mut report = String::new();
     let mut mismatches = 0;
+    let mut port_stops = 0;
     for (index, case) in cases.iter().enumerate() {
         let finished = (0..=255).contains(&wheel[index].exit_code);
-        assert_eq!(
-            finished,
-            !case.dies,
+        let either_way = matches!(
+            case.stop,
+            Some(Stop::IfTheWheelDies(_) | Stop::Profile { .. })
+        );
+        if let Some(Stop::Profile { reads_outside, .. }) = case.stop
+            && said(&port[index], reads_outside)
+        {
+            port_stops += 1;
+        }
+        assert!(
+            either_way || finished != case.dies,
             "{}: the wheel ended with {}: {}",
             case.label,
             wheel[index].exit_code,
             show(&wheel[index].stderr)
         );
-        let text = differences(&wheel[index], &port[index]);
+        let text = case_differences(case, &wheel[index], &port[index]);
         if !text.is_empty() {
             mismatches += 1;
             report += &format!("{} {:?}\n{text}\n", case.label, case.argv);
@@ -471,7 +627,10 @@ pub(crate) fn sweep(group: &str, tool: &str, program: &str, cases: &[Case]) -> S
             path.display()
         );
     }
-    Summary { outcomes: wheel }
+    Summary {
+        outcomes: wheel,
+        port_stops,
+    }
 }
 
 /// Windows only: `argv` writes the file `output`, which exists with each combination of
