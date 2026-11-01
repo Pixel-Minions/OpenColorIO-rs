@@ -9,7 +9,7 @@
 use ocio::transforms::range_transform::{
     RangeStyle, range_style_from_string, range_style_to_string,
 };
-use ocio_gpu::open_color_types::{GpuLanguage, gpu_language_to_string};
+use ocio_gpu::open_color_types::{GpuLanguage, gpu_language_from_string, gpu_language_to_string};
 use ocio_ops::open_color_types::{
     Allocation, BitDepth, CdlStyle, EnvironmentMode, FixedFunctionStyle, GradingStyle,
     Interpolation, LoggingLevel, NegativeStyle, TransformDirection, allocation_to_string,
@@ -455,29 +455,6 @@ fn bit_depth(v: i64) -> Option<BitDepth> {
     )
 }
 
-/// Port of `GpuLanguageFromString` (src/OpenColorIO/ParseUtils.cpp:277-296 @ v2.5.2).
-fn gpu_language_from_string(s: &[u8]) -> ocio::Result<GpuLanguage> {
-    use GpuLanguage::*;
-    let p = c_str(s);
-    Ok(match lower(p).as_slice() {
-        b"cg" => Cg,
-        b"glsl_1.2" => Glsl1_2,
-        b"glsl_1.3" => Glsl1_3,
-        b"glsl_4.0" => Glsl4_0,
-        b"glsl_vk_4.6" => GlslVk4_6,
-        b"glsl_es_1.0" => GlslEs1_0,
-        b"glsl_es_3.0" => GlslEs3_0,
-        b"hlsl_sm_5.0" => HlslSm5_0,
-        b"osl_1" => Osl1,
-        b"msl_2" => Msl2_0,
-        _ => {
-            return Err(ocio::Exception::new(
-                [b"Unsupported GPU shader language: '".as_slice(), p, b"'."].concat(),
-            ));
-        }
-    })
-}
-
 /// Port of `GradingStyleFromString` (src/OpenColorIO/ParseUtils.cpp:443-456 @ v2.5.2).
 fn grading_style_from_string(style: &[u8]) -> ocio::Result<GradingStyle> {
     let p = c_str(style);
@@ -738,7 +715,7 @@ static CONVERSIONS: [Function; 32] = [
         GPU_LANGUAGE,
         |py, _, a, convert| {
             let s = arg!(a, 0, convert, CharPtr);
-            let language = py_result(py, gpu_language_from_string(c_string(&s)))?;
+            let language = py_result(py, gpu_language_from_string(s.0.as_deref()))?;
             enum_out(py, GPU_LANGUAGE, language as i64)
         }
     ),

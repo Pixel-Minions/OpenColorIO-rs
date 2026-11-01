@@ -358,3 +358,16 @@ Group writing and all three registry queries are also present. Corrected two sta
 module comments which still described those implemented features as future work.
 Existing I-11/U-58/I-73/I-178 decisions, every test and all runtime code are unchanged.
 The full normal CI gate is still required before this source-map chunk lands.
+
+## P60 transform and op-factory declaration audit (2026-10-31)
+
+The Transform.cpp dispatch covers all 23 upstream transform kinds and all 14
+transform-producing op families. Every declaration in GammaOp.h, LogOp.h, Lut1DOp.h
+and RangeOp.h also has a current Rust implementation, including all overloads and
+GenerateLinearScaleLut1D. Mark those five entries complete and list their transform-side
+implementation files. Correct the stale CreateTransform comment. Runtime code and
+tests are unchanged; normal CI is required before landing. Keep CDLOp.h and MatrixOp.h
+partial: their declared-but-undefined upstream overloads need separate accounting.
+
+P60 also audits PathUtils.h: all five declarations already map to path_utils.rs,
+including ParseColorSpaceFromString. Mark that header complete with no runtime changes.
