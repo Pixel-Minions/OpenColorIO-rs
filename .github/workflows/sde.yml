@@ -36,6 +36,7 @@ on:
         required: true
         default: true
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
     paths:
       - "crates/ocio-ops/**"
       - "crates/ocio-testkit/**"
@@ -77,7 +78,7 @@ env:
 jobs:
   windows-kernels:
     # The owner selects a separate targeted run for PRs carrying this label.
-    if: (github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')) && !inputs.targeted
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
     name: SDE ${{ matrix.cpu }} kernel shard${{ matrix.shard }} (Windows)
     runs-on: windows-2025
     # Original comparisons retained; the runner bounds individual executions separately.
@@ -129,7 +130,7 @@ jobs:
 
   windows-lut:
     # The owner selects a separate targeted run for PRs carrying this label.
-    if: (github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')) && !inputs.targeted
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
     name: SDE ${{ matrix.cpu }} LUT sweep (Windows)
     runs-on: windows-2025
     timeout-minutes: 360
@@ -171,7 +172,7 @@ jobs:
 
   rocky9-kernels:
     # The owner selects a separate targeted run for PRs carrying this label.
-    if: (github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')) && !inputs.targeted
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
     name: SDE ${{ matrix.cpu }} kernel shard${{ matrix.shard }} (Rocky Linux 9)
     runs-on: ubuntu-24.04
     # Original comparisons retained; the runner bounds individual executions separately.
@@ -219,7 +220,7 @@ jobs:
 
   rocky9-lut:
     # The owner selects a separate targeted run for PRs carrying this label.
-    if: (github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')) && !inputs.targeted
+    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
     name: SDE ${{ matrix.cpu }} LUT sweep (Rocky Linux 9)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -258,7 +259,7 @@ jobs:
 
   kernels:
     name: SDE ${{ matrix.cpu }} (${{ matrix.system == 'Rocky' && 'Rocky Linux 9' || 'Windows' }})
-    if: always() && (github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')) && !inputs.targeted
+    if: always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
     needs: [windows-kernels, rocky9-kernels]
     runs-on: ubuntu-24.04
     timeout-minutes: 30

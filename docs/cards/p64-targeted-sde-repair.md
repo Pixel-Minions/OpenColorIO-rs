@@ -35,7 +35,9 @@ unbounded budgets. They launch no SDE or OCIO processes.
 ## One workflow, five focused test jobs
 
 Dispatch the existing SDE workflow with targeted=true on the verified repair SHA.
-All full-matrix and depth jobs are excluded from that invocation.
+All full-matrix and depth jobs are excluded from that invocation. Draft PRs defer
+SDE until ready_for_review, so the targeted label can be applied before any full
+matrix is considered; ready PRs without the label retain automatic SDE coverage.
 
 | Job | Exact selection | Coverage claim |
 |---|---|---|
