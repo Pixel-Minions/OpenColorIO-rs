@@ -93,7 +93,7 @@ one.
 ## Progress
 
 Status as of 2026-11-01: **milestones M0, M1, M2, M3 and M4 are complete**, about 93% of the
-planned work (853 of 913 upstream source files ported or reviewed not applicable; 1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
+planned work (859 of 913 upstream source files ported or reviewed not applicable; 1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
 all 1,191; 384 of 384 upstream Python tests pass unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
 test configs): the grading values (GradingPrimary, GradingTone,
@@ -102,7 +102,8 @@ GradingTone and GradingHueCurve op families, CPU and GPU; the ExposureContrast a
 transforms, with their builders, their YAML and their CLF/CTF elements; dynamic properties end to
 end; and every app helper (color space menus, display/view helpers, `LegacyViewingPipeline`,
 the mixing helpers). Phase 9 in main: ConfigUtils, OS monitor support and complete config merging,
-including every section, OCIOM chains, whole-config merges and single-color-space merges. Phase 6 (M4) in main: the
+including every section, OCIOM chains, whole-config merges and single-color-space merges.
+Six stale transform/factory/path header mappings now record their existing complete implementations. Phase 6 (M4) in main: the
 `PyOpenColorIO` module's foundation (the module and its build, upstream's Python suite runner,
 pybind11's dispatcher, casters, classes and enums as the wheel shows them, every enum, constant
 and string conversion), every transform class, and the objects the config holds (context,
