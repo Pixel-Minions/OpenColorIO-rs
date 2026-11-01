@@ -5949,9 +5949,9 @@ note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source r
 [[file]]
 path = "tests/python/OpenColorIOTestSuite.py"
 kind = "test-python"
-target = ["xtask/src/py.rs"]
-status = "partial"
-note = "P54: driver_modules/modules_of_driver consume the unchanged get_test_modules inventory (48 modules); py-suite runs those modules unmodified in fresh processes and verifies all 384 functions against the wheel. The standalone driver CLI and its single-process suite path have not been separately validated; do not count them as complete."
+target = ["xtask/src/py.rs", "xtask/src/py_driver.rs"]
+status = "done"
+note = "P54/P73: driver_modules/modules_of_driver consume the unchanged get_test_modules inventory (48 modules); py-suite runs those modules unmodified in fresh processes and verifies all 384 functions against the wheel. It also executes the original unmodified driver as one process against each package, checking the wheel-inventoried test IDs/multiplicities, successful unittest footer and exact run order. Its valid module-selection and unknown-module CLI paths are compared too; actual logs are retained in py-driver.json. Both-platform runtime qualification is required before the P73 chunk lands."
 
 [[file]]
 path = "tests/python/ProcessorCacheTest.py"
