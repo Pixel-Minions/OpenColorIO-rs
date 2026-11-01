@@ -134,8 +134,8 @@ note = "build system"
 path = "src/OpenColorIO/CPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
-status = "partial"
-note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534), CreateScanlineHelper (187-238) and the image apply methods (379-431, 541-549; apply(img, img) as apply_same), checked against the wheel through image_apply (tests/cpu_processor_apply_oracle.rs), and applyRGB and applyRGBA (433-465, 551-559), each wheel's in-place conversions (I-41), checked through image_apply identities (tests/cpu_processor_apply_rgb_oracle.rs); p1-optimizer C: the Lut1D ends of CreateCPUEngine (GetLut1DRenderer), and applyRGB and applyRGBA return a Result for U-1 (owner-approved API change)"
+status = "done"
+note = "P71 reconciles merged Phase8 source: typed bit-depth ends, CPU engine/renderer dispatch, scanline/image apply, RGB/RGBA apply, dynamic queries and cache metadata are implemented in cpu_processor.rs. Physical SIMD/packing is supplied by the already merged renderer modules. Source implementation is complete; complete CPU-profile qualification remains separately open in P63."
 
 [[file]]
 path = "src/OpenColorIO/CPUProcessor.h"
@@ -472,16 +472,16 @@ note = "p4-baker 4.9a: CIOPOciozArchive (77-107) and the reading functions; 4.9b
 [[file]]
 path = "src/OpenColorIO/Op.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
-status = "partial"
-note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's; the Gamma op (1.3g3): its arms, OpData::getIdentityReplacement's Gamma override, CreateOpVecFromOpData's; the CDL op (1.3c3): its arms, OpData::getIdentityReplacement's and getSimplerReplacement's CDL overrides, CreateOpVecFromOpData's; the Exponent op (1.3e1): its arms, and CreateOpVecFromOpData's; the Log op (1.3l3): its arms, OpData::getIdentityReplacement's Log override (LogOpData's, which can raise), CreateOpVecFromOpData's; the Lut1D op (p1-optimizer B): its arms; the GradingPrimary op (p5-primary 5.2a): its arms, OpData::getIdentityReplacement's GradingPrimary override (a Range of the clamps, which can raise), CreateOpVecFromOpData's"
+target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs", "crates/ocio/src/processor.rs"]
+status = "done"
+note = "P71 complete source mapping after Phase8: CpuOp defaults, every op-family CPU dispatch, op/data/vector behavior, identity/combination/finalization/cache and transform metadata hand-off have existing Rust implementations. No renderer or numerical changes; CPU-profile qualification is tracked separately."
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
 kind = "src"
-target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
-status = "partial"
-note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; 1.2d: optimize and optimizeForBitdepth (OpOptimizers.cpp), HasFlag, as OptimizationFlags::has_flag; 1.8h1: dumpMetadata, in Processor::compute_metadata (crates/ocio/src/processor.rs); 1.7e: extractGpuShaderInfo, in ocio-gpu (extract_op_gpu_shader_info, gpu_processor.rs), which matches on the op data's variant"
+target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/processor.rs"]
+status = "done"
+note = "P71 complete declaration mapping after Phase8: CpuOp float/typed/in-place/dynamic interfaces, OpData/OpVec and CPU/GPU extraction/metadata dispatch are implemented in the listed modules. Existing Rust ownership/typing boundaries remain. Full CPU-profile qualification is separate release work."
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -529,15 +529,15 @@ note = "p3-context 3.5f: the declarations of the functions in path_utils.rs; p60
 path = "src/OpenColorIO/Platform.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/platform.rs"]
-status = "partial"
-note = "p3-context 3.5a: everything but AlignedMalloc/AlignedFree (no caller in the port yet). The environment goes through an injectable provider with each platform's rules, bytes, and the whole-environment listing (environ / _wenviron); what OCIO sets goes to an overlay (deviation D-5). Utf8ToUtf16/Utf16ToUtf8 reproduce MultiByteToWideChar/WideCharToMultiByte, CreateFileContentHash _wstat/stat (devices: I-114), checked against the system in tests/platform_crt.rs; CreateTempFilename's names differ (I-112). The public GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent are re-exported by ocio. Strcasecmp and Strncasecmp take bytes that end at a NUL and fold A-Z only, as the classic C locale does (deviation D-4), checked against _stricmp/_strnicmp (UCRT) and strcasecmp/strncasecmp (glibc) for every pair of bytes (tests/platform_crt.rs)"
+status = "done"
+note = "P71 complete existing platform-function mapping. AlignedMalloc/AlignedFree remain the already approved P9-6 not-applicable C++ storage helpers: merged Phase8 Lut3D still stores Vec<f32> and uses unaligned SSE2/AVX loads, so the conditional aligned-storage reopening is unnecessary. Environment/UTF conversion/hash/string comparison behavior and existing D-4/D-5 remain unchanged."
 
 [[file]]
 path = "src/OpenColorIO/Platform.h"
 kind = "src"
 target = ["crates/ocio-ops/src/platform.rs"]
-status = "partial"
-note = "see Platform.cpp"
+status = "done"
+note = "P71 complete declaration accounting under P9-6: aligned allocation/free remain outside the Rust storage API because the actual merged Lut3D table is Vec<f32> with unaligned SIMD loads. All other platform functions are implemented. No new exclusion, unsafe code or allocator is introduced."
 
 [[file]]
 path = "src/OpenColorIO/PrivateTypes.h"
@@ -1854,8 +1854,8 @@ note = "p1-optimizer C: the lookups of a forward LUT without hue adjust from 8-,
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu.rs"]
-status = "partial"
-note = "p1-optimizer C: GetLut1DRenderer"
+status = "done"
+note = "P71 complete factory declaration mapping: get_lut1d_renderer/get_lut1d_renderer_for_cpu select each supported typed input/output renderer and CpuInfo-dispatched physical kernels. This closes the obsolete pre-Phase8 partial status; full cross-CPU execution qualification remains open in P63."
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.cpp"
