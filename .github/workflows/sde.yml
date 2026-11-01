@@ -35,6 +35,12 @@ on:
         type: boolean
         required: true
         default: true
+      targeted_scope:
+        description: Focused jobs; icc selects only the two owed Rocky snb sweeps
+        type: choice
+        required: true
+        default: all
+        options: [all, icc]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
@@ -354,7 +360,7 @@ jobs:
 
   targeted-windows:
     name: Targeted ${{ matrix.plan }} ${{ matrix.cpu }} (Windows)
-    if: github.event_name == 'workflow_dispatch' && inputs.targeted
+    if: github.event_name == 'workflow_dispatch' && inputs.targeted && inputs.targeted_scope != 'icc'
     needs: targeted-controls
     runs-on: windows-2025
     timeout-minutes: 360

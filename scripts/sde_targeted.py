@@ -14,6 +14,19 @@ import sys
 from sde_cpu_tests import native_list, one_test, write_json
 
 
+def source_head(root):
+    # Docker's /work is owned by the checkout's host user. Trust only this path,
+    # for this read: do not modify a global config or trust unrelated repositories.
+    root = pathlib.Path(root).resolve()
+    head = subprocess.check_output([
+        'git', '-c', 'safe.directory=' + root.as_posix(), '-C', str(root),
+        'rev-parse', '--verify', 'HEAD',
+    ], text=True).strip()
+    if not re.fullmatch(r'[0-9a-f]{40}', head):
+        raise RuntimeError('Expected the actual checked-out source commit')
+    return head
+
+
 def selection(plan):
     if plan == 'boundary':
         return 'ocio', 'legacy_gpu_oracle', [
@@ -57,6 +70,7 @@ def run(plan, cpu):
         raise RuntimeError('The owed ICC sweeps belong to Rocky snb')
     root = pathlib.Path(__file__).resolve().parents[1]
     os.chdir(root)
+    head = source_head(root)
     triple = 'X86_64_PC_WINDOWS_MSVC' if windows else 'X86_64_UNKNOWN_LINUX_GNU'
     prefix = shlex.split(os.environ['CARGO_TARGET_' + triple + '_RUNNER'])
     if not prefix or prefix[-1] != '--' or '-' + cpu not in prefix:
@@ -79,7 +93,7 @@ def run(plan, cpu):
     native = native_list(binary, [])
     if not set(selected) <= set(native) or len(selected) != len(set(selected)):
         raise RuntimeError('Missing or duplicate native tests in the focused selection')
-    report = dict(Plan=plan, CPU=cpu, Head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+    report = dict(Plan=plan, CPU=cpu, Head=head,
                   SDEPrefix=prefix, BuildCommand=command, Tier=os.environ['OCIO_RS_TIER'],
                   NativeInventory=native, Selected=selected, Results=[],
                   CompleteCPUProfile=False, AllSelectedPassed=False)

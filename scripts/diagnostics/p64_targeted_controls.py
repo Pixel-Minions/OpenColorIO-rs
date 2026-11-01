@@ -6,13 +6,31 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from sde_cpu_tests import one_test
-from sde_targeted import selection
+from sde_targeted import selection, source_head
 
 
 class TargetedControls(unittest.TestCase):
+    def test_source_head_trust_is_process_scoped_and_specific(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        with mock.patch('sde_targeted.subprocess.check_output', return_value='f' * 40 + '\n') as read:
+            self.assertEqual(source_head(root), 'f' * 40)
+        read.assert_called_once_with([
+            'git', '-c', 'safe.directory=' + root.as_posix(), '-C', str(root),
+            'rev-parse', '--verify', 'HEAD',
+        ], text=True)
+        with mock.patch('sde_targeted.subprocess.check_output', return_value='HEAD\n'):
+            with self.assertRaises(RuntimeError):
+                source_head(root)
+
+    def test_actual_mounted_checkout_head_is_readable(self):
+        # Run this inside Rocky before the ordinary gate sets its Git trust config:
+        # the former bare rev-parse fails here for the host-owned /work checkout.
+        self.assertRegex(source_head(pathlib.Path(__file__).resolve().parents[2]), r'^[0-9a-f]{40}$')
+
     def case(self, source, budget):
         with tempfile.TemporaryDirectory() as folder:
             directory = pathlib.Path(folder)
