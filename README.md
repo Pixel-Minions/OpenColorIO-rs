@@ -15,7 +15,7 @@ from Rust and Python.
 > CPU results and generated GPU shaders match the official library. All 384 upstream
 > Python tests pass unmodified; SystemMonitors and complete module metadata are checked
 > on Windows and Rocky Linux 9, within the approved [D-16 scope](docs/deviations.md).
-> Next: remaining library tests, legacy GPU parity, SIMD performance and release work
+> Next: remaining library tests, legacy GPU parity and release work
 > (M5). See [Progress](#progress).
 
 ## How precise: byte for byte
@@ -92,7 +92,7 @@ one.
 
 ## Progress
 
-Status as of 2026-10-31: **milestones M0, M1, M2, M3 and M4 are complete**, about 93% of the
+Status as of 2026-11-01: **milestones M0, M1, M2, M3 and M4 are complete**, about 93% of the
 planned work (853 of 913 upstream source files ported or reviewed not applicable; 1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
 all 1,191; 384 of 384 upstream Python tests pass unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
@@ -130,7 +130,7 @@ files, and the CLF/CTF writer; the baker, in every format the official library b
 CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
 4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
 ops in M3. Next: remaining legacy GPU parity (Phase 7), the remaining library-file audit
-(Phase 9), hardware SIMD and threading (Phase 8), and developer tools and release work (Phase 10).
+(Phase 9), and release work (Phase 10). Hardware SIMD (Phase 8) is in: most paths run within 10% of C++ OCIO on the same machine, a few are still slower (`docs/cards/phase8.md`), and `CpuProcessor::apply_threaded`, which upstream doesn't have, renders rows on several threads.
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
@@ -260,14 +260,14 @@ shader text are compared with the official library.
 
 Each milestone completes a section of OCIO with exact oracle checks:
 
-| Milestone | Section | Status (2026-10-31) | Version |
+| Milestone | Section | Status (2026-11-01) | Version |
 |---|---|---|---|
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
 | **M4** | The `PyOpenColorIO`-compatible Python module | **Done:** all 384 upstream Python tests, SystemMonitors and complete module metadata checks pass on both reference platforms, within the approved [D-16 scope](docs/deviations.md) | `0.5.0` |
-| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. Remaining: library tests, legacy GPU parity, SIMD performance and release checks | `1.0.0` |
+| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. Remaining: library tests, legacy GPU parity and release checks | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
 
