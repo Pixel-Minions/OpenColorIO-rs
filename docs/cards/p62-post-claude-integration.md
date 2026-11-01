@@ -7,15 +7,16 @@ The production source and SDE protocol match the prior PR90 head012d52d8.
 
 Keep all41 current-main cpu-tests targets, including ocio-tools/tools_cpu_oracle,
 matrix_oracle, grading_rgb_curve_oracle and cpu_processor_apply_oracle. PR86 and
-later add ocio/legacy_gpu_oracle, making42 named integration-test targets plus
-ocio-ops lib. The main normal-CI workflow and xtask/src/shards.rs remain byte-identical,
+later add ocio/legacy_gpu_oracle, making42 named integration-test targets. Cargo also selects the library target
+of each selected package: metadata predicts46 executables, not the old41.
+An actual native build/list must verify that expected selection before qualification. The main normal-CI workflow and xtask/src/shards.rs remain byte-identical,
 including the ICC heavy-group assignment and sample packages appended last.
 All six submodules are retained; Little-CMS is initialized from the primary
 checkout's .git/modules/upstream/Little-CMS, without a network fetch.
 
 P45 and P61 are retained as historical evidence and gate definitions; their old
 41-target totals are not new-head evidence. A new native inventory must derive
-from the combined42-target alias. Preserve each original comparison and original
+from the combined alias (42 named test targets plus the selected libraries). Preserve each original comparison and original
 request/input union. P61's ten full profiles and ten LUT passes remain owed.
 The older PR90 normal21 result does not validate this rebased head.
 
