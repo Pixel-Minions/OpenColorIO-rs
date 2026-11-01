@@ -19,7 +19,10 @@ use crate::bit_depth_utils::{
 };
 use crate::dynamic_property::DynamicPropertyRcPtr;
 use crate::exception::{Exception, Result};
-use crate::image_desc::{ImageDesc, ImageDescMut};
+use crate::image_desc::{
+    ImageDesc, ImageDescMut, buffers as image_desc_buffers, buffers_mut as image_desc_buffers_mut,
+    row_runs, rows_of, split_rows_mut,
+};
 use crate::imath_half::half_to_float_table;
 use crate::op::{CpuOp, OpVec, Pixels, PixelsMut};
 use crate::op_data::OpData;
@@ -308,6 +311,29 @@ fn create_scanline_helper<'a>(
         BitDepth::F16 => to_output!(half::f16),
         BitDepth::F32 => to_output!(f32),
         BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => return Err(unsupported()),
+    })
+}
+
+/// Runs each of `jobs` on a thread of its own, the last on this one, and returns the error of the
+/// first that failed.
+fn in_threads<F>(jobs: impl Iterator<Item = F>) -> Result<()>
+where
+    F: FnOnce() -> Result<()> + Send,
+{
+    let mut jobs: Vec<F> = jobs.collect();
+    let last = jobs.pop();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = jobs.into_iter().map(|job| scope.spawn(job)).collect();
+        let last = last.map_or(Ok(()), |job| job());
+        let joined = handles.into_iter().map(|handle| match handle.join() {
+            Ok(result) => result,
+            Err(panic) => std::panic::resume_unwind(panic),
+        });
+        joined
+            .collect::<Vec<_>>()
+            .into_iter()
+            .chain([last])
+            .collect()
     })
 }
 
@@ -641,6 +667,64 @@ impl CpuProcessor {
         scanline_builder.init_src_dst(src, dst)?;
 
         self.process(&mut *scanline_builder)
+    }
+
+    /// [`CpuProcessor::apply`] with up to `threads` threads, one run of rows each. Not in upstream,
+    /// whose CPU apply is serial and leaves threads to the caller, and not in the Python module.
+    ///
+    /// The output is the serial apply's, bit for bit, for every thread count: the rows are
+    /// independent, as the serial apply renders each one on its own, and a run of rows is
+    /// rendered as an image of its own. Fewer rows than threads take fewer threads. The serial
+    /// apply serves an image whose rows can't be parted (a negative or zero stride, planes that
+    /// interleave in one buffer) and a processor that can stop at a row, with U-1's error: the
+    /// rows after that one stay unwritten, which other threads can't know. Every other error
+    /// comes before any row is written.
+    pub fn apply_threaded(&self, img: &mut dyn ImageDescMut, threads: usize) -> Result<()> {
+        let layout = *img.layout();
+        let height = layout.height();
+        if threads <= 1 || height <= 1 || self.engine.in_bit_depth_op.can_refuse_input() {
+            return self.apply(img);
+        }
+        // What the serial apply refuses, it refuses here first, in the same words.
+        self.scanline_helper()?.init(&mut *img)?;
+
+        let runs = row_runs(height, threads);
+        match split_rows_mut(&layout, image_desc_buffers_mut(img), &runs) {
+            Some(parts) => in_threads(
+                parts
+                    .into_iter()
+                    .map(|mut part| move || self.apply(&mut part)),
+            ),
+            None => self.apply(img),
+        }
+    }
+
+    /// [`CpuProcessor::apply_src_dst`] with up to `threads` threads, one run of rows each. See
+    /// [`CpuProcessor::apply_threaded`].
+    pub fn apply_src_dst_threaded(
+        &self,
+        src: &dyn ImageDesc,
+        dst: &mut dyn ImageDescMut,
+        threads: usize,
+    ) -> Result<()> {
+        let layout = *dst.layout();
+        let src_layout = *src.layout();
+        let height = layout.height();
+        if threads <= 1 || height <= 1 || self.engine.in_bit_depth_op.can_refuse_input() {
+            return self.apply_src_dst(src, dst);
+        }
+        // What the serial apply refuses, it refuses here first, in the same words.
+        self.scanline_helper()?.init_src_dst(src, &mut *dst)?;
+
+        let runs = row_runs(height, threads);
+        let src_buffers = image_desc_buffers(src);
+        match split_rows_mut(&layout, image_desc_buffers_mut(dst), &runs) {
+            Some(parts) => in_threads(parts.into_iter().zip(&runs).map(|(mut part, run)| {
+                let from = rows_of(&src_layout, &src_buffers, *run);
+                move || self.apply_src_dst(&from, &mut part)
+            })),
+            None => self.apply_src_dst(src, dst),
+        }
     }
 
     /// Applies the processor from `img` to `img`: upstream's path from one image to another,

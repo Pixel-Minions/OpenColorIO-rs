@@ -21,7 +21,7 @@
 //! - A typed slice must hold the bit depth's channel type. That check and its message are the
 //!   Python binding's (`checkBufferType`), which runs before the library's checks.
 
-use core::ffi::c_long;
+use core::ffi::{c_int, c_long};
 use std::fmt;
 use std::sync::Arc;
 
@@ -395,6 +395,179 @@ pub trait ImageDesc: sealed::Sealed + fmt::Debug {
     fn is_float(&self) -> bool {
         self.layout().is_float()
     }
+}
+
+/// Some rows of an image to read, as a description of their own.
+#[derive(Debug)]
+pub(crate) struct Rows<'a> {
+    layout: ImageLayout,
+    buffers: Vec<&'a [u8]>,
+}
+
+impl sealed::Sealed for Rows<'_> {
+    fn buffers(&self) -> Vec<&[u8]> {
+        self.buffers.clone()
+    }
+}
+
+impl ImageDesc for Rows<'_> {
+    fn layout(&self) -> &ImageLayout {
+        &self.layout
+    }
+}
+
+/// Some rows of an image to write, as a description of their own, with the memory of those rows
+/// only, so that threads can write other rows at the same time.
+#[derive(Debug)]
+pub(crate) struct RowsMut<'a> {
+    layout: ImageLayout,
+    buffers: Vec<&'a mut [u8]>,
+}
+
+impl sealed::Sealed for RowsMut<'_> {
+    fn buffers(&self) -> Vec<&[u8]> {
+        self.buffers.iter().map(|b| &**b).collect()
+    }
+}
+
+impl sealed::SealedMut for RowsMut<'_> {
+    fn buffers_mut(&mut self) -> Vec<&mut [u8]> {
+        self.buffers.iter_mut().map(|b| &mut **b).collect()
+    }
+}
+
+impl ImageDesc for RowsMut<'_> {
+    fn layout(&self) -> &ImageLayout {
+        &self.layout
+    }
+}
+
+impl ImageDescMut for RowsMut<'_> {}
+
+/// `rows` as the `(first row, row count)` of `parts` runs of contiguous rows, of nearly equal
+/// lengths: as many as there are parts or rows.
+pub(crate) fn row_runs(rows: usize, parts: usize) -> Vec<(usize, usize)> {
+    let parts = parts.min(rows).max(1);
+    let (each, extra) = (rows / parts, rows % parts);
+    let mut first = 0;
+    (0..parts)
+        .map(|part| {
+            let count = each + usize::from(part < extra);
+            let run = (first, count);
+            first += count;
+            run
+        })
+        .collect()
+}
+
+impl ImageLayout {
+    /// The channels' positions.
+    fn channels(&self) -> impl Iterator<Item = ChannelPos> {
+        [Some(self.r), Some(self.g), Some(self.b), self.a]
+            .into_iter()
+            .flatten()
+    }
+
+    /// For each buffer that the channels use, by its index, the offset of the first row's first
+    /// byte: `None` unless each row's bytes in a buffer come before the next row's, going
+    /// forward, so that cutting a buffer between rows parts the rows. Negative or zero strides,
+    /// and planes that interleave in one buffer, aren't that.
+    fn row_starts(&self, buffers: usize) -> Option<Vec<usize>> {
+        let (x, y) = (self.x_stride_bytes, self.y_stride_bytes);
+        // Past `int`'s rows, upstream's row index wraps (U-3), which runs of rows would not do.
+        if x <= 0 || y <= 0 || self.width <= 0 || self.height > c_long::from(c_int::MAX) {
+            return None;
+        }
+        let size = crate::bit_depth_utils::get_channel_size_in_bytes(self.bit_depth).ok()? as usize;
+        let last_pixel = (self.width as usize - 1).checked_mul(x as usize)?;
+        (0..buffers)
+            .map(|buffer| {
+                let offsets = || {
+                    self.channels()
+                        .filter(move |c| c.buffer == buffer)
+                        .map(|c| c.offset)
+                };
+                let first = offsets().min()?;
+                let last = offsets().max()?;
+                let reach = last.checked_add(last_pixel)?.checked_add(size)? - first;
+                (reach <= y as usize).then_some(first)
+            })
+            .collect()
+    }
+
+    /// The layout of `count` rows from row `first`, in the same buffers.
+    fn rows(&self, first: usize, count: usize) -> ImageLayout {
+        // Inside the buffer: the description holds every row.
+        let step = first as isize * self.y_stride_bytes;
+        let moved = |c: ChannelPos| ChannelPos {
+            buffer: c.buffer,
+            offset: c.offset.wrapping_add_signed(step),
+        };
+        ImageLayout {
+            height: count as c_long,
+            r: moved(self.r),
+            g: moved(self.g),
+            b: moved(self.b),
+            a: self.a.map(moved),
+            ..*self
+        }
+    }
+}
+
+/// The rows of `img` from row `first`, in its own buffers.
+pub(crate) fn rows_of<'a>(
+    layout: &ImageLayout,
+    buffers: &[&'a [u8]],
+    run: (usize, usize),
+) -> Rows<'a> {
+    Rows {
+        layout: layout.rows(run.0, run.1),
+        buffers: buffers.to_vec(),
+    }
+}
+
+/// `img`'s memory cut between rows into `runs`, which [`row_runs`] made: `None` where cutting can't
+/// part the rows ([`ImageLayout::row_starts`]).
+pub(crate) fn split_rows_mut<'a>(
+    layout: &ImageLayout,
+    buffers: Vec<&'a mut [u8]>,
+    runs: &[(usize, usize)],
+) -> Option<Vec<RowsMut<'a>>> {
+    let starts = layout.row_starts(buffers.len())?;
+    let y = layout.y_stride_bytes as usize;
+    let mut parts: Vec<Vec<&'a mut [u8]>> = runs.iter().map(|_| Vec::new()).collect();
+    for (buffer, start) in buffers.into_iter().zip(&starts) {
+        let (_, mut rest) = buffer.split_at_mut((*start).min(buffer.len()));
+        for (part, run) in parts.iter_mut().zip(runs) {
+            let (rows, after) = rest.split_at_mut((run.1 * y).min(rest.len()));
+            part.push(rows);
+            rest = after;
+        }
+    }
+    Some(
+        parts
+            .into_iter()
+            .zip(runs)
+            .map(|(buffers, run)| {
+                // The channels' offsets from the first byte of their buffer's rows.
+                let moved = |c: ChannelPos| ChannelPos {
+                    buffer: c.buffer,
+                    offset: c.offset - starts[c.buffer],
+                };
+                RowsMut {
+                    layout: ImageLayout {
+                        height: run.1 as c_long,
+                        r: moved(layout.r),
+                        g: moved(layout.g),
+                        b: moved(layout.b),
+                        a: layout.a.map(moved),
+                        ..*layout
+                    },
+                    buffers,
+                }
+            })
+            .collect(),
+    )
 }
 
 /// An image description whose memory the CPU processor can write: the image of an in-place

@@ -67,3 +67,31 @@ fn a_matrix_processor_has_no_dynamic_property() {
         "Cannot find dynamic property; not used by CPU processor."
     );
 }
+
+/// Each job runs on a thread of its own, and every job runs after one fails: the error is the
+/// first job's that failed.
+#[test]
+fn in_threads_runs_every_job_and_returns_the_first_error() {
+    let ids = std::sync::Mutex::new(Vec::new());
+    let job = |error: Option<&'static str>| {
+        let ids = &ids;
+        move || {
+            ids.lock().unwrap().push(std::thread::current().id());
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            error.map_or(Ok(()), |e| Err(crate::exception::Exception::new(e)))
+        }
+    };
+    let jobs = [None, Some("second"), Some("third"), None];
+    let result = super::in_threads(jobs.into_iter().map(job));
+    assert_eq!(result.unwrap_err().message(), "second");
+    let mut seen = ids.lock().unwrap().clone();
+    assert_eq!(seen.len(), 4);
+    seen.sort_by_key(|id| format!("{id:?}"));
+    seen.dedup();
+    assert_eq!(seen.len(), 4);
+
+    let last_fails = [None, Some("last")];
+    let result = super::in_threads(last_fails.into_iter().map(job));
+    assert_eq!(result.unwrap_err().message(), "last");
+    assert!(super::in_threads([None].into_iter().map(job)).is_ok());
+}

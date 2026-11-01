@@ -212,6 +212,9 @@ fn main() {
     let width = plan["width"].as_u64().expect("a width") as usize;
     let height = plan["height"].as_u64().expect("a height") as usize;
     let iters = plan["iters"].as_u64().expect("a count");
+    let threads = std::env::var("PERF_THREADS")
+        .ok()
+        .map(|n| n.parse::<usize>().expect("a thread count"));
 
     let mut configs = BTreeMap::new();
     let mut images: BTreeMap<String, Vec<u8>> = BTreeMap::new();
@@ -265,9 +268,51 @@ fn main() {
             }
             best
         };
+        // `PERF_THREADS` also times `apply_src_dst_threaded`, whose bytes must be the serial
+        // apply's. Run the program unpinned for this: `perf_compare.py` pins it to one CPU.
+        let threaded_ns = threads.map(|threads| {
+            let mut threaded = vec![0u8; dst.len()];
+            let auto = AUTO_STRIDE;
+            let src_desc = PackedImageDesc::with_strides(
+                Bytes(&src[..]),
+                width,
+                height,
+                4,
+                bd_in,
+                auto,
+                auto,
+                auto,
+            )
+            .expect("a source image");
+            let mut dst_desc = PackedImageDesc::with_strides(
+                Bytes(&mut threaded[..]),
+                width,
+                height,
+                4,
+                bd_out,
+                auto,
+                auto,
+                auto,
+            )
+            .expect("a destination image");
+            let mut best = u128::MAX;
+            for _ in 0..iters {
+                let start = Instant::now();
+                cpu.apply_src_dst_threaded(&src_desc, &mut dst_desc, threads)
+                    .expect("the apply");
+                best = best.min(start.elapsed().as_nanos());
+            }
+            assert!(threaded == dst, "{case}: the threaded apply differs");
+            best as u64
+        });
         results.insert(
             case["name"].as_str().expect("a name").to_owned(),
-            json!({ "ns": ns as u64, "src": digest(src), "dst": digest(&dst) }),
+            json!({
+                "ns": ns as u64,
+                "threaded_ns": threaded_ns,
+                "src": digest(src),
+                "dst": digest(&dst),
+            }),
         );
     }
 

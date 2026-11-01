@@ -506,6 +506,11 @@ where
         }
     }
 
+    fn can_refuse_input(&self) -> bool {
+        // Tables with an entry per value of the input's type have no code past them.
+        self.max_index() < (1usize << (8 * size_of::<I::Type>())) - 1
+    }
+
     /// The codes of a 10- or 12-bit image past the tables are an error (docs/improvements.md,
     /// U-1), where upstream reads past them.
     fn check_input(&self, input: Pixels<'_>) -> Result<()> {
@@ -1091,6 +1096,11 @@ where
         {
             *out = self.render(inp);
         }
+    }
+
+    fn can_refuse_input(&self) -> bool {
+        // Tables with an entry per value of the input's type have no code past them.
+        self.max_index() < (1usize << (8 * size_of::<I::Type>())) - 1
     }
 
     /// The codes of a 10- or 12-bit image past the tables are an error (docs/improvements.md,

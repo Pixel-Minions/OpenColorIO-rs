@@ -854,6 +854,94 @@ fn image_codes_past_the_table_are_errors() {
     }
 }
 
+/// U-1's error stops an apply at its row, and the threaded applies with it: an image of six rows
+/// whose fourth has a code past the table leaves the same bytes in the destination, and the same
+/// error, for every thread count, and its last rows unwritten.
+#[test]
+fn threaded_applies_stop_at_the_row_of_a_code_past_the_table() {
+    use crate::cpu_processor::CpuProcessor;
+    use crate::image_desc::{AUTO_STRIDE, PackedImageDesc};
+    use crate::op::OpVec;
+    use crate::open_color_types::OptimizationFlags;
+    use crate::ops::lut1d::lut1d_op::create_lut1d_op;
+
+    const VALUES: usize = 2 * 6 * 4;
+    let mut input = [100u16; VALUES];
+    input[3 * 8 + 5] = 2000;
+    let cpu = lookup_processor(BitDepth::Uint10, false);
+    let mut serial = None;
+    for threads in 0..=9 {
+        let mut codes = input;
+        let src = PackedImageDesc::with_strides(
+            &mut codes[..],
+            2,
+            6,
+            4,
+            BitDepth::Uint10,
+            AUTO_STRIDE,
+            AUTO_STRIDE,
+            AUTO_STRIDE,
+        )
+        .unwrap();
+        let mut dst = [-1.0f32; VALUES];
+        let mut desc = PackedImageDesc::new(&mut dst[..], 2, 6, 4).unwrap();
+        let error = if threads == 0 {
+            cpu.apply_src_dst(&src, &mut desc)
+        } else {
+            cpu.apply_src_dst_threaded(&src, &mut desc, threads)
+        }
+        .unwrap_err();
+        let bits = dst.map(f32::to_bits);
+        let serial = serial.get_or_insert((error.message().to_string(), bits));
+        assert_eq!(error.message(), serial.0, "{threads} threads");
+        assert_eq!(bits, serial.1, "{threads} threads");
+    }
+    let (_, bits) = serial.unwrap();
+    assert_ne!(bits[0], (-1.0f32).to_bits());
+    assert_eq!(bits[VALUES - 1], (-1.0f32).to_bits());
+
+    // In place.
+    let mut lut = Lut1DOpData::make_lookup_domain(BitDepth::Uint10).unwrap();
+    lut.get_array_mut().get_values_mut().fill(0.25);
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, lut, TransformDirection::Forward);
+    ops.finalize().unwrap();
+    let cpu = CpuProcessor::new(
+        &ops,
+        BitDepth::Uint10,
+        BitDepth::Uint10,
+        OptimizationFlags::NONE,
+    )
+    .unwrap();
+    let mut serial = None;
+    for threads in 0..=9 {
+        let mut codes = input;
+        let mut desc = PackedImageDesc::with_strides(
+            &mut codes[..],
+            2,
+            6,
+            4,
+            BitDepth::Uint10,
+            AUTO_STRIDE,
+            AUTO_STRIDE,
+            AUTO_STRIDE,
+        )
+        .unwrap();
+        let error = if threads == 0 {
+            cpu.apply(&mut desc)
+        } else {
+            cpu.apply_threaded(&mut desc, threads)
+        }
+        .unwrap_err();
+        let serial = serial.get_or_insert((error.message().to_string(), codes));
+        assert_eq!(error.message(), serial.0, "{threads} threads");
+        assert_eq!(codes, serial.1, "{threads} threads");
+    }
+    let (_, codes) = serial.unwrap();
+    assert_ne!(codes[0], input[0]);
+    assert_eq!(codes[VALUES - 8], input[VALUES - 8]);
+}
+
 /// In place, the first code read is red's, the pixel's first 16 bits on both wheels' orders:
 /// with a LUT of zeros, the floats stored read back as code 0, so a red code of exactly the
 /// maximum is looked up, and one above it is U-1's error.
