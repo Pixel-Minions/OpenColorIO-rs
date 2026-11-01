@@ -807,9 +807,7 @@ fn legacy_mixed_lut_range_and_alpha_lattices_match_native_wheel() {
     compare_batches("P37", &chains, &jobs, 50, false);
 }
 
-#[test]
-fn legacy_boundary_edges_match_native_wheel() {
-    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+fn boundary_legacy_plan() -> (Vec<Chain>, Vec<Job>) {
     let chains = chains();
     let mut jobs = Vec::new();
     // NoOps.cpp:175-206 constructs Lut3DOpData before allocating the RGBA lattice.
@@ -831,7 +829,97 @@ fn legacy_boundary_edges_match_native_wheel() {
         }
     }
     assert_eq!(jobs.len(), 1400, "the complete P35 boundary input plan");
-    compare_batches("P35 boundary", &chains, &jobs, 50, false);
+    (chains, jobs)
+}
+
+// Partition execution only: keep the complete original P35 Cartesian product above.
+const BOUNDARY_PARTS: usize = 7;
+
+fn boundary_legacy_part(jobs: Vec<Job>, part: usize) -> Vec<Job> {
+    assert!(part < BOUNDARY_PARTS);
+    assert_eq!(jobs.len(), 1400, "the unchanged original P35 input plan");
+    let selected = jobs
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, job)| (index % BOUNDARY_PARTS == part).then_some(job))
+        .collect::<Vec<_>>();
+    assert_eq!(selected.len(), 200);
+    selected
+}
+
+fn compare_boundary_legacy_part(part: usize) {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let (chains, jobs) = boundary_legacy_plan();
+    let selected = boundary_legacy_part(jobs, part);
+    let indices = (part..1400).step_by(BOUNDARY_PARTS).collect::<Vec<_>>();
+    println!("P64 boundary part {part}/7 original indices: {indices:?}");
+    // Every part retains the same exact outcome/log/texture/uniform checks and batch size.
+    compare_batches("P35 boundary", &chains, &selected, 50, false);
+}
+
+#[test]
+fn legacy_boundary_edges_match_native_wheel_part0() {
+    compare_boundary_legacy_part(0);
+}
+
+#[test]
+fn legacy_boundary_edges_match_native_wheel_part1() {
+    compare_boundary_legacy_part(1);
+}
+
+#[test]
+fn legacy_boundary_edges_match_native_wheel_part2() {
+    compare_boundary_legacy_part(2);
+}
+
+#[test]
+fn legacy_boundary_edges_match_native_wheel_part3() {
+    compare_boundary_legacy_part(3);
+}
+
+#[test]
+fn legacy_boundary_edges_match_native_wheel_part4() {
+    compare_boundary_legacy_part(4);
+}
+
+#[test]
+fn legacy_boundary_edges_match_native_wheel_part5() {
+    compare_boundary_legacy_part(5);
+}
+
+#[test]
+fn legacy_boundary_edges_match_native_wheel_part6() {
+    compare_boundary_legacy_part(6);
+}
+
+#[test]
+fn boundary_legacy_parts_cover_original_requests_once() {
+    let (_, jobs) = boundary_legacy_plan();
+    let key = |job: &Job| (job.chain, job.level, job.edge, job.before, job.language);
+    let original = jobs.iter().map(key).collect::<Vec<_>>();
+    let mut expected = Vec::new();
+    // Independent enumeration of the original P35 domains, before execution partitioning.
+    for chain in 0..4 {
+        for level in 0..7 {
+            for edge in [0, 1, 130, 1626, u32::MAX] {
+                for language in 0..10 {
+                    expected.push((chain, level, edge, 0, language));
+                }
+            }
+        }
+    }
+    assert_eq!(original, expected);
+    let mut observed = std::collections::BTreeMap::new();
+    for part in 0..BOUNDARY_PARTS {
+        let (_, jobs) = boundary_legacy_plan();
+        for (offset, job) in boundary_legacy_part(jobs, part).iter().enumerate() {
+            let index = part + offset * BOUNDARY_PARTS;
+            assert!(observed.insert(index, key(job)).is_none());
+        }
+    }
+    assert_eq!(observed.len(), 1400);
+    assert_eq!(observed.into_values().collect::<Vec<_>>(), original);
+    println!("P64 input audit: all 1400 original requests exactly once in seven 200-request parts");
 }
 
 #[test]

@@ -37,12 +37,15 @@ class ScheduleControls(unittest.TestCase):
             'small_legacy_parts_cover_original_requests_once': 0,
             'legacy_allocation_cuts_and_file_boundaries_match_native_wheel': counters['P33']['Requests'],
             'legacy_dynamic_positions_and_snapshot_values_match_native_wheel': counters['P34']['Requests'],
-            'legacy_boundary_edges_match_native_wheel': counters['P35 boundary']['Requests'],
+            **{f'legacy_boundary_edges_match_native_wheel_part{i}':
+               counters['P35 boundary']['Requests'] // 7 for i in range(7)},
+            'boundary_legacy_parts_cover_original_requests_once': 0,
             'legacy_large_lattice_values_match_native_wheel': 40,
             'ordinary_after_legacy_keeps_native_cached_shader_and_texture_values': counters['P36']['Requests'],
             'legacy_mixed_lut_range_and_alpha_lattices_match_native_wheel': counters['P37']['Requests'],
         }
         self.assertEqual(counters['P32']['Requests'], 4 * 420)
+        self.assertEqual(counters['P35 boundary']['Requests'], 7 * 200)
         self.assertEqual(set(weights), set(NAMES))
         parts = [selected_shard(META, NAMES, dict(Index=i, Count=4)) for i in range(4)]
         loads = [sum(weights[name] for name in part) for part in parts]

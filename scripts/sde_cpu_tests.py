@@ -34,7 +34,8 @@ LEGACY_FOUR_WAY = {
     'legacy_allocation_cuts_and_file_boundaries_match_native_wheel': 1,
     'legacy_mixed_lut_range_and_alpha_lattices_match_native_wheel': 1,
     'legacy_large_lattice_values_match_native_wheel': 1,
-    'legacy_boundary_edges_match_native_wheel': 2,
+    **{f'legacy_boundary_edges_match_native_wheel_part{i}': 2 for i in range(7)},
+    'boundary_legacy_parts_cover_original_requests_once': 2,
     'ordinary_after_legacy_keeps_native_cached_shader_and_texture_values': 2,
     'legacy_dynamic_positions_and_snapshot_values_match_native_wheel': 3,
 }
@@ -89,7 +90,9 @@ def native_list(binary, arguments):
     return names
 
 
-def one_test(prefix, binary, name, native_count, path):
+def one_test(prefix, binary, name, native_count, path, timeout_seconds=7200):
+    if not 0 < timeout_seconds <= 18000:
+        raise RuntimeError("Per-case time budget must be bounded by five hours")
     started = time.monotonic()
     fatal = threading.Event()
     timed_out = False
@@ -108,8 +111,19 @@ def one_test(prefix, binary, name, native_count, path):
 
     def kill_owned():
         if windows:
+            if process.poll() is not None:
+                return  # Never address a reused PID after our process exited.
             subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+            # A restricted launcher may deny taskkill even for its child. We own this
+            # Popen handle: terminate that process directly as a fallback. An inherited
+            # pipe still held by a descendant leaves reader alive and cannot pass below.
+            if process.poll() is None:
+                try:
+                    process.kill()
+                except PermissionError:
+                    if process.poll() is None:
+                        raise
         else:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -120,13 +134,15 @@ def one_test(prefix, binary, name, native_count, path):
     reader.start()
     try:
         while process.poll() is None or reader.is_alive():
-            if fatal.is_set() or time.monotonic() - started > 7200:
+            if fatal.is_set() or time.monotonic() - started > timeout_seconds:
                 timed_out = not fatal.is_set()
                 kill_owned()
                 break
             time.sleep(.1)
         code = process.wait(timeout=30)
         reader.join(timeout=10)
+        if not reader.is_alive():
+            process.stdout.close()
     finally:
         if process.poll() is None:
             kill_owned()

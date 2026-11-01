@@ -223,7 +223,10 @@ debug and release builds, and was reviewed independently before merging.
   library has (SSE2, AVX, AVX2, AVX-512) is compared with the port's, whatever CPU the tests
   run on. Kernel jobs record Cargo's complete selected target and test manifests, then run
   each selected test in a fresh emulator to avoid SDE's cumulative thread limit. The two
-  long LUT sweeps retain their separate jobs.
+  long LUT sweeps retain their separate jobs. The boundary request plan is split into
+  seven executions with an exact input-union audit; a [targeted follow-up](docs/cards/p64-targeted-sde-repair.md)
+  tracks the remaining Windows execution errors and the two Rocky snb ICC sweeps.
+  Complete CPU-profile qualification remains open.
 - **A shared test battery.** Every op family is tested the same way against the official
   library: probe sets, generated extreme and non-finite parameters, and every numeric profile.
   Every card's tests were mutation-tested by an independent reviewer to prove they catch
