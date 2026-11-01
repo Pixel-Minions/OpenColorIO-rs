@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The public enums of `include/OpenColorIO/OpenColorTypes.h` @ v2.5.2 that only the GPU side
-//! uses. The public `ocio` crate re-exports them.
+//! uses. They are exposed through this GPU crate's public `open_color_types` module.
 //!
 //! So far: `GpuLanguage`, with `GpuLanguageToString` from `src/OpenColorIO/ParseUtils.cpp`,
 //! `GpuLanguageFromString`, and `UniformDataType`.
