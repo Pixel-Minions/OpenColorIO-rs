@@ -3903,15 +3903,15 @@ note = "p6-objects 6.3e"
 path = "src/bindings/python/PyOpenColorIO.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs"]
-status = "partial"
-note = "6.1a: the module, its attributes, the two exceptions, the global functions on versions, caches and environment variables; p6-config 6.6a: the logging level, LogMessage, the logging and hash callbacks (crate::callback); the bindPy* calls come with WP 6.2-6.7"
+status = "done"
+note = "P70 complete binding registration audit: all binders, module functions/exceptions/constants/metadata and module initialization are registered in the existing binding modules. The original48 required Python modules/384 functions and complete module metadata already run in normal CI; retain the approved D-16 native C++ pointer boundary."
 
 [[file]]
 path = "src/bindings/python/PyOpenColorIO.h"
 kind = "binding"
-target = ["crates/ocio-py/src/py_open_color_io.rs", "crates/ocio-py/src/py_transform.rs"]
-status = "partial"
-note = "6.1a: the module's declarations; the classes it declares come with their chunks. p6-transforms 6.3a: the Transform polymorphic_type_hook (py_transform.rs, class_name and to_py)"
+target = ["crates/ocio-py/src/py_open_color_io.rs", "crates/ocio-py/src/py_transform.rs", "crates/ocio-py/src/lib.rs"]
+status = "done"
+note = "P70 complete declaration audit: every binder declaration has its registration, and polymorphic class_name/to_py dispatch covers all supported classes. Existing Rust/Python ownership and D-16 native C++ pointer boundaries remain; the old partial note predated full binding completion."
 
 [[file]]
 path = "src/bindings/python/PyPackedImageDesc.cpp"
@@ -3958,16 +3958,16 @@ note = "p6-after-p9 6.8a: singleton wrapper and monitor tuple iterator, exact su
 [[file]]
 path = "src/bindings/python/PyTransform.cpp"
 kind = "binding"
-target = ["crates/ocio-py/src/py_transform.rs"]
-status = "partial"
-note = "p6-transforms 6.3a-c: the base class and the subclasses bound so far (Allocation, Builtin, CDL, Exponent, ExponentWithLinear, File, FixedFunction, Group, Log, LogAffine, LogCamera, Matrix, Range); the others come with their cards"
+target = ["crates/ocio-py/src/py_transform.rs", "crates/ocio-py/src/transforms/py_allocation_transform.rs", "crates/ocio-py/src/transforms/py_builtin_transform.rs", "crates/ocio-py/src/transforms/py_cdl_transform.rs", "crates/ocio-py/src/transforms/py_color_space_transform.rs", "crates/ocio-py/src/transforms/py_display_view_transform.rs", "crates/ocio-py/src/transforms/py_exponent_transform.rs", "crates/ocio-py/src/transforms/py_exponent_with_linear_transform.rs", "crates/ocio-py/src/transforms/py_exposure_contrast_transform.rs", "crates/ocio-py/src/transforms/py_file_transform.rs", "crates/ocio-py/src/transforms/py_fixed_function_transform.rs", "crates/ocio-py/src/transforms/py_grading_hue_curve_transform.rs", "crates/ocio-py/src/transforms/py_grading_primary_transform.rs", "crates/ocio-py/src/transforms/py_grading_rgb_curve_transform.rs", "crates/ocio-py/src/transforms/py_grading_tone_transform.rs", "crates/ocio-py/src/transforms/py_group_transform.rs", "crates/ocio-py/src/transforms/py_log_affine_transform.rs", "crates/ocio-py/src/transforms/py_log_camera_transform.rs", "crates/ocio-py/src/transforms/py_log_transform.rs", "crates/ocio-py/src/transforms/py_look_transform.rs", "crates/ocio-py/src/transforms/py_lut1d_transform.rs", "crates/ocio-py/src/transforms/py_lut3d_transform.rs", "crates/ocio-py/src/transforms/py_matrix_transform.rs", "crates/ocio-py/src/transforms/py_range_transform.rs", "crates/ocio-py/src/transforms/mod.rs"]
+status = "done"
+note = "P70 complete transform-binding audit: the base and all23 concrete transform classes are implemented and registered in their existing per-transform modules. Replace the obsolete early-subset status; no binding, signature or behavior changes."
 
 [[file]]
 path = "src/bindings/python/PyTransform.h"
 kind = "binding"
-target = ["crates/ocio-py/src/py_transform.rs"]
-status = "partial"
-note = "p6-transforms 6.3a: the declarations of the subclasses bound so far"
+target = ["crates/ocio-py/src/py_transform.rs", "crates/ocio-py/src/transforms/py_allocation_transform.rs", "crates/ocio-py/src/transforms/py_builtin_transform.rs", "crates/ocio-py/src/transforms/py_cdl_transform.rs", "crates/ocio-py/src/transforms/py_color_space_transform.rs", "crates/ocio-py/src/transforms/py_display_view_transform.rs", "crates/ocio-py/src/transforms/py_exponent_transform.rs", "crates/ocio-py/src/transforms/py_exponent_with_linear_transform.rs", "crates/ocio-py/src/transforms/py_exposure_contrast_transform.rs", "crates/ocio-py/src/transforms/py_file_transform.rs", "crates/ocio-py/src/transforms/py_fixed_function_transform.rs", "crates/ocio-py/src/transforms/py_grading_hue_curve_transform.rs", "crates/ocio-py/src/transforms/py_grading_primary_transform.rs", "crates/ocio-py/src/transforms/py_grading_rgb_curve_transform.rs", "crates/ocio-py/src/transforms/py_grading_tone_transform.rs", "crates/ocio-py/src/transforms/py_group_transform.rs", "crates/ocio-py/src/transforms/py_log_affine_transform.rs", "crates/ocio-py/src/transforms/py_log_camera_transform.rs", "crates/ocio-py/src/transforms/py_log_transform.rs", "crates/ocio-py/src/transforms/py_look_transform.rs", "crates/ocio-py/src/transforms/py_lut1d_transform.rs", "crates/ocio-py/src/transforms/py_lut3d_transform.rs", "crates/ocio-py/src/transforms/py_matrix_transform.rs", "crates/ocio-py/src/transforms/py_range_transform.rs", "crates/ocio-py/src/transforms/mod.rs"]
+status = "done"
+note = "P70 complete transform-binding declaration audit: base and all23 concrete binders exist and are registered. The class dispatch/ownership behavior remains qualified by the original Python suite within D-16; no new public surface."
 
 [[file]]
 path = "src/bindings/python/PyTypes.cpp"
@@ -4617,14 +4617,16 @@ note = "P56 records the only OCIO_ADD_TEST here, UnitTest/windows_debug, as the 
 [[file]]
 path = "tests/cpu/UnitTestOptimFlags.cpp"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_optim_flags.rs"]
-status = "todo"
+target = ["crates/ocio/src/test_env.rs", "crates/ocio/src/processor_tests.rs"]
+status = "done"
+note = "P70 maps the optimization-environment scope to the existing test_env::EnvGuard thread overlay and processor_tests.rs checks. The host environment is left intact and Drop restores the default provider (D-5); no separate unit_test_optim_flags.rs or new product feature is needed. No OCIO_ADD_TEST case or comparison is removed."
 
 [[file]]
 path = "tests/cpu/UnitTestOptimFlags.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_optim_flags.rs"]
-status = "todo"
+target = ["crates/ocio/src/test_env.rs", "crates/ocio/src/processor_tests.rs"]
+status = "done"
+note = "P70 maps the optimization-environment scope to the existing test_env::EnvGuard thread overlay and processor_tests.rs checks. The host environment is left intact and Drop restores the default provider (D-5); no separate unit_test_optim_flags.rs or new product feature is needed. No OCIO_ADD_TEST case or comparison is removed."
 
 [[file]]
 path = "tests/cpu/UnitTestUtils.cpp"
@@ -5392,15 +5394,15 @@ status = "done"
 path = "tests/gpu/GPUUnitTest.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu-exec/src/gpu_unit_test.rs", "crates/ocio-testkit/src/upstream/gpu.rs", "crates/ocio-gpu-exec/tests/gpu_unit_test.rs"]
-status = "partial"
-note = "p7-oracle O7.2: oracle/ocio_oracle/spec.py supports the harness's Config::Create with PROCESSOR_CACHE_OFF (137-142); O7.1: oracle/native/legacy_gpu.cpp calls the pinned wheel's public legacy GPU API, with exact ordinary-GPU transport proof and capped edge probes in crates/ocio-testkit/tests/legacy_gpu_oracle.rs. p7-harness 7.2c source prepared on the actual integrated prerequisites: defaults/input, exact upstream special-value comparisons, run/retests and wheel-shader same-context identity; runtime/mutations/full gates remain pending. main's registry and argument parsing are excluded by the Phase 7 card."
+status = "done"
+note = "P70 complete in-scope harness mapping: input/defaults, exact upstream comparisons, run/retests, wheel-GPU whole-image identity, native-vs-Rust readback regression and rejection controls are implemented and qualified in the existing harness/tests. All264 original cases execute on the approved Rocky llvmpipe renderer with existing approved exceptions. The standalone main registry/CLI remains explicitly outside Phase7 card7.2c; no new exclusion."
 
 [[file]]
 path = "tests/gpu/GPUUnitTest.h"
 kind = "test-gpu"
 target = ["crates/ocio-gpu-exec/src/gpu_unit_test.rs"]
-status = "partial"
-note = "p7-harness 7.2c source prepared against actual integrated O7/legacy APIs; runtime/mutations/full gates pending."
+status = "done"
+note = "P70 complete in-scope harness declaration mapping: test defaults/input, comparison/run/retest and independent readback controls are implemented and exercised by the existing suite. Preserve the approved Phase7 card7.2c registry/CLI boundary and all existing exact pins/class controls."
 
 [[file]]
 path = "tests/gpu/GammaOp_test.cpp"
@@ -5460,8 +5462,8 @@ status = "done"
 path = "tests/gpu/MatrixOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu-exec/tests/matrix_op_test.rs"]
-status = "partial"
-note = "p7-harness 7.2c source prepared: all ten source cases, eight legacy, using upstream matrix_cases data, exact 5e-7 tolerance and pinned input digest; actual wheel CPU batch and wheel-shader render identity. Runtime/mutations/full gates pending. Existing ten-language shader-text parity remains in crates/ocio-gpu/tests/matrix_op_gpu_oracle.rs."
+status = "done"
+note = "P70 all10 original matrix cases, including8 legacy cases, already execute in matrix_op_test.rs with original settings/thresholds and whole-image wheel identity. Native readback regression/rejection controls and the existing ten-language shader-text test remain. The former pending-runtime note is obsolete; no test or exception change."
 
 [[file]]
 path = "tests/gpu/RangeOp_test.cpp"
