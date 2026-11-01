@@ -477,8 +477,8 @@ impl Profile {
     }
 }
 
-const V2: u32 = 0x02400000;
-const V4: u32 = 0x04300000;
+pub(crate) const V2: u32 = 0x02400000;
+pub(crate) const V4: u32 = 0x04300000;
 
 /// A parameter of each `para` kind.
 fn para_kinds() -> Vec<(&'static str, Vec<u8>)> {

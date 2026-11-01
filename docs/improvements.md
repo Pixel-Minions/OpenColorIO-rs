@@ -6799,28 +6799,46 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   keeping its empty list, as upstream's exception boundary does. No uninitialized storage is
   read (`system_monitor_windows_ffi.rs`, `system_monitor_windows.rs`).
 
-### U-650. `cmsSignalError` under MSVC reads past its buffer on long messages
+### U-650. `cmsSignalError` under MSVC can read past its message on long ones
 
 - **Upstream:** `lcms2_internal.h:103-105` makes `vsnprintf` the C runtime's `_vsnprintf` under
   MSVC, which writes no terminator when it fills the size it is given. `cmsSignalError` passes 1023
   for a buffer of 1024 it doesn't clear (src/cmserr.c:513-518 @ lcms2.17), so a message of 1023
-  characters or more runs on into what follows on the stack until a zero byte. A message that long
-  needs a file name of about 1000 characters: "File '...' not found", "Couldn't create '...'".
-- **Who notices:** Windows users of paths that long, which `fopen` can't open anyway (I-608).
+  characters or more ends only if the buffer's last byte, which nobody set, is zero; if not, it runs
+  on into what follows on the stack until a zero byte. A message that long needs a file name of
+  about 1000 characters: "File '...' not found", "Couldn't create '...'". The byte was zero in all
+  of 108 runs on the Windows wheel, with names of 1000 to 3000 characters, so the message stopped at
+  1023.
+- **Who notices:** Windows users of paths that long, which `fopen` can't open anyway (I-608), if
+  the byte isn't zero.
 - **A fix:** clear the last byte. The GCC build keeps 1022 characters and a terminator.
-- **Status:** the port keeps 1023 characters and stops. Linux is matched and tested.
+- **Status:** the port keeps 1023 characters on Windows and 1022 on Linux, and stops there, which
+  matches both wheels as measured, and is tested on both (`long_messages`). A run where the wheel's
+  byte isn't zero wouldn't match.
 
-### U-651. A bad `--whitepoint` leaves the white point unset
+### U-651. A bad `--whitepoint` writes a `chad` tag from a white point nobody set
 
 - **Upstream:** `cmsWhitePointFromTemp` fails outside 4000 to 25000 K, and `ocioicc.cpp:102-103` goes
-  on with the uninitialized `cmsCIExyY whitePoint`. Both wheels print "OCIO Error:
-  cmsWhitePointFromTemp: invalid temp" and write a 2384-byte profile, with what the stack held in
-  its Lab profile's white point and `chad` tags, and in every value of the CLUTs that depend on
-  them.
+  on with the uninitialized local `cmsCIExyY whitePoint`. Both wheels print "OCIO Error:
+  cmsWhitePointFromTemp: invalid temp", and exit with 0. That point reaches only the `chad` tags
+  (src/cmsvirt.c:145-149 @ lcms2.17) of the output and of the Lab profile, whose tag the tool's
+  perceptual transforms don't read. So with the time masked, the only bytes of the output that
+  differ from a good profile's are the 36 of its `chad` values, as measured with 8 temperatures,
+  3 runs each, on both wheels. Their values, in 48 more runs at 3999, 25001, 0 and 100000: all
+  zeros in every run on Windows; on Linux 0x80000000 nine times in 35 runs, and 0, 0x13d0, 0xa5b, 0,
+  0xa3d7, 0x547b, 0x10000, 0x4ccd, 0x999a in the other 13, at every temperature and at random.
 - **Who notices:** anyone who mistypes a temperature, and gets a profile with exit 0.
 - **A fix:** refuse the value, which is what the port does.
-- **Status:** the port prints the same error, then "ERROR: the whitepoint must be between 4000 and
-  25000 to write an ICC profile.", writes nothing, and exits with 1 (`Stop::WhitePoint`).
+- **Status:** the port stops, with exit 1 and no profile, by the owner's decision of 2026-10-31,
+  although the wheel exits with 0 with one bad tag, and its read is of an uninitialised local in its
+  own frame, not of memory outside it. It can't be matched: the two wheels write different values,
+  and the Linux wheel's change from run to run. The port says all the wheel says up to the save,
+  with what the save reports about the tags: the display profile's errors, and "Couldn't write
+  type" where a cube of 256 and over gives no CLUT. Where the wheel's tool dies on a null transform,
+  the port stops as in U-652. If not, it prints "ERROR: the whitepoint must be between 4000 and
+  25000 to write an ICC profile.", and exits with 1 (`Stop::WhitePoint`). So a cube of 256 and over,
+  where the wheel saves nothing and exits with 0, exits with 1 as well. The port doesn't open the
+  output, so it doesn't report a path it couldn't create, and leaves a file already there alone.
 
 ### U-652. A display profile that gives no transform kills the tool
 
@@ -6840,12 +6858,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** `BilinearInterpFloat` and `Eval4InputsFloat` to `Eval15InputsFloat` take the cell
   with `_cmsQuickFloor` (src/cmsintrp.c:380, 1053, 1132 @ lcms2.17), which works on 16 fractional
-  bits and rounds at that precision, where `TetrahedralInterpFloat` uses `floor`. So an input
-  within about 2^-17 under 1.0 lands on the last node, and the next node is read past the end of
-  the table, with a negative weight of that size. The wheel goes on with what the heap held there:
-  the effect on the result is small, but it depends on that memory.
-- **Who notices:** a display profile with a `clut` element of those sizes in a `mpet` tag, on an
-  input that close to white. It takes a matrix before the CLUT: an input of exactly 1.0 is safe.
+  bits and rounds at that precision, where `TetrahedralInterpFloat` uses `floor`. So an input within
+  about 2^-17/domain under 1.0 (the domain is the grid's size less one) lands on the last node, and
+  the next node is read past the end of the table, with a negative weight of that size: the tests
+  place the width between 1.5e-6 and 3e-6 for a domain of 4, and between 3e-6 and 6e-6 for a domain
+  of 2. The same goes for the second of two inputs when the first is on the last node, and with
+  five inputs and more for an inner input on the last row of the level above, even with a weight of
+  0 there. The wheel goes on with what the memory there holds. Measured with grid (5,7), first
+  input 1-2^-24, on the Windows wheel: 50 runs, over 5 sizes of a tag nothing reads, gave six
+  results, one of them in about 3 of 4 runs at every size. Grid (128,128) died with 0xC0000005 in 3
+  of 20 runs, and a CLUT of five inputs and grid 3 died so in 1 of 72 runs of its test. The Linux
+  wheel gave one result and no death in 10 runs at each of those sizes and in 20 at grid (128,128).
+  Its result at grid (5,7) isn't the Windows wheel's usual one; at (128,128) it is.
+- **Who notices:** a real display profile is very unlikely to hit it. It takes a `mpet` tag with a
+  `clut` element of 2 or of 4 and more inputs on an RGB device, and a node of the cube that comes to
+  within 2^-17/domain of 1 through a matrix or a curve before the CLUT: an input of exactly 1.0 is
+  safe.
 - **A fix:** use `floor`, as the three-input one does.
 - **Status:** the port prints what the wheel printed, then "ERROR: the display profile's table is
   read past its end: the ICC profile can't be written.", and exits with 1 (`Stop::OutOfBounds`).

@@ -192,9 +192,10 @@ pub fn cms_create_lab2_profile_thr() -> Option<Profile> {
     Some(profile)
 }
 
-/// Port of `cmsCreateLab4ProfileTHR` (src/cmsvirt.c:520-557 @ lcms2.17).
-pub fn cms_create_lab4_profile_thr(white_point: &CieXyY) -> Option<Profile> {
-    let mut profile = cms_create_rgb_profile_thr(Some(white_point), None, None)?;
+/// Port of `cmsCreateLab4ProfileTHR` (src/cmsvirt.c:520-557 @ lcms2.17). A null white point is D50.
+pub fn cms_create_lab4_profile_thr(white_point: Option<&CieXyY>) -> Option<Profile> {
+    let d50 = cms_xyz_2_xy_y(&cms_d50_xyz());
+    let mut profile = cms_create_rgb_profile_thr(Some(white_point.unwrap_or(&d50)), None, None)?;
 
     cms_set_profile_version(&mut profile, 4.4);
     profile.device_class = SIG_ABSTRACT_CLASS;

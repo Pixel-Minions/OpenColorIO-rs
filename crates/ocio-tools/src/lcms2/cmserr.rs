@@ -29,8 +29,9 @@ pub fn cms_set_log_error_handler(handler: LogErrorHandler) {
 /// Port of `cmsSignalError` (src/cmserr.c:510-526 @ lcms2.17). `text` is what `vsnprintf` formats.
 ///
 /// `vsnprintf(Buffer, MAX_ERROR_MESSAGE_LEN-1, ...)` keeps 1022 characters with the C library's
-/// function. `lcms2_internal.h` makes it `_vsnprintf` under MSVC, which keeps 1023 and then no
-/// terminator, so the message runs on into whatever follows on the stack (U-650).
+/// function. `lcms2_internal.h` makes it `_vsnprintf` under MSVC, which keeps 1023 and no
+/// terminator, so the message ends only if the buffer's last byte, which nobody set, is zero, as it
+/// was in every measured run (U-650).
 pub fn cms_signal_error(code: u32, text: &[u8]) {
     let kept = if cfg!(windows) {
         MAX_ERROR_MESSAGE_LEN - 1

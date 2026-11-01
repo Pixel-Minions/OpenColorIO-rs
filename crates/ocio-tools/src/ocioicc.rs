@@ -23,8 +23,8 @@ use crate::stdio::{cerr, cout, cout_endl};
 /// Why `SaveICCProfileToFile` can't go on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop {
-    /// `cmsWhitePointFromTemp` failed, and the tool goes on with a white point nobody set
-    /// (U-651).
+    /// `cmsWhitePointFromTemp` failed, and the tool would write a `chad` tag out of a white point
+    /// nobody set (U-651).
     WhitePoint,
     /// A transform couldn't be created, and the sampler calls `cmsDoTransform` on a null pointer
     /// (U-652).
@@ -211,10 +211,14 @@ pub fn save_icc_profile_to_file(
     cms_set_log_error_handler(error_handler);
 
     // D65 white point
-    let white_point = cms_white_point_from_temp(whitepointtemp as f64).ok_or(Stop::WhitePoint)?;
+    // Without one the wheel goes on with memory nobody set, which only reaches the `chad` tags,
+    // and only the output's is ever looked at. So the port goes on, too, with what it prints, and
+    // stops where the output would be written (U-651).
+    let white_point = cms_white_point_from_temp(whitepointtemp as f64);
 
     // LAB PCS
-    let mut lab_profile = cms_create_lab4_profile_thr(&white_point).ok_or(Stop::WhitePoint)?;
+    let mut lab_profile =
+        cms_create_lab4_profile_thr(white_point.as_ref()).ok_or(Stop::WhitePoint)?;
 
     // Display (OCIO sRGB cube -> LAB)
     let mut display_profile = if !displayicc.is_empty() {
@@ -225,7 +229,7 @@ pub fn save_icc_profile_to_file(
 
     // Create an empty RGB Profile
     let mut h_profile =
-        cms_create_rgb_profile_thr(Some(&white_point), None, None).ok_or(Stop::WhitePoint)?;
+        cms_create_rgb_profile_thr(white_point.as_ref(), None, None).ok_or(Stop::WhitePoint)?;
 
     if verbose {
         cout(b"[OpenColorIO INFO]: Setting up Profile: ");
@@ -363,6 +367,11 @@ pub fn save_icc_profile_to_file(
         cout(b"[OpenColorIO INFO]: Writing ");
         cout(outputfile);
         cout_endl();
+    }
+    if white_point.is_none() {
+        // What the wheel's save would report about the tags, on no file.
+        cms_save_profile_to_io_handler(&mut h_profile, &mut IoHandler::null());
+        return Err(Stop::WhitePoint);
     }
     cms_save_profile_to_file(&mut h_profile, outputfile);
 

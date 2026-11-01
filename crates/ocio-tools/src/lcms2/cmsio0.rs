@@ -687,7 +687,7 @@ fn save_tags(icc: &mut Profile, io: &mut IoHandler) -> bool {
 }
 
 /// Port of `cmsSaveProfileToIOhandler` (src/cmsio0.c:1446-1498 @ lcms2.17).
-fn cms_save_profile_to_io_handler(icc: &mut Profile, io: &mut IoHandler) -> u32 {
+pub fn cms_save_profile_to_io_handler(icc: &mut Profile, io: &mut IoHandler) -> u32 {
     let mut null = IoHandler::null();
 
     // Pass #1 does compute offsets
