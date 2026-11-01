@@ -120,7 +120,13 @@ on finite sampling footprints, plus a complete finite companion and independent
 native readback controls under the approved [non-finite class](docs/gpu-nonfinite.md).
 Five finite CPU/GPU failures have separately approved [exact pins](docs/gpu-finite-exact-pins.md)
 for the recorded renderer; original thresholds stay enforced and any changed or newly passing
-result is rejected. The remaining legacy GPU parity sweep follows. Phases 1 (the op engine and
+result is rejected. Legacy shader and LUT data are also checked against the wheel's native API
+in all 10 languages: all seven named optimization levels on small lattices, shared-cache request
+orders, allocation/file boundaries, mixed LUT/range/alpha chains and initial dynamic snapshots.
+The DEFAULT sweep also checks larger lattices through 129 cubed, with every texture value
+bit exact. Post-extraction dynamic updates and complete SDE qualification remain
+open in the [execution and qualification card](docs/cards/p63-sde-followups.md).
+SDE is advisory for merging; it remains part of the definition of a finished port. Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
 port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
@@ -215,7 +221,9 @@ debug and release builds, and was reviewed independently before merging.
 - **Checks on emulated CPUs.** The CPU-dependent tests also run under Intel's CPU emulator, as
   Nehalem, Sandy Bridge, Haswell, Skylake and Skylake server. So every SIMD kernel the official
   library has (SSE2, AVX, AVX2, AVX-512) is compared with the port's, whatever CPU the tests
-  run on.
+  run on. Kernel jobs record Cargo's complete selected target and test manifests, then run
+  each selected test in a fresh emulator to avoid SDE's cumulative thread limit. The two
+  long LUT sweeps retain their separate jobs.
 - **A shared test battery.** Every op family is tested the same way against the official
   library: probe sets, generated extreme and non-finite parameters, and every numeric profile.
   Every card's tests were mutation-tested by an independent reviewer to prove they catch
@@ -267,7 +275,7 @@ Each milestone completes a section of OCIO with exact oracle checks:
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
 | **M4** | The `PyOpenColorIO`-compatible Python module | **Done:** all 384 upstream Python tests, SystemMonitors and complete module metadata checks pass on both reference platforms, within the approved [D-16 scope](docs/deviations.md) | `0.5.0` |
-| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. Remaining: library tests, legacy GPU parity and release checks | `1.0.0` |
+| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. Initial legacy shader/texture snapshots are checked; remaining: library completion, post-extraction legacy dynamic updates, complete SDE qualification and release checks | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
 

@@ -1,0 +1,226 @@
+{
+  "VerifiedUTC": "2026-10-30T19:37:20.004547+00:00",
+  "Run": 41111548180,
+  "Source": "49b0435f4fc33e1871be113311485f0c40644fe1",
+  "Validation": "33d1a8db3556ae429002432ceb02ab8cb75bf8d3",
+  "AllFourProfilesPassed": true,
+  "RequestsPerProfile": 7120,
+  "GeneratedFilesIdentical": true,
+  "CountsUnchanged": true,
+  "HeldGPUChanged": false,
+  "OracleSourceChanged": false,
+  "FullLargeTierVerified": true,
+  "ReverseNativeCacheOrderVerified": true,
+  "Scope": "legacy initial shader/texture/uniform/property snapshots; not new GPU pixel executions or post-extraction updates",
+  "FinalNormalAndCPUProfileValidationStillRequired": true,
+  "Profiles": [
+    {
+      "OS": "Windows",
+      "Profile": "debug",
+      "Counters": {
+        "P32": {
+          "Requests": 1680,
+          "ExactShaderTextures": 1554,
+          "ExactRefusals": 126
+        },
+        "P33": {
+          "Requests": 980,
+          "ExactShaderTextures": 882,
+          "ExactRefusals": 98
+        },
+        "P34": {
+          "Requests": 1680,
+          "ExactShaderTextures": 1512,
+          "ExactRefusals": 168
+        },
+        "P35 boundary": {
+          "Requests": 1400,
+          "ExactShaderTextures": 539,
+          "ExactRefusals": 861
+        },
+        "P35 large": {
+          "Requests": 120,
+          "ExactShaderTextures": 111,
+          "ExactRefusals": 9
+        },
+        "P36": {
+          "Requests": 280,
+          "ExactShaderTextures": 259,
+          "ExactRefusals": 21
+        },
+        "P37": {
+          "Requests": 980,
+          "ExactShaderTextures": 882,
+          "ExactRefusals": 98
+        }
+      },
+      "DynamicSnapshotRows": 1080,
+      "TestCount": 7,
+      "Ignored": 0,
+      "GuardsClippyMainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      },
+      "RawLogSHA256": "b85f998a45322ff59ac9a13f693df3594fb4888a1438a34b33710f5d4d26cc75"
+    },
+    {
+      "OS": "Windows",
+      "Profile": "release",
+      "Counters": {
+        "P32": {
+          "Requests": 1680,
+          "ExactShaderTextures": 1554,
+          "ExactRefusals": 126
+        },
+        "P33": {
+          "Requests": 980,
+          "ExactShaderTextures": 882,
+          "ExactRefusals": 98
+        },
+        "P34": {
+          "Requests": 1680,
+          "ExactShaderTextures": 1512,
+          "ExactRefusals": 168
+        },
+        "P35 boundary": {
+          "Requests": 1400,
+          "ExactShaderTextures": 539,
+          "ExactRefusals": 861
+        },
+        "P35 large": {
+          "Requests": 120,
+          "ExactShaderTextures": 111,
+          "ExactRefusals": 9
+        },
+        "P36": {
+          "Requests": 280,
+          "ExactShaderTextures": 259,
+          "ExactRefusals": 21
+        },
+        "P37": {
+          "Requests": 980,
+          "ExactShaderTextures": 882,
+          "ExactRefusals": 98
+        }
+      },
+      "DynamicSnapshotRows": 1080,
+      "TestCount": 7,
+      "Ignored": 0,
+      "GuardsClippyMainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      },
+      "RawLogSHA256": "c48c35764e794b65e5dd3ef43a1e06fb37842a8e006fbc422b4a1a4472d61fe7"
+    },
+    {
+      "OS": "Linux",
+      "Profile": "debug",
+      "Counters": {
+        "P32": {
+          "Requests": 1680,
+          "ExactShaderTextures": 1554,
+          "ExactRefusals": 126
+        },
+        "P33": {
+          "Requests": 980,
+          "ExactShaderTextures": 882,
+          "ExactRefusals": 98
+        },
+        "P34": {
+          "Requests": 1680,
+          "ExactShaderTextures": 1512,
+          "ExactRefusals": 168
+        },
+        "P35 boundary": {
+          "Requests": 1400,
+          "ExactShaderTextures": 539,
+          "ExactRefusals": 861
+        },
+        "P35 large": {
+          "Requests": 120,
+          "ExactShaderTextures": 111,
+          "ExactRefusals": 9
+        },
+        "P36": {
+          "Requests": 280,
+          "ExactShaderTextures": 259,
+          "ExactRefusals": 21
+        },
+        "P37": {
+          "Requests": 980,
+          "ExactShaderTextures": 882,
+          "ExactRefusals": 98
+        }
+      },
+      "DynamicSnapshotRows": 1080,
+      "TestCount": 7,
+      "Ignored": 0,
+      "GuardsClippyMainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      },
+      "RawLogSHA256": "0734c0bc3b3f39eb0fb4a54d7ab77302ef2cea8e3d3c8ee2d2d3b2aa71930a97"
+    },
+    {
+      "OS": "Linux",
+      "Profile": "release",
+      "Counters": {
+        "P32": {
+          "Requests": 1680,
+          "ExactShaderTextures": 1554,
+          "ExactRefusals": 126
+        },
+        "P33": {
+          "Requests": 980,
+          "ExactShaderTextures": 882,
+          "ExactRefusals": 98
+        },
+        "P34": {
+          "Requests": 1680,
+          "ExactShaderTextures": 1512,
+          "ExactRefusals": 168
+        },
+        "P35 boundary": {
+          "Requests": 1400,
+          "ExactShaderTextures": 539,
+          "ExactRefusals": 861
+        },
+        "P35 large": {
+          "Requests": 120,
+          "ExactShaderTextures": 111,
+          "ExactRefusals": 9
+        },
+        "P36": {
+          "Requests": 280,
+          "ExactShaderTextures": 259,
+          "ExactRefusals": 21
+        },
+        "P37": {
+          "Requests": 980,
+          "ExactShaderTextures": 882,
+          "ExactRefusals": 98
+        }
+      },
+      "DynamicSnapshotRows": 1080,
+      "TestCount": 7,
+      "Ignored": 0,
+      "GuardsClippyMainModePassed": true,
+      "CPP": 1188,
+      "GPU": 205,
+      "GeneratedSHA256": {
+        "parity.md": "88bd018b4a4b844de861f40b9340b43e0ae7dbcdd225b9977f16f15b005a4828",
+        "ratchet.toml": "959cb6f8315a8fb91cccde39b51d23c061ab665f14980aac2e41f4e89aa88ea0"
+      },
+      "RawLogSHA256": "e9236586de788722616cb64bbe3b939ffb721cdeef8477f81e4c72f856f8606b"
+    }
+  ]
+}
