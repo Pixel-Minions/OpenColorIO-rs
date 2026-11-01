@@ -37,6 +37,7 @@ on:
       - "scripts/sde.sh"
       - "crates/ocio/**"
       - "crates/ocio-gpu/**"
+      - "crates/ocio-tools/**"
       - "scripts/sde_join_shards.py"
       - "scripts/diagnostics/p41_shard_controls.py"
       - "scripts/diagnostics/p46_join_order_controls.py"
@@ -74,7 +75,7 @@ jobs:
     timeout-minutes: 240
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: 8
       matrix:
         cpu: [nhm, snb, hsw, skl, skx]
         shard: [0, 1, 2, 3]
@@ -163,7 +164,7 @@ jobs:
     timeout-minutes: 240
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: 8
       matrix:
         cpu: [nhm, snb, hsw, skl, skx]
         shard: [0, 1, 2, 3]

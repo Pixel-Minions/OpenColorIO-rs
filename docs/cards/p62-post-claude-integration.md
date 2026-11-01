@@ -4,6 +4,8 @@ Rebase PR85, PR86, PR87 and combined PR90 onto main
 4bc8b1f6313ff2292cbfc61f307454a524acc4a9, preserving their merge ancestry.
 This replaces no renderer, tools, ICC, oracle, fixture, waiver or arithmetic code.
 The production source and SDE protocol match the prior PR90 head012d52d8.
+Retain its eight kernel shards/platform concurrency and add ocio-tools to the SDE
+path trigger, since the preserved alias now selects tools_cpu_oracle as well.
 
 Keep all41 current-main cpu-tests targets, including ocio-tools/tools_cpu_oracle,
 matrix_oracle, grading_rgb_curve_oracle and cpu_processor_apply_oracle. PR86 and
