@@ -1,5 +1,10 @@
 # P45: complete bounded SDE validation with balanced normal CI
 
+Owner override2026-11-01: the three exact-head normal checks govern merging.
+SDE is advisory for merges; complete SDE qualification remains release work.
+The prior all-ten-profile merge hold and final-attempt/no-reruns policy below
+are historical and superseded by the one targeted run authorized in [P63](p63-sde-followups.md).
+
 Own the integration, .github/workflows/sde.yml concurrency and this card. Combine
 P44 bad41047 (full normal CI balancing) with frozen P42 5a3f1474 (P29-P41 native-
 validated SDE/legacy components). No older draft or diagnostic branch is rewritten.

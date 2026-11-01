@@ -1,5 +1,10 @@
 # P62: rebase the legacy stack after tools, ICC and SIMD
 
+Owner override2026-11-01: the three exact-head normal checks govern merging.
+SDE is advisory for merges; complete SDE qualification remains release work.
+The prior all-ten-profile merge hold and final-attempt/no-reruns policy below
+are historical and superseded by the one targeted run authorized in [P63](p63-sde-followups.md).
+
 Rebase PR85, PR86, PR87 and combined PR90 onto main
 4bc8b1f6313ff2292cbfc61f307454a524acc4a9, preserving their merge ancestry.
 This replaces no renderer, tools, ICC, oracle, fixture, waiver or arithmetic code.

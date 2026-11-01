@@ -1,5 +1,10 @@
 # P61: final combined legacy candidate after the bounded P32 source split
 
+Owner override2026-11-01: the three exact-head normal checks govern merging.
+SDE is advisory for merges; complete SDE qualification remains release work.
+The prior all-ten-profile merge hold and final-attempt/no-reruns policy below
+are historical and superseded by the one targeted run authorized in [P63](p63-sde-followups.md).
+
 Combine the full source ancestry of PR85/86/87/90 with P55, the completed Python
 source-file status audit, the final C++ accounting and the six-entry Phase9 library
 audit. No Claude-owned Phase8, tools or apputils source is included. The normal ci.yml,

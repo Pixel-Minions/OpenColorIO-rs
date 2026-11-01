@@ -70,6 +70,8 @@ env:
 
 jobs:
   windows-kernels:
+    # The owner selects a separate targeted run for PRs carrying this label.
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')
     name: SDE ${{ matrix.cpu }} kernel shard${{ matrix.shard }} (Windows)
     runs-on: windows-2025
     timeout-minutes: 240
@@ -119,6 +121,8 @@ jobs:
           retention-days: 30
 
   windows-lut:
+    # The owner selects a separate targeted run for PRs carrying this label.
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')
     name: SDE ${{ matrix.cpu }} LUT sweep (Windows)
     runs-on: windows-2025
     timeout-minutes: 360
@@ -159,6 +163,8 @@ jobs:
         run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
 
   rocky9-kernels:
+    # The owner selects a separate targeted run for PRs carrying this label.
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')
     name: SDE ${{ matrix.cpu }} kernel shard${{ matrix.shard }} (Rocky Linux 9)
     runs-on: ubuntu-24.04
     timeout-minutes: 240
@@ -204,6 +210,8 @@ jobs:
           retention-days: 30
 
   rocky9-lut:
+    # The owner selects a separate targeted run for PRs carrying this label.
+    if: github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted')
     name: SDE ${{ matrix.cpu }} LUT sweep (Rocky Linux 9)
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -242,7 +250,7 @@ jobs:
 
   kernels:
     name: SDE ${{ matrix.cpu }} (${{ matrix.system == 'Rocky' && 'Rocky Linux 9' || 'Windows' }})
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))
     needs: [windows-kernels, rocky9-kernels]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
