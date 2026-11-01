@@ -261,6 +261,39 @@ pub mod scalar {
     instruction!(mulsd, f64, "mulsd {0}, {1}");
 }
 
+/// The x86 packed instructions with their operand order fixed, which Rust's `_mm_add_ps` and
+/// `_mm_mul_ps`, LLVM's commutative `fadd` and `fmul`, don't fix. With NaN operands the result
+/// is the instruction's, as in the wheels' loops of the same instructions.
+#[cfg(target_arch = "x86_64")]
+pub mod packed {
+    use core::arch::asm;
+    use core::arch::x86_64::__m128;
+
+    macro_rules! instruction {
+        ($name:ident, $text:literal) => {
+            /// The instruction with `a` as its first source operand.
+            #[inline(always)]
+            pub fn $name(a: __m128, b: __m128) -> __m128 {
+                let out: __m128;
+                // SAFETY: the instruction reads two registers and writes the first, and x86-64
+                // has SSE.
+                unsafe {
+                    asm!(
+                        $text,
+                        inlateout(xmm_reg) a => out,
+                        in(xmm_reg) b,
+                        options(pure, nomem, nostack, preserves_flags)
+                    );
+                }
+                out
+            }
+        };
+    }
+
+    instruction!(addps, "addps {0}, {1}");
+    instruction!(mulps, "mulps {0}, {1}");
+}
+
 /// What the renderers' real SIMD fast paths share (`docs/cards/phase8.md`).
 ///
 /// Rust's `_mm_add_ps` and `_mm_mul_ps` are LLVM's commutative `fadd` and `fmul`, so they don't
@@ -277,6 +310,15 @@ pub mod blocks {
 
     /// The pixels of a block. One special value sends all of its block to the exact lanes.
     pub const BLOCK_PIXELS: usize = 32;
+
+    /// Aligns the code that follows to 32 bytes. A loop of a few cycles a pixel that crosses a
+    /// boundary of the CPU's fetch windows, which changes from build to build, can take a third
+    /// longer. It runs once before such a loop.
+    #[inline(always)]
+    pub fn align_loop() {
+        // SAFETY: the directive only pads the code with no-ops.
+        unsafe { core::arch::asm!(".p2align 5", options(nomem, nostack, preserves_flags)) };
+    }
 
     /// A pixel as an SSE register.
     #[inline]
@@ -307,7 +349,7 @@ pub mod blocks {
     #[inline]
     pub fn block_is_finite(pixels: &[[f32; 4]]) -> bool {
         // A few pixels, such as `applyRGBA`'s one, don't pay for the wider registers.
-        if std::arch::is_x86_feature_detected!("avx2") {
+        if pixels.len() >= 4 && std::arch::is_x86_feature_detected!("avx2") {
             // SAFETY: the CPU has AVX2.
             return unsafe { crate::avx2::block_is_finite(pixels) };
         }
@@ -332,6 +374,23 @@ pub mod blocks {
         }
         // SAFETY: x86-64 has SSE2.
         unsafe { check(pixels) }
+    }
+
+    /// The OR of the first three values of every pixel of `pixels`.
+    pub fn rgb_bits(pixels: &[[u16; 4]]) -> u16 {
+        #[target_feature(enable = "sse2")]
+        fn scan(pixels: &[[u16; 4]]) -> u16 {
+            let mut bits = _mm_setzero_si128();
+            for pixel in pixels {
+                // SAFETY: `pixel` holds the 8 bytes this reads, at any alignment.
+                let value = unsafe { _mm_loadl_epi64(pixel.as_ptr().cast()) };
+                bits = _mm_or_si128(bits, value);
+            }
+            let rgba = _mm_cvtsi128_si64(bits) as u64;
+            (rgba | (rgba >> 16) | (rgba >> 32)) as u16
+        }
+        // SAFETY: x86-64 has SSE2.
+        unsafe { scan(pixels) }
     }
 
     /// A pixel of a loop between two buffers, for a kernel written for a pixel in place.

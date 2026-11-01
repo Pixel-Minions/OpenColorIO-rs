@@ -51,7 +51,10 @@ use crate::sse2::blocks::{for_each_block, for_each_block_to};
 /// Whether every value is finite, as the real SSE2 kernels need.
 #[cfg(target_arch = "x86_64")]
 fn finite<'a>(values: impl IntoIterator<Item = &'a [f32; 3]>) -> bool {
-    values.into_iter().flatten().all(|v| v.is_finite())
+    values
+        .into_iter()
+        .flatten()
+        .fold(true, |finite, v| finite & v.is_finite())
 }
 
 /// A renderer with fast math: its exact lanes, and on x86-64 its real kernels and what they

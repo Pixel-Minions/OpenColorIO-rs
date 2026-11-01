@@ -65,7 +65,7 @@ impl Coefficients {
                 self.black_pivot,
                 self.white_pivot,
             ])
-            .all(|v| v.is_finite());
+            .fold(true, |finite, v| finite & v.is_finite());
         finite && (!self.lin_contrast || self.pivot != 0.0)
     }
 }

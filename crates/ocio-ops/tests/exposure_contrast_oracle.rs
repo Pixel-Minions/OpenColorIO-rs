@@ -15,6 +15,7 @@
 //! not dynamic, as the wheel's does.
 
 use ocio_ops::cpu_processor::CpuProcessor;
+use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{
     BitDepth, DynamicPropertyType, ExposureContrastStyle, OptimizationFlags, TransformDirection,
@@ -579,25 +580,32 @@ fn dynamic_sets_apply_as_the_wheels() {
                 .as_u64()
                 .unwrap_or_else(|| panic!("{step}")) as usize;
             let wheel = bytes_to_f32(&response.blobs[index]);
-            let differ: Vec<String> = port
-                .iter()
-                .zip(&wheel)
-                .enumerate()
-                .filter(|(_, (p, w))| p.to_bits() != w.to_bits())
-                .map(|(i, (p, w))| {
-                    format!(
-                        "[{i}] port {p:e} ({:#x}) wheel {w:e} ({:#x})",
-                        p.to_bits(),
-                        w.to_bits()
-                    )
-                })
-                .collect();
-            if !differ.is_empty() {
-                failures.push(format!(
-                    "{:?} {direction:?} after {set:?}: {}",
-                    params.style,
-                    differ.join(", ")
-                ));
+            // Between two buffers too, the wheel's own path.
+            let mut between = vec![0.0f32; input.len()];
+            let src = PackedImageDesc::new(&input[..], 5, 1, 4).unwrap();
+            let mut dst = PackedImageDesc::new(&mut between[..], 5, 1, 4).unwrap();
+            cpu.apply_src_dst(&src, &mut dst).unwrap();
+            for port in [&port, &between] {
+                let differ: Vec<String> = port
+                    .iter()
+                    .zip(&wheel)
+                    .enumerate()
+                    .filter(|(_, (p, w))| p.to_bits() != w.to_bits())
+                    .map(|(i, (p, w))| {
+                        format!(
+                            "[{i}] port {p:e} ({:#x}) wheel {w:e} ({:#x})",
+                            p.to_bits(),
+                            w.to_bits()
+                        )
+                    })
+                    .collect();
+                if !differ.is_empty() {
+                    failures.push(format!(
+                        "{:?} {direction:?} after {set:?}: {}",
+                        params.style,
+                        differ.join(", ")
+                    ));
+                }
             }
         }
     }

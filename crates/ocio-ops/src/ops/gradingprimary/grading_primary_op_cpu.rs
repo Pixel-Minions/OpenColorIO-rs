@@ -62,7 +62,7 @@
 //! take the real SSE2 kernels of `grading_primary_op_cpu_sse2` instead, where no NaN can show
 //! an order (its `Coefficients::fast_path` says why); any other block takes the lanes.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLockReadGuard};
 
 #[cfg(target_arch = "x86_64")]
 use super::grading_primary_op_cpu_sse2 as sse2;
@@ -425,8 +425,8 @@ impl GradingPrimaryOpCpu {
     /// The values and their pre-render form, read once for an `apply`, or `None` when the
     /// values change nothing (`getLocalBypass`): upstream's `apply` then copies its input, and
     /// in place leaves it as it is.
-    fn state(&self) -> Option<PrimaryState> {
-        let state = *self.gp.state();
+    fn state(&self) -> Option<RwLockReadGuard<'_, PrimaryState>> {
+        let state = self.gp.state();
         (!state.pre_render.get_local_bypass()).then_some(state)
     }
 

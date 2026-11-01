@@ -41,7 +41,8 @@
 //!
 //! With finite coefficients, blocks of finite pixels take the real SSE2 kernels of
 //! `exposure_contrast_op_cpu_sse2`, which says why no operand order shows there. Any other
-//! block takes the lanes, in each wheel's operand order.
+//! block takes the lanes, in each wheel's operand order. `in * contrast + offset` is the
+//! instructions themselves, in the wheels' order, and needs no such check.
 
 use std::sync::Arc;
 
@@ -214,16 +215,14 @@ fn power_rgb(rgba: &mut [f32], scale: f32, power: f32, factor: f32) {
 
 /// `in * contrast + offset` on the color channels, in the wheels' order: the product first.
 fn linear_rgb(rgba: &mut [f32], contrast: f32, offset: f32) {
-    let finite = contrast.is_finite() && offset.is_finite();
-    render(
-        rgba,
-        finite,
-        |block| sse2_linear(block, contrast, offset),
-        |block| linear_exact(block, contrast, offset),
-    );
+    #[cfg(target_arch = "x86_64")]
+    sse2_linear(rgba.as_chunks_mut::<4>().0, contrast, offset);
+    #[cfg(not(target_arch = "x86_64"))]
+    linear_exact(rgba.as_chunks_mut::<4>().0, contrast, offset);
 }
 
-/// The lanes of [`linear_rgb`].
+/// The lanes of [`linear_rgb`], where its instructions don't compile.
+#[cfg(not(target_arch = "x86_64"))]
 fn linear_exact(block: &mut [[f32; 4]], contrast: f32, offset: f32) {
     for px in block {
         for v in &mut px[..3] {
@@ -233,23 +232,23 @@ fn linear_exact(block: &mut [[f32; 4]], contrast: f32, offset: f32) {
 }
 
 /// [`linear_rgb`] between two buffers, as the C++ renders the first op of a chain: without a
-/// copy of the input where the real kernel runs.
+/// copy of the input.
 fn linear_between(input: Pixels<'_>, output: PixelsMut<'_>, contrast: f32, offset: f32) {
     let (Pixels::F32(input), PixelsMut::F32(output)) = (input, output) else {
         panic!("the renderers process float pixels only");
     };
     #[cfg(target_arch = "x86_64")]
-    if contrast.is_finite() && offset.is_finite() {
-        crate::sse2::blocks::for_each_block_to(
-            input.as_chunks::<4>().0,
-            output.as_chunks_mut::<4>().0,
-            |from, to| sse2_linear_to(from, to, contrast, offset),
-            |block, _| linear_exact(block, contrast, offset),
-        );
-        return;
+    sse2_linear_to(
+        input.as_chunks::<4>().0,
+        output.as_chunks_mut::<4>().0,
+        contrast,
+        offset,
+    );
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        output.copy_from_slice(input);
+        linear_exact(output.as_chunks_mut::<4>().0, contrast, offset);
     }
-    output.copy_from_slice(input);
-    linear_exact(output.as_chunks_mut::<4>().0, contrast, offset);
 }
 
 /// Renders `rgba` with `exact`, or block by block with `fast` where `finite` allows it.
@@ -290,8 +289,6 @@ use super::exposure_contrast_op_cpu_sse2::{
 fn sse2_scale(_: &mut [[f32; 4]], _: f32) {}
 #[cfg(not(target_arch = "x86_64"))]
 fn sse2_power(_: &mut [[f32; 4]], _: f32, _: f32, _: f32) {}
-#[cfg(not(target_arch = "x86_64"))]
-fn sse2_linear(_: &mut [[f32; 4]], _: f32, _: f32) {}
 
 /// Implements [`CpuOp`]'s dynamic property methods with the renderer's base.
 macro_rules! base_dynamic_properties {

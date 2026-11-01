@@ -22,7 +22,8 @@
 use core::arch::x86_64::*;
 
 use crate::sse::simd::sse_power;
-use crate::sse2::blocks::{Pair, load, store_rgb};
+use crate::sse2::blocks::{align_loop, load, store_rgb};
+use crate::sse2::packed::{addps, mulps};
 
 /// `in * factor` on `block`, in place.
 pub(super) fn scale(block: &mut [[f32; 4]], factor: f32) {
@@ -51,13 +52,15 @@ pub(super) fn power(block: &mut [[f32; 4]], scale: f32, power: f32, factor: f32)
     unsafe { kernel(block, scale, power, factor) }
 }
 
-/// `in * contrast + offset` on `block`, in place.
+/// `in * contrast + offset` on `block`, in place: the instructions, in the wheels' order, so any
+/// NaN comes out as in the wheel.
 pub(super) fn linear(block: &mut [[f32; 4]], contrast: f32, offset: f32) {
     #[target_feature(enable = "sse2")]
     fn kernel(block: &mut [[f32; 4]], contrast: f32, offset: f32) {
         let (contrast, offset) = (_mm_set1_ps(contrast), _mm_set1_ps(offset));
+        align_loop();
         for px in block {
-            store_rgb(px, _mm_add_ps(_mm_mul_ps(load(px), contrast), offset));
+            store_rgb(px, addps(mulps(load(px), contrast), offset));
         }
     }
     // SAFETY: x86-64 has SSE2.
@@ -69,10 +72,10 @@ pub(super) fn linear_to(input: &[[f32; 4]], output: &mut [[f32; 4]], contrast: f
     #[target_feature(enable = "sse2")]
     fn kernel(input: &[[f32; 4]], output: &mut [[f32; 4]], contrast: f32, offset: f32) {
         let (contrast, offset) = (_mm_set1_ps(contrast), _mm_set1_ps(offset));
+        align_loop();
         for (from, to) in input.iter().zip(output) {
-            let mut pair = Pair { from, to };
-            let value = _mm_add_ps(_mm_mul_ps(pair.load(), contrast), offset);
-            pair.store_rgb(value);
+            store_rgb(to, addps(mulps(load(from), contrast), offset));
+            to[3] = from[3];
         }
     }
     // SAFETY: x86-64 has SSE2.

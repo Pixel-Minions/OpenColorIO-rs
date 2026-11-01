@@ -66,6 +66,14 @@ use crate::sse2::PackDepth;
 /// a half its bits.
 pub(crate) trait LookupIndex: ChannelType {
     fn lookup_index(self) -> usize;
+
+    /// The bits of every code of `row`, alpha left out: above the largest code a table holds,
+    /// some code is past it.
+    fn row_bits(row: &[[Self; 4]]) -> usize {
+        row.iter().fold(0, |bits, px| {
+            bits | px[0].lookup_index() | px[1].lookup_index() | px[2].lookup_index()
+        })
+    }
 }
 
 impl LookupIndex for u8 {
@@ -77,6 +85,11 @@ impl LookupIndex for u8 {
 impl LookupIndex for u16 {
     fn lookup_index(self) -> usize {
         self as usize
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn row_bits(row: &[[u16; 4]]) -> usize {
+        crate::sse2::blocks::rgb_bits(row) as usize
     }
 }
 
@@ -505,10 +518,7 @@ where
             return Ok(());
         }
         // One pass over the row, in place of a test per value: the bits of every code.
-        let bits = input.as_chunks::<4>().0.iter().fold(0, |bits, px| {
-            bits | px[0].lookup_index() | px[1].lookup_index() | px[2].lookup_index()
-        });
-        if bits <= max {
+        if I::Type::row_bits(input.as_chunks::<4>().0) <= max {
             return Ok(());
         }
         for px in input.as_chunks::<4>().0 {

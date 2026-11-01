@@ -327,6 +327,21 @@ fn packed_all_test() {
     check_packed_all(SSE2, true);
 }
 
+/// The OR of the first three values of every pixel, and never of the fourth.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn rgb_bits_reads_red_green_and_blue_of_every_pixel() {
+    use crate::sse2::blocks::rgb_bits;
+
+    assert_eq!(rgb_bits(&[]), 0);
+    assert_eq!(rgb_bits(&[[1, 0, 0, 0x8000]]), 1);
+    assert_eq!(rgb_bits(&[[0, 2, 0, 0], [0, 0, 4, 0]]), 6);
+    let mut pixels = [[0u16; 4]; 19];
+    pixels[18][2] = 0x4000;
+    pixels[3][1] = 8;
+    assert_eq!(rgb_bits(&pixels), 0x4008);
+}
+
 /// A block with one NaN or infinity, at any place, in any channel and of any length, isn't
 /// finite, on the SSE2 path and on the AVX2 one (`f32::is_finite` decides what finite means).
 #[cfg(target_arch = "x86_64")]

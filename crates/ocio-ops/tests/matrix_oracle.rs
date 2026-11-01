@@ -27,8 +27,8 @@
 //!   depths (OpOptimizers.cpp:559-563).
 //!
 //! The renderers write every channel, so no channel passes through, and they have no other
-//! numeric profile. Their SSE2 fast paths and exact lanes (`matrix_op_cpu.rs`) both run in the
-//! rows of [`ProbeSet::FiniteRows`].
+//! numeric profile. Their real SSE2 kernels (`matrix_op_cpu_sse2.rs`) run in the rows of
+//! [`ProbeSet::FiniteRows`] too.
 
 use std::hint::black_box;
 
@@ -408,9 +408,9 @@ fn every_width_matches_the_wheel_bit_for_bit() {
             }
         }
     }
-    // Finite pixels, which are the SSE2 fast path's where the coefficients are finite too. Here
-    // they aren't: an infinite coefficient and a zero make the default NaN, whose sign differs
-    // from the positive NaN of a NaN coefficient, so the sum's operand order shows.
+    // Finite pixels with coefficients that are not finite: an infinite coefficient and a zero
+    // make the default NaN, whose sign differs from the positive NaN of a NaN coefficient, so
+    // the sum's operand order shows.
     let finite_widths = [31, 32, 33, 64, 65];
     let first_mixed = matrices.len();
     matrices.extend(mixed_coefficients());
