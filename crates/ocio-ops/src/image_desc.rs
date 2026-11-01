@@ -474,8 +474,14 @@ impl ImageLayout {
     /// and planes that interleave in one buffer, aren't that.
     fn row_starts(&self, buffers: usize) -> Option<Vec<usize>> {
         let (x, y) = (self.x_stride_bytes, self.y_stride_bytes);
-        // Past `int`'s rows, upstream's row index wraps (U-3), which runs of rows would not do.
-        if x <= 0 || y <= 0 || self.width <= 0 || self.height > c_long::from(c_int::MAX) {
+        // Past `int`'s rows, upstream's row index wraps (U-3), and past `long`'s pixels so do
+        // `width * height` and `y * width` (I-1). Runs of rows would not do either.
+        if x <= 0
+            || y <= 0
+            || self.width <= 0
+            || self.height > c_long::from(c_int::MAX)
+            || self.width.checked_mul(self.height).is_none()
+        {
             return None;
         }
         let size = crate::bit_depth_utils::get_channel_size_in_bytes(self.bit_depth).ok()? as usize;

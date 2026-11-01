@@ -95,3 +95,72 @@ fn in_threads_runs_every_job_and_returns_the_first_error() {
     assert_eq!(result.unwrap_err().message(), "last");
     assert!(super::in_threads([None].into_iter().map(job)).is_ok());
 }
+
+/// A job whose thread can't be made runs on the calling thread, in its place among the results.
+#[test]
+fn a_job_without_a_thread_runs_on_the_calling_thread() {
+    let ran = std::sync::Mutex::new(Vec::new());
+    let job = |index: usize| {
+        let ran = &ran;
+        move || {
+            ran.lock()
+                .unwrap()
+                .push((index, std::thread::current().id()));
+            match index {
+                1 => Err(crate::exception::Exception::new("second")),
+                2 => Err(crate::exception::Exception::new("third")),
+                _ => Ok(()),
+            }
+        }
+    };
+    let result = super::in_threads_where((0..5).map(job), |index| index != 1);
+    assert_eq!(result.unwrap_err().message(), "second");
+
+    let here = std::thread::current().id();
+    let mut ran = ran.into_inner().unwrap();
+    ran.sort_by_key(|(index, _)| *index);
+    assert_eq!(
+        ran.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+        [0, 1, 2, 3, 4]
+    );
+    let on_this_thread: Vec<usize> = ran
+        .iter()
+        .filter(|(_, id)| *id == here)
+        .map(|(index, _)| *index)
+        .collect();
+    assert_eq!(on_this_thread, [1, 4]);
+}
+
+/// A host that sets flush-to-zero and denormals-are-zero on its thread gets the serial apply's
+/// bytes from the threaded one: on Windows new threads start with the default control word.
+/// Subnormal pixels show the flags, and the plain render shows they make a difference.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn threads_render_under_the_control_word_of_the_caller() {
+    use crate::image_desc::PackedImageDesc;
+    use crate::sse2::scalar::{control_word, set_control_word};
+
+    let mut ops = crate::op::OpVec::new();
+    crate::ops::matrix::matrix_op::create_scale_op(
+        &mut ops,
+        &[1.5, 1.5, 1.5, 1.0],
+        TransformDirection::Forward,
+    );
+    ops.finalize().unwrap();
+    let cpu = super::CpuProcessor::new(&ops, BitDepth::F32, BitDepth::F32, OptimizationFlags::NONE)
+        .unwrap();
+    let render = |threads: usize| {
+        let mut image = vec![1e-40f32; 4 * 8 * 8];
+        let mut img = PackedImageDesc::new(&mut image[..], 8, 8, 4).unwrap();
+        cpu.apply_threaded(&mut img, threads).unwrap();
+        image.iter().map(|v| v.to_bits()).collect::<Vec<u32>>()
+    };
+    let before = control_word();
+    let plain = render(4);
+    set_control_word(before | 0x8040);
+    let serial = render(1);
+    let threaded = render(4);
+    set_control_word(before);
+    assert_ne!(plain, serial);
+    assert_eq!(threaded, serial);
+}

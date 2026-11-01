@@ -45,6 +45,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `scanline_helper_oracle.rs`), and wrapped starts on small buffers
   (`crates/ocio-ops/src/image_packing_tests.rs`). The owner chose to match it on 2026-09-30.
   Where a wrapped scanline would reach outside the memory, the port returns an error (U-15).
+  `CpuProcessor::apply_threaded` and `apply_src_dst_threaded`, which upstream doesn't have,
+  match it too: an image whose `width * height` overflows a `long` takes the serial apply,
+  since a run of its rows, an image of its own, wouldn't wrap.
 
 ### I-2. "Invalid x stride." is checked on Windows only
 

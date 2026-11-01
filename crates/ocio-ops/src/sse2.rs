@@ -253,6 +253,26 @@ pub mod scalar {
         };
     }
 
+    /// This thread's `MXCSR`: flush-to-zero, denormals-are-zero, the rounding mode and the
+    /// exception masks that its SSE instructions follow.
+    #[inline]
+    pub(crate) fn control_word() -> u32 {
+        let mut word = 0u32;
+        // SAFETY: `stmxcsr` writes the 4 bytes of `word`, and x86-64 has SSE.
+        unsafe { asm!("stmxcsr [{}]", in(reg) &mut word, options(nostack, preserves_flags)) };
+        word
+    }
+
+    /// Sets this thread's `MXCSR` to `word`, which [`control_word`] read: for a thread that
+    /// renders for another. A new thread doesn't always inherit it: Linux's do, Windows's don't.
+    #[inline]
+    pub(crate) fn set_control_word(word: u32) {
+        // SAFETY: `ldmxcsr` reads the 4 bytes of `word`, a value the CPU gave, and x86-64 has SSE.
+        unsafe {
+            asm!("ldmxcsr [{}]", in(reg) &word, options(nostack, preserves_flags, readonly));
+        }
+    }
+
     instruction!(addss, f32, "addss {0}, {1}");
     instruction!(subss, f32, "subss {0}, {1}");
     instruction!(mulss, f32, "mulss {0}, {1}");

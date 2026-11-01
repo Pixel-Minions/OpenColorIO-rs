@@ -12,7 +12,7 @@
 use std::fmt;
 use std::hint::black_box;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::bit_depth_utils::{
     BitDepthInfo, ChannelType, Converter, F16, F32, Uint8, Uint10, Uint12, Uint16,
@@ -315,25 +315,69 @@ fn create_scanline_helper<'a>(
 }
 
 /// Runs each of `jobs` on a thread of its own, the last on this one, and returns the error of the
-/// first that failed.
+/// first that failed. The threads render under this thread's control word, as the serial apply
+/// does. A job whose thread the system can't make runs on this thread.
 fn in_threads<F>(jobs: impl Iterator<Item = F>) -> Result<()>
 where
     F: FnOnce() -> Result<()> + Send,
 {
-    let mut jobs: Vec<F> = jobs.collect();
-    let last = jobs.pop();
+    in_threads_where(jobs, |_| true)
+}
+
+/// A job, which a failed spawn must leave to run here: it drops the closure it was given.
+type JobSlot<F> = Mutex<Option<F>>;
+
+/// Takes the job out of `slot` and runs it.
+fn run_slot<F: FnOnce() -> Result<()>>(slot: &JobSlot<F>) -> Result<()> {
+    let job = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
+    job.map_or(Ok(()), |job| job())
+}
+
+/// [`in_threads`] where `may_spawn(index)` tells whether to try to make that job's thread, as
+/// the tests need to refuse one.
+fn in_threads_where<F>(
+    jobs: impl Iterator<Item = F>,
+    may_spawn: impl Fn(usize) -> bool,
+) -> Result<()>
+where
+    F: FnOnce() -> Result<()> + Send,
+{
+    let slots: Vec<JobSlot<F>> = jobs.map(|job| Mutex::new(Some(job))).collect();
+    let Some((last, others)) = slots.split_last() else {
+        return Ok(());
+    };
+    #[cfg(target_arch = "x86_64")]
+    let control_word = crate::sse2::scalar::control_word();
     std::thread::scope(|scope| {
-        let handles: Vec<_> = jobs.into_iter().map(|job| scope.spawn(job)).collect();
-        let last = last.map_or(Ok(()), |job| job());
-        let joined = handles.into_iter().map(|handle| match handle.join() {
-            Ok(result) => result,
-            Err(panic) => std::panic::resume_unwind(panic),
-        });
-        joined
-            .collect::<Vec<_>>()
+        let spawn = |slot| {
+            std::thread::Builder::new().spawn_scoped(scope, move || {
+                #[cfg(target_arch = "x86_64")]
+                crate::sse2::scalar::set_control_word(control_word);
+                run_slot(slot)
+            })
+        };
+        let handles: Vec<_> = others
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                let handle = if may_spawn(index) {
+                    spawn(slot).ok()
+                } else {
+                    None
+                };
+                (handle, slot)
+            })
+            .collect();
+        let last = run_slot(last);
+        let results: Vec<_> = handles
             .into_iter()
-            .chain([last])
-            .collect()
+            .map(|(handle, slot)| match handle.map(|handle| handle.join()) {
+                Some(Ok(result)) => result,
+                Some(Err(panic)) => std::panic::resume_unwind(panic),
+                None => run_slot(slot),
+            })
+            .collect();
+        results.into_iter().chain([last]).collect()
     })
 }
 

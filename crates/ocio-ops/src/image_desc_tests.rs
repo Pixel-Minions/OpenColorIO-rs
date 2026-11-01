@@ -473,3 +473,22 @@ fn split_rows_mut_refuses_rows_that_cuts_cannot_part() {
     assert!(split_rows_mut(&tight, buffers_mut(&mut img), &row_runs(1, 2)).is_some());
     assert!(tight.row_starts(2).is_none(), "a buffer without channels");
 }
+
+/// Images whose `width * height` wraps in a `long` keep the serial apply, whose scanlines then
+/// count as outside the image (I-1): the layout alone decides, as an image that size takes 6 GiB.
+/// `long` has 32 bits on Windows and 64 on Linux.
+#[test]
+fn row_starts_refuses_the_images_of_i_1() {
+    let mut pixels = [0.0f32; 4];
+    let img = PackedImageDesc::new(&mut pixels[..], 1, 1, 4).unwrap();
+    let sized = |width: c_long, height: c_long| ImageLayout {
+        width,
+        height,
+        x_stride_bytes: 16,
+        y_stride_bytes: 16 * width as isize,
+        ..*img.layout()
+    };
+    assert!(sized(65535, 32768).row_starts(1).is_some());
+    assert!(sized(65536, 32767).row_starts(1).is_some());
+    assert_eq!(sized(65536, 32768).row_starts(1).is_none(), cfg!(windows));
+}
