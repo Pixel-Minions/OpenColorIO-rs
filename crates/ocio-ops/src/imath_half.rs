@@ -20,6 +20,24 @@
 /// Converts half bits to float. Port of `imath_half_to_float` without F16C or the lookup
 /// table (src/Imath/half.h:284-364 @ Imath v3.2.1).
 pub fn half_to_float(h: u16) -> f32 {
+    half_to_float_bits(h)
+}
+
+/// [`half_to_float`] of every half, by its bits, built on first use: Imath's `_toFloat` table,
+/// for rows of halves, where the branches of the function cost more than the lookup.
+pub fn half_to_float_table() -> &'static [f32; 65536] {
+    static TABLE: std::sync::OnceLock<Box<[f32; 65536]>> = std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = Box::new([0.0f32; 65536]);
+        for (bits, value) in table.iter_mut().enumerate() {
+            *value = half_to_float(bits as u16);
+        }
+        table
+    })
+}
+
+#[inline]
+fn half_to_float_bits(h: u16) -> f32 {
     let h = u32::from(h);
     let hexpmant = (h << 17) >> 4;
     let mut v = (h >> 15) << 31;

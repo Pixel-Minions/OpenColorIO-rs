@@ -20,6 +20,7 @@ use crate::bit_depth_utils::{
 use crate::dynamic_property::DynamicPropertyRcPtr;
 use crate::exception::{Exception, Result};
 use crate::image_desc::{ImageDesc, ImageDescMut};
+use crate::imath_half::half_to_float_table;
 use crate::op::{CpuOp, OpVec, Pixels, PixelsMut};
 use crate::op_data::OpData;
 use crate::open_color_types::{
@@ -28,6 +29,8 @@ use crate::open_color_types::{
 use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_renderer;
 use crate::ops::matrix::matrix_op::create_identity_matrix_op;
 use crate::scanline_helper::{GenericScanlineHelper, ScanlineHelper};
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::casts;
 
 /// The conversion of RGBA pixels from bit depth `I` to bit depth `O`: each value is scaled by
 /// `maxValue(O) / maxValue(I)`, then cast (`Converter<O>::CastValue`). From F32 to F32 it only
@@ -184,6 +187,31 @@ impl<I: BitDepthInfo + 'static, O: Converter + 'static> CpuOp for BitDepthCast<I
         // runs the multiply and quiets signaling NaNs; `black_box` keeps LLVM from folding it
         // (spike S4, docs/spikes/s4.md).
         let scale = black_box(self.scale);
+
+        // From F32 to an integer depth, the real SSE2 cast renders whole groups of values.
+        #[cfg(target_arch = "x86_64")]
+        let done = match (I::Type::pixels(input), O::Type::pixels_mut(output)) {
+            (Pixels::F32(input), PixelsMut::U8(output)) => casts::cast_to_u8(input, output, scale),
+            (Pixels::F32(input), PixelsMut::U16(output)) => {
+                casts::cast_to_u16(input, output, scale, O::MAX_VALUE as f32)
+            }
+            _ => 0,
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        let done = 0;
+
+        // From halves to F32, through the table Imath's `half` has.
+        if let (Pixels::F16(input), PixelsMut::F32(output)) =
+            (I::Type::pixels(input), O::Type::pixels_mut(output))
+        {
+            let table = half_to_float_table();
+            for (out, value) in output.iter_mut().zip(input) {
+                *out = table[usize::from(value.to_bits())] * scale;
+            }
+            return;
+        }
+
+        let (input, output) = (&input[done..], &mut output[done..]);
         for (out, &value) in output.iter_mut().zip(input) {
             *out = O::cast_value(value.to_float() * scale);
         }

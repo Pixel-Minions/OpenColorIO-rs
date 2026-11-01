@@ -400,6 +400,80 @@ pub mod blocks {
     }
 }
 
+/// The real SSE2 form of `BitDepthCast<BIT_DEPTH_F32, outBD>` for the integer depths: the values
+/// of `Converter<BD>::CastValue` (src/OpenColorIO/BitDepthUtils.h:95-139 @ v2.5.2), four at a
+/// time.
+///
+/// `CastValue` adds 0.5, clamps with two comparisons and truncates. `_mm_max_ps(v, 0)` and
+/// `_mm_min_ps(v, max)` give the same integer: a NaN stays a NaN in `CastValue`, whose 32-bit
+/// conversion gives `0x80000000`, of which the low bits kept are 0, and it becomes 0 here. A
+/// value has no other NaN to meet, so no operand order shows.
+#[cfg(target_arch = "x86_64")]
+pub mod casts {
+    use core::arch::x86_64::*;
+
+    /// `(int)CLAMP(value * scale + 0.5f, 0.0f, max)` on four values.
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    fn cast(value: __m128, scale: __m128, max: __m128) -> __m128i {
+        let v = _mm_add_ps(_mm_mul_ps(value, scale), _mm_set1_ps(0.5));
+        _mm_cvttps_epi32(_mm_min_ps(_mm_max_ps(v, _mm_setzero_ps()), max))
+    }
+
+    /// The whole groups of sixteen values of `input`, cast and stored in `output`: the number of
+    /// values done.
+    #[target_feature(enable = "sse2")]
+    fn to_u8(input: &[f32], output: &mut [u8], scale: f32) -> usize {
+        let (scale, max) = (_mm_set1_ps(scale), _mm_set1_ps(255.0));
+        let (groups, _) = input.as_chunks::<16>();
+        let (outputs, _) = output.as_chunks_mut::<16>();
+        for (group, out) in groups.iter().zip(outputs) {
+            // SAFETY: `group` holds the sixteen floats these read, at any alignment.
+            let v: [__m128; 4] =
+                std::array::from_fn(|i| unsafe { _mm_loadu_ps(group.as_ptr().add(4 * i)) });
+            let [a, b, c, d] = v.map(|v| cast(v, scale, max));
+            let packed = _mm_packus_epi16(_mm_packs_epi32(a, b), _mm_packs_epi32(c, d));
+            // SAFETY: `out` holds the sixteen bytes this writes, at any alignment.
+            unsafe { _mm_storeu_si128(out.as_mut_ptr().cast(), packed) };
+        }
+        groups.len() * 16
+    }
+
+    /// As [`to_u8`], to 16 bits, for a `max_value` of at most 65535.
+    #[target_feature(enable = "sse2")]
+    fn to_u16(input: &[f32], output: &mut [u16], scale: f32, max_value: f32) -> usize {
+        let (scale, max) = (_mm_set1_ps(scale), _mm_set1_ps(max_value));
+        let (groups, _) = input.as_chunks::<16>();
+        let (outputs, _) = output.as_chunks_mut::<16>();
+        for (group, out) in groups.iter().zip(outputs) {
+            // SAFETY: `group` holds the sixteen floats these read, at any alignment.
+            let v: [__m128; 4] =
+                std::array::from_fn(|i| unsafe { _mm_loadu_ps(group.as_ptr().add(4 * i)) });
+            // The low 16 bits as signed values, as `_mm_packs_epi32` keeps those whole.
+            let [a, b, c, d] =
+                v.map(|v| _mm_srai_epi32::<16>(_mm_slli_epi32::<16>(cast(v, scale, max))));
+            // SAFETY: `out` holds the sixteen values these write, at any alignment.
+            unsafe {
+                _mm_storeu_si128(out.as_mut_ptr().cast(), _mm_packs_epi32(a, b));
+                _mm_storeu_si128(out.as_mut_ptr().add(8).cast(), _mm_packs_epi32(c, d));
+            }
+        }
+        groups.len() * 16
+    }
+
+    /// [`to_u8`] for every x86-64 CPU.
+    pub fn cast_to_u8(input: &[f32], output: &mut [u8], scale: f32) -> usize {
+        // SAFETY: x86-64 has SSE2.
+        unsafe { to_u8(input, output, scale) }
+    }
+
+    /// [`to_u16`] for every x86-64 CPU.
+    pub fn cast_to_u16(input: &[f32], output: &mut [u16], scale: f32, max_value: f32) -> usize {
+        // SAFETY: x86-64 has SSE2.
+        unsafe { to_u16(input, output, scale, max_value) }
+    }
+}
+
 /// The real `SSE2RGBAPack`s: four pixels, sixteen values. The kernels only load F32.
 #[cfg(target_arch = "x86_64")]
 pub(crate) mod packs {
