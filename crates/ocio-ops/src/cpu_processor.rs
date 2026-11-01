@@ -12,14 +12,18 @@
 use std::fmt;
 use std::hint::black_box;
 use std::marker::PhantomData;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::bit_depth_utils::{
     BitDepthInfo, ChannelType, Converter, F16, F32, Uint8, Uint10, Uint12, Uint16,
 };
 use crate::dynamic_property::DynamicPropertyRcPtr;
 use crate::exception::{Exception, Result};
-use crate::image_desc::{ImageDesc, ImageDescMut};
+use crate::image_desc::{
+    ImageDesc, ImageDescMut, buffers as image_desc_buffers, buffers_mut as image_desc_buffers_mut,
+    row_runs, rows_of, split_rows_mut,
+};
+use crate::imath_half::half_to_float_table;
 use crate::op::{CpuOp, OpVec, Pixels, PixelsMut};
 use crate::op_data::OpData;
 use crate::open_color_types::{
@@ -28,6 +32,8 @@ use crate::open_color_types::{
 use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_renderer;
 use crate::ops::matrix::matrix_op::create_identity_matrix_op;
 use crate::scanline_helper::{GenericScanlineHelper, ScanlineHelper};
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::casts;
 
 /// The conversion of RGBA pixels from bit depth `I` to bit depth `O`: each value is scaled by
 /// `maxValue(O) / maxValue(I)`, then cast (`Converter<O>::CastValue`). From F32 to F32 it only
@@ -184,6 +190,31 @@ impl<I: BitDepthInfo + 'static, O: Converter + 'static> CpuOp for BitDepthCast<I
         // runs the multiply and quiets signaling NaNs; `black_box` keeps LLVM from folding it
         // (spike S4, docs/spikes/s4.md).
         let scale = black_box(self.scale);
+
+        // From F32 to an integer depth, the real SSE2 cast renders whole groups of values.
+        #[cfg(target_arch = "x86_64")]
+        let done = match (I::Type::pixels(input), O::Type::pixels_mut(output)) {
+            (Pixels::F32(input), PixelsMut::U8(output)) => casts::cast_to_u8(input, output, scale),
+            (Pixels::F32(input), PixelsMut::U16(output)) => {
+                casts::cast_to_u16(input, output, scale, O::MAX_VALUE as f32)
+            }
+            _ => 0,
+        };
+        #[cfg(not(target_arch = "x86_64"))]
+        let done = 0;
+
+        // From halves to F32, through the table Imath's `half` has.
+        if let (Pixels::F16(input), PixelsMut::F32(output)) =
+            (I::Type::pixels(input), O::Type::pixels_mut(output))
+        {
+            let table = half_to_float_table();
+            for (out, value) in output.iter_mut().zip(input) {
+                *out = table[usize::from(value.to_bits())] * scale;
+            }
+            return;
+        }
+
+        let (input, output) = (&input[done..], &mut output[done..]);
         for (out, &value) in output.iter_mut().zip(input) {
             *out = O::cast_value(value.to_float() * scale);
         }
@@ -280,6 +311,73 @@ fn create_scanline_helper<'a>(
         BitDepth::F16 => to_output!(half::f16),
         BitDepth::F32 => to_output!(f32),
         BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => return Err(unsupported()),
+    })
+}
+
+/// Runs each of `jobs` on a thread of its own, the last on this one, and returns the error of the
+/// first that failed. The threads render under this thread's control word, as the serial apply
+/// does. A job whose thread the system can't make runs on this thread.
+fn in_threads<F>(jobs: impl Iterator<Item = F>) -> Result<()>
+where
+    F: FnOnce() -> Result<()> + Send,
+{
+    in_threads_where(jobs, |_| true)
+}
+
+/// A job, which a failed spawn must leave to run here: it drops the closure it was given.
+type JobSlot<F> = Mutex<Option<F>>;
+
+/// Takes the job out of `slot` and runs it.
+fn run_slot<F: FnOnce() -> Result<()>>(slot: &JobSlot<F>) -> Result<()> {
+    let job = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
+    job.map_or(Ok(()), |job| job())
+}
+
+/// [`in_threads`] where `may_spawn(index)` tells whether to try to make that job's thread, as
+/// the tests need to refuse one.
+fn in_threads_where<F>(
+    jobs: impl Iterator<Item = F>,
+    may_spawn: impl Fn(usize) -> bool,
+) -> Result<()>
+where
+    F: FnOnce() -> Result<()> + Send,
+{
+    let slots: Vec<JobSlot<F>> = jobs.map(|job| Mutex::new(Some(job))).collect();
+    let Some((last, others)) = slots.split_last() else {
+        return Ok(());
+    };
+    #[cfg(target_arch = "x86_64")]
+    let control_word = crate::sse2::scalar::control_word();
+    std::thread::scope(|scope| {
+        let spawn = |slot| {
+            std::thread::Builder::new().spawn_scoped(scope, move || {
+                #[cfg(target_arch = "x86_64")]
+                crate::sse2::scalar::set_control_word(control_word);
+                run_slot(slot)
+            })
+        };
+        let handles: Vec<_> = others
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                let handle = if may_spawn(index) {
+                    spawn(slot).ok()
+                } else {
+                    None
+                };
+                (handle, slot)
+            })
+            .collect();
+        let last = run_slot(last);
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|(handle, slot)| match handle.map(|handle| handle.join()) {
+                Some(Ok(result)) => result,
+                Some(Err(panic)) => std::panic::resume_unwind(panic),
+                None => run_slot(slot),
+            })
+            .collect();
+        results.into_iter().chain([last]).collect()
     })
 }
 
@@ -613,6 +711,64 @@ impl CpuProcessor {
         scanline_builder.init_src_dst(src, dst)?;
 
         self.process(&mut *scanline_builder)
+    }
+
+    /// [`CpuProcessor::apply`] with up to `threads` threads, one run of rows each. Not in upstream,
+    /// whose CPU apply is serial and leaves threads to the caller, and not in the Python module.
+    ///
+    /// The output is the serial apply's, bit for bit, for every thread count: the rows are
+    /// independent, as the serial apply renders each one on its own, and a run of rows is
+    /// rendered as an image of its own. Fewer rows than threads take fewer threads. The serial
+    /// apply serves an image whose rows can't be parted (a negative or zero stride, planes that
+    /// interleave in one buffer) and a processor that can stop at a row, with U-1's error: the
+    /// rows after that one stay unwritten, which other threads can't know. Every other error
+    /// comes before any row is written.
+    pub fn apply_threaded(&self, img: &mut dyn ImageDescMut, threads: usize) -> Result<()> {
+        let layout = *img.layout();
+        let height = layout.height();
+        if threads <= 1 || height <= 1 || self.engine.in_bit_depth_op.can_refuse_input() {
+            return self.apply(img);
+        }
+        // What the serial apply refuses, it refuses here first, in the same words.
+        self.scanline_helper()?.init(&mut *img)?;
+
+        let runs = row_runs(height, threads);
+        match split_rows_mut(&layout, image_desc_buffers_mut(img), &runs) {
+            Some(parts) => in_threads(
+                parts
+                    .into_iter()
+                    .map(|mut part| move || self.apply(&mut part)),
+            ),
+            None => self.apply(img),
+        }
+    }
+
+    /// [`CpuProcessor::apply_src_dst`] with up to `threads` threads, one run of rows each. See
+    /// [`CpuProcessor::apply_threaded`].
+    pub fn apply_src_dst_threaded(
+        &self,
+        src: &dyn ImageDesc,
+        dst: &mut dyn ImageDescMut,
+        threads: usize,
+    ) -> Result<()> {
+        let layout = *dst.layout();
+        let src_layout = *src.layout();
+        let height = layout.height();
+        if threads <= 1 || height <= 1 || self.engine.in_bit_depth_op.can_refuse_input() {
+            return self.apply_src_dst(src, dst);
+        }
+        // What the serial apply refuses, it refuses here first, in the same words.
+        self.scanline_helper()?.init_src_dst(src, &mut *dst)?;
+
+        let runs = row_runs(height, threads);
+        let src_buffers = image_desc_buffers(src);
+        match split_rows_mut(&layout, image_desc_buffers_mut(dst), &runs) {
+            Some(parts) => in_threads(parts.into_iter().zip(&runs).map(|(mut part, run)| {
+                let from = rows_of(&src_layout, &src_buffers, *run);
+                move || self.apply_src_dst(&from, &mut part)
+            })),
+            None => self.apply_src_dst(src, dst),
+        }
     }
 
     /// Applies the processor from `img` to `img`: upstream's path from one image to another,

@@ -53,7 +53,7 @@ path = "src/OpenColorIO/AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/avx.rs"]
 status = "done"
-note = "S4: scalar profile. F16C lanes proven against the hardware for all 2^32 floats and 65,536 halves; AVXRGBAPack as per-value Load/Store"
+note = "S4: scalar profile. F16C lanes proven against the hardware for all 2^32 floats and 65,536 halves; AVXRGBAPack as per-value Load/Store. Phase 8: the real F32 Load and the real Stores (avx::packs), which the AVX2 kernels use too"
 
 [[file]]
 path = "src/OpenColorIO/AVX2.h"
@@ -67,7 +67,7 @@ path = "src/OpenColorIO/AVX512.h"
 kind = "src"
 target = ["crates/ocio-ops/src/avx512.rs", "crates/ocio-ops/src/avx.rs"]
 status = "done"
-note = "S4: scalar profile. AVX512RGBAPack as per-value Load/Store, with LoadMasked/StoreMasked; F16C lanes in avx.rs"
+note = "S4: scalar profile. AVX512RGBAPack as per-value Load/Store, with LoadMasked/StoreMasked; F16C lanes in avx.rs. Phase 8: the real F32 Load and the real Stores (avx512::packs)"
 
 [[file]]
 path = "src/OpenColorIO/Baker.cpp"
@@ -572,7 +572,7 @@ path = "src/OpenColorIO/SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/sse2.rs"]
 status = "done"
-note = "S4: scalar profile. The software half conversions (with sse2_blendv) proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; sse2_clamp and SSE2RGBAPack as per-value Load/Store (the transposes only move values), checked by the upstream SSE2 tests. x86 only; SSE2NEON (ARM) variants not ported. To do (p1-dispatch, 1.5b): PackDepth::max_value and is_float repeat BitDepthInfo's maxValue and isFloat (bit_depth_utils.rs); use BitDepthInfo"
+note = "S4: scalar profile. The software half conversions (with sse2_blendv) proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; sse2_clamp and SSE2RGBAPack as per-value Load/Store (the transposes only move values), checked by the upstream SSE2 tests. Phase 8: the real F32 Load and the real Stores (sse2::packs). x86 only; SSE2NEON (ARM) variants not ported. To do (p1-dispatch, 1.5b): PackDepth::max_value and is_float repeat BitDepthInfo's maxValue and isFloat (bit_depth_utils.rs); use BitDepthInfo"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.cpp"
@@ -1215,7 +1215,7 @@ note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; c
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/cdl/cdl_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/cdl/cdl_op_cpu.rs", "crates/ocio-ops/src/ops/cdl/cdl_op_cpu_sse2.rs"]
 status = "done"
 note = "1.3c2: RenderParams, the 4 scalar and 4 SSE2 (fast-math) renderers, GetCDLCPURenderer; bit-exact against the wheel through tests/cdl_oracle.rs, alpha passed through"
 
@@ -1285,7 +1285,7 @@ note = "p5-ec 5.1b: CreateExposureContrastOp; p5-transforms 5.5a: CreateExposure
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu.rs", "crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu_sse2.rs"]
 status = "done"
 
 [[file]]
@@ -1369,7 +1369,7 @@ status = "done"
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu.rs", "crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu_sse2.rs"]
 status = "done"
 note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), whose every arm has its renderer since 2.3d2; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823); 2.3d1: LIN_TO_GAMMA_LOG, GAMMA_LOG_TO_LIN, LIN_TO_DOUBLE_LOG, DOUBLE_LOG_TO_LIN (389-474, 2230-2423); p2-aces2-cpu 2.4e1: Renderer_ACES_RGB_TO_JMh_20 and Renderer_ACES_TONESCALE_COMPRESS_20 (153-187, 1168-1319); 2.4e2: Renderer_ACES_OutputTransform20 and Renderer_ACES_GAMUT_COMPRESS_20 (133-151, 189-205, 1057-1166, 1321-1404); p2-ff-cpu-2 2.3d2: LIN_TO_PQ and PQ_TO_LIN, scalar and SSE (349-386, 2030-2227)"
 
@@ -1424,7 +1424,7 @@ note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs", "crates/ocio-ops/src/ops/gamma/gamma_op_cpu_sse2.rs"]
 status = "done"
 note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs); 1.3g2: GetGammaRenderer refuses short parameters (U-24), the battery compares the refusals"
 
@@ -1575,7 +1575,7 @@ note = "p5-primary 5.2a: CreateGradingPrimaryOp; CreateGradingPrimaryTransform w
 [[file]]
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs", "crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu_sse2.rs"]
 status = "done"
 note = "p5-primary 5.2b-c: GradingPrimaryOpCPU, the SSE2 helpers, the six renderers (operand orders of both wheels' machine code, I-226, I-227, I-228) and GetGradingPrimaryCPURenderer; checked by tests/grading_primary_oracle.rs"
 
@@ -1656,7 +1656,7 @@ note = "p5-transforms 5.5c: CreateGradingRGBCurveTransform in crates/ocio gradin
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu.rs", "crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu_sse2.rs"]
 status = "done"
 note = "p2-rgbcurve 2.6d: the four renderers and their SSE2 LinLog/LogLin; alpha as I-90 says"
 
@@ -1776,7 +1776,7 @@ note = "1.3l3: CreateLogOp; p1-transforms-fam2 (1.8e): the three BuildLogOp and 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/log/log_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/log/log_op_cpu.rs", "crates/ocio-ops/src/ops/log/log_op_cpu_sse2.rs"]
 status = "done"
 note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/log_oracle.rs)"
 
@@ -1862,7 +1862,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx.rs"]
 status = "done"
-note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.h"
@@ -1876,7 +1876,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx2.rs"]
 status = "done"
-note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX2.h"
@@ -1890,7 +1890,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX512.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx512.rs"]
 status = "done"
-note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx512, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx512, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX512.h"
@@ -1904,7 +1904,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_SSE2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_sse2.rs"]
 status = "done"
-note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_sse2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_sse2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_SSE2.h"
@@ -1960,7 +1960,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs", "crates/ocio-ops/src/ops/lut3d/inv_lut3d.rs"]
 status = "done"
-note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129. p2-lut3d 2.2b: the forward renderers as the op's CpuOp, GetLut3DRenderer. p2-lut3d-inv 2.2d1: InvLut3DRenderer's RangeTree (78-196, 1080-1388) in inv_lut3d.rs; 2.2d2: invert_hypercube, extrapolate, InvLut3DRenderer (822-1078, 1424-1734) in inv_lut3d.rs, GetLut3DRenderer's inverse arm. A grid size of 1 is refused (U-65, upstream never returns)"
+note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129. p2-lut3d 2.2b: the forward renderers as the op's CpuOp, GetLut3DRenderer. p2-lut3d-inv 2.2d1: InvLut3DRenderer's RangeTree (78-196, 1080-1388) in inv_lut3d.rs; 2.2d2: invert_hypercube, extrapolate, InvLut3DRenderer (822-1078, 1424-1734) in inv_lut3d.rs, GetLut3DRenderer's inverse arm. A grid size of 1 is refused (U-65, upstream never returns). Phase 8: the SSE2 trilinear loop is real SSE2 (lut3d_op_cpu_sse2::simd)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.h"
@@ -1974,7 +1974,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (the only instantiation)"
+note = "S4: exact scalar profile of the F32 kernel (the only instantiation). Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.h"
@@ -1988,7 +1988,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx2.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); lane-identical to AVX-512, which matches the wheel"
+note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); lane-identical to AVX-512, which matches the wheel. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.h"
@@ -2002,7 +2002,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX512.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx512.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); the kernel the wheel runs on Zen 5, bit-identical on Windows and Rocky 9"
+note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); the kernel the wheel runs on Zen 5, bit-identical on Windows and Rocky 9. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX512.h"
@@ -2016,7 +2016,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_sse2.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (the only instantiation). x86 only; SSE2NEON (ARM) variants not ported"
+note = "S4: exact scalar profile of the F32 kernel (the only instantiation). x86 only; SSE2NEON (ARM) variants not ported. Phase 8: the real instructions too (mod simd), proven against the lanes on every kernel this CPU runs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.h"
@@ -2070,9 +2070,9 @@ note = "see MatrixOp.cpp"
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/matrix/matrix_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/matrix/matrix_op_cpu.rs", "crates/ocio-ops/src/ops/matrix/matrix_op_cpu_sse2.rs"]
 status = "done"
-note = "1.3m2: the four renderers, the matrix ones in their SSE2 form (OCIO_USE_SSE2, set in both wheels), with each wheel's operand orders: MSVC's differ between its four-pixel loop and the loop that finishes the last numPixels % 4 pixels (matrix_op_cpu.rs notes the addresses)"
+note = "1.3m2: the four renderers, the matrix ones in their SSE2 form (OCIO_USE_SSE2, set in both wheels), with each wheel's operand orders: MSVC's differ between its four-pixel loop and the loop that finishes the last numPixels % 4 pixels (matrix_op_cpu.rs notes the addresses). Phase 8: real SSE2 kernels of the x86 instructions in those orders (sse2::packed), for every pixel, with no block check; on Windows the scale renderers keep the exact lanes for the last numPixels % 4 pixels"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpCPU.h"

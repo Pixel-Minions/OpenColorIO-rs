@@ -370,6 +370,13 @@ impl Family for RgbCurveFamily {
     fn name(&self) -> String {
         "GradingRGBCurveTransform".to_string()
     }
+    fn extra_probes(
+        &self,
+        _: &RgbCurveParams,
+        _: ocio_testkit::battery::Direction,
+    ) -> Vec<ocio_testkit::probe::ProbeSet> {
+        vec![ocio_testkit::probe::ProbeSet::FiniteRows]
+    }
 
     fn cases(&self) -> Vec<Case<RgbCurveParams>> {
         explicit_cases()
@@ -728,12 +735,17 @@ fn renderers_match_the_wheel() {
 /// In place, the linear style's renderers convert alpha to the grading log and back (I-90):
 /// Python's `applyRGBA` on an array processes it in place, the first op too, where the
 /// battery's images go from one buffer to another. Every value of the specials in every
-/// channel, forward and inverse, bypassed and not, compares bit for bit with
-/// `CpuOp::apply`.
+/// channel, which take the exact lanes, and finite rows, which take the real SSE2 kernels,
+/// forward and inverse, bypassed and not, compares bit for bit with `CpuOp::apply`.
 #[test]
 fn in_place_the_linear_style_converts_alpha() {
-    let pixels = ocio_testkit::probe::to_rgba_cycled(&ocio_testkit::probe::specials());
-    let bytes = ocio_testkit::oracle::f32_to_bytes(&pixels);
+    let specials = ocio_testkit::probe::to_rgba_cycled(&ocio_testkit::probe::specials());
+    let finite: Vec<f32> = ocio_testkit::probe::finite_rows()
+        .into_iter()
+        .filter(|(name, _)| name.starts_with("finite row of"))
+        .flat_map(|(_, pixels)| pixels)
+        .collect();
+    assert!(finite.iter().all(|v| v.is_finite()) && finite.len() > 4 * 32);
     let lin = explicit_cases()
         .into_iter()
         .find(|c| c.label() == "upstream lin")
@@ -752,57 +764,65 @@ fn in_place_the_linear_style_converts_alpha() {
             ));
         }
     }
-    let requests: Vec<ocio_testkit::image::RgbRequest> = cases
-        .iter()
-        .map(|(p, direction)| {
-            let Spec::Transform(transform) = RgbCurveFamily.spec(p, *direction) else {
-                panic!("a transform spec");
-            };
-            ocio_testkit::image::RgbRequest {
-                processor: json!({ "transform": transform }),
-                rgba: true,
-                input: ocio_testkit::image::RgbInput::array(bytes.clone(), "float32"),
-            }
-        })
-        .collect();
-    let calls: Vec<_> = requests.iter().map(|r| r.call()).collect();
     let mut converted = 0;
-    for ((p, direction), response) in cases
-        .iter()
-        .zip(ocio_testkit::Oracle::get().batch(&calls, true))
-    {
-        let reply = ocio_testkit::image::RgbReply::from_response(response.expect("the oracle"));
-        assert!(reply.raised().is_none(), "{:?}", reply.result);
-        let wheel = ocio_testkit::oracle::bytes_to_f32(reply.output.as_deref().expect("the array"));
-        let combo = Combo {
-            direction: *direction,
-            fast_math: true,
-            format: battery::Format::F32_RGBA,
-        };
-        let mut data = GradingRgbCurveOpData::new(p.style);
-        data.set_value(&p.curves()).unwrap();
-        data.set_direction(match direction {
-            Direction::Forward => TransformDirection::Forward,
-            Direction::Inverse => TransformDirection::Inverse,
-        });
-        data.set_bypass_lin_to_log(p.bypass);
-        let mut ops = OpVec::new();
-        create_grading_rgb_curve_op(&mut ops, data, TransformDirection::Forward);
-        let renderer = ops[0]
-            .get_cpu_op(combo.fast_math)
-            .unwrap()
-            .expect("a renderer");
-        let mut port = pixels.clone();
-        renderer.apply(&mut port);
-        ocio_testkit::assert_f32_bits_eq(&format!("{combo}, bypass {}", p.bypass), &wheel, &port);
-        let alpha_changed = wheel
+    for pixels in [&specials, &finite] {
+        let bytes = ocio_testkit::oracle::f32_to_bytes(pixels);
+        let requests: Vec<ocio_testkit::image::RgbRequest> = cases
             .iter()
-            .zip(&pixels)
-            .skip(3)
-            .step_by(4)
-            .any(|(w, i)| w.to_bits() != i.to_bits());
-        assert_eq!(alpha_changed, !p.bypass, "{combo}, bypass {}", p.bypass);
-        converted += usize::from(alpha_changed);
+            .map(|(p, direction)| {
+                let Spec::Transform(transform) = RgbCurveFamily.spec(p, *direction) else {
+                    panic!("a transform spec");
+                };
+                ocio_testkit::image::RgbRequest {
+                    processor: json!({ "transform": transform }),
+                    rgba: true,
+                    input: ocio_testkit::image::RgbInput::array(bytes.clone(), "float32"),
+                }
+            })
+            .collect();
+        let calls: Vec<_> = requests.iter().map(|r| r.call()).collect();
+        for ((p, direction), response) in cases
+            .iter()
+            .zip(ocio_testkit::Oracle::get().batch(&calls, true))
+        {
+            let reply = ocio_testkit::image::RgbReply::from_response(response.expect("the oracle"));
+            assert!(reply.raised().is_none(), "{:?}", reply.result);
+            let wheel =
+                ocio_testkit::oracle::bytes_to_f32(reply.output.as_deref().expect("the array"));
+            let combo = Combo {
+                direction: *direction,
+                fast_math: true,
+                format: battery::Format::F32_RGBA,
+            };
+            let mut data = GradingRgbCurveOpData::new(p.style);
+            data.set_value(&p.curves()).unwrap();
+            data.set_direction(match direction {
+                Direction::Forward => TransformDirection::Forward,
+                Direction::Inverse => TransformDirection::Inverse,
+            });
+            data.set_bypass_lin_to_log(p.bypass);
+            let mut ops = OpVec::new();
+            create_grading_rgb_curve_op(&mut ops, data, TransformDirection::Forward);
+            let renderer = ops[0]
+                .get_cpu_op(combo.fast_math)
+                .unwrap()
+                .expect("a renderer");
+            let mut port = pixels.clone();
+            renderer.apply(&mut port);
+            ocio_testkit::assert_f32_bits_eq(
+                &format!("{combo}, bypass {}", p.bypass),
+                &wheel,
+                &port,
+            );
+            let alpha_changed = wheel
+                .iter()
+                .zip(pixels)
+                .skip(3)
+                .step_by(4)
+                .any(|(w, i)| w.to_bits() != i.to_bits());
+            assert_eq!(alpha_changed, !p.bypass, "{combo}, bypass {}", p.bypass);
+            converted += usize::from(alpha_changed);
+        }
     }
-    assert_eq!(converted, 2);
+    assert_eq!(converted, 4);
 }

@@ -34,8 +34,14 @@ enum Apply {
     Same(Image),
 }
 
-/// The port applies `cpu` to the images of `apply` in `buffers`.
-fn port_apply(cpu: &CpuProcessor, apply: &Apply, buffers: &mut [Vec<u8>]) -> Result<()> {
+/// The port applies `cpu` to the images of `apply` in `buffers`: with the serial methods for
+/// `threads` 0, with the threaded ones otherwise, which have no form for `apply(img, img)`.
+fn port_apply(
+    cpu: &CpuProcessor,
+    apply: &Apply,
+    buffers: &mut [Vec<u8>],
+    threads: usize,
+) -> Result<()> {
     match apply {
         Apply::SrcDst(src, dst) => {
             // The destination's buffers come after the source's.
@@ -45,14 +51,19 @@ fn port_apply(cpu: &CpuProcessor, apply: &Apply, buffers: &mut [Vec<u8>]) -> Res
             let mut slots: Vec<Option<&mut [u8]>> =
                 dst_buffers.iter_mut().map(|b| Some(&mut b[..])).collect();
             let mut dst = port_image(dst, |b| Bytes(slots[b - first_dst].take().expect("once")))?;
-            cpu.apply_src_dst(src.desc(), dst.desc_mut())
+            if threads == 0 {
+                cpu.apply_src_dst(src.desc(), dst.desc_mut())
+            } else {
+                cpu.apply_src_dst_threaded(src.desc(), dst.desc_mut(), threads)
+            }
         }
         Apply::InPlace(img) | Apply::Same(img) => {
             let mut slots: Vec<Option<&mut [u8]>> =
                 buffers.iter_mut().map(|b| Some(&mut b[..])).collect();
             let mut img = port_image(img, |b| Bytes(slots[b].take().expect("once")))?;
             match apply {
-                Apply::InPlace(_) => cpu.apply(img.desc_mut()),
+                Apply::InPlace(_) if threads == 0 => cpu.apply(img.desc_mut()),
+                Apply::InPlace(_) => cpu.apply_threaded(img.desc_mut(), threads),
                 _ => cpu.apply_same(img.desc_mut()),
             }
         }
@@ -94,8 +105,10 @@ fn add_case(
     });
 }
 
-/// Runs `cases` on the wheel and the port: each gives the same buffers, or the same error.
-fn check(cases: &[Case]) {
+/// Runs `cases` on the wheel and, with each of `threads`, on the port: each gives the same
+/// buffers, or the same error. 0 is the serial apply, others its threaded forms.
+fn check(cases: &[Case], threads: &[usize]) {
+    assert!(!cases.is_empty());
     let calls: Vec<_> = cases.iter().map(|case| case.request.call()).collect();
     let responses = Oracle::get().batch(&calls, true);
     let chains = chains();
@@ -111,29 +124,34 @@ fn check(cases: &[Case]) {
             .request
             .reply(response.unwrap_or_else(|e| panic!("{what}: {e}")));
 
-        let mut buffers: Vec<Vec<u8>> = case.request.buffers.iter().map(Buffer::bytes).collect();
-        let port = port_processor(
-            &chains[case.chain],
-            FLAGS[case.flags].1,
-            port_depth(input),
-            port_depth(output),
-        )
-        .and_then(|cpu| port_apply(&cpu, &case.apply, &mut buffers));
-        match (reply.raised(), port) {
-            (None, Ok(())) => {
-                for (k, (port, wheel)) in buffers.iter().zip(&reply.buffers).enumerate() {
-                    if port != wheel {
-                        let first = port.iter().zip(wheel).position(|(a, b)| a != b);
-                        failures.push(format!("{what}\n  buffer {k} differs at byte {first:?}"));
+        for &threads in threads {
+            let what = format!("{what}, {threads} threads");
+            let mut buffers: Vec<Vec<u8>> =
+                case.request.buffers.iter().map(Buffer::bytes).collect();
+            let port = port_processor(
+                &chains[case.chain],
+                FLAGS[case.flags].1,
+                port_depth(input),
+                port_depth(output),
+            )
+            .and_then(|cpu| port_apply(&cpu, &case.apply, &mut buffers, threads));
+            match (reply.raised(), port) {
+                (None, Ok(())) => {
+                    for (k, (port, wheel)) in buffers.iter().zip(&reply.buffers).enumerate() {
+                        if port != wheel {
+                            let first = port.iter().zip(wheel).position(|(a, b)| a != b);
+                            failures
+                                .push(format!("{what}\n  buffer {k} differs at byte {first:?}"));
+                        }
                     }
                 }
+                (Some(raised), Err(e)) if raised.message == e.message() => {}
+                (raised, port) => failures.push(format!(
+                    "{what}\n  wheel {:?}\n  port  {:?}",
+                    raised.map(|r| (r.stage, r.message)),
+                    port.map_err(|e| e.message().to_string())
+                )),
             }
-            (Some(raised), Err(e)) if raised.message == e.message() => {}
-            (raised, port) => failures.push(format!(
-                "{what}\n  wheel {:?}\n  port  {:?}",
-                raised.map(|r| (r.stage, r.message)),
-                port.map_err(|e| e.message().to_string())
-            )),
         }
     }
     assert!(
@@ -154,12 +172,11 @@ fn shapes() -> Vec<Shape> {
 
 /// From one image to another: each layout to itself and to the next one, at every pair of bit
 /// depths, with each list of transforms and both optimization levels in turn.
-#[test]
-fn apply_src_dst_matches_the_wheel() {
+fn src_dst_cases(sizes: &[(i64, i64)]) -> Vec<Case> {
     let shapes = shapes();
     let mut cases = Vec::new();
     for (pair, depths) in PAIRS.into_iter().enumerate() {
-        for size in [(1, 1), (17, 3)] {
+        for &size in sizes {
             for (k, &shape) in shapes.iter().enumerate() {
                 for (d, dst_shape) in [shape, shapes[(k + 1) % shapes.len()]]
                     .into_iter()
@@ -176,21 +193,25 @@ fn apply_src_dst_matches_the_wheel() {
             }
         }
     }
-    check(&cases);
+    cases
+}
+
+#[test]
+fn apply_src_dst_matches_the_wheel() {
+    check(&src_dst_cases(&[(1, 1), (17, 3)]), &[0]);
 }
 
 /// In place, and from an image to itself: every layout, at every bit depth, as input and
 /// output. From an image to itself, upstream reads each row through the source's description
 /// and writes it through the destination's, the same image (`GenericScanlineHelper::init(src,
 /// dst)`, src/OpenColorIO/ScanlineHelper.cpp:50-82 @ v2.5.2).
-#[test]
-fn apply_in_place_and_to_itself_match_the_wheel() {
+fn in_place_cases(sizes: &[(i64, i64)]) -> Vec<Case> {
     let mut cases = Vec::new();
     for (pair, depths) in PAIRS.into_iter().enumerate() {
         if depths.0 != depths.1 {
             continue;
         }
-        for size in [(1, 1), (3, 2), (17, 3)] {
+        for &size in sizes {
             for (k, &shape) in shapes().iter().enumerate() {
                 for same in [false, true] {
                     let n = pair + k + usize::from(same);
@@ -207,14 +228,18 @@ fn apply_in_place_and_to_itself_match_the_wheel() {
             }
         }
     }
-    check(&cases);
+    cases
+}
+
+#[test]
+fn apply_in_place_and_to_itself_match_the_wheel() {
+    check(&in_place_cases(&[(1, 1), (3, 2), (17, 3)]), &[0]);
 }
 
 /// The errors, with the wheel's messages: in place and from an image to itself, with an image
 /// whose bit depth is the input's but not the output's; from one image to another, with images
 /// of different sizes, and a source whose bit depth isn't the input's.
-#[test]
-fn apply_errors_match_the_wheel() {
+fn error_cases() -> Vec<Case> {
     let rgba = PACKED_SHAPES[0];
     let planar = GENERIC_SHAPES[9];
     let mut cases = Vec::new();
@@ -231,7 +256,7 @@ fn apply_errors_match_the_wheel() {
             });
         }
         let depths = (Depth::F32, Depth::F16);
-        for (src_size, dst_size) in [((3, 2), (2, 3)), ((3, 2), (3, 1))] {
+        for (src_size, dst_size) in [((3, 2), (2, 3)), ((3, 2), (3, 1)), ((3, 2), (3, 3))] {
             add_case(&mut cases, (3, 0), depths, |request| {
                 let src = add_image(request, shape, Depth::F32, src_size, Some(9));
                 let dst = add_image(request, shape, Depth::F16, dst_size, None);
@@ -244,5 +269,23 @@ fn apply_errors_match_the_wheel() {
             (Apply::SrcDst(src, dst), vec![0, 1])
         });
     }
-    check(&cases);
+    cases
+}
+
+#[test]
+fn apply_errors_match_the_wheel() {
+    check(&error_cases(), &[0]);
+}
+
+/// `apply_threaded` and `apply_src_dst_threaded`, which upstream doesn't have, against the same
+/// calls of the wheel as the serial methods, and the serial methods with them: from no thread
+/// to more threads than any image has rows and more than three past it, on images of widths
+/// that end a block of the renderers, at a block's end and past one, of up to seven rows.
+#[test]
+fn threaded_applies_match_the_serial_ones_and_the_wheel() {
+    let sizes = [(1, 5), (17, 3), (32, 2), (33, 4), (70, 7)];
+    let threads: Vec<usize> = (0..=10).collect();
+    check(&src_dst_cases(&sizes), &threads);
+    check(&in_place_cases(&sizes), &threads);
+    check(&error_cases(), &threads);
 }

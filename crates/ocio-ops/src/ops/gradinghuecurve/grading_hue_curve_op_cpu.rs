@@ -53,6 +53,7 @@ use crate::ops::fixedfunction::fixed_function_op_cpu::get_fixed_function_cpu_ren
 use crate::ops::fixedfunction::fixed_function_op_data::{
     FixedFunctionOpData, FixedFunctionOpStyle,
 };
+use crate::ops::gradingrgbcurve::grading_b_spline_curve::Curve;
 use crate::ops::matrix::matrix_op_cpu::get_matrix_renderer;
 use crate::ops::matrix::matrix_op_data::MatrixOpData;
 
@@ -248,30 +249,31 @@ impl GradingHueCurveOpCpu {
         if knots_coefs.local_bypass {
             return;
         }
+        let curves: [_; 8] = std::array::from_fn(|c| knots_coefs.curve(c));
         for out in rgba.as_chunks_mut::<4>().0 {
             self.rgb_to_hsy_op.apply(out);
 
             self.apply_lin_log(out);
 
             // HUE-SAT
-            let hue_sat_gain = std_max(0.0, knots_coefs.eval_curve(HUE_SAT, out[0], 1.0));
+            let hue_sat_gain = std_max(0.0, eval(&curves[HUE_SAT], out[0], 1.0));
             // HUE-LUM
-            let mut hue_lum_gain = std_max(0.0, knots_coefs.eval_curve(HUE_LUM, out[0], 1.0));
+            let mut hue_lum_gain = std_max(0.0, eval(&curves[HUE_LUM], out[0], 1.0));
             // HUE-HUE
-            out[0] = knots_coefs.eval_curve(HUE_HUE, out[0], out[0]);
+            out[0] = eval(&curves[HUE_HUE], out[0], out[0]);
             // SAT-SAT
-            out[1] = std_max(0.0, knots_coefs.eval_curve(SAT_SAT, out[1], out[1]));
+            out[1] = std_max(0.0, eval(&curves[SAT_SAT], out[1], out[1]));
             // LUM-SAT
-            let lum_sat_gain = std_max(0.0, knots_coefs.eval_curve(LUM_SAT, out[2], 1.0));
+            let lum_sat_gain = std_max(0.0, eval(&curves[LUM_SAT], out[2], 1.0));
 
             // Apply sat gain.
             let sat_gain = sse_mul(lum_sat_gain, hue_sat_gain);
             out[1] = sse_mul(sat_gain, out[1]);
 
             // SAT-LUM
-            let sat_lum_gain = std_max(0.0, knots_coefs.eval_curve(SAT_LUM, out[1], 1.0));
+            let sat_lum_gain = std_max(0.0, eval(&curves[SAT_LUM], out[1], 1.0));
             // LUM-LUM
-            out[2] = knots_coefs.eval_curve(LUM_LUM, out[2], out[2]);
+            out[2] = eval(&curves[LUM_LUM], out[2], out[2]);
 
             self.apply_log_lin(out);
 
@@ -293,7 +295,7 @@ impl GradingHueCurveOpCpu {
 
             // HUE-FX
             out[0] -= out[0].floor(); // wrap to [0,1)
-            out[0] = sse_add(knots_coefs.eval_curve(HUE_FX, out[0], 0.0), out[0]);
+            out[0] = sse_add(eval(&curves[HUE_FX], out[0], 0.0), out[0]);
 
             self.hsy_to_rgb_op.apply(out);
         }
@@ -309,6 +311,7 @@ impl GradingHueCurveOpCpu {
         if knots_coefs.local_bypass {
             return;
         }
+        let curves: [_; 8] = std::array::from_fn(|c| knots_coefs.curve(c));
         for out in rgba.as_chunks_mut::<4>().0 {
             self.rgb_to_hsy_op.apply(out);
 
@@ -320,12 +323,12 @@ impl GradingHueCurveOpCpu {
 
             // Use the inverted hue to calculate the HUE-SAT & HUE-LUM gains.
             out[0] -= out[0].floor(); // wrap to [0,1)
-            let hue_sat_gain = std_max(0.0, knots_coefs.eval_curve(HUE_SAT, out[0], 1.0));
-            let mut hue_lum_gain = std_max(0.0, knots_coefs.eval_curve(HUE_LUM, out[0], 1.0));
+            let hue_sat_gain = std_max(0.0, eval(&curves[HUE_SAT], out[0], 1.0));
+            let mut hue_lum_gain = std_max(0.0, eval(&curves[HUE_LUM], out[0], 1.0));
 
             // Use the output sat to calculate the SAT-LUM gain.
             out[1] = std_max(0.0, out[1]); // guard against negative saturation
-            let sat_lum_gain = std_max(0.0, knots_coefs.eval_curve(SAT_LUM, out[1], 1.0));
+            let sat_lum_gain = std_max(0.0, eval(&curves[SAT_LUM], out[1], 1.0));
 
             hue_lum_gain = sse_sub(1.0, sse_mul(1.0 - hue_lum_gain, std_min(out[1], 1.0)));
 
@@ -345,10 +348,10 @@ impl GradingHueCurveOpCpu {
             self.apply_lin_log(out);
 
             // Invert LUM-LUM.
-            out[2] = knots_coefs.eval_curve_rev(LUM_LUM, out[2]);
+            out[2] = eval_rev(&curves[LUM_LUM], out[2]);
 
             // Use it to calc the LUM-SAT gain.
-            let lum_sat_gain = std_max(0.0, knots_coefs.eval_curve(LUM_SAT, out[2], 1.0));
+            let lum_sat_gain = std_max(0.0, eval(&curves[LUM_SAT], out[2], 1.0));
 
             self.apply_log_lin(out);
 
@@ -361,10 +364,28 @@ impl GradingHueCurveOpCpu {
             out[1] /= std_max(0.01, sat_gain);
 
             // Invert SAT-SAT.
-            out[1] = std_max(0.0, knots_coefs.eval_curve_rev(SAT_SAT, out[1]));
+            out[1] = std_max(0.0, eval_rev(&curves[SAT_SAT], out[1]));
 
             self.hsy_to_rgb_op.apply(out);
         }
+    }
+}
+
+/// `evalCurve(c, x, identity_x)`, from the curve the renderer reads once per `apply`.
+#[inline]
+fn eval(curve: &Option<Curve<'_>>, x: f32, identity_x: f32) -> f32 {
+    match curve {
+        Some(curve) => curve.eval(x),
+        None => identity_x,
+    }
+}
+
+/// `evalCurveRev(c, y)`, from the curve the renderer reads once per `apply`.
+#[inline]
+fn eval_rev(curve: &Option<Curve<'_>>, y: f32) -> f32 {
+    match curve {
+        Some(curve) => curve.eval_rev(y),
+        None => y,
     }
 }
 

@@ -26,7 +26,9 @@
 
 use std::sync::Arc;
 
-use super::grading_b_spline_curve::KnotsCoefs;
+use super::grading_b_spline_curve::Curve;
+#[cfg(target_arch = "x86_64")]
+use super::grading_rgb_curve_op_cpu_sse2 as sse2;
 use super::grading_rgb_curve_op_data::GradingRgbCurveOpData;
 use crate::dynamic_property::{DynamicPropertyGradingRgbCurveImplRcPtr, DynamicPropertyRcPtr};
 use crate::exception::{Exception, Result};
@@ -35,11 +37,34 @@ use crate::open_color_types::{
     DynamicPropertyType, GradingStyle, RgbCurveType, TransformDirection,
 };
 use crate::sse::{sse_log2, sse_power};
+#[cfg(target_arch = "x86_64")]
+use crate::sse2::blocks::for_each_block;
 
 const RED: usize = RgbCurveType::Red as usize;
 const GREEN: usize = RgbCurveType::Green as usize;
 const BLUE: usize = RgbCurveType::Blue as usize;
 const MASTER: usize = RgbCurveType::Master as usize;
+
+/// The four curves, each `None` when it is an identity.
+type Curves<'a> = [Option<Curve<'a>>; 4];
+
+/// `evalCurve(c, x, x)`.
+#[inline]
+fn fwd(curve: &Option<Curve<'_>>, x: f32) -> f32 {
+    match curve {
+        Some(curve) => curve.eval(x),
+        None => x,
+    }
+}
+
+/// `evalCurveRev(c, y)`.
+#[inline]
+fn rev(curve: &Option<Curve<'_>>, y: f32) -> f32 {
+    match curve {
+        Some(curve) => curve.eval_rev(y),
+        None => y,
+    }
+}
 
 /// What every renderer holds: the dynamic property, the op data's own or, for a dynamic op, a
 /// copy that the CPU processor exposes.
@@ -64,42 +89,66 @@ impl GradingRgbCurveOpCpu {
     }
 
     /// Port of `GradingRGBCurveOpCPU::eval` (GradingRGBCurveOpCPU.cpp:33-43 @ v2.5.2).
-    fn eval(knots_coefs: &KnotsCoefs, px: &mut [f32; 4]) {
-        px[0] = knots_coefs.eval_curve(RED, px[0], px[0]);
-        px[1] = knots_coefs.eval_curve(GREEN, px[1], px[1]);
-        px[2] = knots_coefs.eval_curve(BLUE, px[2], px[2]);
-        px[0] = knots_coefs.eval_curve(MASTER, px[0], px[0]);
-        px[1] = knots_coefs.eval_curve(MASTER, px[1], px[1]);
-        px[2] = knots_coefs.eval_curve(MASTER, px[2], px[2]);
+    #[inline]
+    fn eval(c: &Curves<'_>, px: &mut [f32; 4]) {
+        px[0] = fwd(&c[RED], px[0]);
+        px[1] = fwd(&c[GREEN], px[1]);
+        px[2] = fwd(&c[BLUE], px[2]);
+        px[0] = fwd(&c[MASTER], px[0]);
+        px[1] = fwd(&c[MASTER], px[1]);
+        px[2] = fwd(&c[MASTER], px[2]);
     }
 
     /// Port of `GradingRGBCurveOpCPU::evalRev` (GradingRGBCurveOpCPU.cpp:44-53 @ v2.5.2).
-    fn eval_rev(knots_coefs: &KnotsCoefs, px: &mut [f32; 4]) {
-        px[0] = knots_coefs.eval_curve_rev(MASTER, px[0]);
-        px[1] = knots_coefs.eval_curve_rev(MASTER, px[1]);
-        px[2] = knots_coefs.eval_curve_rev(MASTER, px[2]);
-        px[0] = knots_coefs.eval_curve_rev(RED, px[0]);
-        px[1] = knots_coefs.eval_curve_rev(GREEN, px[1]);
-        px[2] = knots_coefs.eval_curve_rev(BLUE, px[2]);
+    #[inline]
+    fn eval_rev(c: &Curves<'_>, px: &mut [f32; 4]) {
+        px[0] = rev(&c[MASTER], px[0]);
+        px[1] = rev(&c[MASTER], px[1]);
+        px[2] = rev(&c[MASTER], px[2]);
+        px[0] = rev(&c[RED], px[0]);
+        px[1] = rev(&c[GREEN], px[1]);
+        px[2] = rev(&c[BLUE], px[2]);
     }
 
     /// Applies `curves` (`eval` or `eval_rev`) to each pixel, around the linear style's
     /// conversion when `lin_to_log`; nothing when the property says to bypass.
-    fn apply(&self, rgba: &mut [f32], lin_to_log: bool, curves: fn(&KnotsCoefs, &mut [f32; 4])) {
+    fn apply(
+        &self,
+        rgba: &mut [f32],
+        lin_to_log: bool,
+        curves: impl Fn(&Curves<'_>, &mut [f32; 4]),
+    ) {
         let state = self.grgbcurve.state();
         let knots_coefs = &state.knots_coefs;
         if knots_coefs.local_bypass {
             return;
         }
-        for px in rgba.as_chunks_mut::<4>().0 {
-            if lin_to_log {
-                lin_log(px);
+        let curves_of = [RED, GREEN, BLUE, MASTER].map(|c| knots_coefs.curve(c));
+        let exact = |block: &mut [[f32; 4]]| {
+            for px in block {
+                if lin_to_log {
+                    lin_log(px);
+                }
+                curves(&curves_of, px);
+                if lin_to_log {
+                    log_lin(px);
+                }
             }
-            curves(knots_coefs, px);
-            if lin_to_log {
-                log_lin(px);
-            }
+        };
+        let pixels = rgba.as_chunks_mut::<4>().0;
+        #[cfg(target_arch = "x86_64")]
+        if lin_to_log {
+            let fast = |block: &mut [[f32; 4]]| {
+                for px in block {
+                    sse2::lin_log_pixel(px);
+                    curves(&curves_of, px);
+                    sse2::log_lin_pixel(px);
+                }
+            };
+            for_each_block(pixels, fast, |block, _| exact(block));
+            return;
         }
+        exact(pixels);
     }
 
     /// The renderer between two buffers: in place on a copy of the input, then for the
@@ -111,7 +160,7 @@ impl GradingRgbCurveOpCpu {
         input: Pixels<'_>,
         output: PixelsMut<'_>,
         lin_to_log: bool,
-        curves: fn(&KnotsCoefs, &mut [f32; 4]),
+        curves: impl Fn(&Curves<'_>, &mut [f32; 4]),
         name: &str,
     ) {
         match (input, output) {
@@ -164,19 +213,19 @@ impl GradingRgbCurveOpCpu {
 
 /// The constants of the linear style's conversion (GradingRGBCurveOpCPU.cpp:157-177 @
 /// v2.5.2), `float` arithmetic in `constexpr` and in the `_mm_set1_ps` initializers.
-mod log_lin {
-    pub(super) const XBRK: f32 = 0.0041318374739483946;
-    pub(super) const SHIFT: f32 = -0.000157849851665374;
-    pub(super) const M: f32 = 1.0 / (0.18 + SHIFT);
-    pub(super) const GAIN: f32 = 363.034608563;
-    pub(super) const OFFS: f32 = -7.0;
-    pub(super) const YBRK: f32 = -5.5;
+pub(super) mod log_lin {
+    pub(crate) const XBRK: f32 = 0.0041318374739483946;
+    pub(crate) const SHIFT: f32 = -0.000157849851665374;
+    pub(crate) const M: f32 = 1.0 / (0.18 + SHIFT);
+    pub(crate) const GAIN: f32 = 363.034608563;
+    pub(crate) const OFFS: f32 = -7.0;
+    pub(crate) const YBRK: f32 = -5.5;
     /// `mgainInv`: `1.f / gain`.
-    pub(super) const GAIN_INV: f32 = 1.0 / GAIN;
+    pub(crate) const GAIN_INV: f32 = 1.0 / GAIN;
     /// `mshift018`: `shift + 0.18f`.
-    pub(super) const SHIFT_018: f32 = SHIFT + 0.18;
+    pub(crate) const SHIFT_018: f32 = SHIFT + 0.18;
     /// `mpower`.
-    pub(super) const POWER: f32 = 2.0;
+    pub(crate) const POWER: f32 = 2.0;
 }
 
 /// The `OCIO_USE_SSE2` branch of `LinLog`, on all four lanes: `sseLog2((x + shift) * m)`

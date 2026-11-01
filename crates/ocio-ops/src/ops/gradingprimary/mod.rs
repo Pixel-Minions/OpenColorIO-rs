@@ -9,4 +9,6 @@
 pub mod grading_primary;
 pub mod grading_primary_op;
 pub mod grading_primary_op_cpu;
+#[cfg(target_arch = "x86_64")]
+mod grading_primary_op_cpu_sse2;
 pub mod grading_primary_op_data;

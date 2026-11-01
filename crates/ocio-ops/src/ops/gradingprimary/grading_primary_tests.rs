@@ -158,6 +158,12 @@ fn precompute() {
     assert!(comp.get_local_bypass());
 }
 
+/// A value's bits, out of LLVM's sight: it would fold a `^` on the sign into the division that
+/// made the value, as in `inverse_log_brightness`, and the test would compare that.
+fn bits(x: f32) -> u32 {
+    std::hint::black_box(x).to_bits()
+}
+
 /// The negations of the inverse directions flip a NaN's sign, as the wheels' `xorps` does (on
 /// Windows the log brightness's negation is folded into `-6.25`, which keeps it): the same
 /// value through the forward and the inverse direction differs only in the sign bit. Run in
@@ -173,8 +179,8 @@ fn inverse_negations_flip_the_sign_of_a_nan() {
     inv.update(GradingStyle::Lin, TransformDirection::Inverse, &v);
     assert!(fwd.get_offset()[0].is_nan());
     assert_eq!(
-        inv.get_offset()[0].to_bits(),
-        fwd.get_offset()[0].to_bits() ^ 0x8000_0000
+        bits(inv.get_offset()[0]),
+        bits(fwd.get_offset()[0]) ^ 0x8000_0000
     );
 
     let mut v = GradingPrimary::new(GradingStyle::Video);
@@ -182,8 +188,8 @@ fn inverse_negations_flip_the_sign_of_a_nan() {
     fwd.update(GradingStyle::Video, TransformDirection::Forward, &v);
     inv.update(GradingStyle::Video, TransformDirection::Inverse, &v);
     assert_eq!(
-        inv.get_offset()[0].to_bits(),
-        fwd.get_offset()[0].to_bits() ^ 0x8000_0000
+        bits(inv.get_offset()[0]),
+        bits(fwd.get_offset()[0]) ^ 0x8000_0000
     );
 
     let mut v = GradingPrimary::new(GradingStyle::Log);
@@ -192,7 +198,7 @@ fn inverse_negations_flip_the_sign_of_a_nan() {
     inv.update(GradingStyle::Log, TransformDirection::Inverse, &v);
     let flip = if cfg!(windows) { 0 } else { 0x8000_0000 };
     assert_eq!(
-        inv.get_brightness()[0].to_bits(),
-        fwd.get_brightness()[0].to_bits() ^ flip
+        bits(inv.get_brightness()[0]),
+        bits(fwd.get_brightness()[0]) ^ flip
     );
 }

@@ -26,6 +26,10 @@
 //!   ([`lut1d_kernel`]): `Lut1DOpCPU_SSE2.cpp`, `_AVX.cpp`, `_AVX2.cpp` and `_AVX512.cpp`
 //!   (`lut1d_op_cpu_sse2`, ...). A row of one pixel takes the scalar loop
 //!   ([`get_lut1d_scalar_renderer`]); [`get_lut1d_profile_renderer`] gives any profile.
+//!   Each kernel's file holds its exact scalar lanes and its real instructions (`simd`). The
+//!   real ones render whole groups of pixels where the CPU can run them; the lanes render the
+//!   pixels left over (the same values as the C++'s masked or zero-padded last block, as lanes
+//!   never mix) and rows for another CPU's kernel.
 //!
 //! A lookup of a LUT whose entries aren't one per code of the input bit depth looks up the LUT
 //! resampled on that bit depth's lookup domain (`Lut1DOpData::compose`), which the CPU renders
@@ -62,6 +66,14 @@ use crate::sse2::PackDepth;
 /// a half its bits.
 pub(crate) trait LookupIndex: ChannelType {
     fn lookup_index(self) -> usize;
+
+    /// The bits of every code of `row`, alpha left out: above the largest code a table holds,
+    /// some code is past it.
+    fn row_bits(row: &[[Self; 4]]) -> usize {
+        row.iter().fold(0, |bits, px| {
+            bits | px[0].lookup_index() | px[1].lookup_index() | px[2].lookup_index()
+        })
+    }
 }
 
 impl LookupIndex for u8 {
@@ -73,6 +85,11 @@ impl LookupIndex for u8 {
 impl LookupIndex for u16 {
     fn lookup_index(self) -> usize {
         self as usize
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn row_bits(row: &[[u16; 4]]) -> usize {
+        crate::sse2::blocks::rgb_bits(row) as usize
     }
 }
 
@@ -195,6 +212,74 @@ impl Lut1DKernel {
             Lut1DKernel::Avx => lut1d_op_cpu_avx::store(depth, value),
             Lut1DKernel::Avx2 => lut1d_op_cpu_avx2::store(depth, value),
             Lut1DKernel::Avx512 => lut1d_op_cpu_avx512::store(depth, value),
+        }
+    }
+}
+
+/// What a real kernel reads: the tables and `linear1D`'s scales. Each table holds more than
+/// `lut_max` values ([`KernelLut::new`]), the indices a kernel clamps its input to.
+#[derive(Clone, Copy)]
+pub(crate) struct KernelLut<'a> {
+    /// The red table.
+    pub(crate) r: &'a [f32],
+    /// The green table.
+    pub(crate) g: &'a [f32],
+    /// The blue table.
+    pub(crate) b: &'a [f32],
+    /// `rgb_scale`.
+    pub(crate) scale: f32,
+    /// `(float)dim - 1`.
+    pub(crate) lut_max: f32,
+    /// `alpha_scale`.
+    pub(crate) alpha_scale: f32,
+}
+
+impl<'a> KernelLut<'a> {
+    /// The tables `luts` for a kernel, if each holds `lut_max + 1` values. A table too long for
+    /// `lut_max` to be exact isn't for a kernel: the C++ would read past its end.
+    fn new(luts: &'a Tables<f32>, scale: f32, lut_max: f32, alpha_scale: f32) -> Option<Self> {
+        let len = lut_max as usize + 1;
+        (lut_max >= 0.0 && len <= 1 << 24 && luts.iter().all(|table| table.len() == len)).then_some(
+            KernelLut {
+                r: &luts[0],
+                g: &luts[1],
+                b: &luts[2],
+                scale,
+                lut_max,
+                alpha_scale,
+            },
+        )
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+impl Lut1DKernel {
+    /// The real kernel, in place from F32 to F32: the number of values it rendered, whole
+    /// groups of pixels from the start of `rgba`, or none where this CPU can't run it (a
+    /// renderer can be built for another CPU's kernel).
+    fn render_in_place(self, lut: &KernelLut<'_>, rgba: &mut [f32]) -> usize {
+        match self {
+            Lut1DKernel::Sse2 => lut1d_op_cpu_sse2::simd::render_in_place(lut, rgba),
+            Lut1DKernel::Avx => lut1d_op_cpu_avx::simd::render_in_place(lut, rgba),
+            Lut1DKernel::Avx2 => lut1d_op_cpu_avx2::simd::render_in_place(lut, rgba),
+            Lut1DKernel::Avx512 => lut1d_op_cpu_avx512::simd::render_in_place(lut, rgba),
+        }
+    }
+
+    /// The real kernel from F32 to `depth`, other than F32: the number of values it rendered,
+    /// as for [`Lut1DKernel::render_in_place`].
+    fn render(
+        self,
+        lut: &KernelLut<'_>,
+        depth: PackDepth,
+        input: &[f32],
+        output: PixelsMut<'_>,
+    ) -> usize {
+        match self {
+            Lut1DKernel::Sse2 => lut1d_op_cpu_sse2::simd::render(lut, depth, input, output),
+            Lut1DKernel::Avx => lut1d_op_cpu_avx::simd::render(lut, depth, input, output),
+            Lut1DKernel::Avx2 => lut1d_op_cpu_avx2::simd::render(lut, depth, input, output),
+            Lut1DKernel::Avx512 => lut1d_op_cpu_avx512::simd::render(lut, depth, input, output),
         }
     }
 }
@@ -421,6 +506,11 @@ where
         }
     }
 
+    fn can_refuse_input(&self) -> bool {
+        // Tables with an entry per value of the input's type have no code past them.
+        self.max_index() < (1usize << (8 * size_of::<I::Type>())) - 1
+    }
+
     /// The codes of a 10- or 12-bit image past the tables are an error (docs/improvements.md,
     /// U-1), where upstream reads past them.
     fn check_input(&self, input: Pixels<'_>) -> Result<()> {
@@ -428,6 +518,14 @@ where
             return Ok(());
         };
         let max = self.max_index();
+        // Tables with an entry per value of the input's type have no code past them.
+        if max >= (1usize << (8 * size_of::<I::Type>())) - 1 {
+            return Ok(());
+        }
+        // One pass over the row, in place of a test per value: the bits of every code.
+        if I::Type::row_bits(input.as_chunks::<4>().0) <= max {
+            return Ok(());
+        }
         for px in input.as_chunks::<4>().0 {
             if px[..3].iter().any(|v| v.lookup_index() > max) {
                 return Err(self.past_the_lut());
@@ -586,6 +684,8 @@ pub(crate) struct Lut1DFloatRenderer<O: LutOutput> {
     kernel: Option<Lut1DKernel>,
     /// The kernel's `rgb_scale`: `1.0f / (float)maxValue(BIT_DEPTH_F32) * ((float)dim - 1)`.
     kernel_scale: f32,
+    /// Whether the kernel's real instructions may run, where the CPU can, not its exact lanes.
+    simd: bool,
     output: PhantomData<fn() -> O>,
 }
 
@@ -618,8 +718,63 @@ impl<O: LutOutput> Lut1DFloatRenderer<O> {
             half_code: lut.is_input_half_domain(),
             kernel,
             kernel_scale: 1.0f32 / in_max * (dim as f32 - 1.0f32),
+            simd: true,
             output: PhantomData,
         }
+    }
+
+    /// What the real kernels read, if they run.
+    #[cfg(target_arch = "x86_64")]
+    fn kernel_lut(&self) -> Option<KernelLut<'_>> {
+        if !self.simd {
+            return None;
+        }
+        KernelLut::new(
+            &self.luts,
+            self.kernel_scale,
+            self.dim_minus_one,
+            self.alpha_scaling,
+        )
+    }
+
+    /// The kernel's exact lanes on `rgba`, in place.
+    fn lanes_in_place(&self, kernel: Lut1DKernel, rgba: &mut [f32]) {
+        for px in rgba.as_chunks_mut::<4>().0 {
+            let rgb = self.kernel_rgb(kernel, px);
+            for c in 0..3 {
+                px[c] = O::from_pack(kernel.store(O::PACK, rgb[c])).to_float();
+            }
+        }
+    }
+
+    /// The real `kernel` from F32 to F32: the number of values it rendered.
+    fn simd_between(&self, kernel: Lut1DKernel, input: &[f32], output: &mut [f32]) -> usize {
+        #[cfg(target_arch = "x86_64")]
+        if let Some(lut) = self.kernel_lut() {
+            return kernel.render(&lut, O::PACK, input, PixelsMut::F32(output));
+        }
+        let _ = (kernel, input, output);
+        0
+    }
+
+    /// The real `kernel` on `rgba`, in place: the number of values it rendered.
+    fn simd_in_place(&self, kernel: Lut1DKernel, rgba: &mut [f32]) -> usize {
+        #[cfg(target_arch = "x86_64")]
+        if let Some(lut) = self.kernel_lut() {
+            return kernel.render_in_place(&lut, rgba);
+        }
+        let _ = (kernel, rgba);
+        0
+    }
+
+    /// The real `kernel` from `input` to `output`: the number of values it rendered.
+    fn simd_to_output(&self, kernel: Lut1DKernel, input: &[f32], output: &mut [O::Type]) -> usize {
+        #[cfg(target_arch = "x86_64")]
+        if let Some(lut) = self.kernel_lut() {
+            return kernel.render(&lut, O::PACK, input, O::Type::pixels_mut(output));
+        }
+        let _ = (kernel, input, output);
+        0
     }
 
     /// The kernel for a call of `values` floats: `m_applyLutFunc && numPixels > 1`.
@@ -725,12 +880,8 @@ impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
             O::BIT_DEPTH
         );
         if let Some(kernel) = self.kernel_for(rgba.len()) {
-            for px in rgba.as_chunks_mut::<4>().0 {
-                let rgb = self.kernel_rgb(kernel, px);
-                for c in 0..3 {
-                    px[c] = O::from_pack(kernel.store(O::PACK, rgb[c])).to_float();
-                }
-            }
+            let done = self.simd_in_place(kernel, rgba);
+            self.lanes_in_place(kernel, &mut rgba[done..]);
             return;
         }
         for px in rgba.as_chunks_mut::<4>().0 {
@@ -747,13 +898,16 @@ impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
             panic!("{self:?} got {in_name} to {out_name}");
         };
         let kernel = self.kernel_for(input.len());
-        if kernel.is_some() && O::BIT_DEPTH == BitDepth::F32 {
+        if let Some(kernel) = kernel
+            && O::BIT_DEPTH == BitDepth::F32
+        {
             // F32 to F32: the input's alpha is the output's; the rest in place.
             let PixelsMut::F32(output) = output else {
                 panic!("{self:?} got {in_name} to {out_name}");
             };
-            output.copy_from_slice(input);
-            self.apply(output);
+            let done = self.simd_between(kernel, input, output);
+            output[done..].copy_from_slice(&input[done..]);
+            self.lanes_in_place(kernel, &mut output[done..]);
             return;
         }
         let Some(output) = O::Type::from_pixels_mut(output) else {
@@ -764,11 +918,15 @@ impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
             output.len(),
             "{self:?}: the pixel counts differ"
         );
-        for (inp, out) in input
+        let done = match kernel {
+            Some(kernel) => self.simd_to_output(kernel, input, output),
+            None => 0,
+        };
+        for (inp, out) in input[done..]
             .as_chunks::<4>()
             .0
             .iter()
-            .zip(output.as_chunks_mut::<4>().0)
+            .zip(output[done..].as_chunks_mut::<4>().0)
         {
             *out = match kernel {
                 Some(kernel) => self.kernel_pixel(kernel, inp),
@@ -938,6 +1096,11 @@ where
         {
             *out = self.render(inp);
         }
+    }
+
+    fn can_refuse_input(&self) -> bool {
+        // Tables with an entry per value of the input's type have no code past them.
+        self.max_index() < (1usize << (8 * size_of::<I::Type>())) - 1
     }
 
     /// The codes of a 10- or 12-bit image past the tables are an error (docs/improvements.md,

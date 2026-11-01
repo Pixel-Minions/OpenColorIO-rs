@@ -7,4 +7,6 @@
 
 pub mod exposure_contrast_op;
 pub mod exposure_contrast_op_cpu;
+#[cfg(target_arch = "x86_64")]
+mod exposure_contrast_op_cpu_sse2;
 pub mod exposure_contrast_op_data;

@@ -12,6 +12,8 @@
 //! kernel's arithmetic exactly. The [`intrinsics`] module transcribes the same functions with
 //! the real SSE2 instructions, to prove the scalar lanes against the hardware.
 //!
+//! The [`blocks`] module holds what the real SIMD fast paths share (`docs/cards/phase8.md`).
+//!
 //! `unsafe` is allowed in this module for SIMD intrinsics only.
 #![allow(unsafe_code)]
 
@@ -221,8 +223,466 @@ pub fn sse2_rgba_pack_store(depth: PackDepth, value: f32) -> u32 {
     rgba_pack_store(depth, value, HalfConversion::Sse2)
 }
 
+/// One x86 scalar instruction each, for `math_utils::sse_add`, `sse_sub` and `sse_mul`.
+///
+/// An instruction gives the first operand's NaN where two meet, as C++'s `addss` does, without
+/// the test of a NaN that the same rule takes in Rust: LLVM's `fadd` and `fmul` are commutative,
+/// so `+` and `*` don't say which NaN comes out.
+#[cfg(target_arch = "x86_64")]
+pub mod scalar {
+    use core::arch::asm;
+
+    macro_rules! instruction {
+        ($name:ident, $ty:ty, $text:literal) => {
+            /// The instruction with `a` as its first source operand.
+            #[inline(always)]
+            pub fn $name(a: $ty, b: $ty) -> $ty {
+                let out: $ty;
+                // SAFETY: the instruction reads two registers and writes the first, and x86-64
+                // has SSE2.
+                unsafe {
+                    asm!(
+                        $text,
+                        inlateout(xmm_reg) a => out,
+                        in(xmm_reg) b,
+                        options(pure, nomem, nostack, preserves_flags)
+                    );
+                }
+                out
+            }
+        };
+    }
+
+    /// This thread's `MXCSR`: flush-to-zero, denormals-are-zero, the rounding mode and the
+    /// exception masks that its SSE instructions follow.
+    #[inline]
+    pub(crate) fn control_word() -> u32 {
+        let mut word = 0u32;
+        // SAFETY: `stmxcsr` writes the 4 bytes of `word`, and x86-64 has SSE.
+        unsafe { asm!("stmxcsr [{}]", in(reg) &mut word, options(nostack, preserves_flags)) };
+        word
+    }
+
+    /// Sets this thread's `MXCSR` to `word`, which [`control_word`] read: for a thread that
+    /// renders for another. A new thread doesn't always inherit it: Linux's do, Windows's don't.
+    #[inline]
+    pub(crate) fn set_control_word(word: u32) {
+        // SAFETY: `ldmxcsr` reads the 4 bytes of `word`, a value the CPU gave, and x86-64 has SSE.
+        unsafe {
+            asm!("ldmxcsr [{}]", in(reg) &word, options(nostack, preserves_flags, readonly));
+        }
+    }
+
+    instruction!(addss, f32, "addss {0}, {1}");
+    instruction!(subss, f32, "subss {0}, {1}");
+    instruction!(mulss, f32, "mulss {0}, {1}");
+    instruction!(addsd, f64, "addsd {0}, {1}");
+    instruction!(subsd, f64, "subsd {0}, {1}");
+    instruction!(mulsd, f64, "mulsd {0}, {1}");
+}
+
+/// The x86 packed instructions with their operand order fixed, which Rust's `_mm_add_ps` and
+/// `_mm_mul_ps`, LLVM's commutative `fadd` and `fmul`, don't fix. With NaN operands the result
+/// is the instruction's, as in the wheels' loops of the same instructions.
+#[cfg(target_arch = "x86_64")]
+pub mod packed {
+    use core::arch::asm;
+    use core::arch::x86_64::__m128;
+
+    macro_rules! instruction {
+        ($name:ident, $text:literal) => {
+            /// The instruction with `a` as its first source operand.
+            #[inline(always)]
+            pub fn $name(a: __m128, b: __m128) -> __m128 {
+                let out: __m128;
+                // SAFETY: the instruction reads two registers and writes the first, and x86-64
+                // has SSE.
+                unsafe {
+                    asm!(
+                        $text,
+                        inlateout(xmm_reg) a => out,
+                        in(xmm_reg) b,
+                        options(pure, nomem, nostack, preserves_flags)
+                    );
+                }
+                out
+            }
+        };
+    }
+
+    instruction!(addps, "addps {0}, {1}");
+    instruction!(mulps, "mulps {0}, {1}");
+}
+
+/// What the renderers' real SIMD fast paths share (`docs/cards/phase8.md`).
+///
+/// Rust's `_mm_add_ps` and `_mm_mul_ps` are LLVM's commutative `fadd` and `fmul`, so they don't
+/// fix which NaN comes out where two meet, as x86's `addps` and C++'s intrinsics do. A renderer
+/// therefore keeps its exact lanes, and sends a block of pixels to its fast path only when
+/// every value in the block is finite. The renderer's own coefficients must be finite too.
+/// Then the only NaN its arithmetic can make is x86's default NaN, and which of two default
+/// NaNs comes out doesn't change a bit.
+///
+/// A block holding a NaN or an infinity takes the exact lanes.
+#[cfg(target_arch = "x86_64")]
+pub mod blocks {
+    use core::arch::x86_64::*;
+
+    /// The pixels of a block. One special value sends all of its block to the exact lanes.
+    pub const BLOCK_PIXELS: usize = 32;
+
+    /// Puts the loop that follows at byte 48 of a 64-byte line, wherever the build lays out the
+    /// code around it. LLVM aligns a loop to 16 bytes after the few bytes that set it up, so the
+    /// padding ends 32 bytes into a line. A loop of 60 to 70 bytes and a few cycles a pixel
+    /// depends on that place: on the Zen 5 of the speed table (`docs/cards/phase8.md`) the Matrix
+    /// kernels take 0.93-0.96 of the wheel's time there, and up to 1.28 at bytes 0 and 16. It
+    /// runs once before the loop.
+    #[inline(always)]
+    pub fn align_loop() {
+        // SAFETY: the directives only pad the code with no-ops.
+        unsafe {
+            core::arch::asm!(
+                ".p2align 6",
+                ".nops 32",
+                options(nomem, nostack, preserves_flags)
+            )
+        };
+    }
+
+    /// A pixel as an SSE register.
+    #[inline]
+    pub fn load(pixel: &[f32; 4]) -> __m128 {
+        // SAFETY: `pixel` holds the four floats `_mm_loadu_ps` reads, at any alignment, and
+        // x86-64 has SSE.
+        unsafe { _mm_loadu_ps(pixel.as_ptr()) }
+    }
+
+    /// Writes an SSE register to a pixel.
+    #[inline]
+    pub fn store(pixel: &mut [f32; 4], value: __m128) {
+        // SAFETY: `pixel` holds the four floats `_mm_storeu_ps` writes, at any alignment, and
+        // x86-64 has SSE.
+        unsafe { _mm_storeu_ps(pixel.as_mut_ptr(), value) }
+    }
+
+    /// Writes red, green and blue of a register to a pixel. Alpha isn't written.
+    #[inline]
+    pub fn store_rgb(pixel: &mut [f32; 4], value: __m128) {
+        let mut lanes = [0.0f32; 4];
+        // SAFETY: `lanes` holds the four floats this writes, at any alignment, and x86-64 has SSE.
+        unsafe { _mm_storeu_ps(lanes.as_mut_ptr(), value) };
+        pixel[..3].copy_from_slice(&lanes[..3]);
+    }
+
+    /// Whether every value of `pixels` is finite: its exponent bits aren't all ones.
+    #[inline]
+    pub fn block_is_finite(pixels: &[[f32; 4]]) -> bool {
+        // A few pixels, such as `applyRGBA`'s one, don't pay for the wider registers.
+        if pixels.len() >= 4 && std::arch::is_x86_feature_detected!("avx2") {
+            // SAFETY: the CPU has AVX2.
+            return unsafe { crate::avx2::block_is_finite(pixels) };
+        }
+        block_is_finite_sse2(pixels)
+    }
+
+    /// [`block_is_finite`] for every x86-64 CPU, one pixel at a time.
+    #[inline]
+    pub fn block_is_finite_sse2(pixels: &[[f32; 4]]) -> bool {
+        #[inline]
+        #[target_feature(enable = "sse2")]
+        fn check(pixels: &[[f32; 4]]) -> bool {
+            // The exponent is in the upper 16 bits of each value, where 0x7f80 is the largest
+            // signed value the mask leaves, so one maximum keeps it (the lower 16 are 0).
+            let exponent = _mm_set1_epi32(0x7f80_0000);
+            let mut largest = _mm_setzero_si128();
+            for pixel in pixels {
+                let bits = _mm_and_si128(_mm_castps_si128(load(pixel)), exponent);
+                largest = _mm_max_epi16(largest, bits);
+            }
+            _mm_movemask_epi8(_mm_cmpeq_epi32(largest, exponent)) == 0
+        }
+        // SAFETY: x86-64 has SSE2.
+        unsafe { check(pixels) }
+    }
+
+    /// The OR of the first three values of every pixel of `pixels`.
+    pub fn rgb_bits(pixels: &[[u16; 4]]) -> u16 {
+        #[target_feature(enable = "sse2")]
+        fn scan(pixels: &[[u16; 4]]) -> u16 {
+            let mut bits = _mm_setzero_si128();
+            for pixel in pixels {
+                // SAFETY: `pixel` holds the 8 bytes this reads, at any alignment.
+                let value = unsafe { _mm_loadl_epi64(pixel.as_ptr().cast()) };
+                bits = _mm_or_si128(bits, value);
+            }
+            let rgba = _mm_cvtsi128_si64(bits) as u64;
+            (rgba | (rgba >> 16) | (rgba >> 32)) as u16
+        }
+        // SAFETY: x86-64 has SSE2.
+        unsafe { scan(pixels) }
+    }
+
+    /// A pixel of a loop between two buffers, for a kernel written for a pixel in place.
+    #[derive(Debug)]
+    pub struct Pair<'a> {
+        /// The input.
+        pub from: &'a [f32; 4],
+        /// The output.
+        pub to: &'a mut [f32; 4],
+    }
+
+    impl Pair<'_> {
+        /// The input as a register.
+        #[inline]
+        pub fn load(&self) -> __m128 {
+            load(self.from)
+        }
+
+        /// Writes red, green and blue of `value`, and the input's alpha, a finite value whose
+        /// copy has nothing to quiet.
+        #[inline]
+        pub fn store_rgb(&mut self, value: __m128) {
+            store_rgb(self.to, value);
+            self.to[3] = self.from[3];
+        }
+    }
+
+    /// [`for_each_block`] from `input` to `output`, the same number of pixels: `fast` renders a
+    /// finite block from one to the other, and `exact` a copy of another block, in place. The
+    /// C++ renders the first op of a chain between two rows, without that copy.
+    #[inline]
+    pub fn for_each_block_to(
+        input: &[[f32; 4]],
+        output: &mut [[f32; 4]],
+        mut fast: impl FnMut(&[[f32; 4]], &mut [[f32; 4]]),
+        mut exact: impl FnMut(&mut [[f32; 4]], usize),
+    ) {
+        let blocks = input
+            .chunks(BLOCK_PIXELS)
+            .zip(output.chunks_mut(BLOCK_PIXELS));
+        for (index, (from, to)) in blocks.enumerate() {
+            if block_is_finite(from) {
+                fast(from, to);
+            } else {
+                to.copy_from_slice(from);
+                exact(to, index * BLOCK_PIXELS);
+            }
+        }
+    }
+
+    /// Cuts `pixels` into blocks: `fast` renders the finite ones, `exact` the others, with the
+    /// index in `pixels` of the block's first pixel.
+    #[inline]
+    pub fn for_each_block(
+        pixels: &mut [[f32; 4]],
+        mut fast: impl FnMut(&mut [[f32; 4]]),
+        mut exact: impl FnMut(&mut [[f32; 4]], usize),
+    ) {
+        for (index, block) in pixels.chunks_mut(BLOCK_PIXELS).enumerate() {
+            if block_is_finite(block) {
+                fast(block);
+            } else {
+                exact(block, index * BLOCK_PIXELS);
+            }
+        }
+    }
+}
+
+/// The real SSE2 form of `BitDepthCast<BIT_DEPTH_F32, outBD>` for the integer depths: the values
+/// of `Converter<BD>::CastValue` (src/OpenColorIO/BitDepthUtils.h:95-139 @ v2.5.2), four at a
+/// time.
+///
+/// `CastValue` adds 0.5, clamps with two comparisons and truncates. `_mm_max_ps(v, 0)` and
+/// `_mm_min_ps(v, max)` give the same integer: a NaN stays a NaN in `CastValue`, whose 32-bit
+/// conversion gives `0x80000000`, of which the low bits kept are 0, and it becomes 0 here. A
+/// value has no other NaN to meet, so no operand order shows.
+#[cfg(target_arch = "x86_64")]
+pub mod casts {
+    use core::arch::x86_64::*;
+
+    /// `(int)CLAMP(value * scale + 0.5f, 0.0f, max)` on four values.
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    fn cast(value: __m128, scale: __m128, max: __m128) -> __m128i {
+        let v = _mm_add_ps(_mm_mul_ps(value, scale), _mm_set1_ps(0.5));
+        _mm_cvttps_epi32(_mm_min_ps(_mm_max_ps(v, _mm_setzero_ps()), max))
+    }
+
+    /// The whole groups of sixteen values of `input`, cast and stored in `output`: the number of
+    /// values done.
+    #[target_feature(enable = "sse2")]
+    fn to_u8(input: &[f32], output: &mut [u8], scale: f32) -> usize {
+        let (scale, max) = (_mm_set1_ps(scale), _mm_set1_ps(255.0));
+        let (groups, _) = input.as_chunks::<16>();
+        let (outputs, _) = output.as_chunks_mut::<16>();
+        for (group, out) in groups.iter().zip(outputs) {
+            // SAFETY: `group` holds the sixteen floats these read, at any alignment.
+            let v: [__m128; 4] =
+                std::array::from_fn(|i| unsafe { _mm_loadu_ps(group.as_ptr().add(4 * i)) });
+            let [a, b, c, d] = v.map(|v| cast(v, scale, max));
+            let packed = _mm_packus_epi16(_mm_packs_epi32(a, b), _mm_packs_epi32(c, d));
+            // SAFETY: `out` holds the sixteen bytes this writes, at any alignment.
+            unsafe { _mm_storeu_si128(out.as_mut_ptr().cast(), packed) };
+        }
+        groups.len() * 16
+    }
+
+    /// As [`to_u8`], to 16 bits, for a `max_value` of at most 65535.
+    #[target_feature(enable = "sse2")]
+    fn to_u16(input: &[f32], output: &mut [u16], scale: f32, max_value: f32) -> usize {
+        let (scale, max) = (_mm_set1_ps(scale), _mm_set1_ps(max_value));
+        let (groups, _) = input.as_chunks::<16>();
+        let (outputs, _) = output.as_chunks_mut::<16>();
+        for (group, out) in groups.iter().zip(outputs) {
+            // SAFETY: `group` holds the sixteen floats these read, at any alignment.
+            let v: [__m128; 4] =
+                std::array::from_fn(|i| unsafe { _mm_loadu_ps(group.as_ptr().add(4 * i)) });
+            // The low 16 bits as signed values, as `_mm_packs_epi32` keeps those whole.
+            let [a, b, c, d] =
+                v.map(|v| _mm_srai_epi32::<16>(_mm_slli_epi32::<16>(cast(v, scale, max))));
+            // SAFETY: `out` holds the sixteen values these write, at any alignment.
+            unsafe {
+                _mm_storeu_si128(out.as_mut_ptr().cast(), _mm_packs_epi32(a, b));
+                _mm_storeu_si128(out.as_mut_ptr().add(8).cast(), _mm_packs_epi32(c, d));
+            }
+        }
+        groups.len() * 16
+    }
+
+    /// [`to_u8`] for every x86-64 CPU.
+    pub fn cast_to_u8(input: &[f32], output: &mut [u8], scale: f32) -> usize {
+        // SAFETY: x86-64 has SSE2.
+        unsafe { to_u8(input, output, scale) }
+    }
+
+    /// [`to_u16`] for every x86-64 CPU.
+    pub fn cast_to_u16(input: &[f32], output: &mut [u16], scale: f32, max_value: f32) -> usize {
+        // SAFETY: x86-64 has SSE2.
+        unsafe { to_u16(input, output, scale, max_value) }
+    }
+}
+
+/// The real `SSE2RGBAPack`s: four pixels, sixteen values. The kernels only load F32.
+#[cfg(target_arch = "x86_64")]
+pub(crate) mod packs {
+    use core::arch::x86_64::*;
+
+    use super::intrinsics::sse2_cvtps_ph;
+
+    /// Port of `sse2_clamp` (src/OpenColorIO/SSE2.h:85-89 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    fn clamp(value: __m128, max_value: __m128) -> __m128 {
+        _mm_min_ps(_mm_max_ps(value, _mm_setzero_ps()), max_value)
+    }
+
+    /// Port of `sse2RGBATranspose_4x4` (src/OpenColorIO/SSE2.h:91-104 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn transpose(rows: [__m128; 4]) -> [__m128; 4] {
+        let tmp0 = _mm_unpacklo_ps(rows[0], rows[1]);
+        let tmp2 = _mm_unpacklo_ps(rows[2], rows[3]);
+        let tmp1 = _mm_unpackhi_ps(rows[0], rows[1]);
+        let tmp3 = _mm_unpackhi_ps(rows[2], rows[3]);
+        [
+            _mm_movelh_ps(tmp0, tmp2),
+            _mm_movehl_ps(tmp2, tmp0), // Note movhlps swaps b with a which is different than unpckhpd
+            _mm_movelh_ps(tmp1, tmp3),
+            _mm_movehl_ps(tmp3, tmp1),
+        ]
+    }
+
+    /// Port of `SSE2RGBAPack<BIT_DEPTH_F32>::Load` (src/OpenColorIO/SSE2.h:375-384 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn load_f32(input: &[f32; 16]) -> [__m128; 4] {
+        // SAFETY: `input` holds the sixteen floats these read, at any alignment.
+        transpose(std::array::from_fn(|i| unsafe {
+            _mm_loadu_ps(input.as_ptr().add(4 * i))
+        }))
+    }
+
+    /// Port of `SSE2RGBAPack<BIT_DEPTH_F32>::Store` (src/OpenColorIO/SSE2.h:386-397 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn store_f32(out: &mut [f32; 16], rgba: [__m128; 4]) {
+        for (i, row) in transpose(rgba).into_iter().enumerate() {
+            // SAFETY: `out` holds the sixteen floats these write, at any alignment.
+            unsafe { _mm_storeu_ps(out.as_mut_ptr().add(4 * i), row) };
+        }
+    }
+
+    /// Port of `SSE2RGBAPack<BIT_DEPTH_UINT8>::Store` (src/OpenColorIO/SSE2.h:222-238 @ v2.5.2).
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn store_u8(out: &mut [u8; 16], [r, g, b, a]: [__m128; 4]) {
+        let max_value = _mm_set1_ps(255.0);
+
+        // NOTE note using cvtps which will round based on MXCSR register defaults to _MM_ROUND_NEAREST
+        let r = _mm_cvtps_epi32(clamp(r, max_value));
+        let g = _mm_cvtps_epi32(clamp(g, max_value));
+        let b = _mm_cvtps_epi32(clamp(b, max_value));
+        let a = _mm_cvtps_epi32(clamp(a, max_value));
+
+        let rgba = _mm_or_si128(r, _mm_slli_si128::<1>(g));
+        let rgba = _mm_or_si128(rgba, _mm_slli_si128::<2>(b));
+        let rgba = _mm_or_si128(rgba, _mm_slli_si128::<3>(a));
+
+        // SAFETY: `out` holds the sixteen bytes this writes, at any alignment.
+        unsafe { _mm_storeu_si128(out.as_mut_ptr().cast(), rgba) };
+    }
+
+    /// Port of `SSE2RGBAPack16<BD>::Store` (src/OpenColorIO/SSE2.h:260-278 @ v2.5.2), where
+    /// `max_value` is `BitDepthInfo<BD>::maxValue`.
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn store_u16(out: &mut [u16; 16], [r, g, b, a]: [__m128; 4], max_value: f32) {
+        let max_value = _mm_set1_ps(max_value);
+
+        let rrrr = _mm_cvtps_epi32(clamp(r, max_value));
+        let gggg = _mm_cvtps_epi32(clamp(g, max_value));
+        let bbbb = _mm_cvtps_epi32(clamp(b, max_value));
+        let aaaa = _mm_cvtps_epi32(clamp(a, max_value));
+
+        let rgrg_rgrg = _mm_or_si128(rrrr, _mm_slli_si128::<2>(gggg));
+        let baba_baba = _mm_or_si128(bbbb, _mm_slli_si128::<2>(aaaa));
+
+        let rgba_00_01 = _mm_unpacklo_epi32(rgrg_rgrg, baba_baba);
+        let rgba_02_03 = _mm_unpackhi_epi32(rgrg_rgrg, baba_baba);
+
+        // SAFETY: `out` holds the sixteen values these write, at any alignment.
+        unsafe {
+            _mm_storeu_si128(out.as_mut_ptr().cast(), rgba_00_01);
+            _mm_storeu_si128(out.as_mut_ptr().add(8).cast(), rgba_02_03);
+        }
+    }
+
+    /// Port of `SSE2RGBAPack<BIT_DEPTH_F16>::Store` (src/OpenColorIO/SSE2.h:344-370 @ v2.5.2),
+    /// its branch without SSE2NEON.
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub(crate) fn store_f16(out: &mut [half::f16; 16], rgba: [__m128; 4]) {
+        let [rgba0, rgba1, rgba2, rgba3] = transpose(rgba);
+
+        let rgba00_01 = sse2_cvtps_ph(rgba0);
+        let rgba02_03 = sse2_cvtps_ph(rgba1);
+        let rgba04_05 = sse2_cvtps_ph(rgba2);
+        let rgba06_07 = sse2_cvtps_ph(rgba3);
+
+        let low = _mm_xor_si128(rgba00_01, _mm_shuffle_epi32::<0b01_00_11_10>(rgba02_03));
+        let high = _mm_xor_si128(rgba04_05, _mm_shuffle_epi32::<0b01_00_11_10>(rgba06_07));
+
+        // SAFETY: `out` holds the sixteen values these write, at any alignment.
+        unsafe {
+            _mm_storeu_si128(out.as_mut_ptr().cast(), low);
+            _mm_storeu_si128(out.as_mut_ptr().add(8).cast(), high);
+        }
+    }
+}
+
 /// The same functions written with SSE2 intrinsics, instruction for instruction as in
-/// `SSE2.h`. They exist to prove the scalar lanes above against the hardware.
+/// `SSE2.h`. They exist to prove the scalar lanes above against the hardware, and the real
+/// pack of halves ([`packs`]) uses them.
 #[cfg(target_arch = "x86_64")]
 pub mod intrinsics {
     use core::arch::x86_64::*;
@@ -235,8 +695,9 @@ pub mod intrinsics {
     }
 
     /// Port of `sse2_cvtps_ph` (src/OpenColorIO/SSE2.h:111-153 @ v2.5.2).
+    #[inline]
     #[target_feature(enable = "sse2")]
-    fn sse2_cvtps_ph(a: __m128) -> __m128i {
+    pub(crate) fn sse2_cvtps_ph(a: __m128) -> __m128i {
         let mut x = _mm_castps_si128(a);
 
         let x_sgn = _mm_and_si128(x, _mm_set1_epi32(0x8000_0000u32 as i32));

@@ -6,6 +6,8 @@
 pub mod aces2;
 pub mod fixed_function_op;
 pub mod fixed_function_op_cpu;
+#[cfg(target_arch = "x86_64")]
+mod fixed_function_op_cpu_sse2;
 pub mod fixed_function_op_data;
 
 pub use fixed_function_op_data::FixedFunctionOpStyle;

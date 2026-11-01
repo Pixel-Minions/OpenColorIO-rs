@@ -15,6 +15,7 @@
 //! not dynamic, as the wheel's does.
 
 use ocio_ops::cpu_processor::CpuProcessor;
+use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{
     BitDepth, DynamicPropertyType, ExposureContrastStyle, OptimizationFlags, TransformDirection,
@@ -162,11 +163,20 @@ fn transform_direction(direction: Direction) -> TransformDirection {
     }
 }
 
-/// Applies `cpu` to packed F32 RGBA pixels, in place.
+/// Applies `cpu` to packed F32 RGBA pixels, in place, as one row of an image, so that the
+/// renderers see the pixels as the wheel's images give them, and each pixel through
+/// `apply_rgba`, whose bits must be the row's.
 fn apply(cpu: &CpuProcessor, px: &mut [f32]) {
-    for pixel in px.as_chunks_mut::<4>().0 {
+    let mut pixels = px.to_vec();
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         cpu.apply_rgba(pixel).unwrap();
     }
+    if !px.is_empty() {
+        let mut row = PackedImageDesc::new(&mut *px, pixels.len() / 4, 1, 4).unwrap();
+        cpu.apply(&mut row).unwrap();
+    }
+    let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>();
+    assert_eq!(bits(px), bits(&pixels), "the row and its pixels");
 }
 
 const STYLES: [ExposureContrastStyle; 3] = [
@@ -272,6 +282,13 @@ impl Family for EcFamily {
 
     fn name(&self) -> String {
         "ExposureContrastTransform".to_string()
+    }
+    fn extra_probes(
+        &self,
+        _: &EcParams,
+        _: ocio_testkit::battery::Direction,
+    ) -> Vec<ocio_testkit::probe::ProbeSet> {
+        vec![ocio_testkit::probe::ProbeSet::FiniteRows]
     }
 
     fn cases(&self) -> Vec<Case<EcParams>> {
@@ -572,25 +589,32 @@ fn dynamic_sets_apply_as_the_wheels() {
                 .as_u64()
                 .unwrap_or_else(|| panic!("{step}")) as usize;
             let wheel = bytes_to_f32(&response.blobs[index]);
-            let differ: Vec<String> = port
-                .iter()
-                .zip(&wheel)
-                .enumerate()
-                .filter(|(_, (p, w))| p.to_bits() != w.to_bits())
-                .map(|(i, (p, w))| {
-                    format!(
-                        "[{i}] port {p:e} ({:#x}) wheel {w:e} ({:#x})",
-                        p.to_bits(),
-                        w.to_bits()
-                    )
-                })
-                .collect();
-            if !differ.is_empty() {
-                failures.push(format!(
-                    "{:?} {direction:?} after {set:?}: {}",
-                    params.style,
-                    differ.join(", ")
-                ));
+            // Between two buffers too, the wheel's own path.
+            let mut between = vec![0.0f32; input.len()];
+            let src = PackedImageDesc::new(&input[..], 5, 1, 4).unwrap();
+            let mut dst = PackedImageDesc::new(&mut between[..], 5, 1, 4).unwrap();
+            cpu.apply_src_dst(&src, &mut dst).unwrap();
+            for port in [&port, &between] {
+                let differ: Vec<String> = port
+                    .iter()
+                    .zip(&wheel)
+                    .enumerate()
+                    .filter(|(_, (p, w))| p.to_bits() != w.to_bits())
+                    .map(|(i, (p, w))| {
+                        format!(
+                            "[{i}] port {p:e} ({:#x}) wheel {w:e} ({:#x})",
+                            p.to_bits(),
+                            w.to_bits()
+                        )
+                    })
+                    .collect();
+                if !differ.is_empty() {
+                    failures.push(format!(
+                        "{:?} {direction:?} after {set:?}: {}",
+                        params.style,
+                        differ.join(", ")
+                    ));
+                }
             }
         }
     }

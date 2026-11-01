@@ -5,5 +5,7 @@
 
 pub mod log_op;
 pub mod log_op_cpu;
+#[cfg(target_arch = "x86_64")]
+mod log_op_cpu_sse2;
 pub mod log_op_data;
 pub mod log_utils;

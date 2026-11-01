@@ -419,53 +419,26 @@ pub struct KnotsCoefs {
     pub num_knots: i32,
 }
 
-impl KnotsCoefs {
-    /// The most knots of all the curves together (GradingBSplineCurve.h:103).
-    pub const MAX_NUM_KNOTS: i32 = 120;
-    /// The most coefficients of all the curves together (GradingBSplineCurve.h:105).
-    pub const MAX_NUM_COEFS: i32 = 360;
+/// One curve of a [`KnotsCoefs`]: see [`KnotsCoefs::curve`].
+#[derive(Debug, Clone, Copy)]
+pub struct Curve<'a> {
+    /// `coefsSets`.
+    coefs_sets: i32,
+    /// `knotsCnt`.
+    knots_cnt: i32,
+    /// The curve's knots.
+    knots: &'a [f32],
+    /// The curve's coefficients.
+    coefs: &'a [f32],
+}
 
-    /// Room for `num_curves` curves. Upstream leaves `m_localBypass` uninitialized; its users
-    /// set it before they read it (`precompute`).
-    ///
-    /// Port of `KnotsCoefs::KnotsCoefs(size_t)` (GradingBSplineCurve.cpp:1247-1254 @ v2.5.2).
-    pub fn new(num_curves: usize) -> Self {
-        KnotsCoefs {
-            local_bypass: false,
-            knots_offsets: vec![0; 2 * num_curves],
-            coefs_offsets: vec![0; 2 * num_curves],
-            coefs: vec![0.0; Self::MAX_NUM_COEFS as usize],
-            knots: vec![0.0; Self::MAX_NUM_KNOTS as usize],
-            num_coefs: 0,
-            num_knots: 0,
-        }
-    }
-
-    /// Curve `c` at `x`: `identity_x` for an identity curve, the line of the first segment's
-    /// slope below the first knot, the line of the last segment's end slope past the last
-    /// knot, and the segment's quadratic in between.
-    ///
-    /// Port of `KnotsCoefs::evalCurve` (GradingBSplineCurve.cpp:1258-1307 @ v2.5.2), in the
-    /// operand orders of each wheel's machine code, since a NaN input meets NaN coefficients
-    /// (degenerate curves give them; `docs/wheel-inspect.md`):
-    /// - Windows (`sub_1801e87d0`, which `GradingRGBCurveFwdOpCPU::apply` calls): `(x -
-    ///   knStart) * B + C` below; `offs + slope * (x - knEnd)` above, with `offs = ((t * A) + B)
-    ///   * t + C` and `slope = (A + A) * t + B`; `((t * A) + B) * t + C` in between;
-    /// - Linux (`0x3bc930`): `B * (x - knStart) + C` below; `offs + (x - knEnd) * slope` above,
-    ///   with `offs = ((A * t) + B) * t + C` and the same slope; `((A * t) + B) * t + C` in
-    ///   between.
-    ///
-    /// Both compute upstream's `2.f * A` as `A + A`, which gives the same bits.
-    pub fn eval_curve(&self, c: usize, x: f32, identity_x: f32) -> f32 {
-        let coefs_sets = self.coefs_offsets[2 * c + 1] / 3;
-        if coefs_sets == 0 {
-            return identity_x;
-        }
-        let coefs_offs = self.coefs_offsets[2 * c];
-        let knots_cnt = self.knots_offsets[2 * c + 1];
-        let knots_offs = self.knots_offsets[2 * c];
-        let knot = |i: i32| self.knots[(knots_offs + i) as usize];
-        let coef = |i: i32| self.coefs[(coefs_offs + i) as usize];
+impl Curve<'_> {
+    /// [`KnotsCoefs::eval_curve`] of a curve that isn't an identity.
+    #[inline]
+    pub fn eval(&self, x: f32) -> f32 {
+        let (coefs_sets, knots_cnt) = (self.coefs_sets, self.knots_cnt);
+        let knot = |i: i32| self.knots[i as usize];
+        let coef = |i: i32| self.coefs[i as usize];
         // `(A * t + B) * t + C`, with the product `A * t` in each wheel's order.
         let quadratic = |a: f32, b: f32, c: f32, t: f32| {
             let at = if WINDOWS {
@@ -520,33 +493,12 @@ impl KnotsCoefs {
         }
     }
 
-    /// The inverse of curve `c` (a monotonic one) at `y`: `y` for an identity curve, the
-    /// inverses of the end lines outside the curve's range (the end knot where their slope is
-    /// nearly 0), and the segment's quadratic solved in between.
-    ///
-    /// Port of `KnotsCoefs::evalCurveRev` (GradingBSplineCurve.cpp:1311-1381 @ v2.5.2), in the
-    /// operand orders and operations of each wheel's machine code:
-    /// - Windows (`sub_1801e8970`, which `GradingRGBCurveRevOpCPU::apply` calls): the end
-    ///   lines' inverses add the knot second, as the source does; the quadratic's root is `kn -
-    ///   C0 / B` and `kn - (C0 + C0) / denom`, for upstream's `kn + (-C0 / B)` and `kn + (-2.f *
-    ///   C0) / denom`: the same values, but a NaN `C0` keeps its sign;
-    /// - Linux (`0x3bcab0`): the end lines' inverses add the knot first (`knStart + q`); the
-    ///   root is `kn + (-C0) / B` and `kn + (C0 * -2) / denom`, as the source.
-    ///
-    /// `knEndY` and the slope are computed as in [`eval_curve`](Self::eval_curve) on both,
-    /// `4.f * A` as `A * 4` (Windows) or `4 * A` (Linux), which give the same bits.
-    /// Upstream's unqualified `sqrt` of a `float` is `sqrtss` in both wheels (and `sqrtf` for
-    /// a negative argument, for `errno`): the same `float`.
-    pub fn eval_curve_rev(&self, c: usize, y: f32) -> f32 {
-        let coefs_sets = self.coefs_offsets[2 * c + 1] / 3;
-        if coefs_sets == 0 {
-            return y;
-        }
-        let coefs_offs = self.coefs_offsets[2 * c];
-        let knots_cnt = self.knots_offsets[2 * c + 1];
-        let knots_offs = self.knots_offsets[2 * c];
-        let knot = |i: i32| self.knots[(knots_offs + i) as usize];
-        let coef = |i: i32| self.coefs[(coefs_offs + i) as usize];
+    /// [`KnotsCoefs::eval_curve_rev`] of a curve that isn't an identity.
+    #[inline]
+    pub fn eval_rev(&self, y: f32) -> f32 {
+        let (coefs_sets, knots_cnt) = (self.coefs_sets, self.knots_cnt);
+        let knot = |i: i32| self.knots[i as usize];
+        let coef = |i: i32| self.coefs[i as usize];
         // `q + kn`, in each wheel's order.
         let add_knot = |q: f32, kn: f32| {
             if WINDOWS {
@@ -626,6 +578,93 @@ impl KnotsCoefs {
             } else {
                 sse_add(kn, sse_mul(c0, -2.0) / denom)
             }
+        }
+    }
+}
+
+impl KnotsCoefs {
+    /// The most knots of all the curves together (GradingBSplineCurve.h:103).
+    pub const MAX_NUM_KNOTS: i32 = 120;
+    /// The most coefficients of all the curves together (GradingBSplineCurve.h:105).
+    pub const MAX_NUM_COEFS: i32 = 360;
+
+    /// Room for `num_curves` curves. Upstream leaves `m_localBypass` uninitialized; its users
+    /// set it before they read it (`precompute`).
+    ///
+    /// Port of `KnotsCoefs::KnotsCoefs(size_t)` (GradingBSplineCurve.cpp:1247-1254 @ v2.5.2).
+    pub fn new(num_curves: usize) -> Self {
+        KnotsCoefs {
+            local_bypass: false,
+            knots_offsets: vec![0; 2 * num_curves],
+            coefs_offsets: vec![0; 2 * num_curves],
+            coefs: vec![0.0; Self::MAX_NUM_COEFS as usize],
+            knots: vec![0.0; Self::MAX_NUM_KNOTS as usize],
+            num_coefs: 0,
+            num_knots: 0,
+        }
+    }
+
+    /// Curve `c` at `x`: `identity_x` for an identity curve, the line of the first segment's
+    /// slope below the first knot, the line of the last segment's end slope past the last
+    /// knot, and the segment's quadratic in between.
+    ///
+    /// Port of `KnotsCoefs::evalCurve` (GradingBSplineCurve.cpp:1258-1307 @ v2.5.2), in the
+    /// operand orders of each wheel's machine code, since a NaN input meets NaN coefficients
+    /// (degenerate curves give them; `docs/wheel-inspect.md`):
+    /// - Windows (`sub_1801e87d0`, which `GradingRGBCurveFwdOpCPU::apply` calls): `(x -
+    ///   knStart) * B + C` below; `offs + slope * (x - knEnd)` above, with `offs = ((t * A) + B)
+    ///   * t + C` and `slope = (A + A) * t + B`; `((t * A) + B) * t + C` in between;
+    /// - Linux (`0x3bc930`): `B * (x - knStart) + C` below; `offs + (x - knEnd) * slope` above,
+    ///   with `offs = ((A * t) + B) * t + C` and the same slope; `((A * t) + B) * t + C` in
+    ///   between.
+    ///
+    /// Both compute upstream's `2.f * A` as `A + A`, which gives the same bits.
+    pub fn eval_curve(&self, c: usize, x: f32, identity_x: f32) -> f32 {
+        match self.curve(c) {
+            Some(curve) => curve.eval(x),
+            None => identity_x,
+        }
+    }
+
+    /// Curve `c`'s knots and coefficients, which [`KnotsCoefs::eval_curve`] and
+    /// [`KnotsCoefs::eval_curve_rev`] read for every value, ready for many values; `None` for
+    /// an identity curve.
+    pub fn curve(&self, c: usize) -> Option<Curve<'_>> {
+        let coefs_sets = self.coefs_offsets[2 * c + 1] / 3;
+        if coefs_sets == 0 {
+            return None;
+        }
+        let coefs_offs = self.coefs_offsets[2 * c] as usize;
+        let knots_cnt = self.knots_offsets[2 * c + 1];
+        let knots_offs = self.knots_offsets[2 * c] as usize;
+        Some(Curve {
+            coefs_sets,
+            knots_cnt,
+            knots: &self.knots[knots_offs..knots_offs + knots_cnt as usize],
+            coefs: &self.coefs[coefs_offs..coefs_offs + 3 * coefs_sets as usize],
+        })
+    }
+    /// The inverse of curve `c` (a monotonic one) at `y`: `y` for an identity curve, the
+    /// inverses of the end lines outside the curve's range (the end knot where their slope is
+    /// nearly 0), and the segment's quadratic solved in between.
+    ///
+    /// Port of `KnotsCoefs::evalCurveRev` (GradingBSplineCurve.cpp:1311-1381 @ v2.5.2), in the
+    /// operand orders and operations of each wheel's machine code:
+    /// - Windows (`sub_1801e8970`, which `GradingRGBCurveRevOpCPU::apply` calls): the end
+    ///   lines' inverses add the knot second, as the source does; the quadratic's root is `kn -
+    ///   C0 / B` and `kn - (C0 + C0) / denom`, for upstream's `kn + (-C0 / B)` and `kn + (-2.f *
+    ///   C0) / denom`: the same values, but a NaN `C0` keeps its sign;
+    /// - Linux (`0x3bcab0`): the end lines' inverses add the knot first (`knStart + q`); the
+    ///   root is `kn + (-C0) / B` and `kn + (C0 * -2) / denom`, as the source.
+    ///
+    /// `knEndY` and the slope are computed as in [`eval_curve`](Self::eval_curve) on both,
+    /// `4.f * A` as `A * 4` (Windows) or `4 * A` (Linux), which give the same bits.
+    /// Upstream's unqualified `sqrt` of a `float` is `sqrtss` in both wheels (and `sqrtf` for
+    /// a negative argument, for `errno`): the same `float`.
+    pub fn eval_curve_rev(&self, c: usize, y: f32) -> f32 {
+        match self.curve(c) {
+            Some(curve) => curve.eval_rev(y),
+            None => y,
         }
     }
 

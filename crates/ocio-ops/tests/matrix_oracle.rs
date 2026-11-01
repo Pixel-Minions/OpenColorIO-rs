@@ -27,10 +27,12 @@
 //!   depths (OpOptimizers.cpp:559-563).
 //!
 //! The renderers write every channel, so no channel passes through, and they have no other
-//! numeric profile.
+//! numeric profile. Their real SSE2 kernels (`matrix_op_cpu_sse2.rs`) run in the rows of
+//! [`ProbeSet::FiniteRows`] too.
 
 use std::hint::black_box;
 
+use ocio_ops::op::{Pixels, PixelsMut};
 use ocio_ops::open_color_types::TransformDirection;
 use ocio_ops::ops::matrix::MatrixOpData;
 use ocio_ops::ops::matrix::matrix_op_cpu::get_matrix_renderer;
@@ -40,7 +42,7 @@ use ocio_testkit::battery::{
     self, Combo, Direction, Family, Format, Port, Spec, Validation, yaml_list,
 };
 use ocio_testkit::oracle::BatchCall;
-use ocio_testkit::probe::Rng;
+use ocio_testkit::probe::{ProbeSet, Rng};
 use serde_json::json;
 
 /// The parameters of a MatrixTransform: the matrix, row by row, and the offsets.
@@ -167,6 +169,9 @@ impl Family for MatrixFamily {
     fn port(&self, p: &Matrix, combo: &Combo) -> Result<Port, String> {
         let renderer = port_renderer(p, combo.direction)?;
         Ok(Port::in_place(move |px| renderer.apply(px)))
+    }
+    fn extra_probes(&self, _: &Matrix, _: Direction) -> Vec<ProbeSet> {
+        vec![ProbeSet::FiniteRows]
     }
     fn validation(&self) -> Validation {
         Validation::Ported
@@ -326,6 +331,45 @@ fn special_value(rng: &mut Rng) -> f32 {
     }
 }
 
+/// A finite value, often a zero.
+fn finite_value(rng: &mut Rng) -> f32 {
+    let pick = rng.next_u64();
+    match pick % 4 {
+        0 => 0.0,
+        1 => -0.0,
+        _ => ((pick >> 32) % 33) as f32 / 8.0 - 2.0,
+    }
+}
+
+/// One matrix of each renderer with NaN and infinite coefficients in one output channel.
+fn mixed_coefficients() -> Vec<Matrix> {
+    let (nan, inf) = (f64::NAN, f64::INFINITY);
+    let full = [
+        nan, inf, -inf, 0.5, //
+        0.5, nan, inf, -inf, //
+        -inf, 0.5, nan, inf, //
+        inf, -inf, 0.5, nan,
+    ];
+    vec![
+        Matrix {
+            matrix: full,
+            offset: [0.0; 4],
+        },
+        Matrix {
+            matrix: full,
+            offset: [nan, inf, -inf, 0.5],
+        },
+        Matrix {
+            matrix: diagonal([inf, 2.0, inf, 2.0]),
+            offset: [nan, nan, 0.5, nan],
+        },
+        Matrix {
+            matrix: diagonal([inf, nan, 2.0, -inf]),
+            offset: [0.0; 4],
+        },
+    ]
+}
+
 /// Every width from 1 to 9 pixels, and 16 and 17, of pixels full of NaNs, through each
 /// renderer, with finite and with NaN parameters, compared bit for bit: the Windows wheel sums
 /// the products in one order in its four-pixel loop and in another in the loop that finishes
@@ -362,6 +406,18 @@ fn every_width_matches_the_wheel_bit_for_bit() {
                 let pixels: Vec<f32> = (0..4 * width).map(|_| special_value(&mut rng)).collect();
                 cases.push((index, direction, pixels));
             }
+        }
+    }
+    // Finite pixels with coefficients that are not finite: an infinite coefficient and a zero
+    // make the default NaN, whose sign differs from the positive NaN of a NaN coefficient, so
+    // the sum's operand order shows.
+    let finite_widths = [31, 32, 33, 64, 65];
+    let first_mixed = matrices.len();
+    matrices.extend(mixed_coefficients());
+    for index in first_mixed..matrices.len() {
+        for &width in &finite_widths {
+            let pixels: Vec<f32> = (0..4 * width).map(|_| finite_value(&mut rng)).collect();
+            cases.push((index, Direction::Forward, pixels));
         }
     }
     let combo = Combo {
@@ -401,7 +457,12 @@ fn every_width_matches_the_wheel_bit_for_bit() {
                     .collect();
                 let mut port = pixels.clone();
                 renderer.apply(&mut port);
+                // The C++ renders between two buffers, as the port's first op of a chain does.
+                let mut between = vec![0.0f32; pixels.len()];
+                renderer.apply_bit_depth(Pixels::F32(pixels), PixelsMut::F32(&mut between));
+                let between: Vec<u32> = between.iter().map(|v| v.to_bits()).collect();
                 let port: Vec<u32> = port.iter().map(|v| v.to_bits()).collect();
+                assert_eq!(port, between, "{what}: in place and between two buffers");
                 if port != wheel {
                     let first = port.iter().zip(&wheel).position(|(p, w)| p != w).unwrap();
                     failures.push(format!(

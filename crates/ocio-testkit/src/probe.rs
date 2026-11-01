@@ -13,7 +13,9 @@
 //! - [`ProbeSet::Neighbourhoods`]: every value within ±N ulp, and every bit pattern within ±N
 //!   steps, of given points, such as an op's break points ([`neighbourhoods`]);
 //! - [`ProbeSet::NanBuffers`]: NaN pixels in buffers of every length from one pixel up
-//!   ([`nan_buffers`]), so that each part of a renderer's loops meets them.
+//!   ([`nan_buffers`]), so that each part of a renderer's loops meets them;
+//! - [`ProbeSet::FiniteRows`]: rows of finite values with at most one special, around the block
+//!   sizes of the renderers' fast paths ([`finite_rows`]).
 //!
 //! Value sets become RGBA pixels with every value in every channel ([`to_rgba_cycled`]). The
 //! exhaustive tier also sweeps every `f32` bit pattern ([`all_f32_chunk`]).
@@ -418,6 +420,68 @@ pub fn row_length_buffers(max_pixels: usize) -> Vec<(String, Vec<f32>)> {
         .collect()
 }
 
+/// Rows for the renderers' SIMD fast paths, which take whole blocks of finite pixels and leave
+/// a block with a NaN or an infinity to their exact code (`docs/cards/phase8.md`). Each buffer
+/// is one row, one renderer call, of seeded finite values:
+/// - `"finite row of n pixels"`, of lengths around the blocks of up to 64 pixels: every pixel
+///   takes the fast path, the last ones in a shorter block;
+/// - `"finite row with x at pixel i, channel c"`: 130 pixels, of which one value is a special:
+///   the block that holds it takes the exact code and its neighbours the fast path, with the
+///   special at either end of a block and in the middle of one, in each channel.
+///
+/// The values cover a LUT's domain and past it, values that overflow and underflow, zeros of
+/// both signs and a few exact values.
+pub fn finite_rows() -> Vec<(String, Vec<f32>)> {
+    let mut values = random(
+        0x0b47_7e27_0003,
+        &[
+            (RandomRange::Unit, 2048),
+            (RandomRange::Overshoot, 1024),
+            (RandomRange::Hdr, 512),
+            (RandomRange::Tiny, 256),
+            (RandomRange::Huge, 256),
+            (RandomRange::Finite, 512),
+        ],
+    );
+    // Exact values, where comparisons and signs of zero decide.
+    for _ in 0..64 {
+        values.extend([0.0, -0.0, 0.0, -0.0, 1.0, -1.0, 0.5, 0.18]);
+    }
+    // A shuffled order, so that a block mixes the ranges.
+    let mut rng = Rng::new(0x0b47_7e27_0004);
+    let mut next = || values[(rng.next_u64() % values.len() as u64) as usize];
+
+    let mut out = Vec::new();
+    let lengths = [
+        1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 63, 64, 65, 127, 128, 129,
+    ];
+    for n in lengths {
+        let pixels: Vec<f32> = (0..4 * n).map(|_| next()).collect();
+        out.push((format!("finite row of {n} pixels"), pixels));
+    }
+    let specials = [
+        ("a quiet NaN", NAN_PATTERNS[0]),
+        ("a signaling NaN", NAN_PATTERNS[2]),
+        ("+Inf", f32::INFINITY.to_bits()),
+        ("-Inf", f32::NEG_INFINITY.to_bits()),
+    ];
+    let places = [
+        0usize, 7, 8, 15, 16, 31, 32, 33, 63, 64, 95, 96, 127, 128, 129,
+    ];
+    for (name, bits) in specials {
+        for (k, &pixel) in places.iter().enumerate() {
+            let channel = k % 4;
+            let mut pixels: Vec<f32> = (0..4 * 130).map(|_| next()).collect();
+            pixels[4 * pixel + channel] = f32::from_bits(bits);
+            out.push((
+                format!("finite row with {name} at pixel {pixel}, channel {channel}"),
+                pixels,
+            ));
+        }
+    }
+    out
+}
+
 /// Inputs at a LUT's nodes, at the midpoints between them, and outside its domain, for the
 /// battery's break-point neighbourhoods ([`neighbourhoods`]): for a LUT of `entries` entries
 /// per channel over `[0, 1]` (a 1D LUT's standard domain, a 3D LUT's grid along each axis),
@@ -513,6 +577,8 @@ pub enum ProbeSet {
         /// The longest buffer.
         max_pixels: usize,
     },
+    /// [`finite_rows`]: rows of finite values, with at most one special.
+    FiniteRows,
 }
 
 impl ProbeSet {
@@ -529,6 +595,7 @@ impl ProbeSet {
                 format!("NaN buffers of 1 to {max_pixels} pixels")
             }
             ProbeSet::RowLengths { max_pixels } => format!("rows of 1 to {max_pixels} pixels"),
+            ProbeSet::FiniteRows => "finite rows".to_string(),
         }
     }
 
@@ -544,6 +611,7 @@ impl ProbeSet {
             ProbeSet::Values { values, .. } => values.clone(),
             ProbeSet::NanBuffers { max_pixels } => return nan_buffers(*max_pixels),
             ProbeSet::RowLengths { max_pixels } => return row_length_buffers(*max_pixels),
+            ProbeSet::FiniteRows => return finite_rows(),
         };
         if values.is_empty() {
             return Vec::new();
@@ -960,6 +1028,15 @@ mod tests {
                 ),
             ),
             ("lut points", digest(&lut_domain_points(4096))),
+            (
+                "finite rows",
+                digest(
+                    &finite_rows()
+                        .into_iter()
+                        .flat_map(|(_, pixels)| pixels)
+                        .collect::<Vec<f32>>(),
+                ),
+            ),
         ];
         let expected = [
             ("all halves", 0xbca4_a3b3_75d9_2669),
@@ -969,6 +1046,7 @@ mod tests {
             ("neighbourhoods", 0x1636_2655_412e_6ab6),
             ("rows", 0xdca1_81b6_676b_a224),
             ("lut points", 0xde0c_0135_2f84_a084),
+            ("finite rows", 0xebd5_ffee_04b8_b3a6),
         ];
         assert_eq!(digests, expected, "{digests:#018x?}");
     }

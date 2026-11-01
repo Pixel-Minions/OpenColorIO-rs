@@ -326,3 +326,67 @@ fn packed_nan_inf_test() {
 fn packed_all_test() {
     check_packed_all(SSE2, true);
 }
+
+/// The OR of the first three values of every pixel, and never of the fourth.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn rgb_bits_reads_red_green_and_blue_of_every_pixel() {
+    use crate::sse2::blocks::rgb_bits;
+
+    assert_eq!(rgb_bits(&[]), 0);
+    assert_eq!(rgb_bits(&[[1, 0, 0, 0x8000]]), 1);
+    assert_eq!(rgb_bits(&[[0, 2, 0, 0], [0, 0, 4, 0]]), 6);
+    let mut pixels = [[0u16; 4]; 19];
+    pixels[18][2] = 0x4000;
+    pixels[3][1] = 8;
+    assert_eq!(rgb_bits(&pixels), 0x4008);
+}
+
+/// A block with one NaN or infinity, at any place, in any channel and of any length, isn't
+/// finite, on the SSE2 path and on the AVX2 one (`f32::is_finite` decides what finite means).
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn block_is_finite_finds_every_special() {
+    use crate::sse2::blocks::{BLOCK_PIXELS, block_is_finite, block_is_finite_sse2};
+
+    let check = |pixels: &[[f32; 4]]| {
+        let expected = pixels.iter().flatten().all(|v| v.is_finite());
+        assert_eq!(block_is_finite(pixels), expected, "{pixels:?}");
+        assert_eq!(block_is_finite_sse2(pixels), expected, "{pixels:?}");
+    };
+
+    let finite = [
+        0.0,
+        -0.0,
+        f32::MAX,
+        f32::MIN,
+        f32::MIN_POSITIVE,
+        f32::from_bits(1),
+        f32::from_bits(0x7f7f_ffff),
+        f32::from_bits(0xff7f_ffff),
+    ];
+    let specials = [
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+        f32::from_bits(0x7f80_0001),
+        f32::from_bits(0xff80_0001),
+        f32::from_bits(0x7fc0_0000),
+        f32::from_bits(0xffff_ffff),
+    ];
+    for length in 0..=BLOCK_PIXELS {
+        let mut pixels: Vec<[f32; 4]> = (0..length)
+            .map(|i| std::array::from_fn(|c| finite[(i + c) % finite.len()]))
+            .collect();
+        check(&pixels);
+        for pixel in 0..length {
+            for channel in 0..4 {
+                for special in specials {
+                    let keep = pixels[pixel][channel];
+                    pixels[pixel][channel] = special;
+                    check(&pixels);
+                    pixels[pixel][channel] = keep;
+                }
+            }
+        }
+    }
+}

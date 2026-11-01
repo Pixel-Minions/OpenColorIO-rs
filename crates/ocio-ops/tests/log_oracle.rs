@@ -164,6 +164,9 @@ impl Family for LogFamily {
     fn pass_through(&self, _: &LogBase, _: &Combo) -> Channels {
         A
     }
+    fn extra_probes(&self, _: &LogBase, _: Direction) -> Vec<ProbeSet> {
+        vec![ProbeSet::FiniteRows]
+    }
     fn validation(&self) -> Validation {
         Validation::Ported
     }
@@ -315,6 +318,9 @@ impl Family for AffineFamily {
     }
     fn pass_through(&self, _: &Affine, _: &Combo) -> Channels {
         A
+    }
+    fn extra_probes(&self, _: &Affine, _: Direction) -> Vec<ProbeSet> {
+        vec![ProbeSet::FiniteRows]
     }
     fn validation(&self) -> Validation {
         Validation::Ported
@@ -581,6 +587,9 @@ impl Family for CameraFamily {
     }
     fn breakpoints(&self, p: &Camera, _: Direction) -> Vec<f32> {
         p.break_points()
+    }
+    fn extra_probes(&self, _: &Camera, _: Direction) -> Vec<ProbeSet> {
+        vec![ProbeSet::FiniteRows]
     }
     fn validation(&self) -> Validation {
         Validation::Ported

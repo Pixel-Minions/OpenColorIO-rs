@@ -81,3 +81,111 @@ fn nan_tetra_test() {
         lut3d_renderer_nan_test(Interpolation::Tetrahedral, &cpu);
     }
 }
+
+/// The real kernels this CPU can run give the bits of their exact lanes (PLAN.md, "equality tests
+/// against the scalar profile"), on rows with and without specials, of every length around
+/// their groups, on a smooth table and on one whose neighbours overflow when added. The lanes
+/// are compared with the wheel in `tests/lut3d_oracle.rs`, on the CPU each one is dispatched
+/// on.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn real_kernels_match_their_lanes() {
+    use crate::ops::lut3d::{
+        lut3d_op_cpu_avx as avx, lut3d_op_cpu_avx2 as avx2, lut3d_op_cpu_avx512 as avx512,
+        lut3d_op_cpu_sse2 as sse2,
+    };
+    use ocio_testkit::probe;
+
+    type Lanes = fn(&[f32], i32, &mut [f32], i32);
+    type Real = fn(&[f32], i32, &mut [f32]) -> usize;
+
+    let kernels: [(&str, Real, Lanes, bool); 4] = [
+        (
+            "SSE2",
+            sse2::simd::tetrahedral,
+            sse2::apply_tetrahedral_lanes,
+            true,
+        ),
+        (
+            "AVX",
+            avx::simd::tetrahedral,
+            avx::apply_tetrahedral_lanes,
+            std::arch::is_x86_feature_detected!("avx"),
+        ),
+        (
+            "AVX2",
+            avx2::simd::tetrahedral,
+            avx2::apply_tetrahedral_lanes,
+            std::arch::is_x86_feature_detected!("avx2")
+                && std::arch::is_x86_feature_detected!("fma"),
+        ),
+        (
+            "AVX-512",
+            avx512::simd::tetrahedral,
+            avx512::apply_tetrahedral_lanes,
+            std::arch::is_x86_feature_detected!("avx512f"),
+        ),
+    ];
+
+    let dim = 5i32;
+    let entries = (dim * dim * dim) as usize;
+    let smooth: Vec<f32> = (0..entries)
+        .flat_map(|i| {
+            let x = i as f32 / entries as f32;
+            [x.sqrt(), x * 1.5 - 0.25, 1.0 - x, 0.0]
+        })
+        .collect();
+    let extreme: Vec<f32> = (0..entries)
+        .flat_map(|i| {
+            let v = if i % 3 == 0 { f32::MAX } else { f32::MIN };
+            [v, -v, v, 0.0]
+        })
+        .collect();
+
+    let mut rows = probe::finite_rows();
+    rows.extend(probe::row_length_buffers(33));
+    rows.extend(probe::nan_buffers(24));
+
+    let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>();
+    let mut checked = 0;
+    for (name, real, lanes, runs) in kernels {
+        if !runs {
+            continue;
+        }
+        for table in [&smooth, &extreme] {
+            for (row_name, row) in &rows {
+                let mut a = row.clone();
+                let mut b = row.clone();
+                let done = real(table, dim, &mut a);
+                assert!(row.len() - done < 64, "{name}: {row_name}");
+                lanes(table, dim, &mut a[done..], ((row.len() - done) / 4) as i32);
+                lanes(table, dim, &mut b, (row.len() / 4) as i32);
+                assert_eq!(bits(&a), bits(&b), "{name}: {row_name}");
+                checked += usize::from(done > 0);
+            }
+        }
+    }
+    assert!(checked > rows.len(), "{checked}");
+
+    // Trilinear: the real SSE2 loop against its lanes, through the renderer's own table.
+    let cpu = CpuInfo::instance().with_flags(0);
+    for values in [0.75f32, f32::MAX] {
+        let mut data = Lut3DOpData::new(dim as _).unwrap();
+        let array = data.get_array_mut().get_values_mut();
+        for (i, value) in array.iter_mut().enumerate() {
+            *value = if i % 3 == 1 {
+                -values
+            } else {
+                values * (i % 7) as f32 / 6.0
+            };
+        }
+        let renderer = Lut3DRenderer::new(&data, &cpu);
+        for (row_name, row) in &rows {
+            let mut a = row.clone();
+            let mut b = row.clone();
+            renderer.apply_sse2(&mut a);
+            renderer.apply_sse2_lanes(&mut b);
+            assert_eq!(bits(&a), bits(&b), "trilinear: {row_name}");
+        }
+    }
+}

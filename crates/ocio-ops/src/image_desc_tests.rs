@@ -383,3 +383,112 @@ fn the_length_only_cores_agree_with_the_constructors() {
     }
     assert!(accepted > 100 && refused > 1000, "{accepted} {refused}");
 }
+
+/// The rows, in order, in as many runs as parts, or rows.
+#[test]
+fn row_runs_share_the_rows_out() {
+    assert_eq!(row_runs(10, 3), [(0, 4), (4, 3), (7, 3)]);
+    assert_eq!(row_runs(4, 2), [(0, 2), (2, 2)]);
+    assert_eq!(row_runs(2, 5), [(0, 1), (1, 1)]);
+    assert_eq!(row_runs(7, 1), [(0, 7)]);
+    assert_eq!(row_runs(7, 0), [(0, 7)]);
+}
+
+/// Runs of rows of an image are images of their own, over the bytes of those rows.
+#[test]
+fn split_rows_mut_gives_each_run_its_rows() {
+    // Two rows, then one, of three pixels, each with 8 bytes of padding.
+    let mut bytes = [0u8; 3 * 40 - 8];
+    let mut img = PackedImageDesc::with_strides(
+        Bytes(&mut bytes[..]),
+        3,
+        3,
+        4,
+        BitDepth::Uint8,
+        AUTO_STRIDE,
+        AUTO_STRIDE,
+        40,
+    )
+    .unwrap();
+    let layout = *img.layout();
+    let runs = row_runs(3, 2);
+    let mut parts = split_rows_mut(&layout, buffers_mut(&mut img), &runs).unwrap();
+    assert_eq!(parts.len(), 2);
+    assert_eq!(parts[0].layout().height(), 2);
+    assert_eq!(parts[1].layout().height(), 1);
+    assert_eq!(buffers_mut(&mut parts[0])[0].len(), 80);
+    assert_eq!(buffers_mut(&mut parts[1])[0].len(), 32);
+    assert_eq!(parts[1].layout().r_data().offset, 0);
+    assert_eq!(parts[1].layout().y_stride_bytes(), 40);
+    buffers_mut(&mut parts[1])[0][0] = 7;
+    drop(parts);
+    assert_eq!(bytes[80], 7);
+}
+
+/// Planes keep their offsets from the first byte of their rows.
+#[test]
+fn split_rows_mut_cuts_each_plane() {
+    let mut planes = [[0.0f32; 6]; 3];
+    let [r, g, b] = &mut planes;
+    let mut img = PlanarImageDesc::new(&mut r[..], &mut g[..], &mut b[..], None, 2, 3).unwrap();
+    let layout = *img.layout();
+    let runs = row_runs(3, 3);
+    let mut parts = split_rows_mut(&layout, buffers_mut(&mut img), &runs).unwrap();
+    assert_eq!(parts.len(), 3);
+    for part in &mut parts {
+        let buffers = buffers_mut(part);
+        assert_eq!(buffers.len(), 3);
+        assert!(buffers.iter().all(|b| b.len() == 8));
+    }
+}
+
+/// Rows that don't come one after the other in a buffer can't be parted by cutting it.
+#[test]
+fn split_rows_mut_refuses_rows_that_cuts_cannot_part() {
+    let row = 3 * 4 * 4;
+    let mut bottom_up = vec![0u8; 2 * row];
+    let mut img = PackedImageDesc::with_strides(
+        Bytes(&mut bottom_up[..]),
+        3,
+        2,
+        4,
+        BitDepth::F32,
+        AUTO_STRIDE,
+        AUTO_STRIDE,
+        AUTO_STRIDE,
+    )
+    .unwrap();
+    let up = ImageLayout {
+        y_stride_bytes: -(row as isize),
+        ..*img.layout()
+    };
+    assert!(split_rows_mut(&up, buffers_mut(&mut img), &row_runs(2, 2)).is_none());
+
+    let tight = *img.layout();
+    let overlapping = ImageLayout {
+        y_stride_bytes: row as isize - 1,
+        ..tight
+    };
+    assert!(split_rows_mut(&overlapping, buffers_mut(&mut img), &row_runs(2, 2)).is_none());
+    assert!(split_rows_mut(&tight, buffers_mut(&mut img), &row_runs(1, 2)).is_some());
+    assert!(tight.row_starts(2).is_none(), "a buffer without channels");
+}
+
+/// Images whose `width * height` wraps in a `long` keep the serial apply, whose scanlines then
+/// count as outside the image (I-1): the layout alone decides, as an image that size takes 6 GiB.
+/// `long` has 32 bits on Windows and 64 on Linux.
+#[test]
+fn row_starts_refuses_the_images_of_i_1() {
+    let mut pixels = [0.0f32; 4];
+    let img = PackedImageDesc::new(&mut pixels[..], 1, 1, 4).unwrap();
+    let sized = |width: c_long, height: c_long| ImageLayout {
+        width,
+        height,
+        x_stride_bytes: 16,
+        y_stride_bytes: 16 * width as isize,
+        ..*img.layout()
+    };
+    assert!(sized(65535, 32768).row_starts(1).is_some());
+    assert!(sized(65536, 32767).row_starts(1).is_some());
+    assert_eq!(sized(65536, 32768).row_starts(1).is_none(), cfg!(windows));
+}

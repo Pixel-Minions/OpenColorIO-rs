@@ -140,6 +140,11 @@ pub trait CpuOp: Send + Sync + Debug {
         Ok(())
     }
 
+    /// Whether [`check_input`](Self::check_input) can refuse an input.
+    fn can_refuse_input(&self) -> bool {
+        false
+    }
+
     /// Port of `OpCPU::apply(pixel, pixel, 1)` on the one pixel of `CPUProcessor::applyRGB` and
     /// `applyRGBA` (src/OpenColorIO/CPUProcessor.cpp:433-465 @ v2.5.2): the op reads the
     /// pixel's bytes as its input channel type and writes its output channel type over the same
