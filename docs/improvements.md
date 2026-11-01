@@ -6839,6 +6839,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   25000 to write an ICC profile.", and exits with 1 (`Stop::WhitePoint`). So a cube of 256 and over,
   where the wheel saves nothing and exits with 0, exits with 1 as well. The port doesn't open the
   output, so it doesn't report a path it couldn't create, and leaves a file already there alone.
+  So where the output can't be created at a cube of 256 and over, the wheel says "Couldn't create" and
+  nothing about the tags, while the port reports the tags ("LUT is not suitable to be saved as
+  LutAToB", "Couldn't write type 'mAB '"). Under `--v` the port doesn't print the wheel's
+  `[OpenColorIO INFO]: Finished`, which comes after the save.
 
 ### U-652. A display profile that gives no transform kills the tool
 
