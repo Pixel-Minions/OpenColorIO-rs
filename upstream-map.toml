@@ -1167,8 +1167,8 @@ status = "done"
 path = "src/OpenColorIO/ops/OpArray.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/op_array.rs"]
-status = "partial"
-note = "1.3m1: ArrayT (the constructor, resize, getLength, getNumColorComponents, getValues, operator[], validate, operator== and scale) and ArrayDouble, what the Matrix op uses; getNumValues is the subclass's, so resize and validate take its value. p1-optimizer A: Array (ArrayT<float>), setLength, getMaxColorComponents, setNumColorComponents and adjustColorComponentNumber (for float arrays), for the Lut1D op. p4-ctf-read-1 4.5c: setDoubleValue. ArrayBase, getDoubleValue and setMaxColorComponents come with the file readers"
+status = "done"
+note = "P68 complete representation audit: ArrayBase is flattened into typed Matrix/Lut1D/Lut3D arrays and CTF dispatch. getDoubleValue uses typed value indexing (including builtins/color_matrix_helpers.rs); resize/setDoubleValue/validation are present. The unused C++ setMaxColorComponents declaration has no upstream caller; typed storage carries the component invariant."
 
 [[file]]
 path = "src/OpenColorIO/ops/OpTools.cpp"
@@ -1202,15 +1202,15 @@ note = "P57: every declaration is implemented: AllocationData fields/default, ge
 path = "src/OpenColorIO/ops/cdl/CDLOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/cdl_transform.rs"]
-status = "partial"
-note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). p1-transforms-fam2 (1.8f): CreateCDLTransform and BuildCDLOp (both config versions), in crates/ocio/src/transforms/cdl_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
+status = "done"
+note = "P68 complete wrapper/factory audit: CDL op data, factories, validation/finalization/cache/combination/inverse identity and GPU extraction are implemented; transform reconstruction/build lives in cdl_transform.rs. The separate CDLOpCPU source owns renderer implementation and CPU qualification remains separately tracked."
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
-status = "partial"
-note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). p1-transforms-fam2 (1.8f): CreateCDLTransform and BuildCDLOp (both config versions), in crates/ocio/src/transforms/cdl_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
+target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/cdl_transform.rs"]
+status = "done"
+note = "P68 all defined declarations are mapped to existing CDL factories and transform reconstruction. The header-only value overload taking FormatMetadataImpl has no upstream definition; the port follows the actually defined C++ signature, documented in cdl_op.rs. No nonexistent overload implementation is invented."
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpCPU.cpp"
@@ -1264,9 +1264,9 @@ note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behavio
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs"]
-status = "partial"
-note = "see ExponentOp.cpp"
+target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs", "crates/ocio/src/transforms/exponent_transform.rs"]
+status = "done"
+note = "P68 complete declaration audit: Exponent op/data and factories are implemented in the op module, and CreateExponentTransform is implemented in exponent_transform.rs. Add the transform-side target; no runtime behavior changes."
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOp.cpp"
@@ -1411,8 +1411,8 @@ note = "p2-ff-gpu 2.3f: the two functions it declares"
 path = "src/OpenColorIO/ops/gamma/GammaOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
-status = "partial"
-note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). p1-transforms-fam2 (1.8d): CreateGammaTransform and BuildExponentWithLinearOp in exponent_with_linear_transform.rs, BuildExponentOp in exponent_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4)"
+status = "done"
+note = "P68 complete wrapper/factory audit: Gamma op/data behavior, all defined factories, transform reconstruction/build and GPU extraction are present. Physical CPU rendering belongs to the separately mapped GammaOpCPU files; no arithmetic change."
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.h"
@@ -1623,8 +1623,8 @@ note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, is
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs"]
-status = "partial"
-note = "see GradingBSplineCurve.cpp"
+status = "done"
+note = "P68 complete declaration audit: spline/control-point/KnotsCoefs types and forward/reverse/hue/fit behavior are implemented in grading_b_spline_curve.rs. The historical partial note predates the completed hue path; no value or renderer change."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurve.cpp"
@@ -1762,9 +1762,9 @@ status = "done"
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/log_transform.rs"]
-status = "partial"
-note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache IDs, the optimizer's inverse pairs and pixels against the wheel (tests/log_op_oracle.rs). p1-transforms-fam2 (1.8e): the three BuildLogOp and CreateLogTransform, in crates/ocio/src/transforms/log_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Log arm (gpu_processor.rs, 1.3l4)"
+target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/log_transform.rs", "crates/ocio/src/transforms/log_affine_transform.rs", "crates/ocio/src/transforms/log_camera_transform.rs"]
+status = "done"
+note = "P68 complete wrapper/factory audit: Log op/data behavior, all three defined factory overloads, transform reconstruction/build and GPU extraction are present. The separately mapped LogOpCPU files own physical renderers; no arithmetic change."
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.h"
@@ -1833,8 +1833,8 @@ note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLin
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs", "crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
-status = "partial"
-note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. p2-lut1d-gpu 2.1h: extractGpuShaderInfo (an inverse LUT made fast, I-137), in crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs. p4-baker 4.8b1: GenerateLinearScaleLut1D"
+status = "done"
+note = "P68 complete wrapper/factory audit: LUT1D op behavior, factories, composition, identity/linear-scale construction, transform reconstruction/build and GPU extraction are implemented. Physical renderers remain separately mapped and full CPU qualification remains open."
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -2036,8 +2036,8 @@ note = "S4: array (identity fill, size limit), interpolation and GetConcreteInte
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
-status = "partial"
-note = "S4, p2-lut3d 2.2a: see Lut3DOpData.cpp; Compose and MakeFastLut3DFromInverse come with 2.2e"
+status = "done"
+note = "P68 complete declaration audit: the value/data API includes Compose and MakeFastLut3DFromInverse in lut3d_op_data.rs; the formerly missing declarations already have implementations. No data, interpolation or numerical change."
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpGPU.cpp"
@@ -2063,9 +2063,9 @@ note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSame
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
-status = "partial"
-note = "see MatrixOp.cpp"
+target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio/src/transforms/matrix_transform.rs"]
+status = "done"
+note = "P68 all defined factories and transform reconstruction are implemented, including the one-argument CreateIdentityMatrixOp. Only the two float-pointer CreateFitOp/CreateMatrixOffsetOp declarations lack upstream C++ definitions; no nonexistent behavior is invented. Add the existing transform-side target."
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpCPU.cpp"
