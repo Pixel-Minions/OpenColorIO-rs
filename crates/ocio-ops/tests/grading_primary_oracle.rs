@@ -19,6 +19,7 @@
 //! not dynamic, as the wheel's does.
 
 use ocio_ops::cpu_processor::CpuProcessor;
+use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{
     BitDepth, DynamicPropertyType, GradingStyle, OptimizationFlags, TransformDirection,
@@ -240,11 +241,20 @@ fn transform_direction(direction: Direction) -> TransformDirection {
     }
 }
 
-/// Applies `cpu` to packed F32 RGBA pixels, in place.
+/// Applies `cpu` to packed F32 RGBA pixels, in place, as one row of an image, so that the
+/// renderers see the pixels as the wheel's images give them, and each pixel through
+/// `apply_rgba`, whose bits must be the row's.
 fn apply(cpu: &CpuProcessor, px: &mut [f32]) {
-    for pixel in px.as_chunks_mut::<4>().0 {
+    let mut pixels = px.to_vec();
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         cpu.apply_rgba(pixel).unwrap();
     }
+    if !px.is_empty() {
+        let mut row = PackedImageDesc::new(&mut *px, pixels.len() / 4, 1, 4).unwrap();
+        cpu.apply(&mut row).unwrap();
+    }
+    let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>();
+    assert_eq!(bits(px), bits(&pixels), "the row and its pixels");
 }
 
 fn rgbm(red: f64, green: f64, blue: f64, master: f64) -> GradingRgbm {

@@ -130,6 +130,11 @@ What the work showed:
   families to the wheel's speed without other changes, and the Matrix and EC-log kernels as
   instructions need no block check and no finite coefficients. This is the better design where
   a kernel's order is uniform: the block check stays on the kernels written before it.
+- **Pass-through channels, a known exception.** The in-place Lut1D and Lut3D kernels load alpha and
+  store it back through shuffles, where CLAUDE.md says a renderer never writes a channel it passes
+  through. Shuffles move bits and don't quiet a signaling NaN, so the rule's reason doesn't apply
+  and the kernels stay: the speed verifier checked it, and the tests compare those channels with
+  the wheel on every numeric profile.
 - **Loop placement.** The Matrix loops took 0.93 to 1.28 of the wheel's time depending on where the
   build put them, so `sse2::blocks::align_loop` fixes the place. Code above that loop doesn't move it.
 - **Parallel apply** is `CpuProcessor::apply_threaded` and `apply_src_dst_threaded`.
