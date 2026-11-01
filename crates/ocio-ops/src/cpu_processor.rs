@@ -720,9 +720,10 @@ impl CpuProcessor {
     /// independent, as the serial apply renders each one on its own, and a run of rows is
     /// rendered as an image of its own. Fewer rows than threads take fewer threads. The serial
     /// apply serves an image whose rows can't be parted (a negative or zero stride, planes that
-    /// interleave in one buffer) and a processor that can stop at a row, with U-1's error: the
-    /// rows after that one stay unwritten, which other threads can't know. Every other error
-    /// comes before any row is written.
+    /// interleave in one buffer), one past what upstream's row index and `long` positions hold
+    /// (U-3, I-1), and a processor that can stop at a row, with U-1's error. U-1's and I-1's
+    /// errors leave the rows after that one unwritten, which other threads can't know. Every
+    /// other error comes before any row is written.
     pub fn apply_threaded(&self, img: &mut dyn ImageDescMut, threads: usize) -> Result<()> {
         let layout = *img.layout();
         let height = layout.height();

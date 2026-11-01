@@ -131,9 +131,10 @@ fn a_job_without_a_thread_runs_on_the_calling_thread() {
     assert_eq!(on_this_thread, [1, 4]);
 }
 
-/// A host that sets flush-to-zero and denormals-are-zero on its thread gets the serial apply's
-/// bytes from the threaded one: on Windows new threads start with the default control word.
-/// Subnormal pixels show the flags, and the plain render shows they make a difference.
+/// A host that sets flush-to-zero and denormals-are-zero, or another rounding mode, on its thread
+/// gets the serial apply's bytes from the threaded one: on Windows new threads start with the
+/// default control word. Subnormal pixels show the flags, pixels whose product doesn't fit show
+/// the rounding, and the plain render shows that each makes a difference.
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn threads_render_under_the_control_word_of_the_caller() {
@@ -149,18 +150,22 @@ fn threads_render_under_the_control_word_of_the_caller() {
     ops.finalize().unwrap();
     let cpu = super::CpuProcessor::new(&ops, BitDepth::F32, BitDepth::F32, OptimizationFlags::NONE)
         .unwrap();
-    let render = |threads: usize| {
-        let mut image = vec![1e-40f32; 4 * 8 * 8];
+    let render = |value: f32, threads: usize| {
+        let mut image = vec![value; 4 * 8 * 8];
         let mut img = PackedImageDesc::new(&mut image[..], 8, 8, 4).unwrap();
         cpu.apply_threaded(&mut img, threads).unwrap();
         image.iter().map(|v| v.to_bits()).collect::<Vec<u32>>()
     };
     let before = control_word();
-    let plain = render(4);
-    set_control_word(before | 0x8040);
-    let serial = render(1);
-    let threaded = render(4);
-    set_control_word(before);
-    assert_ne!(plain, serial);
-    assert_eq!(threaded, serial);
+    let flush_to_zero = 0x8040;
+    let round_toward_zero = 0x6000;
+    for (bits, value) in [(flush_to_zero, 1e-40f32), (round_toward_zero, 0.1f32)] {
+        let plain = render(value, 4);
+        set_control_word(before | bits);
+        let serial = render(value, 1);
+        let threaded = render(value, 4);
+        set_control_word(before);
+        assert_ne!(plain, serial);
+        assert_eq!(threaded, serial);
+    }
 }
