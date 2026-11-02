@@ -78,7 +78,8 @@ def executable():
         raise RuntimeError(f"the pinned wheel's own library was not found at {library}")
     native = root / "oracle/native"
     headers = root / "upstream/OpenColorIO/include/OpenColorIO"
-    inputs = [native / "legacy_gpu.cpp", native / "transport.h", Path(__file__), headers / "OpenColorABI.h.in"]
+    inputs = [native / "legacy_gpu.cpp", native / "transport.h", native / "legacy_updates.h",
+              Path(__file__), headers / "OpenColorABI.h.in"]
     inputs.extend(sorted(headers.glob("*.h")))
     digest = hashlib.sha256()
     for path in inputs:

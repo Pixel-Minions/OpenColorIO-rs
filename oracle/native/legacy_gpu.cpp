@@ -72,6 +72,8 @@ static void write_shader(Writer & w, const OCIO::GpuShaderDescRcPtr & desc) {
     for (unsigned i = 0; i < desc->getNumDynamicProperties(); ++i) write_property(w, desc->getDynamicProperty(i));
 }
 
+#include "legacy_updates.h"
+
 int main() {
 #ifdef _WIN32
     _setmode(_fileno(stdin), _O_BINARY); _setmode(_fileno(stdout), _O_BINARY);
@@ -91,9 +93,11 @@ int main() {
     std::vector<std::string> log;
     OCIO::SetLoggingFunction([&](const char * message) { log.emplace_back(message); });
     std::string stage = "config", exception_type, exception_message, processor_id;
+    OCIO::ConstProcessorRcPtr processor;
     OCIO::ConstGPUProcessorRcPtr gpu;
     OCIO::GpuShaderDescRcPtr desc;
-    bool extracted = false;
+    bool extracted = false, update_mode = false;
+    std::vector<std::string> states;
     try {
         if (r.u() != MAGIC) throw std::runtime_error("wrong native helper protocol");
         auto kind = r.u(); auto source = r.text(); auto cache_off = r.u();
@@ -118,7 +122,7 @@ int main() {
         else { src = r.text(); dst = r.text(); }
         const auto direction = static_cast<OCIO::TransformDirection>(r.u());
         stage = "processor";
-        auto processor = transform ? config->getProcessor(transform, direction) : config->getProcessor(src.c_str(), dst.c_str());
+        processor = transform ? config->getProcessor(transform, direction) : config->getProcessor(src.c_str(), dst.c_str());
         processor_id = processor->getCacheID();
         stage = "gpu_processor";
         const auto requests = r.u();
@@ -136,15 +140,29 @@ int main() {
         desc->setFunctionName(r.text().c_str()); desc->setPixelName(r.text().c_str()); desc->setResourcePrefix(r.text().c_str()); desc->setUniqueID(r.text().c_str());
         auto set = r.u(); auto binding = r.u(); desc->setDescriptorSetIndex(set, binding);
         desc->setTextureMaxWidth(r.u()); desc->setAllowTexture1D(r.u() != 0);
+        std::vector<DynamicUpdate> updates;
+        if (std::cin.peek() != std::char_traits<char>::eof()) {
+            if (r.u() != UPDATES_MAGIC) throw std::runtime_error("wrong dynamic update protocol");
+            update_mode = true;
+            updates = read_dynamic_updates(r);
+        }
         if (std::cin.peek() != std::char_traits<char>::eof()) throw std::runtime_error("trailing native helper request bytes");
         stage = "extract";
         gpu->extractGpuShaderInfo(desc); extracted = true;
+        if (update_mode) {
+            states.push_back(dynamic_state(processor, gpu, desc, log));
+            for (const auto & update : updates) {
+                stage = "update";
+                apply_dynamic_update(update, processor, desc);
+                states.push_back(dynamic_state(processor, gpu, desc, log));
+            }
+        }
     } catch (const OCIO::ExceptionMissingFile & e) { exception_type = "ExceptionMissingFile"; exception_message = e.what(); }
       catch (const OCIO::Exception & e) { exception_type = "Exception"; exception_message = e.what(); }
       catch (const std::exception & e) { exception_type = "RuntimeError"; exception_message = e.what(); }
     OCIO::ResetToDefaultLoggingFunction();
     try {
-        w.u(MAGIC); w.text(OCIO::GetVersion());
+        w.u(update_mode ? UPDATES_MAGIC : MAGIC); w.text(OCIO::GetVersion());
 #ifdef _MSC_VER
         w.text("msvc-release-md");
 #else
@@ -152,6 +170,11 @@ int main() {
 #endif
         w.text(exception_type); w.text(exception_message); w.text(stage);
         w.u(static_cast<uint32_t>(log.size())); for (const auto & message : log) w.text(message);
+        if (update_mode) {
+            w.u(static_cast<uint32_t>(states.size()));
+            for (const auto & state : states) w.text(state);
+            return 0;
+        }
         w.u(!processor_id.empty()); if (!processor_id.empty()) w.text(processor_id);
         w.u(gpu != nullptr);
         if (gpu) { w.text(gpu->getCacheID()); w.u(gpu->isNoOp()); w.u(gpu->hasChannelCrosstalk()); }
