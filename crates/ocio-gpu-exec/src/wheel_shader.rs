@@ -13,6 +13,7 @@ use ocio_ops::{Exception, Result};
 use ocio_testkit::gpu::{Shader, ShaderSettings, UniformValue};
 
 use crate::UniformUpload;
+use crate::shader_settings::description;
 
 fn interpolation(value: &str) -> Interpolation {
     match value {
@@ -41,39 +42,6 @@ fn dimensions(value: &str) -> TextureDimensions {
         "TEXTURE_2D" => TextureDimensions::D2,
         _ => panic!("unknown wheel texture dimensions: {value}"),
     }
-}
-
-/// Apply the original setter arguments exactly once. Canonical getter names
-/// must not be passed through underscore normalization a second time.
-pub(crate) fn description(settings: &ShaderSettings) -> Result<GpuShaderDesc> {
-    assert!(
-        settings
-            .language
-            .is_none_or(|v| v == ocio_testkit::gpu::GpuLanguage::Glsl12)
-    );
-    let mut desc = GpuShaderDesc::new(GpuLanguage::Glsl1_2);
-    if let Some(value) = &settings.function_name {
-        desc.set_function_name(value);
-    }
-    if let Some(value) = &settings.pixel_name {
-        desc.set_pixel_name(value);
-    }
-    if let Some(value) = &settings.resource_prefix {
-        desc.set_resource_prefix(value);
-    }
-    if let Some(value) = &settings.uid {
-        desc.set_unique_id(value);
-    }
-    if let Some((index, start)) = settings.descriptor_set {
-        desc.set_descriptor_set_index(index, start)?;
-    }
-    if let Some(value) = settings.texture_max_width {
-        desc.set_texture_max_width(value);
-    }
-    if let Some(value) = settings.allow_texture_1d {
-        desc.set_allow_texture_1d(value);
-    }
-    Ok(desc)
 }
 
 /// Uniform getters are snapshots of the wheel's actual getter values. Retests
@@ -307,8 +275,9 @@ mod tests {
     use ocio_testkit::{Oracle, assert_f32_bits_eq};
     use serde_json::json;
 
-    use super::{assert_matches, description, from_wheel};
+    use super::{assert_matches, from_wheel};
     use crate::gpu_unit_test::GpuUnitTest;
+    use crate::shader_settings::description;
     use crate::{Components, HeadlessApp};
 
     const DEFAULT_INPUT_DIGEST: &str =

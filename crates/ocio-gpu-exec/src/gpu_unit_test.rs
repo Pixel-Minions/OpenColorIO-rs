@@ -3,6 +3,10 @@
 
 //! Port of `tests/gpu/GPUUnitTest.h` and `GPUUnitTest.cpp:26-526,661-753` @ v2.5.2.
 //! CPU expectations come only from the actual wheel, never this port's processor.
+//!
+//! Under the `shader-corpus` feature (`cargo xtask compile-shaders`, P7-5) the same tests
+//! render nothing: [`GpuUnitTest::run`] checks the port's shader text against the wheel's in
+//! every compiled language and records it for the compilers.
 
 use std::sync::Arc;
 
@@ -10,14 +14,20 @@ use ocio::{Config, Processor, ProcessorCacheFlags, Transform};
 use ocio_gpu::GpuShaderDesc;
 use ocio_ops::open_color_types::OptimizationFlags;
 use ocio_ops::{Exception, Result};
-use ocio_testkit::gpu::{GpuShaderReply, Shader, ShaderSettings};
-use ocio_testkit::upstream::gpu::{
-    COMPONENTS, ComparisonSettings, ENTRIES, HEIGHT, ImageComparison, WIDTH, compare_image,
-    comparison_dimensions,
-};
+#[cfg(not(feature = "shader-corpus"))]
+use ocio_testkit::gpu::Shader;
+use ocio_testkit::gpu::{GpuShaderReply, ShaderSettings};
+use ocio_testkit::upstream::gpu::{COMPONENTS, ComparisonSettings, ENTRIES, comparison_dimensions};
+#[cfg(not(feature = "shader-corpus"))]
+use ocio_testkit::upstream::gpu::{HEIGHT, ImageComparison, WIDTH, compare_image};
+use serde_json::Value;
 
+#[cfg(not(feature = "shader-corpus"))]
 use crate::nonfinite_class::{self, Companion, Environment, Frame};
+use crate::shader_settings::description;
+#[cfg(not(feature = "shader-corpus"))]
 use crate::{Components, HeadlessApp};
+#[cfg(not(feature = "shader-corpus"))]
 use crate::{exact_pin, wheel_shader};
 
 // Upstream's callback captures its OCIOGPUTest by reference. Borrowing the actual
@@ -31,6 +41,15 @@ pub struct CustomValues {
     pub input_values: Vec<f32>,
     /// Count before padding, used to choose the CPU/comparison rectangle.
     pub original_input_value_size: usize,
+}
+
+/// The oracle call that gave a [`ReferenceRun`]'s shader, to ask for it in other languages.
+#[derive(Debug, Clone)]
+pub struct WheelRequest {
+    /// `gpu_shader`, or `legacy_gpu_shader` for a legacy test.
+    pub cmd: &'static str,
+    /// Its arguments, with the description's settings under `shader`.
+    pub args: Value,
 }
 
 /// One actual wheel CPU/shader result, prepared before GL execution. A test file
@@ -47,6 +66,8 @@ pub struct ReferenceRun {
     pub gpu: GpuShaderReply,
     /// Original descriptor setter arguments; normalization runs exactly once.
     pub shader_settings: ShaderSettings,
+    /// The call that gave `gpu`.
+    pub wheel_request: WheelRequest,
 }
 
 /// The upstream test object. Rust test functions replace main's callback registry.
@@ -170,7 +191,7 @@ impl GpuUnitTest {
         match self.shader_desc {
             Some(ref mut desc) => Ok(desc),
             None => {
-                let desc = wheel_shader::description(&self.shader_settings)?;
+                let desc = description(&self.shader_settings)?;
                 Ok(self.shader_desc.insert(desc))
             }
         }
@@ -293,9 +314,102 @@ impl GpuUnitTest {
         Ok(())
     }
 
+    /// The text-only run of `cargo xtask compile-shaders` (P7-5, `docs/cards/phase7.md` WP 7.4).
+    /// In each compiled language: the wheel's shader for this test's processor, the port's
+    /// asserted equal to it, then recorded for the compilers. Dynamic retests change uniform
+    /// values, not text, so one extraction stands for them all.
+    #[cfg(feature = "shader-corpus")]
+    pub fn run(&mut self, references: &[ReferenceRun]) -> Result<bool> {
+        use ocio_testkit::oracle::BatchCall;
+        use ocio_testkit::shader_compile::{self, COMPILED_LANGUAGES, Corpus};
+
+        if !self.enabled {
+            return Ok(false);
+        }
+        let processor = self
+            .processor
+            .clone()
+            .ok_or_else(|| Exception::new("Invalid test"))?;
+        if references.len() != self.num_retests() + 1 {
+            return Err(Exception::new(
+                "Missing wheel results for one or more GPU test runs",
+            ));
+        }
+        self.prepare_values()?;
+        let entries = self.comparison_entries()?;
+        for reference in references {
+            self.validate_reference(reference, entries)?;
+        }
+        let gpu = if self.legacy_shader {
+            processor.optimized_legacy_gpu_processor(
+                OptimizationFlags::DEFAULT,
+                self.legacy_shader_lut_edge,
+            )?
+        } else {
+            processor.default_gpu_processor()?
+        };
+        let request = &references[0].wheel_request;
+        let settings: Vec<_> = COMPILED_LANGUAGES
+            .iter()
+            .map(|language| ShaderSettings {
+                language: Some(*language),
+                ..self.shader_settings.clone()
+            })
+            .collect();
+        let calls: Vec<_> = settings
+            .iter()
+            .map(|settings| {
+                let mut args = request.args.clone();
+                args["shader"] = settings.json();
+                BatchCall {
+                    cmd: request.cmd,
+                    args,
+                    blobs: Vec::new(),
+                }
+            })
+            .collect();
+        let answers = ocio_testkit::Oracle::get().batch(&calls, true);
+        assert_eq!(answers.len(), COMPILED_LANGUAGES.len());
+        let dir = shader_compile::corpus_dir()
+            .ok_or_else(|| Exception::new("The shader corpus directory is not set"))?;
+        let source = format!("{}.{}", self.group, self.name);
+        for ((answer, settings), language) in
+            answers.into_iter().zip(&settings).zip(COMPILED_LANGUAGES)
+        {
+            let label = format!("{source} {language:?}");
+            let reply = GpuShaderReply::from_response(answer.expect("actual wheel shader"));
+            assert!(reply.raised().is_none(), "{label}: {:?}", reply.raised());
+            let wheel = reply.shader();
+            assert!(!wheel.text.is_empty(), "{label}");
+            if language == ocio_testkit::gpu::GpuLanguage::Glsl12 {
+                ocio_testkit::assert_text_eq(&label, &references[0].gpu.shader().text, &wheel.text);
+            }
+            let mut desc = description(settings)?;
+            gpu.extract_gpu_shader_info(&mut desc)?;
+            ocio_testkit::assert_text_eq(
+                &label,
+                &wheel.text,
+                desc.shader_text_utf8().expect("UTF-8 shader text"),
+            );
+            assert_eq!(desc.cache_id(), wheel.cache_id.as_bytes(), "{label}");
+            shader_compile::record(
+                &dir,
+                Corpus::Suite,
+                &source,
+                language,
+                wheel.getters["function_name"]
+                    .as_str()
+                    .expect("a function name"),
+                &wheel.text,
+            );
+        }
+        Ok(true)
+    }
+
     /// Upstream's per-test run and every retest (`GPUUnitTest.cpp:661-753` @ v2.5.2),
     /// using actual wheel CPU outputs and an additional exact wheel-shader pixel check.
     /// Returns false only for an upstream-disabled test; Rust callers must account for it.
+    #[cfg(not(feature = "shader-corpus"))]
     pub fn run(&mut self, references: &[ReferenceRun]) -> Result<bool> {
         if !self.enabled {
             return Ok(false);

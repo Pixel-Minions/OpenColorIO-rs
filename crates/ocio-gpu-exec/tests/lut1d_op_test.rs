@@ -4,7 +4,7 @@
 //! Port of `tests/gpu/Lut1DOp_test.cpp` @ v2.5.2.
 //! Actual uncached wheel CPU and ordinary/native-legacy shader references are
 //! rendered by the reviewed GpuUnitTest runner on the same renderer.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

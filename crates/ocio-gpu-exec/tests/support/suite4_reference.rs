@@ -5,7 +5,7 @@
 //! Finite companions replay the same CPU bindings and updates over the complete
 //! padded input, changing only non-finite input components to zero.
 
-use ocio_gpu_exec::gpu_unit_test::{GpuUnitTest, ReferenceRun};
+use ocio_gpu_exec::gpu_unit_test::{GpuUnitTest, ReferenceRun, WheelRequest};
 use ocio_testkit::Oracle;
 use ocio_testkit::gpu::GpuShaderReply;
 use ocio_testkit::oracle::{BatchCall, Response, f32_to_bytes};
@@ -167,6 +167,12 @@ pub(super) fn batch(plans: &[Plan]) -> Vec<Vec<ReferenceRun>> {
                 finite_cpu: finite_cpu.as_ref().map(|frames| frames[frame].clone()),
                 gpu,
                 shader_settings: plan.test.shader_settings.clone(),
+                wheel_request: WheelRequest {
+                    cmd: "gpu_shader",
+                    args: json!({"config":{"create":{"processor_cache":"off"}},
+                        "transform":plan.transforms[frame],
+                        "shader":plan.test.shader_settings.json()}),
+                },
             });
         }
         assert_eq!(out.len(), plan.test.num_retests() + 1);

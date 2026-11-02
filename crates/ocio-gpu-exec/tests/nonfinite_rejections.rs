@@ -3,7 +3,7 @@
 
 //! Rejection controls exercise the actual harness and uncached wheel responses.
 //! Fixture parameters are RangeOp_test.cpp's arbitrary_1_no_clamp @ v2.5.2.
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", not(feature = "shader-corpus")))]
 #![forbid(unsafe_code)]
 
 use ocio::{MatrixTransform, RangeStyle, RangeTransform, Transform};

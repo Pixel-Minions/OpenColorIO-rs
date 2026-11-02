@@ -9,16 +9,23 @@ authors.workspace = true
 repository.workspace = true
 publish = false
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[features]
+# `cargo xtask compile-shaders` (P7-5): the suite's targets check text parity and record the
+# wheel's shaders instead of rendering, on Windows too. Never on in `cargo test --workspace`.
+shader-corpus = []
+
+[dependencies]
 ocio.workspace = true
 ocio-gpu.workspace = true
 ocio-ops.workspace = true
 ocio-testkit.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
 glow.workspace = true
 khronos-egl.workspace = true
 # Pin the dynamic loader used by khronos-egl as approved in P7-2.
 libloading.workspace = true
-serde_json.workspace = true
 
 [lints]
 workspace = true

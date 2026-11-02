@@ -4,7 +4,7 @@
 //! `tests/gpu/RangeOp_test.cpp` @ v2.5.2: all eight cases from the verified table.
 //! Actual uncached wheel CPU/shader references; same-renderer shader identity
 //! remains bitwise, and only upstream's 1e-6 comparison threshold is used.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

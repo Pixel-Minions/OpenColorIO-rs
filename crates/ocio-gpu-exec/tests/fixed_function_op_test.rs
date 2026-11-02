@@ -3,7 +3,7 @@
 
 //! Port of `tests/gpu/FixedFunctionOp_test.cpp` @ v2.5.2, 36 other cases (7.3e).
 //! Original inputs and settings; actual wheel CPU/shader references; no retests.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

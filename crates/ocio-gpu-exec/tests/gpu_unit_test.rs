@@ -3,7 +3,7 @@
 
 //! Direct coverage of GPUUnitTest's dynamic retests and the additional
 //! same-context wheel-render restoration path. CPU answers are the actual wheel.
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", not(feature = "shader-corpus")))]
 #![forbid(unsafe_code)]
 
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use ocio::{DynamicPropertyType, ExposureContrastStyle, ExposureContrastTransform, Transform};
 use ocio_gpu::GpuShaderDesc;
-use ocio_gpu_exec::gpu_unit_test::{GpuUnitTest, ReferenceRun};
+use ocio_gpu_exec::gpu_unit_test::{GpuUnitTest, ReferenceRun, WheelRequest};
 use ocio_gpu_exec::{Components, HeadlessApp, UniformUpload};
 use ocio_testkit::gpu::GpuShaderReply;
 use ocio_testkit::oracle::{BatchCall, f32_to_bytes};
@@ -69,7 +69,7 @@ fn retests_reach_the_actual_extracted_and_decoupled_gpu_property() {
     assert_eq!(answers.len(), 6);
     let mut answers = answers.into_iter();
     let mut references = Vec::new();
-    for _ in 0..3 {
+    for run in 0..3 {
         let cpu = answers.next().unwrap().expect("actual wheel CPU");
         assert!(cpu.result.get("exception").is_none(), "{}", cpu.result);
         assert_eq!(cpu.blobs.len(), 1);
@@ -83,6 +83,10 @@ fn retests_reach_the_actual_extracted_and_decoupled_gpu_property() {
             finite_cpu: None,
             gpu,
             shader_settings: settings.clone(),
+            wheel_request: WheelRequest {
+                cmd: "gpu_shader",
+                args: calls[2 * run + 1].args.clone(),
+            },
         });
     }
     assert!(answers.next().is_none());
