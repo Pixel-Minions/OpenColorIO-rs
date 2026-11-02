@@ -1955,8 +1955,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   shader of upstream's 264 GPU tests is affected.
 - **A fix:** add the `.` only when the text holds neither `.` nor `e`. That changes the text and
   the cache ID of those shaders.
-- **Status:** matched (`p1-engine`; text parity holds). The compile failures are open: owner item
-  P7-9 (`docs/cards/phase7.md`).
+- **Status:** matched (`p1-engine`; text parity holds). The compile failures are accepted as this
+  upstream limit (owner, 2026-11-02, P7-9): `cargo xtask compile-shaders` passes such a shader only
+  by this cause, shown on that shader (`ocio_testkit::shader_compile`, `Cause`).
 
 ### I-811. A NaN or infinite parameter makes a shader that doesn't compile
 
@@ -1971,8 +1972,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** write an expression a compiler takes (`(0.0/0.0)`, `(1.0/0.0)`) or refuse the
   parameter when the shader is extracted. Either changes the text or turns a shader into an
   error.
-- **Status:** matched (`p1-engine`; text parity holds). The compile failures are open: owner item
-  P7-9 (`docs/cards/phase7.md`).
+- **Status:** matched (`p1-engine`; text parity holds). The compile failures are accepted as this
+  upstream limit (owner, 2026-11-02, P7-9): `cargo xtask compile-shaders` passes such a shader only
+  by this cause, shown on that shader (`ocio_testkit::shader_compile`, `Cause`).
 
 ### I-812. Three kinds of shader text that GLSL ES 1.0 doesn't accept
 
@@ -1988,8 +1990,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   ES 3.0 and every other language compile these shaders.
 - **A fix:** write ES 1.00 tables as assignments in a function or as uniform data, and drop the
   suffix. That changes ES 1.0's text and cache IDs only.
-- **Status:** matched (text parity holds). The compile failures are open: owner item P7-9
-  (`docs/cards/phase7.md`).
+- **Status:** matched (text parity holds). The compile failures are accepted as this upstream limit
+  (owner, 2026-11-02, P7-9): `cargo xtask compile-shaders` passes such a shader only by this cause,
+  shown on that shader (`ocio_testkit::shader_compile`, `Cause`).
+
+### I-813. A description's names go into the shader unchecked
+
+- **Upstream:** `GpuShaderCreator::setFunctionName` and `setPixelName` (`GpuShaderDesc.cpp:134-169
+  @ v2.5.2`) take any text and only replace `__`, and the shader writers put it in the text as it
+  is. So an empty function name writes `vec4 (vec4 inPixel)`, a name that isn't ASCII writes that
+  identifier, which only some shading languages take, and `main` clashes with the `main` of a
+  client that calls the function.
+- **Who notices:** a client that gives such a name. Three family shaders fail for this in every
+  compiled language, from `gpu_processor_oracle`'s description cases: the empty function name, the
+  function name `f_\u{e9}`, and the function name `main` with the pixel name `\u{3c0}`.
+- **A fix:** refuse such names in the setters. That turns these calls into errors.
+- **Status:** matched (text parity holds). The compile failures are accepted as this upstream limit
+  (owner, 2026-11-02, P7-9): `cargo xtask compile-shaders` passes such a shader only by this cause,
+  shown on that shader (`ocio_testkit::shader_compile`, `Cause`).
 
 ## Python module (`ocio-py`)
 

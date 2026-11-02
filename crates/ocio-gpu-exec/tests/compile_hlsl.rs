@@ -6,13 +6,12 @@
 //!
 //! The compilers are Windows' own (P7-5), so this target is Windows only, and it exists only
 //! under `ocio-gpu-exec`'s `shader-corpus` feature: `cargo xtask compile-shaders` builds it and
-//! runs it after capturing the corpus. Each check is strict: `ocio_testkit::shader_compile`
-//! holds no list of expected failures. A wheel shader that fails to compile goes to the owner
-//! (`docs/cards/phase7.md` WP 7.4).
+//! runs it after capturing the corpus. A wheel shader that fails passes only by a registered
+//! cause, shown on that shader (`ocio_testkit::shader_compile`, `docs/cards/phase7.md` P7-9).
 #![cfg(all(windows, feature = "shader-corpus"))]
 
 use ocio_testkit::gpu::GpuLanguage::HlslSm50;
-use ocio_testkit::shader_compile::{Corpus, Tool, check, check_controls};
+use ocio_testkit::shader_compile::{Corpus, Tool, check, check_cause_controls, check_controls};
 
 /// A complete small shader as OCIO writes it (GpuShaderText's own shape).
 const VALID: &str =
@@ -26,6 +25,18 @@ fn control_fxc() {
 #[test]
 fn control_dxc() {
     check_controls("control_dxc", Tool::Dxc, HlslSm50, VALID);
+}
+
+#[test]
+fn control_causes_fxc() {
+    let (corpus, check) = (Corpus::Family, "control_causes_fxc");
+    check_cause_controls(check, corpus, Tool::Fxc, HlslSm50, VALID);
+}
+
+#[test]
+fn control_causes_dxc() {
+    let (corpus, check) = (Corpus::Family, "control_causes_dxc");
+    check_cause_controls(check, corpus, Tool::Dxc, HlslSm50, VALID);
 }
 
 #[test]

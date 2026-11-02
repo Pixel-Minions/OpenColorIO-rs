@@ -75,9 +75,9 @@ jobs:
         run: cargo xtask py-check
       - name: Compile the GPU suite's HLSL (fxc, dxc; P7-5)
         run: cargo xtask compile-shaders suite_hlsl_fxc suite_hlsl_dxc
-      # Fails on upstream's own text: docs/cards/phase7.md, open owner item P7-9.
-      - name: "OPEN P7-9: compile the family oracle tests' HLSL"
-        continue-on-error: true
+      # Upstream's own text that doesn't compile passes only by a registered cause, shown on that
+      # shader: docs/cards/phase7.md, P7-9.
+      - name: Compile the family oracle tests' HLSL (fxc, dxc; P7-9)
         run: cargo xtask compile-shaders family_
 
   windows-tests:
@@ -199,9 +199,9 @@ jobs:
         run: >-
           scripts/rocky9.sh cargo xtask compile-shaders suite_glsl_1_2 suite_glsl_1_3
           suite_glsl_4_0 suite_glsl_es_3_0 suite_glsl_vk_4_6
-      # Fails on upstream's own text: docs/cards/phase7.md, open owner item P7-9.
-      - name: "OPEN P7-9: compile the family oracle tests' GLSL and the suite's GLSL ES 1.0"
-        continue-on-error: true
+      # Upstream's own text that doesn't compile passes only by a registered cause, shown on that
+      # shader: docs/cards/phase7.md, P7-9.
+      - name: Compile the family oracle tests' GLSL and the suite's GLSL ES 1.0 (glslang; P7-9)
         run: scripts/rocky9.sh cargo xtask compile-shaders suite_glsl_es_1_0 family_
 
   rocky9-tests:

@@ -6,13 +6,14 @@
 //!
 //! glslang is in the Rocky Linux 9 image (P7-4), so this target is Linux only, and it exists
 //! only under `ocio-gpu-exec`'s `shader-corpus` feature: `cargo xtask compile-shaders` builds it
-//! and runs it after capturing the corpus. Each check is strict: `ocio_testkit::shader_compile`
-//! holds no list of expected failures. A wheel shader that fails to compile goes to the owner
-//! (`docs/cards/phase7.md` WP 7.4).
+//! and runs it after capturing the corpus. A wheel shader that fails passes only by a registered
+//! cause, shown on that shader (`ocio_testkit::shader_compile`, `docs/cards/phase7.md` P7-9).
 #![cfg(all(target_os = "linux", feature = "shader-corpus"))]
 
 use ocio_testkit::gpu::GpuLanguage::{self, Glsl12, Glsl13, Glsl40, GlslEs10, GlslEs30, GlslVk46};
-use ocio_testkit::shader_compile::{Corpus, GLSL_LANGUAGES, Tool, check, check_controls};
+use ocio_testkit::shader_compile::{
+    Corpus, GLSL_LANGUAGES, Tool, check, check_cause_controls, check_controls,
+};
 
 /// A complete small shader as OCIO writes it (GpuShaderText's own shape).
 const VALID: &str =
@@ -24,6 +25,16 @@ fn control_glslang() {
         let name = format!("control_{language:?}");
         check_controls(&name, Tool::Glslang, language, VALID);
     }
+}
+
+#[test]
+fn control_causes_glslang() {
+    for language in GLSL_LANGUAGES {
+        let name = format!("control_causes_{language:?}");
+        check_cause_controls(&name, Corpus::Family, Tool::Glslang, language, VALID);
+    }
+    let name = "control_causes_suite_es_1_0";
+    check_cause_controls(name, Corpus::Suite, Tool::Glslang, GlslEs10, VALID);
 }
 
 fn suite(name: &str, language: GpuLanguage) {
