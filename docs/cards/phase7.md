@@ -1,6 +1,6 @@
 # Phase 7 cards: the legacy GPU path and GPU execution
 
-**Status: planned, 2026-10-25. Owner decisions P7-1 to P7-8 taken 2026-10-25: every recommendation, (a) where there are options.** Phases 1–5 already
+**Status: WP 7.1 to 7.3 landed; WP 7.4 implemented by card `p10-gpu-compile`, 2026-11-02, with P7-9 open. Owner decisions P7-1 to P7-8 taken 2026-10-25: every recommendation, (a) where there are options.** Phases 1–5 already
 give every op family its GPU writer in all 10 languages, checked against the wheel byte for
 byte (shader text, uniforms, textures, cache IDs). Phase 7 adds what is left of OCIO's GPU
 side and runs the shaders.
@@ -221,6 +221,82 @@ oracle sweep remains a separate `p7-legacy-parity` test chunk after O7.1.
   skip.
 - MSL 2.0, OSL 1 and Cg have no compiler on the reference platforms (P7-5): text parity only.
 
+### How it runs: `cargo xtask compile-shaders <check>...`
+
+The check lives in its own command, not in `cargo test --workspace` or the gate, for one reason:
+the suite's GPU targets don't exist on Windows (P7-3), so the corpus has to be captured first.
+
+1. **Capture.** `OCIO_RS_SHADER_CORPUS` names a directory under the target directory.
+   - The suite: the 14 `tests/*_test.rs` targets, built with `ocio-gpu-exec`'s `shader-corpus`
+     feature, on either platform. `GpuUnitTest::run` then renders nothing: for each test, in the 7
+     compiled languages, it asks the wheel (`gpu_shader` or `legacy_gpu_shader`, `WheelRequest`),
+     asserts the port's text and cache ID equal, and records the text. Without the feature nothing
+     changes: Linux renders and Windows is empty. It is a compile-time feature so that no CI
+     setting can turn the pixel checks into text checks.
+   - The family oracle tests: `GpuShaderReply::from_response` records each wheel shader of a
+     `*_oracle` target; those tests compare the port with it.
+   Since the port's text is asserted equal first, compiling the wheel's compiles the port's.
+2. **Compile.** `compile_glsl.rs` (Rocky Linux 9, `glslangValidator -l`, `-V` for Vulkan) and
+   `compile_hlsl.rs` (Windows, `fxc /T ps_5_0`, `dxc -T ps_6_0`) have one strict test per corpus,
+   language and tool (`suite_glsl_1_2`, `family_hlsl_dxc`, ...). `ocio_testkit::shader_compile`
+   holds no list of expected failures. The tests refuse an incomplete capture (exactly 264 suite
+   tests with one shader each, every family target present). `control_*` tests always run: a valid
+   shader must pass, and a syntax error, an unknown identifier, a type error, an empty text and a
+   call of an undefined function must fail, in every language and tool.
+
+The wrappers follow upstream's program order (`glsl.cpp:483-510`, version strings `:454-481`) and
+GLSL 1.2's `main` is `oglapp.cpp:206-215`. GLSL ES adds a default float precision and ES 1.0
+`GL_OES_texture_3D`, as a client must; upstream has no ES client to port.
+
+`fxc.exe` and `dxc.exe` come from the newest `Windows Kits/10/bin/<version>/x64` holding both: no
+SDK is an error, never a skip. This workstation has 10.0.22000.0. GitHub's `windows-2025`
+image lists SDK 10.0.26100.0 (its readme, image 20261021.299.1), not yet run: the first CI run
+is the proof, with a newer dxc that can default to HLSL 2021.
+
+### Results, 2026-11-02
+
+Text parity held for all 264 tests in all 7 languages, on both platforms. Distinct shaders, as a
+strict check counts them, on this workstation and in Rocky Linux 9:
+
+| Corpus | Language | Tool | Compiled | Passed | Failed |
+|---|---|---|---:|---:|---:|
+| Suite (264 tests) | HLSL SM 5.0 | fxc ps_5_0 | 212 | 212 | 0 |
+| Suite | HLSL SM 5.0 | dxc ps_6_0 | 212 | 212 | 0 |
+| Suite | GLSL 1.2 | glslang | 212 | 212 | 0 |
+| Suite | GLSL 1.3 | glslang | 212 | 212 | 0 |
+| Suite | GLSL 4.0 | glslang | 212 | 212 | 0 |
+| Suite | GLSL ES 3.0 | glslang | 210 | 210 | 0 |
+| Suite | Vulkan GLSL 4.6 | glslang `-V` | 212 | 212 | 0 |
+| Suite | GLSL ES 1.0 | glslang | 210 | 174 | **36** |
+| Family | HLSL SM 5.0 | fxc ps_5_0 | 3,418 | 2,397 | **1,021** |
+| Family | HLSL SM 5.0 | dxc ps_6_0 | 3,418 | 2,397 | **1,021** |
+| Family | GLSL 1.2 | glslang | 3,418 | 2,397 | **1,021** |
+| Family | GLSL 1.3 | glslang | 3,418 | 2,397 | **1,021** |
+| Family | GLSL 4.0 | glslang | 3,863 | 2,467 | **1,396** |
+| Family | GLSL ES 3.0 | glslang | 3,408 | 2,387 | **1,021** |
+| Family | Vulkan GLSL 4.6 | glslang `-V` | 3,425 | 2,404 | **1,021** |
+| Family | GLSL ES 1.0 | glslang | 3,408 | 2,302 | **1,106** |
+
+Every failure is upstream's text. By cause:
+- **A NaN or infinite parameter written as `nan`, `inf`, `-nan(ind)`** (I-811): 811 family shaders
+  (826 in GLSL 4.0), from the generated parameters of the family tests.
+- **A large whole number written as `1e+30.`** (I-810): 207 family shaders (567 in GLSL 4.0).
+- **GLSL ES 1.0 only** (I-812): array constructors and `f` suffixes, 85 family and 35 suite
+  shaders; one suite shader with a reserved `__` in the test's function name.
+- **Names that can't be identifiers**, in `gpu_processor_oracle`'s description tests: 3 family
+  shaders, with the function names `main`, `f_\u{e9}` and the empty name.
+
+### P7-9, CI and the exit list
+
+`.github/workflows/ci.yml` runs the checks without an expected failure in the required checks
+jobs: `suite_hlsl_fxc suite_hlsl_dxc` in `windows-checks`, and `suite_glsl_1_2 suite_glsl_1_3
+suite_glsl_4_0 suite_glsl_es_3_0 suite_glsl_vk_4_6` in `rocky9-checks`. The checks that fail on
+upstream's text run in steps named `OPEN P7-9` with `continue-on-error`: they run on every push,
+fail in the log, and block nothing. `xtask`'s `ci_runs_every_check` pins these commands.
+
+So the exit list's "every suite shader compiles" holds except in GLSL ES 1.0, and 7.4a's "every
+shader the family oracle tests extract" doesn't hold in any language: P7-9.
+
 ---
 
 ## Upstream tests
@@ -279,15 +355,16 @@ when the Rocky image is rebuilt. Licences are all in `deny.toml`'s list.
 | P7-5 | **Compile checks: tools and languages** | **glslang for the six GLSL languages (Rocky), the Windows SDK's `fxc` (ps_5_0) and `dxc` (ps_6_0) for HLSL (Windows), as subprocesses; no `hassle-rs`, no naga.** MSL 2.0 (needs Apple's compiler), OSL 1 (`oslc` isn't packaged for Rocky 9 or Windows) and Cg (NVIDIA's toolkit is discontinued) get no compile check: text parity only, the reason in PLAN.md §8, reopened with macOS (D11). PLAN.md §8's "naga for Vulkan GLSL" becomes glslang `-V` |
 | P7-6 | **Tests that fail on the renderer with upstream's own shader** (`waiver`). Upstream tuned its thresholds on an NVIDIA GPU; llvmpipe's transcendentals, NaN rules and filtering differ | **Owner update, 2026-10-29: one class for non-finite image sampling footprints.** Exact whole-image GPU and metadata identity, original thresholds on finite footprints, complete finite companions, and independent native/Rust readback controls are mandatory. CI40926626678 passed debug and release before W0003-W0012 retired; their signed metadata is archived. See [the rule and proof](../gpu-nonfinite.md). Finite-only failures stay outside this class; any other renderer exception still needs its own root-cause proof and owner decision |
 | P7-7 | **Four inverse 3D LUT tests**: `Lut3DOp/inv3dlut_file_spi3d_linear`, `_tetra`, `_bizarre_linear`, `_bizarre_tetra` disable only inside `#if !defined(NDEBUG) && defined(WIN32)` (`Lut3DOp_test.cpp:156-239`). Upstream runs them on Linux and Windows release | **Owner correction, 2026-10-26: run all four on Linux with upstream settings and thresholds.** This replaces the earlier exclusion approved from this card's incorrect never-runs rationale. No not-applicable entry or waiver for these four |
+| P7-9 | **OPEN. Wheel shaders that don't compile** (`waiver`, WP 7.4). The 264-test suite fails only in GLSL ES 1.0 (36 of 210, I-812); the family oracle tests fail in every language (about 1,021 of 3,418, I-810, I-811, I-812 and 3 invalid names) | Waiting for the owner. **Recommendation:** keep the corpus and the strict checks and sign the failing causes as upstream limitations, each as a rule the check verifies (the shader holds a non-finite or `e+N.` literal; ES 1.0's array constructor, `f` suffix or reserved name; a name that isn't an identifier), so that any other failure blocks. Then drop `continue-on-error` from the `OPEN P7-9` steps. Nothing was added to any list without that decision |
 | P7-8 | **The legacy API** (`api`) | **`Processor::optimized_legacy_gpu_processor(&self, o_flags: OptimizationFlags, edgelen: u32) -> Result<Arc<GpuProcessor>>`**, beside `optimized_gpu_processor` (1.8h3), sharing its cache as upstream does. No Python binding: upstream has none |
 
 ## Platforms and runners
 
 | Where | The GPU suite | GLSL compile | HLSL compile | O7.1's helper |
 |---|---|---|---|---|
-| This workstation, Windows (AMD Radeon RX 9070 XT; WARP) | Only under P7-3 (b) or (c), or as a local diagnostic | No (glslang on Windows needs the Vulkan SDK, a download) | Yes (Windows SDK 10.0.22000: `fxc.exe`, `dxc.exe`, `dxcompiler.dll`, checked 2026-10-25) | Yes (MSVC 14.44, VS 2022 Community) |
+| This workstation, Windows (AMD Radeon RX 9070 XT; WARP) | Only under P7-3 (b) or (c), or as a local diagnostic | No (glslang on Windows needs the Vulkan SDK, a download) | Yes (Windows SDK 10.0.22000: `fxc.exe`, `dxc.exe`, `dxcompiler.dll`, run 2026-11-02) | Yes (MSVC 14.44, VS 2022 Community) |
 | Rocky Linux 9, local (`scripts/rocky9.sh`) | Yes: llvmpipe through EGL, after 7.2a | Yes, after 7.2a | No | Yes (the image's `gcc-c++`) |
-| GitHub `windows-2025` | No: no GPU, and Windows' own OpenGL is GDI's 1.1, below GLSL; P7-3 (b) or (c) would change that | No | Yes, with the image's Windows SDK (7.4b's first CI run confirms its path) | Yes (VS 2022) |
+| GitHub `windows-2025` | No: no GPU, and Windows' own OpenGL is GDI's 1.1, below GLSL; P7-3 (b) or (c) would change that | No | Yes, with the image's Windows SDK (10.0.26100.0 per its readme; 7.4b's first CI run confirms it) | Yes (VS 2022) |
 | GitHub `ubuntu-24.04`, the Rocky container | Yes, as locally (CPU rendering of 264 images of 256×256; minutes at most, to measure in 7.2c) | Yes | No | Yes |
 | SDE (`scripts/sde.sh`) | No (llvmpipe under emulation; the GPU suite is not CPU-dependent in what it checks) | No | No | — |
 
@@ -392,7 +469,7 @@ On Windows and Rocky Linux 9 (the GPU suite where P7-3 says):
   its test running and checking same-renderer wheel identity;
 - `NoOps/partition_gpu_ops`, `NoOps/throw` and `GpuShader/MetalLutTest` are ported and pass;
 - every suite shader compiles with glslang in the six GLSL languages and with fxc and dxc in
-  HLSL (P7-5);
+  HLSL (P7-5), except GLSL ES 1.0's 36 of 210 distinct shaders, open under P7-9;
 - `upstream-map.toml` has `NoOps.cpp/.h`, `Processor.cpp`, `tests/gpu/*`, `GPUUnitTest.*`,
   `oglapp.*` and `glsl.*` done, and `docs/parity.md` counts the GPU tests.
 
