@@ -28,6 +28,8 @@ const THREADS: usize = 6;
 /// One command line.
 #[derive(Debug, Clone)]
 pub(crate) struct Case {
+    /// Preserve an original sweep directory when CI partitions its case inputs.
+    pub(crate) original_index: Option<usize>,
     pub(crate) label: String,
     pub(crate) argv: Vec<String>,
     pub(crate) env: Vec<(String, String)>,
@@ -70,6 +72,7 @@ pub(crate) enum Stop {
 impl Case {
     pub(crate) fn new(label: impl Into<String>, argv: &[&str]) -> Case {
         Case {
+            original_index: None,
             label: label.into(),
             argv: argv.iter().map(|s| s.to_string()).collect(),
             env: Vec::new(),
@@ -183,7 +186,7 @@ pub(crate) fn wheel_outcomes(group: &str, tool: &str, cases: &[Case]) -> Vec<Out
         .iter()
         .enumerate()
         .map(|(index, case)| {
-            let cwd = case_dir(group, index);
+            let cwd = case_dir(group, case.original_index.unwrap_or(index));
             let _ = std::fs::remove_dir_all(&cwd);
             std::fs::create_dir_all(cwd.parent().unwrap()).unwrap();
             let files: Vec<Value> = case
@@ -268,7 +271,7 @@ fn walk(root: &Path, dir: &Path, found: &mut BTreeMap<String, Vec<u8>>) {
 
 /// Runs `case` in the port's `program`, in the directory of the wheel's run.
 fn port_outcome(group: &str, program: &str, index: usize, case: &Case) -> Outcome {
-    let cwd = case_dir(group, index);
+    let cwd = case_dir(group, case.original_index.unwrap_or(index));
     let _ = std::fs::remove_dir_all(&cwd);
     std::fs::create_dir_all(&cwd).unwrap();
     for (path, contents) in &case.files {

@@ -8,6 +8,7 @@
 //! (docs/improvements.md, U-650 to U-653, and [`Case::stops`]).
 
 mod common;
+mod icc_partition;
 mod icc_profiles;
 
 use std::time::Duration;
@@ -637,35 +638,30 @@ fn display_profiles_of_the_test_suites() {
     );
 }
 
-#[test]
-fn display_profiles_generated() {
+fn generated_cases() -> Vec<Case> {
     let profiles = generated();
     let cases: Vec<Case> = profiles
         .into_iter()
         .map(|(name, bytes)| with_display(name, bytes))
         .collect();
-    let summary = sweep("ociobakelut_icc_generated", TOOL, PROGRAM, &cases);
-    assert!(
-        summary.writing_files() >= 150,
-        "{}",
-        summary.writing_files()
-    );
-    assert!(
-        deaths(&summary.outcomes) >= 100,
-        "{}",
-        deaths(&summary.outcomes)
-    );
-    assert!(
-        summary.port_stops <= cases.len() / 50,
-        "{}",
-        summary.port_stops
-    );
+    assert!(!cases.is_empty(), "original ICC generated plan is empty");
+    cases
+}
+
+#[test]
+fn display_profiles_generated() {
+    let cases = generated_cases();
+    if let Some(summary) = icc_partition::run("ociobakelut_icc_generated", TOOL, PROGRAM, &cases) {
+        check_generated(&summary, cases.len());
+    }
+}
+
+fn check_generated(summary: &icc_partition::Audit, total: usize) {
+    assert!(summary.writing_files >= 150, "{}", summary.writing_files);
+    assert!(summary.deaths >= 100, "{}", summary.deaths);
+    assert!(summary.port_stops <= total / 50, "{}", summary.port_stops);
     // Each message lcms2 can give about a profile shows up somewhere in the sweep.
-    let errors: Vec<String> = summary
-        .outcomes
-        .iter()
-        .map(|outcome| String::from_utf8_lossy(&outcome.stderr).into_owned())
-        .collect();
+    let errors = &summary.errors;
     for expected in [
         "Wrong input color space on transform",
         "Wrong output color space on transform",
@@ -815,8 +811,7 @@ fn long_messages() {
 
 /// Profiles with something wrong in them, the same ones on each run. A valid start and one
 /// defect reach further into the readers than a random file does.
-#[test]
-fn corrupted_profiles() {
+fn corrupted_cases() -> Vec<Case> {
     let full = matches!(
         std::env::var("OCIO_RS_TIER").as_deref(),
         Ok("full") | Ok("exhaustive")
@@ -852,9 +847,21 @@ fn corrupted_profiles() {
             with_display(format!("corrupt_{index}_{name}"), bytes)
         })
         .collect();
-    let summary = sweep("ociobakelut_icc_corrupted", TOOL, PROGRAM, &cases);
-    assert!(summary.writing_files() >= count / 8);
-    assert!(deaths(&summary.outcomes) >= count / 8);
+    assert_eq!(cases.len(), count, "original ICC corrupted plan count");
+    cases
+}
+
+#[test]
+fn corrupted_profiles() {
+    let cases = corrupted_cases();
+    if let Some(summary) = icc_partition::run("ociobakelut_icc_corrupted", TOOL, PROGRAM, &cases) {
+        check_corrupted(&summary, cases.len());
+    }
+}
+
+fn check_corrupted(summary: &icc_partition::Audit, count: usize) {
+    assert!(summary.writing_files >= count / 8);
+    assert!(summary.deaths >= count / 8);
     assert!(summary.port_stops <= count / 50, "{}", summary.port_stops);
 }
 
@@ -1281,5 +1288,47 @@ fn float_cluts_at_their_last_node() {
             "{}",
             case.label
         );
+    }
+}
+
+/// The required CI join regenerates the ORIGINAL input plans and enforces the
+/// ORIGINAL aggregate assertions over exactly one outcome for every input.
+#[test]
+fn icc_partition_audit() {
+    let generated = generated_cases();
+    let corrupted = corrupted_cases();
+    if let Some(directory) = std::env::var_os("OCIO_RS_ICC_AUDIT_DIR") {
+        let root = std::path::Path::new(&directory);
+        let generated_audit = icc_partition::joined(root, "ociobakelut_icc_generated", &generated);
+        let corrupted_audit = icc_partition::joined(root, "ociobakelut_icc_corrupted", &corrupted);
+        check_generated(&generated_audit, generated.len());
+        check_corrupted(&corrupted_audit, corrupted.len());
+        let profile = if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        };
+        let proof = serde_json::json!({"source": std::env::var("OCIO_RS_ICC_SOURCE").unwrap(),
+        "profile":profile,"tier":"full","exact_once":true,"original_aggregate_assertions_passed":true,
+        "groups":[
+            {"name":"generated","cases":generated.len(),"input_plan_sha256":ocio_testkit::fixtures::sha256_hex(&serde_json::to_vec(&icc_partition::plan(&generated)).unwrap())},
+            {"name":"corrupted","cases":corrupted.len(),"input_plan_sha256":ocio_testkit::fixtures::sha256_hex(&serde_json::to_vec(&icc_partition::plan(&corrupted)).unwrap())}
+        ]});
+        let path = root.join(format!("audit-{profile}.json"));
+        let mut out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap();
+        serde_json::to_writer_pretty(&mut out, &proof).unwrap();
+    } else {
+        // Native input-plan checks also run in ordinary unpartitioned workspace tests.
+        for cases in [&generated, &corrupted] {
+            let plan = icc_partition::plan(cases);
+            assert_eq!(plan.len(), cases.len());
+            let unique: std::collections::BTreeSet<_> =
+                plan.iter().map(|p| p["label"].as_str().unwrap()).collect();
+            assert_eq!(unique.len(), cases.len());
+        }
     }
 }

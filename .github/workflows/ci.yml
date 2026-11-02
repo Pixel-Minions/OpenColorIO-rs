@@ -177,6 +177,14 @@ jobs:
           - linux-release-heavy
           - linux-release-grading
           - linux-release-rest
+          - linux-debug-icc-0
+          - linux-debug-icc-1
+          - linux-debug-icc-2
+          - linux-debug-icc-3
+          - linux-release-icc-0
+          - linux-release-icc-1
+          - linux-release-icc-2
+          - linux-release-icc-3
     steps:
       - name: Free runner disk
         # The hosted image ships toolchains this project never uses; the Rocky builds of the
@@ -204,6 +212,14 @@ jobs:
       - name: Disk left
         if: always()
         run: df -h /
+      - name: Preserve ICC original-input partition reports
+        if: always() && contains(matrix.shard, '-icc-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: icc-ci-${{ matrix.shard }}
+          path: kept/icc-ci/
+          if-no-files-found: error
+          retention-days: 30
       - name: Preserve GPU platform controls and class evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -213,9 +229,56 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  rocky9-icc-audit:
+    name: Linux ICC exact-once audit (${{ matrix.profile }})
+    needs: [rocky9-tests]
+    if: always()
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [debug, release]
+    steps:
+      - name: Free runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/share/swift
+          sudo docker image prune --all --force
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Collect every original ICC input partition
+        uses: actions/download-artifact@v5
+        with:
+          pattern: icc-ci-linux-${{ matrix.profile }}-icc-*
+          path: kept/icc-ci/
+          merge-multiple: true
+      - name: Build the reference image
+        run: docker build -t ocio-rs-rocky9:1 docker/rocky9
+      - name: Regenerate original inputs and enforce original aggregate assertions
+        env:
+          OCIO_RS_TIER: full
+          ICC_PROFILE: ${{ matrix.profile }}
+        run: |
+          scripts/rocky9.sh bash -ec '
+            git config --global --add safe.directory "*"
+            extra=()
+            if [ "$1" = release ]; then extra+=(--release); fi
+            env OCIO_RS_ICC_AUDIT_DIR=/work/kept/icc-ci OCIO_RS_ICC_SOURCE="$(git rev-parse --verify HEAD)" \
+              cargo test --workspace --test ociobakelut_icc_oracle "${extra[@]}" --no-fail-fast icc_partition_audit -- --exact --nocapture
+          ' _ "$ICC_PROFILE"
+      - name: Preserve the complete input-union proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: icc-ci-audit-${{ matrix.profile }}
+          path: kept/icc-ci/
+          if-no-files-found: error
+          retention-days: 30
+
   rocky9:
     name: Linux x86-64 (Rocky Linux 9)
-    needs: [rocky9-checks, rocky9-tests]
+    needs: [rocky9-checks, rocky9-tests, rocky9-icc-audit]
     if: always()
     runs-on: ubuntu-24.04
     steps:
