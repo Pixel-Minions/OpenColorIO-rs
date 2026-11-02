@@ -28,9 +28,14 @@ def input_cases():
     hue_curve = obj("GradingBSplineCurve", [[0.0, 0.8, 0.5, 1.2, 1.0, 1.0], {"enum": "LUM_SAT"}], calls=[["setSlopes", [0.75, 1.0, 0.5]]])
     for kind, name, style, value in [
         ("DYNAMIC_PROPERTY_GRADING_PRIMARY", "GradingPrimaryTransform", "GRADING_LIN",
-         obj("GradingPrimary", [{"enum": "GRADING_LIN"}], [["saturation", 0.75]])),
+         obj("GradingPrimary", [{"enum": "GRADING_LIN"}], [["saturation", 0.75],
+             ["exposure", obj("GradingRGBM", [0.1, -0.2, 0.3, 0.05])],
+             ["offset", obj("GradingRGBM", [0.01, -0.02, 0.03, 0.005])],
+             ["pivotBlack", -0.02], ["clampBlack", -0.5], ["clampWhite", 2.0]])),
         ("DYNAMIC_PROPERTY_GRADING_TONE", "GradingToneTransform", "GRADING_LOG",
-         obj("GradingTone", [{"enum": "GRADING_LOG"}], [["scontrast", 1.125]])),
+         obj("GradingTone", [{"enum": "GRADING_LOG"}], [["scontrast", 1.125],
+             ["blacks", obj("GradingRGBMSW", [1.1, 0.9, 1.2, 1.05, 0.1, 0.2])],
+             ["whites", obj("GradingRGBMSW", [0.95, 1.05, 1.1, 0.99, 0.8, 0.1])]])),
         ("DYNAMIC_PROPERTY_GRADING_RGBCURVE", "GradingRGBCurveTransform", "GRADING_LOG",
          obj("GradingRGBCurve", [{"enum": "GRADING_LOG"}], [["red", curve]])),
         ("DYNAMIC_PROPERTY_GRADING_HUECURVE", "GradingHueCurveTransform", "GRADING_LOG",
@@ -110,6 +115,34 @@ def main():
                 else:
                     assert len(result["states"]) == len(args["updates"]) + 1
                     successful += 1
+    # Platform/wheel-observed IEEE payloads and mixed setter histories. These
+    # are input bits, never expected SDK output values.
+    extended = 0
+    for index, setter in enumerate(["setExposure", "setContrast", "setGamma"]):
+        kind, transform, _ = cases[index]
+        for bits in [0x8000000000000000, 1, 0x7ff0000000000000, 0xfff0000000000000,
+                     0x7ff8000000000123, 0x7ff0000000000123]:
+            donor = {"class": "ExposureContrastTransform", "calls": [[setter, {"f64": bits}]]}
+            for source in ["shader", "processor"]:
+                prove_ordinary(program, {"transform": transform, "optimization": "OPTIMIZATION_NONE", "updates": [
+                    {"from": source, "property": kind, "value_transform": donor},
+                    {"from": source, "property": kind, "value_transform": transform}]})
+                extended += 1
+    for source in ["shader", "processor"]:
+        late = {"transform": cases[0][1], "edge_len": 2, "optimization": "OPTIMIZATION_NONE", "updates": [
+            {"from": source, "property": cases[0][0], "value_transform": cases[0][2]},
+            {"from": source, "property": cases[3][0], "value_transform": cases[3][2]}]}
+        result = prove_ordinary(program, late)
+        assert result["stage"] == "update" and len(result["states"]) == 2
+        legacy, _ = updates.legacy_gpu_updates(late, [])
+        assert legacy["stage"] == "update" and len(legacy["states"]) == 2
+        extended += 1
+    mixed = {"transform": cases[0][1], "optimization": "OPTIMIZATION_NONE", "updates": [
+        {"from": source, "property": cases[index][0], "value_transform": cases[index][2]}
+        for source, index in [("shader", 0), ("processor", 2), ("shader", 1), ("processor", 0), ("shader", 2)]]}
+    prove_ordinary(program, mixed)
+    prove_ordinary(program, dict(mixed, updates=[]))
+    extended += 2
     # A missing property must keep its completed initial state and actual setter failure.
     missing = {"transform": {"class": "MatrixTransform"}, "updates": [
         {"from": "shader", "property": "DYNAMIC_PROPERTY_EXPOSURE", "value_transform": cases[0][2]}]}
@@ -124,7 +157,8 @@ def main():
     assert observed["oracle_native"]["source_key"] == provenance["source_key"]
     print(json.dumps({"ordinary_comparisons": compared, "languages": len(OCIO.GpuLanguage.__members__),
                       "property_types": [c[0] for c in cases], "successful": successful, "exact_refusals": refused,
-                      "missing_property_prefix": True, "legacy_live_update": True, "source_key": provenance["source_key"]}))
+                      "extended_comparisons": extended, "missing_property_prefix": True,
+                      "legacy_live_update": True, "source_key": provenance["source_key"]}))
 
 
 if __name__ == "__main__":

@@ -8,9 +8,14 @@
 
 use ocio_testkit::Oracle;
 use serde_json::Value;
+use std::sync::{Mutex, PoisonError};
+
+// Bound native compiler/Python memory and avoid overlapping first helper builds.
+static SERIAL: Mutex<()> = Mutex::new(());
 
 #[test]
 fn native_post_extraction_states_match_direct_wheel_getters() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
     let lines = Oracle::get().run_script(include_str!("scripts/legacy_gpu_updates.py"), &[]);
     assert_eq!(lines.len(), 1);
     let report: Value = serde_json::from_str(&lines[0]).expect("direct-wheel contract report");
@@ -28,11 +33,13 @@ fn native_post_extraction_states_match_direct_wheel_getters() {
     assert!(report["successful"].as_u64().unwrap() > 0);
     assert_eq!(report["missing_property_prefix"], true);
     assert_eq!(report["legacy_live_update"], true);
+    assert_eq!(report["extended_comparisons"], 40);
     assert_eq!(report["source_key"].as_str().unwrap().len(), 64);
 }
 
 #[test]
 fn native_update_protocol_refuses_changed_initial_states_and_missing_steps() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
     let script = r#"
 import copy, json
 from ocio_oracle import commands, legacy_gpu_updates as updates
@@ -42,7 +49,7 @@ args={"transform":{"class":"ExposureContrastTransform","calls":[["makeExposureDy
          "value_transform":{"class":"ExposureContrastTransform","calls":[["setExposure",1.25]]}}]}
 real=updates._native
 count=0
-for mutation in ["no-initial","drop-step","duplicate-step","text","uniform","texture-blob"]:
+for mutation in ["no-initial","drop-step","duplicate-step","text","uniform","texture-blob", "failed-duplicate", "failed-complete", "failed-stage"]:
     def changed(*a):
         result,blobs,abi=real(*a)
         result=copy.deepcopy(result); blobs=list(blobs)
@@ -51,7 +58,13 @@ for mutation in ["no-initial","drop-step","duplicate-step","text","uniform","tex
         elif mutation=="duplicate-step": result["states"].append(copy.deepcopy(result["states"][-1]))
         elif mutation=="text": result["states"][0]["shader"]["function_name"]="foreign-initial-function"
         elif mutation=="uniform": result["states"][0]["shader"]["uniforms"][0]["value"]^=1
-        else: blobs[0]+=b"foreign bytes"
+        elif mutation=="texture-blob": blobs[0]+=b"foreign bytes"
+        else:
+            result["exception"]={"type":"Exception","message":"injected setter error"}
+            result["stage"]="update"
+            if mutation=="failed-duplicate": result["states"].append(copy.deepcopy(result["states"][-1]))
+            elif mutation=="failed-stage":
+                result["states"].pop(); result["stage"]="extract"
         return result,blobs,abi
     updates._native=changed
     try:
@@ -72,5 +85,5 @@ print(json.dumps({"rejections":count}))
     let lines = Oracle::get().run_script(script, &[]);
     assert_eq!(lines.len(), 1);
     let report: Value = serde_json::from_str(&lines[0]).unwrap();
-    assert_eq!(report["rejections"], 9);
+    assert_eq!(report["rejections"], 12);
 }

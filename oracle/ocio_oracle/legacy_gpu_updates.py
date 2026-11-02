@@ -129,7 +129,10 @@ def legacy_gpu_updates(args, blobs):
         expected = {key: value for key, value in initial.items() if key != "oracle_native"}
         if first != expected or out[:len(initial_blobs)] != initial_blobs:
             raise ValueError("native dynamic initial state does not match legacy_gpu_shader")
-        if "exception" not in result and len(result["states"]) != len(args["updates"]) + 1:
+        if "exception" in result:
+            if result.get("stage") != "update" or not 1 <= len(result["states"]) <= len(args["updates"]):
+                raise ValueError("native dynamic helper returned an impossible failed-update prefix")
+        elif len(result["states"]) != len(args["updates"]) + 1:
             raise ValueError("native dynamic helper dropped or duplicated update states")
     provenance.update(abi)
     result["oracle_native"] = provenance
