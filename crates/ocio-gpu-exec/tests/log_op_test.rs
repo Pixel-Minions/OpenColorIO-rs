@@ -4,7 +4,7 @@
 //! `tests/gpu/LogOp_test.cpp` @ v2.5.2: all twenty-two cases, four legacy.
 //! Uses the verified SSE2 thresholds and expf(1.0f) platform input from log_cases.
 //! Linux retains camera NaN inputs; upstream disables them only under __APPLE__.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

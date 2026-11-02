@@ -17,6 +17,11 @@
 #
 # OCIO_RS_TIER (the test tier), RUST_TEST_THREADS and OCIO_RS_ORACLE_NO_CACHE (no oracle response
 # cache: CI sets it) pass through to the container when they are set here.
+#
+# OCIO_RS_CORPUS_ROOT, when set here, is mounted read-only at /corpus and names it in the
+# container; OCIO_RS_CORPUS and the sweep's other OCIO_RS_CORPUS_* settings pass through
+# (crates/ocio/tests/corpus_oracle.rs). OCIO_RS_STUDIO_CORPUS never does: private configs stay
+# on the host.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="ocio-rs-rocky9:1"
@@ -78,6 +83,11 @@ if [ -f "$root/$submodule/.git" ]; then
     esac
 fi
 
+corpus_args=()
+if [ -n "${OCIO_RS_CORPUS_ROOT:-}" ]; then
+    corpus_args+=(-v "$(host_path "$OCIO_RS_CORPUS_ROOT"):/corpus:ro" -e OCIO_RS_CORPUS_ROOT=/corpus)
+fi
+
 # Git Bash on Windows rewrites paths; keep /work and the labels as they are.
 export MSYS_NO_PATHCONV=1
 # Labels are set only when the volume is created; `docker volume create` keeps an existing one.
@@ -94,11 +104,11 @@ docker run --rm -i $tty_flag \
     -v "$volume:/work/target/rocky9" \
     -v ocio-rs-cargo-registry:/opt/cargo/registry \
     -v ocio-rs-uv-cache:/opt/uv/cache \
-    ${extra_mounts[@]+"${extra_mounts[@]}"} \
+    ${extra_mounts[@]+"${extra_mounts[@]}"}     ${corpus_args[@]+"${corpus_args[@]}"} \
     -e CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-auto}" \
     -e OCIO_RS_TIER \
     -e RUST_TEST_THREADS \
-    -e OCIO_RS_ORACLE_NO_CACHE \
+    -e OCIO_RS_ORACLE_NO_CACHE     -e OCIO_RS_CORPUS     -e OCIO_RS_CORPUS_ONLY     -e OCIO_RS_CORPUS_JOBS     -e OCIO_RS_CORPUS_CACHE     -e OCIO_RS_CORPUS_REPORT \
     -e EGL_PLATFORM=surfaceless \
     -e LIBGL_ALWAYS_SOFTWARE=true \
     -e GALLIUM_DRIVER=llvmpipe \

@@ -12,6 +12,8 @@
 //!   shader description driven through the calls Python has.
 //! - [`processor_ops`]: typed requests and replies of the oracle's `processor_ops` command,
 //!   what the optimizer makes of a processor, each transform with all its getters.
+//! - [`shader_compile`]: compile checks of generated shaders with glslang, fxc and dxc, and the
+//!   corpus of the wheel's shaders they run over.
 //! - [`transform_text`]: typed requests and replies of the oracle's `transform_text` command,
 //!   transforms' `repr()`, validation and equality.
 //! - [`fixtures`]: committed, oracle-generated text fixtures, verified against
@@ -34,6 +36,7 @@
 
 pub mod battery;
 pub mod compare;
+pub mod corpus;
 pub mod crt;
 pub mod fixtures;
 pub mod gpu;
@@ -47,6 +50,7 @@ pub mod oracle_values;
 pub mod paths;
 pub mod probe;
 pub mod processor_ops;
+pub mod shader_compile;
 pub mod transform_text;
 pub mod upstream;
 

@@ -5,7 +5,7 @@
 //! Expected values are the input image, uniform getter inputs and uploaded
 //! texels, written out by platform GLSL. No OCIO CPU renderer is a reference.
 //! P7-3: execution is on Rocky llvmpipe only; Windows compiles this empty target.
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", not(feature = "shader-corpus")))]
 #![forbid(unsafe_code)]
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

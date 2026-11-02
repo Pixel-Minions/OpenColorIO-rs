@@ -8,6 +8,7 @@ use std::process::{Command, ExitCode};
 
 use parity::{Baseline, RatchetMode};
 
+mod compile_shaders;
 mod fixtures;
 mod gate;
 mod guards;
@@ -48,6 +49,9 @@ Checking and landing chunks:
   test-shard <shard> [--dry-run] | --list
                               one CI test job's share of `cargo test --workspace`
                               (.github/workflows/ci.yml; `cargo xtask test-shard --help`)
+  compile-shaders <check>...  compile the wheel's shaders with glslang (Rocky Linux 9) or fxc
+                              and dxc (Windows); <check>: suite_*, family_*
+                              (`cargo xtask compile-shaders --help`)
   merge-register <base> <ours> <theirs>
                               git's merge driver for docs/improvements.md (.gitattributes:
                               merge=ocio-register): merges it entry by entry into <ours>, an
@@ -119,6 +123,11 @@ fn main() -> ExitCode {
             Ok(())
         }
         ["test-shard", rest @ ..] => shards::run(rest),
+        ["compile-shaders", "--help" | "-h"] => {
+            print!("{}", compile_shaders::USAGE);
+            Ok(())
+        }
+        ["compile-shaders", rest @ ..] => compile_shaders::run(rest),
         ["py-build", "--help" | "-h"] => {
             print!("{}", py::USAGE);
             Ok(())

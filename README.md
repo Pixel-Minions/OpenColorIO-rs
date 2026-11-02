@@ -78,8 +78,8 @@ one.
 - **No C++ in your stack.** The whole build is `cargo build`: no CMake, no C++ dependency
   builds, no DLL or ABI mismatches, and no C++ exceptions crossing into Rust.
 - **Safe with untrusted files.** Config and LUT parsers are written without `unsafe` code, and
-  they will be fuzzed against the official library. Known data races in upstream get fixed
-  without changing any output.
+  fuzzing them against the official library is planned for after 1.0.0. Known data races in
+  upstream get fixed without changing any output.
 - **Room to be faster without changing results.** Planned: multithreaded processing, caching
   of expensive setup (such as the ACES 2.0 tables), and more SIMD. Each is only allowed if it
   is bit-identical to the exact version, and the tests enforce that.
@@ -92,7 +92,7 @@ one.
 
 ## Progress
 
-Status as of 2026-11-01: **milestones M0, M1, M2, M3 and M4 are complete**, about 93% of the
+Status as of 2026-11-02: **milestones M0, M1, M2, M3 and M4 are complete**, about 93% of the
 planned work (910 of 913 upstream source files ported or reviewed not applicable; 1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
 all 1,191; 384 of 384 upstream Python tests pass unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
@@ -274,14 +274,14 @@ shader text are compared with the official library.
 
 Each milestone completes a section of OCIO with exact oracle checks:
 
-| Milestone | Section | Status (2026-11-01) | Version |
+| Milestone | Section | Status (2026-11-02) | Version |
 |---|---|---|---|
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
 | **M4** | The `PyOpenColorIO`-compatible Python module | **Done:** all 384 upstream Python tests, SystemMonitors and complete module metadata checks pass on both reference platforms, within the approved [D-16 scope](docs/deviations.md) | `0.5.0` |
-| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. Initial legacy shader/texture snapshots are checked; remaining: library completion, post-extraction legacy dynamic updates, complete SDE qualification and release checks | `1.0.0` |
+| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. All 46 public real-world configs match the wheel on both platforms. Every shader of the 264 upstream GPU tests compiles on real compilers except 36 in GLSL ES 1.0; those and the family tests' shaders that fail are upstream's own text (open item P7-9). Initial legacy shader/texture snapshots are checked; remaining: library completion, post-extraction legacy dynamic updates, complete SDE qualification and release checks | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
 
@@ -316,6 +316,7 @@ cargo xtask ci --main              # also: the parity dashboard and the ratchet 
 BSD-3-Clause, the same license as OpenColorIO. This project is a derivative work of
 OpenColorIO (Copyright Contributors to the OpenColorIO Project); [`NOTICE`](NOTICE) is its
 notice. [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) lists the third-party code it ports,
-with each notice: Imath, yaml-cpp, pystring, expat, the Microsoft C++ Standard Library,
-SampleICC, and the OpenColorIO files that carry their own notices. OpenColorIO-rs is not
+with each notice: Imath, yaml-cpp, pystring, expat, minizip-ng, the Microsoft C++ Standard
+Library, Little CMS, SampleICC, pybind11, and the OpenColorIO files that carry their own
+notices. It also lists the Rust crates a built wheel or tool contains. OpenColorIO-rs is not
 affiliated with the Academy Software Foundation.

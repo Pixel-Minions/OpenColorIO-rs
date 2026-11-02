@@ -73,6 +73,12 @@ jobs:
         run: cargo xtask oracle check-all
       - name: The Python module (clippy and tests of ocio-py's python feature, upstream's Python suite)
         run: cargo xtask py-check
+      - name: Compile the GPU suite's HLSL (fxc, dxc; P7-5)
+        run: cargo xtask compile-shaders suite_hlsl_fxc suite_hlsl_dxc
+      # Fails on upstream's own text: docs/cards/phase7.md, open owner item P7-9.
+      - name: "OPEN P7-9: compile the family oracle tests' HLSL"
+        continue-on-error: true
+        run: cargo xtask compile-shaders family_
 
   windows-tests:
     name: Windows tests (${{ matrix.shard }})
@@ -161,6 +167,14 @@ jobs:
             cargo xtask oracle check-all
             cargo xtask py-check
           '
+      - name: Compile the GPU suite's GLSL (glslang; P7-5)
+        run: >-
+          scripts/rocky9.sh cargo xtask compile-shaders suite_glsl_1_2 suite_glsl_1_3
+          suite_glsl_4_0 suite_glsl_es_3_0 suite_glsl_vk_4_6
+      # Fails on upstream's own text: docs/cards/phase7.md, open owner item P7-9.
+      - name: "OPEN P7-9: compile the family oracle tests' GLSL and the suite's GLSL ES 1.0"
+        continue-on-error: true
+        run: scripts/rocky9.sh cargo xtask compile-shaders suite_glsl_es_1_0 family_
 
   rocky9-tests:
     name: Linux tests (${{ matrix.shard }})

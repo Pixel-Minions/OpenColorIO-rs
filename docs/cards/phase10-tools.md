@@ -2,7 +2,9 @@
 
 Port the four in-scope tools of OCIO 2.5.2 into `crates/ocio-tools`: `ociocheck`,
 `ociochecklut`, `ociowrite` and `ociobakelut`, as `crates/ocio-tools/src/bin/<tool>.rs`, plus
-what they use from `src/apputils/`. PLAN.md §4 scopes the other apps out.
+what they use from `src/apputils/`. The official wheel's eight other native tools are out of
+scope for 1.0.0 (owner decision 2026-11-01, G8; recorded in PLAN.md section 4), and upstream's
+Python apps are out of scope altogether (PLAN.md section 4).
 
 The expected result is what the real binary of the `opencolorio==2.5.2` wheel does on the same
 platform: stdout, stderr, exit code and the files it writes, byte for byte, on Windows and

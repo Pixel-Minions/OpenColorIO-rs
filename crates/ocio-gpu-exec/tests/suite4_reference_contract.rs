@@ -3,7 +3,7 @@
 
 //! Regression for the Suite4 CPU reference stream's property ownership.
 //! Expected pixels come from independent fresh wheel processors for each state.
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", not(feature = "shader-corpus")))]
 #![forbid(unsafe_code)]
 
 use ocio_gpu_exec::gpu_unit_test::GpuUnitTest;

@@ -4,7 +4,7 @@
 //! `tests/gpu/CDLOp_test.cpp` @ v2.5.2: all fifteen cases, including two legacy.
 //! The verified table retains each source threshold, range and special setting.
 //! Needs the actual reviewed/committed create.major_version oracle option.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

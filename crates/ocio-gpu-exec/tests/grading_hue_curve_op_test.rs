@@ -3,7 +3,7 @@
 
 //! Port of `tests/gpu/GradingHueCurveOp_test.cpp` @ v2.5.2.
 //! Original curve/input data; actual uncached wheel CPU and shader references.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

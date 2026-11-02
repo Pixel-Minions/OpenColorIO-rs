@@ -3,7 +3,7 @@
 
 //! Port of `tests/gpu/GradingToneOp_test.cpp` @ v2.5.2.
 //! Original input values; actual uncached wheel dynamic CPU stream and shaders.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::{Arc, OnceLock};

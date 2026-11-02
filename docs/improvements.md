@@ -1424,7 +1424,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   original's child too.
 - **Who notices:** code and Python scripts that copy a group and then change its children.
 - **A fix:** copy the children as well.
-- **Status:** to be matched when `GroupTransform` is ported (1.8a).
+- **Status:** not matched in the Rust library, by the owner's API decision of 2026-10-01: its
+  group owns its children, so a copy copies them (`crates/ocio/src/transforms/group_transform.rs`).
+  Matched in Python: a group's copy shares its children's nodes, as upstream's
+  (`crates/ocio-py/src/py_transform.rs`, `create_editable_copy`; `transforms_oracle.rs`).
+  Deviation D-20.
 
 ### I-14. Metadata attribute names match exactly when set, but ignoring case when read
 
@@ -1932,6 +1936,54 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   wheels' actual validation error, in `p7-legacy` (7.1a,
   `crates/ocio-ops/src/ops/noop/no_ops.rs`), checked by
   `a_zero_edge_lattice_has_the_wheels_finalization_error`. No invalid memory access is needed.
+
+### I-810. Whole numbers from 1e9 or 1e17 up make shaders that don't compile
+
+- **Upstream:** `getFloatString` (`GpuShaderUtils.cpp:21-35 @ v2.5.2`) adds a `.` to any value
+  with no fractional part. Past the digits `max_digits10` prints (9 for a float, 17 for a
+  double), the stream writes scientific notation, so the literal becomes `1.00000002e+30.` or
+  `1.7976931348623157e+308.`, which no shading language accepts.
+- **Who notices:** a matrix, range, exposure or similar parameter that is a whole number of at
+  least about 1e9 (floats) or 1e17 (doubles). `cargo xtask compile-shaders` shows 207 shaders of
+  the family oracle tests failing in every compiled language for this, 567 in GLSL 4.0; no
+  shader of upstream's 264 GPU tests is affected.
+- **A fix:** add the `.` only when the text holds neither `.` nor `e`. That changes the text and
+  the cache ID of those shaders.
+- **Status:** matched (`p1-engine`; text parity holds). The compile failures are open: owner item
+  P7-9 (`docs/cards/phase7.md`).
+
+### I-811. A NaN or infinite parameter makes a shader that doesn't compile
+
+- **Upstream:** `getFloatString` (`GpuShaderUtils.cpp:21-35 @ v2.5.2`) writes what the stream
+  prints for a value that isn't finite: `nan`, `inf`, `-inf`, and on Windows `-nan(ind)` (I-7's
+  platform difference). No shading language has those literals, so the shader refuses to compile
+  with an undeclared identifier.
+- **Who notices:** a config or transform with a non-finite parameter that reaches a shader as a
+  constant, as the wheel writes it: 811 shaders of the family oracle tests fail in every compiled
+  language for this (826 in GLSL 4.0), all from their generated NaN and infinite parameters; no
+  shader of upstream's 264 GPU tests is affected.
+- **A fix:** write an expression a compiler takes (`(0.0/0.0)`, `(1.0/0.0)`) or refuse the
+  parameter when the shader is extracted. Either changes the text or turns a shader into an
+  error.
+- **Status:** matched (`p1-engine`; text parity holds). The compile failures are open: owner item
+  P7-9 (`docs/cards/phase7.md`).
+
+### I-812. Three kinds of shader text that GLSL ES 1.0 doesn't accept
+
+- **Upstream:** `GPU_LANGUAGE_GLSL_ES_1_0` shares the GLSL path, which writes what ES 1.00 lacks:
+  array constructors for constant tables (`declareFloatArrayConst` and `declareIntArrayConst`,
+  `GpuShaderUtils.cpp:547-556, 610-618 @ v2.5.2`, used by the ACES 2 tables and the hue and RGB
+  curve writers) and literals with an `f` suffix (`FixedFunctionOpGPU.cpp:483, 664, 1103-1118`).
+  One upstream test's function name, `_another_func_name__`, also holds a `__`, which ES reserves
+  (`Config_test.cpp:215`).
+- **Who notices:** GLSL ES 1.0 clients of ACES 2 and the grading curves. 36 of the 210 distinct
+  shaders of upstream's 264 GPU tests fail in glslang: FixedFunction 22, GradingHueCurve 8,
+  GradingRGBCurve 7 (a shader can belong to several tests), Config 1. 85 family shaders too. GLSL
+  ES 3.0 and every other language compile these shaders.
+- **A fix:** write ES 1.00 tables as assignments in a function or as uniform data, and drop the
+  suffix. That changes ES 1.0's text and cache IDs only.
+- **Status:** matched (text parity holds). The compile failures are open: owner item P7-9
+  (`docs/cards/phase7.md`).
 
 ## Python module (`ocio-py`)
 

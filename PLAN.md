@@ -211,6 +211,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 **Out of scope:**
 - the Java binding and the vendor plugins;
 - upstream's Python apps;
+- for 1.0.0, the eight other native tools of the official wheel: `ocioarchive`, `ocioconvert`, `ociocpuinfo`, `ociodisplay`, `ociolutimage`, `ociomakeclf`, `ociomergeconfigs` and `ocioperf`. 1.0.0 has the four tools of section 9 (owner decision 2026-11-01, G8);
 - the Sphinx docs site;
 - a C ABI, unless something later needs one.
 - compatible native C++ ABI/type_info negotiation and native pointer exchange
@@ -242,6 +243,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **D11** | Platforms | Windows x86-64 and Linux x86-64 (Rocky Linux 9, glibc 2.34), both bit-exact reference platforms from Phase 0. ARM and macOS come later | Decided |
 | **D12** | Output across platforms | Do what OCIO does on each platform: where OCIO is byte-identical across Windows and Linux, so is the port; where OCIO differs, the port differs the same way | Decided |
 | **D13** | Python module | Import name `PyOpenColorIO`, so existing scripts run unchanged. A standalone wheel, which Rust applications can also embed (`append_to_inittab`), sharing objects with the host. It can't share a Python environment with the official wheel, so the oracle gets its own | Decided |
+| **D14** | Python wheel for 1.0.0 | Python 3.13 only, under a distribution name separate from `opencolorio`. The name and the hosting are not decided yet | Decided 2026-11-01, name and hosting open |
 
 ---
 
@@ -422,7 +424,7 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
 
 ### Robustness and performance
 
-- **Fuzzing.** `cargo-fuzz` targets for every parser, plus differential fuzzing that checks we accept and reject the same inputs as the oracle. Upstream's size limits apply: 1D LUTs up to 300,000 entries, 3D LUTs up to 129³.
+- **Fuzzing, after 1.0.0 (owner decision 2026-11-01, G6).** Not required for 1.0.0. Planned for after it: `cargo-fuzz` targets for every parser, plus differential fuzzing that checks we accept and reject the same inputs as the oracle. Upstream's size limits apply: 1D LUTs up to 300,000 entries, 3D LUTs up to 129³.
 - **Benchmarks.** criterion benchmarks, compared against:
   - the wheel's `ocioperf` on the same machine.
 
@@ -438,10 +440,11 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
   - The port can run any profile on any CPU, but the wheel only runs the kernel its CPU selects.
   - So the CPU-dependent tests (`cargo cpu-tests`) also run under Intel SDE, on emulated Nehalem (SSE2 kernels), Sandy Bridge (AVX), Haswell (AVX2 with slow gather), Skylake (AVX2) and Skylake server (AVX-512), on both platforms (`scripts/sde.sh`, `.github/workflows/sde.yml`).
   - They run nightly and on PRs that touch the kernels, the test kit or the oracle.
+  - **Final qualification (owner decision 2026-11-01, G4).** One full SDE run on the release commit, then a rerun of only the affected CPU profiles if needed. `docs/release-checklist.md` holds the dispatch until the release commit exists.
 - **Also in CI:**
   - the minimum Rust version;
   - Miri (Rust's undefined-behavior checker) on `unsafe` modules;
-  - quick fuzz runs and nightly sweeps;
+  - nightly sweeps, and quick fuzz runs after 1.0.0;
   - the Python wheel build and upstream's Python suite.
 
 ---
@@ -538,7 +541,7 @@ print(OCIO.__version__)                       # "2.5.2"
 | ICC | The subset of SampleICC 1.2.6 OCIO uses, translated, with its notice | OCIO reads only matrix/TRC profiles (P4-4, decided 2026-10-07) |
 | Python | `pyo3` 0.29 and `numpy` 0.29, pinned exactly; `maturin` 1.15 for the release wheel (Phase 10) | Embedded via `append_to_inittab`; a standalone module for CPython 3.13 only (`cp313`, not `abi3`), built by `cargo xtask py-build` until the release (P6-1 to P6-5, decided 2026-10-17, `docs/cards/phase6.md`) |
 | GPU checks | glow 0.17 + khronos-egl 6.0 (dynamic libloading 0.8.9), Mesa llvmpipe; glslang, Windows SDK fxc/dxc | Test-only `ocio-gpu-exec`; owner decisions P7-2 through P7-5, 2026-10-25 |
-| Tests, benchmarks, CLI | `proptest`, `cargo-fuzz`, `cargo-mutants`, `criterion`, `clap` | No tolerance crates: comparisons are exact |
+| Tests, benchmarks, CLI | `proptest`, `cargo-fuzz` (after 1.0.0), `cargo-mutants`, `criterion`, `clap` | No tolerance crates: comparisons are exact |
 
 ---
 
@@ -660,7 +663,7 @@ All 10 shading languages already come with each op family (Phases 1–5). This p
 - **SIMD kernels** for every numeric profile, each bit-identical to its scalar profile.
 - **Pixel packing:** SIMD pack/unpack.
 - **Parallel apply.**
-- **Speed target:** within 10% of C++ OCIO on the same machine (`ocioperf`).
+- **Speed target:** within 10% of C++ OCIO on the same machine (`ocioperf`). The misses listed in `docs/cards/phase8.md` are accepted for 1.0.0 (owner decision 2026-11-01, G13).
 
 ### Phase 9 — Remaining library surface (~9 pw)
 
@@ -673,7 +676,7 @@ All 10 shading languages already come with each op family (Phases 1–5). This p
 
 - The dev tools.
 - The docs.
-- The release: `v1.0.0` (`1.0.0+ocio.2.5.2`) is tagged when §3 holds.
+- The release: `v1.0.0` (`1.0.0+ocio.2.5.2`) is tagged when §3 holds, by the steps of `docs/release-checklist.md`.
 
 ---
 
@@ -756,7 +759,7 @@ Here is the process for moving from one OCIO release to the next (for example, 2
 | 2–3 agents make the calendar long | Medium | Medium | Complete sections land in order, so consumers can adopt early; re-estimate after Phase 1 |
 | Review load | Low | Medium | You asked not to plan around your review time. Review stays narrow (API, waivers, deviations); the verifier agent reviews every chunk; chunks are small |
 | Licensing, if the code is ever shared | Low | Medium | BSD-3 with upstream's notice from day one (D9) |
-| Malicious configs or LUT files | Medium | High | Fuzzing, size limits, no `unsafe` in parsers |
+| Malicious configs or LUT files | Medium | High | Size limits, no `unsafe` in parsers; fuzzing after 1.0.0 (G6) |
 
 ---
 

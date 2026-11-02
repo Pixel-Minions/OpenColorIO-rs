@@ -21,5 +21,10 @@ pub(super) fn files_directory() -> String {
         .unwrap();
     assert!(path.is_absolute());
     assert!(path.is_dir());
-    path.to_str().unwrap().to_owned()
+    let path = path.to_str().unwrap();
+    // The text-only build runs on Windows too, whose canonical paths are verbatim. Neither
+    // library's path handling reads those, and YAML takes forward slashes.
+    path.strip_prefix(r"\\?\")
+        .unwrap_or(path)
+        .replace('\\', "/")
 }

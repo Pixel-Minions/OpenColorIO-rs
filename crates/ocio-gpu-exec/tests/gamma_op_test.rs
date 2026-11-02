@@ -4,7 +4,7 @@
 //! `tests/gpu/GammaOp_test.cpp` @ v2.5.2: fourteen verified cases, two legacy.
 //! SSE2 thresholds are upstream's selected branch for both pinned wheels.
 //! Needs the actual reviewed/committed create.major_version oracle option.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

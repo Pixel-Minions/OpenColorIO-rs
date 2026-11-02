@@ -4,7 +4,7 @@
 //! `tests/gpu/MatrixOp_test.cpp` @ v2.5.2: all ten cases, including eight legacy.
 //! Wheel CPU expectations are one uncached batch; shaders are actual ordinary or
 //! native-legacy wheel outputs, rendered bit-for-bit on the same GL context.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

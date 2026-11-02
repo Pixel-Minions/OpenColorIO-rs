@@ -3,7 +3,7 @@
 
 //! Port of `tests/gpu/Config_test.cpp` @ v2.5.2: all5 cases.
 //! Preserve CreateFromStream/validate/getProcessor(raw,dst), default cache ON.
-#![cfg(target_os = "linux")]
+#![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
 
 use std::sync::OnceLock;

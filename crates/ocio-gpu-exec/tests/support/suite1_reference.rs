@@ -5,7 +5,7 @@
 //! These helpers only transport actual CPU/shader results. GpuUnitTest owns the
 //! exact wheel-shader/same-context comparison and upstream numerical checks.
 
-use ocio_gpu_exec::gpu_unit_test::{GpuUnitTest, ReferenceRun};
+use ocio_gpu_exec::gpu_unit_test::{GpuUnitTest, ReferenceRun, WheelRequest};
 use ocio_testkit::Oracle;
 use ocio_testkit::gpu::GpuShaderReply;
 use ocio_testkit::oracle::{BatchCall, f32_to_bytes};
@@ -24,6 +24,23 @@ fn finite_parameters(value: &Value) -> bool {
         Value::Object(m) => m.iter().all(|(key, value)| {
             !key.to_ascii_lowercase().contains("bits") && finite_parameters(value)
         }),
+    }
+}
+
+/// The wheel's shader request of `test`.
+fn shader_request(test: &GpuUnitTest, processor: &Value) -> WheelRequest {
+    let mut args = processor.clone();
+    args["shader"] = test.shader_settings.json();
+    if test.legacy_shader {
+        args["edge_len"] = json!(test.legacy_shader_lut_edge);
+    }
+    WheelRequest {
+        cmd: if test.legacy_shader {
+            "legacy_gpu_shader"
+        } else {
+            "gpu_shader"
+        },
+        args,
     }
 }
 
@@ -73,18 +90,10 @@ pub(super) fn batch(tests: &[GpuUnitTest], processors: &[Value]) -> Vec<Referenc
             args: processor.clone(),
             blobs: vec![input.as_slice()],
         });
-        let mut gpu = processor.clone();
-        gpu["shader"] = test.shader_settings.json();
-        if test.legacy_shader {
-            gpu["edge_len"] = json!(test.legacy_shader_lut_edge);
-        }
+        let request = shader_request(test, processor);
         calls.push(BatchCall {
-            cmd: if test.legacy_shader {
-                "legacy_gpu_shader"
-            } else {
-                "gpu_shader"
-            },
-            args: gpu,
+            cmd: request.cmd,
+            args: request.args,
             blobs: Vec::new(),
         });
         if let Some(finite) = finite {
@@ -103,7 +112,12 @@ pub(super) fn batch(tests: &[GpuUnitTest], processors: &[Value]) -> Vec<Referenc
     );
     let mut answers = answers.into_iter();
     let mut out = Vec::new();
-    for ((test, &entries), finite_input) in tests.iter().zip(&entries).zip(&finite_inputs) {
+    for (((test, processor), &entries), finite_input) in tests
+        .iter()
+        .zip(processors)
+        .zip(&entries)
+        .zip(&finite_inputs)
+    {
         let cpu = answers
             .next()
             .expect("CPU response")
@@ -186,6 +200,7 @@ pub(super) fn batch(tests: &[GpuUnitTest], processors: &[Value]) -> Vec<Referenc
             finite_cpu,
             gpu,
             shader_settings: test.shader_settings.clone(),
+            wheel_request: shader_request(test, processor),
         });
     }
     assert!(answers.next().is_none());
