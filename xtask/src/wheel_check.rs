@@ -1253,6 +1253,27 @@ mod tests {
         assert!(!installed_found(&report).is_empty());
     }
 
+    /// Both required checks wait for the wheel's job, and no workflow can publish it.
+    #[test]
+    fn ci_checks_the_wheel_on_both_platforms_and_publishes_nothing() {
+        let workflows = crate::root().join(".github/workflows");
+        let mut wheel_checks = 0;
+        for entry in std::fs::read_dir(&workflows).unwrap() {
+            let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+            wheel_checks += text.matches("cargo xtask wheel-check").count();
+            for command in [
+                "uv publish",
+                "maturin publish",
+                "twine",
+                "PYPI_",
+                "pypi-token",
+            ] {
+                assert!(!text.contains(command), "{command}");
+            }
+        }
+        assert_eq!(wheel_checks, 2);
+    }
+
     #[test]
     fn paths_are_under_a_directory_only_at_a_separator() {
         assert!(is_under("/work/a", "/work"));

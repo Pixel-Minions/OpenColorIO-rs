@@ -1097,7 +1097,9 @@ mod tests {
                 .count(),
             2
         );
-        assert!(text.contains("needs: [windows-checks, windows-tests]"));
-        assert!(text.contains("needs: [rocky9-checks, rocky9-tests, rocky9-icc-audit]"));
+        assert!(text.contains("needs: [windows-checks, windows-tests, windows-wheel]"));
+        assert!(
+            text.contains("needs: [rocky9-checks, rocky9-tests, rocky9-icc-audit, rocky9-wheel]")
+        );
     }
 }
