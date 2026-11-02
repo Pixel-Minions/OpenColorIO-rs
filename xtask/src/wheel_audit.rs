@@ -253,6 +253,9 @@ Version needs section '.gnu.version_r' contains 2 entries:\n\
             ("bin/c", needs(&["libc.so.6"], &["GLIBC_2.9"])),
         ]));
         assert_eq!(got, Ok("manylinux_2_34_x86_64".to_string()));
+        // A three-part version counts by its minor too.
+        let got = true_platform(&binaries(&[("a", needs(&[], &["GLIBC_2.3.4"]))]));
+        assert_eq!(got, Ok("manylinux_2_3_x86_64".to_string()));
     }
 
     #[test]
@@ -265,8 +268,15 @@ Version needs section '.gnu.version_r' contains 2 entries:\n\
             ("libc.so.6", "GCC_7.1.0"),
             ("libc.so.6", "GLIBC_PRIVATE"),
         ] {
-            let got = true_platform(&binaries(&[("a", needs(&[library], &[version]))]));
-            assert!(got.is_err(), "{library} {version}: {got:?}");
+            // With a real GLIBC version too, so that only this entry can be the reason.
+            let versions = [version, "GLIBC_2.34"];
+            let got = true_platform(&binaries(&[("a", needs(&[library], &versions))]));
+            assert!(
+                got.as_ref().is_err_and(
+                    |p| p.len() == 1 && (p[0].contains(library) || p[0].contains(version))
+                ),
+                "{library} {version}: {got:?}"
+            );
         }
         assert!(true_platform(&BTreeMap::new()).is_err());
         assert!(true_platform(&binaries(&[("a", needs(&["libc.so.6"], &[]))])).is_err());
