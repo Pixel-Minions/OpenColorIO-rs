@@ -124,6 +124,9 @@ Above 1.10:
   op's row copy: ocioperf's in place loop is 1.01, and the integer depths are 0.83-1.07. A kernel
   from one buffer to another would close that one, as chunk 12b did for Matrix, Lut1D and Log.
 
+**Accepted for 1.0.0** (owner decision 2026-11-01, G13): every miss in this list. They don't block
+the release.
+
 What the work showed:
 - **The instructions themselves.** `addps`, `mulps` and the scalar forms through `asm!` have the
   operand order fixed, as the C++ has. `sse_add` and `sse_mul` as instructions took the scalar

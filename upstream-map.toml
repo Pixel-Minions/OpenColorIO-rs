@@ -2667,7 +2667,7 @@ note = "build system"
 path = "src/apps/ocioarchive/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
 
 [[file]]
 path = "src/apps/ociobakelut/CMakeLists.txt"
@@ -2729,7 +2729,7 @@ note = "build system"
 path = "src/apps/ocioconvert/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
 
 [[file]]
 path = "src/apps/ociocpuinfo/CMakeLists.txt"
@@ -2741,7 +2741,7 @@ note = "build system"
 path = "src/apps/ociocpuinfo/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
 
 [[file]]
 path = "src/apps/ociodisplay/CMakeLists.txt"
@@ -2753,7 +2753,7 @@ note = "build system"
 path = "src/apps/ociodisplay/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
 
 [[file]]
 path = "src/apps/ociolutimage/CMakeLists.txt"
@@ -2765,7 +2765,7 @@ note = "build system"
 path = "src/apps/ociolutimage/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
 
 [[file]]
 path = "src/apps/ociomakeclf/CMakeLists.txt"
@@ -2777,7 +2777,7 @@ note = "build system"
 path = "src/apps/ociomakeclf/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
 
 [[file]]
 path = "src/apps/ociomergeconfigs/CMakeLists.txt"
@@ -2789,7 +2789,7 @@ note = "build system"
 path = "src/apps/ociomergeconfigs/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
 
 [[file]]
 path = "src/apps/ocioperf/CMakeLists.txt"
@@ -2801,7 +2801,7 @@ note = "build system"
 path = "src/apps/ocioperf/main.cpp"
 kind = "app"
 status = "n/a"
-note = "app not in scope (PLAN.md §4; dev tools are ociocheck, ociochecklut, ociowrite, ociobakelut)"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
 
 [[file]]
 path = "src/apps/ocioview/main.py"
@@ -3429,7 +3429,7 @@ path = "src/apputils/measure.h"
 kind = "app"
 target = ["crates/ocio-tools/src/measure.rs"]
 status = "n/a"
-note = "used only by ocioconvert, ocioperf and ociolutimage, which are out of scope (PLAN.md §4)"
+note = "used only by ocioconvert, ocioperf and ociolutimage, which are out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8)"
 
 [[file]]
 path = "src/apputils/strutil.cpp"

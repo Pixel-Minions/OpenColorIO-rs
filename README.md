@@ -78,8 +78,8 @@ one.
 - **No C++ in your stack.** The whole build is `cargo build`: no CMake, no C++ dependency
   builds, no DLL or ABI mismatches, and no C++ exceptions crossing into Rust.
 - **Safe with untrusted files.** Config and LUT parsers are written without `unsafe` code, and
-  they will be fuzzed against the official library. Known data races in upstream get fixed
-  without changing any output.
+  fuzzing them against the official library is planned for after 1.0.0. Known data races in
+  upstream get fixed without changing any output.
 - **Room to be faster without changing results.** Planned: multithreaded processing, caching
   of expensive setup (such as the ACES 2.0 tables), and more SIMD. Each is only allowed if it
   is bit-identical to the exact version, and the tests enforce that.
