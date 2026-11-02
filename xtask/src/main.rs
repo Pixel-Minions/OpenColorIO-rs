@@ -9,6 +9,8 @@ use std::process::{Command, ExitCode};
 use parity::{Baseline, RatchetMode};
 
 mod compile_shaders;
+#[cfg(test)]
+mod corpus_ci;
 mod fixtures;
 mod gate;
 mod guards;

@@ -13,6 +13,16 @@ Real-world configs checked against the oracle (PLAN.md §8), by
 `manifest.sha256` lists each public input with its SHA-256, in `sha256sum`'s text form, relative
 to the corpus root: `sha256sum -c corpus/manifest.sha256` in that root checks them.
 
+## In CI
+
+`.github/workflows/ci.yml` runs the `aces` corpus on both platforms, in the required checks jobs:
+`scripts/fetch-aces-corpus.sh` fetches its 37 files from their pinned release tags, without a token,
+into a directory `actions/cache` keeps by the hash of `manifest.sha256`, and checks every file with
+`sha256sum -c` against the manifest, on a cache hit too, so a file with another hash fails the step.
+`corpus_oracle` then runs with `OCIO_RS_CORPUS=aces`. Each directory of `aces/` in the manifest is the
+tag of the release that holds its files. That is the only corpus in CI: `xtask`'s `corpus_ci` test
+pins it. `imageworks` has no licence and studio configs never leave this machine.
+
 ## Running
 
 ```sh

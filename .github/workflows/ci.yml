@@ -79,6 +79,21 @@ jobs:
       # shader: docs/cards/phase7.md, P7-9.
       - name: Compile the family oracle tests' HLSL (fxc, dxc; P7-9)
         run: cargo xtask compile-shaders family_
+      # The public ACES configs, and nothing else of the corpora (corpus/README.md): from their
+      # release tags, no token, cached by the manifest's hash, checked against it on every run.
+      - name: Cache the ACES configs
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ocio-corpus
+          key: aces-${{ hashFiles('corpus/manifest.sha256') }}
+      - name: Fetch the ACES configs and check them against corpus/manifest.sha256
+        shell: bash
+        run: scripts/fetch-aces-corpus.sh "$RUNNER_TEMP/ocio-corpus"
+      - name: The ACES configs against the wheel
+        env:
+          OCIO_RS_CORPUS: aces
+          OCIO_RS_CORPUS_ROOT: ${{ runner.temp }}/ocio-corpus
+        run: cargo test -p ocio --test corpus_oracle public_corpora -- --nocapture
 
   windows-tests:
     name: Windows tests (${{ matrix.shard }})
@@ -203,6 +218,22 @@ jobs:
       # shader: docs/cards/phase7.md, P7-9.
       - name: Compile the family oracle tests' GLSL and the suite's GLSL ES 1.0 (glslang; P7-9)
         run: scripts/rocky9.sh cargo xtask compile-shaders suite_glsl_es_1_0 family_
+      # The public ACES configs, and nothing else of the corpora (corpus/README.md): from their
+      # release tags, no token, cached by the manifest's hash, checked against it on every run.
+      - name: Cache the ACES configs
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ocio-corpus
+          key: aces-${{ hashFiles('corpus/manifest.sha256') }}
+      - name: Fetch the ACES configs and check them against corpus/manifest.sha256
+        run: scripts/fetch-aces-corpus.sh "$RUNNER_TEMP/ocio-corpus"
+      - name: The ACES configs against the wheel
+        env:
+          OCIO_RS_CORPUS: aces
+          OCIO_RS_CORPUS_ROOT: ${{ runner.temp }}/ocio-corpus
+        run: >-
+          scripts/rocky9.sh cargo test -p ocio --test corpus_oracle public_corpora --
+          --nocapture
 
   rocky9-tests:
     name: Linux tests (${{ matrix.shard }})
