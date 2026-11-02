@@ -47,31 +47,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "ocio"
+name = "opencolorio-rs"
 version = "0.0.0+ocio.2.5.2"
 dependencies = [
  "flate2",
- "ocio-formats",
- "ocio-gpu",
- "ocio-ops",
+ "opencolorio-rs-formats",
+ "opencolorio-rs-gpu",
+ "opencolorio-rs-ops",
 ]
 
 [[package]]
-name = "ocio-formats"
+name = "opencolorio-rs-formats"
 version = "0.0.0+ocio.2.5.2"
 dependencies = [
- "ocio-ops",
+ "opencolorio-rs-ops",
 ]
 
 [[package]]
-name = "ocio-gpu"
+name = "opencolorio-rs-gpu"
 version = "0.0.0+ocio.2.5.2"
 dependencies = [
- "ocio-ops",
+ "opencolorio-rs-ops",
 ]
 
 [[package]]
-name = "ocio-ops"
+name = "opencolorio-rs-ops"
 version = "0.0.0+ocio.2.5.2"
 dependencies = [
  "half",
@@ -84,8 +84,8 @@ name = "perf-port"
 version = "0.0.0"
 dependencies = [
  "half",
- "ocio",
- "ocio-ops",
+ "opencolorio-rs",
+ "opencolorio-rs-ops",
  "serde_json",
 ]
 

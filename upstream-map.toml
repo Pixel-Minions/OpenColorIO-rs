@@ -815,56 +815,56 @@ path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v1.0.0_aces-v1.3_ocio-v
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v2.1.0_aces-v1.3_ocio-v2.3.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v2.2.0_aces-v1.3_ocio-v2.4.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v4.0.0_aces-v2.0_ocio-v2.5.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v1.0.0_aces-v1.3_ocio-v2.1.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v2.1.0_aces-v1.3_ocio-v2.3.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v2.2.0_aces-v1.3_ocio-v2.4.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v4.0.0_aces-v2.0_ocio-v2.5.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormat3DL.cpp"
@@ -4048,7 +4048,7 @@ path = "src/bindings/python/package/command_line.py"
 kind = "binding"
 target = ["crates/ocio-py/python/PyOpenColorIO/command_line.py", "xtask/src/py_tools.rs", "xtask/src/py.rs"]
 status = "done"
-note = "P78: unchanged upstream Python launcher; py-build stages the four in-scope Rust developer executables under package/bin using Cargo's executable manifest. Both call_program and basename-derived main are checked against the wheel for each tool's help/error exit status and exact stdout/stderr. Console-script distribution installation remains release packaging, as P6-3 already records."
+note = "P78: unchanged upstream Python launcher; py-build stages the four in-scope Rust developer executables under package/bin using Cargo's executable manifest. Both call_program and basename-derived main are checked against the wheel for each tool's help/error exit status and exact stdout/stderr. py-wheel/pyproject.toml declares the official wheel's entry point for each of the four tools, and `cargo xtask wheel-check` compares them with its entry_points.txt and runs them."
 
 [[file]]
 path = "src/bindings/python/transforms/PyAllocationTransform.cpp"

@@ -349,8 +349,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          cargo test -p ocio --test config_processors_oracle -- 1_mib_thread groups_count_in
-          cargo test -p ocio --lib -- chains_of_references_stop_at_the_limit deep_groups_fit_a_small_stack the_nesting_weight_limit_is_exact
+          cargo test -p opencolorio-rs --test config_processors_oracle -- 1_mib_thread groups_count_in
+          cargo test -p opencolorio-rs --lib -- chains_of_references_stop_at_the_limit deep_groups_fit_a_small_stack the_nesting_weight_limit_is_exact
 
   stack-rocky9:
     name: Depth limits at opt-level 0 (Rocky Linux 9)
@@ -368,8 +368,8 @@ jobs:
           scripts/rocky9.sh bash -ec '
             export CARGO_PROFILE_DEV_OPT_LEVEL=0
             cargo xtask oracle info
-            cargo test -p ocio --test config_processors_oracle -- 1_mib_thread groups_count_in
-            cargo test -p ocio --lib -- chains_of_references_stop_at_the_limit deep_groups_fit_a_small_stack the_nesting_weight_limit_is_exact
+            cargo test -p opencolorio-rs --test config_processors_oracle -- 1_mib_thread groups_count_in
+            cargo test -p opencolorio-rs --lib -- chains_of_references_stop_at_the_limit deep_groups_fit_a_small_stack the_nesting_weight_limit_is_exact
           '
 
   targeted-controls:

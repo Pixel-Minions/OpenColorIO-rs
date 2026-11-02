@@ -284,6 +284,62 @@ reason = "The wheel's .exe files have no longPathAware manifest, so the system r
 approved_by = "Project owner, explicit chat approval on 2026-10-31"
 date = "2026-10-31"
 
+[[waiver]]
+id = "W0021"
+scope = "Both platforms: the inverse processor of a LUT file, read through a reader that shares its cached op data, whose three channels are equal and which is not monotonic, when a forward processor of the same file was made earlier in the process with no ClearAllCaches between them (docs/improvements.md I-163). Processors made from a fresh cache, forward processors and pixels are not waived"
+check = "That inverse processor's cache ID and the green and blue entries of its LUT, against the wheel's, in that order of calls only. No check is relaxed in code: the oracle tests start each request from a fresh cache (ClearAllCaches, crates/ocio/tests/common/lut_files.rs and crates/ocio/tests/corpus_oracle.rs), where port and wheel compare bit for bit, so the waiver records the order of calls that isn't compared"
+reason = "The wheel's file cache keeps the op data it read, HandleLUT1D hands that very object to the forward LUT op, and the processor finalizes it in place: adjustColorComponentNumber marks it as one component when its channels are equal (Lut1DOpData::finalize). A later inverse processor clones that LUT, and initializeFromForward makes only its first channel monotonic. The port's processors never change what the file cache holds (owner decision 2026-10-08), so they give what the wheel gives from a fresh cache. Probed 2026-10-08, entries 0, 1, 0.5, 1: green and blue keep 0.5 after a forward processor and become 1 from a fresh cache, the cache ID is 91c3bdd33553011dfc45941c59ca1de5 after a forward processor and 8caceefb8952f416f8747d8a34fc639a from a fresh cache, and the pixels agree, as the one-component LUT renders from red"
+approved_by = "Project owner, answer \"yes to all\" to the release decisions brief (section 4c, question 1), relayed by the coordinator on 2026-11-02"
+date = "2026-11-02"
+
+[[waiver]]
+id = "W0022"
+scope = "Both platforms: a CDLTransform that CreateFromFile or CreateGroupFromFile returned, in the Rust API and in Python, once the caller edits it or compares it by identity (docs/improvements.md I-174). A read that nothing edited, and files read once, are not waived"
+check = "After an edit of such a transform: what a second CreateFromFile or CreateGroupFromFile of that file gives, and the processors of file transforms of it, until ClearAllCaches. In Python: whether a second read is the first's object (`is`), and whether addChildElement on such a CDL's metadata reallocates and gives new child objects. No check is relaxed in code: crates/ocio-py/tests/cdl_files_oracle.rs reads each (file, id) once when it compares with the wheel, and pins the wheel's identity and the port's copies separately"
+reason = "The wheel's CreateFromFile returns the transforms its file cache holds, not copies (getCDLGroup of the CC, CCC and CDL formats, CDLTransform.cpp:34-118 @ v2.5.2), so an edit changes the cached file. Probed 2026-10-08: setSlope on the result gave the new slope to a second CreateFromFile, to CreateGroupFromFile and to a FileTransform's processor. The port returns copies (owner decision 2026-10-08, the API of docs/cards/phase4.md P4-5 d), so the cache never changes, which is what a fix upstream would do. Sharing would need transforms held by handle"
+approved_by = "Project owner, answer \"yes to all\" to the release decisions brief (section 4c, question 1), relayed by the coordinator on 2026-11-02"
+date = "2026-11-02"
+
+[[waiver]]
+id = "W0023"
+scope = "Both platforms: ColorSpaceMenuHelper with setIncludeRoles(true) on a config that has a role set to the empty name (docs/improvements.md U-142). Menus of any other config, and that config without the roles included, are not waived"
+check = "The menu itself: ColorSpaceMenuHelper::new and Python's ColorSpaceMenuHelper raise the port's error when the menu is made, where the wheel builds it. That covers what the wheel gives without reading the null item: its count, the other items, an added name already earlier in the menu (the wheel builds 33 items), and its own 'neither a color space not a named transform' error for an added name the config lacks. crates/ocio/tests/color_space_menu_helper_oracle.rs (a_role_set_to_the_empty_name_is_refused_when_the_menu_is_made) compares with the wheel what doesn't build that menu, and no comparison of any other menu is relaxed"
+reason = "ColorSpaceInfo::CreateFromRole returns a null pointer for a role whose name is empty, and ColorSpaceMenuHelperImpl::refresh adds it (ColorSpaceHelpers.cpp:59-76, 502-511 @ v2.5.2). Getters of that index, lookups that reach it, the menu's text and a pybind11 TypeError holding its repr then read through the null pointer, and the wheel's process dies. The port's plain values can't hold a null item, so it refuses when the menu is made (owner decision 2026-10-22), which also refuses the cases where the wheel gives a defined result"
+approved_by = "Project owner, answer \"yes to all\" to the release decisions brief (section 4c, question 1), relayed by the coordinator on 2026-11-02"
+date = "2026-11-02"
+
+[[waiver]]
+id = "W0024"
+scope = "Both platforms: ociobakelut with an ICC output (ocioicc.cpp) and a --whitepoint outside 4000 to 25000 (docs/improvements.md U-651). Temperatures inside that range are not waived"
+check = "For those arguments: exit code, the profile and whether one is written. The port stops with exit 1 and no file, where the wheel exits with 0 and writes a profile, or saves nothing at a cube of 256 and over. crates/ocio-tools/tests/ociobakelut_icc_oracle.rs compares through Stop::Always and Stop::IfTheWheelDies (crates/ocio-tools/tests/common/mod.rs, stop_differences): the port's exit is 1, it writes no file, its stdout is a prefix of the wheel's or the reverse, and its stderr is the wheel's and then this message. Under --v the wheel's last INFO line, after the save, is not printed. Every other argument compares byte for byte"
+reason = "cmsWhitePointFromTemp fails outside 4000 to 25000 K, and ocioicc.cpp:102-103 goes on with the uninitialized local cmsCIExyY whitePoint, which reaches only the chad tags of the output and of the Lab profile (src/cmsvirt.c:145-149 @ lcms2.17). With the time masked, the only bytes that differ from a good profile's are the 36 of its chad values, over 8 temperatures with 3 runs each on both wheels. Their values: all zeros in 48 more runs on Windows; on Linux 0x80000000 nine times in 35 runs and other values in the other 13, at random. So the file can't be matched: the wheels differ, and the Linux wheel's changes from run to run. Owner decision 2026-10-31: the port refuses the value"
+approved_by = "Project owner, answer \"yes to all\" to the release decisions brief (section 4c, question 1), relayed by the coordinator on 2026-11-02"
+date = "2026-11-02"
+
+[[waiver]]
+id = "W0025"
+scope = "Linux only: the exit status of a tool whose stdout goes to a reader that stops early, as in `ociobakelut ... --stdout | head -c 3` or `ociochecklut --help | head -c 3`, for outputs of about 4 KB to 90 KB (docs/improvements.md I-609). The bytes the reader gets, outputs above about 90 KB, closed and ignored pipes, and Windows are not waived"
+check = "The status alone (PIPESTATUS): the port's 0 against the wheel's 141. No check is relaxed in code: crates/ocio-tools/tests/sigpipe_oracle.rs compares a closed pipe, an ignored SIGPIPE and head_of_a_long_output with the wheel, status and bytes, and no sweep runs a mid-size output through head, so the waiver records what isn't compared"
+reason = "The cause is unexplained. Measured in Rocky Linux 9 with PIPESTATUS, wheel and port: ociobakelut spi1d up to 3.1 KB 0 and 0; spi3d, cube 5, 4.1 KB 141 in 27 of 30 and 0 in 30 of 30; spi1d 4.7 KB, and 12 to 62 KB, and spi3d cube 9, 24 KB 141 in 30 of 30 and 0 in 30 of 30; spi1d 93 KB and spi3d 74 KB and up 141 and 141; ociochecklut --help, 1.5 KB, racy, 141 in 26 of 30 and 141 in 2 of 30. The bytes head passes on are the same. A COUT_BUFFER of 4096 or 1024 and splitting writes at 4096 bytes changed nothing. Timing is the likely cause (the wheel writes while it formats, the port may write in one burst), and that is unproven"
+approved_by = "Project owner, answer \"yes to all\" to the release decisions brief (section 4c, question 1), relayed by the coordinator on 2026-11-02"
+date = "2026-11-02"
+
+[[waiver]]
+id = "W0026"
+scope = "Windows only: a relative path resolved against a working directory whose name isn't ASCII (GetCwd, AbsPath: Config::CreateFromFile('x.ocio') and the like; docs/improvements.md I-116). ASCII working directories and Linux are not waived"
+check = "What the wheel gives for such a path: its working directory in the ANSI code page, with ? for characters the code page lacks, which Utf8ToUtf16 then misreads. The port gives the path as UTF-8. No sweep runs from such a directory on Windows, so no check is relaxed in code: the waiver records what isn't compared"
+reason = "GetCwd calls _getcwd on Windows (PathUtils.cpp:131-150 @ v2.5.2), which gives the path in the process's ANSI code page, while OCIO's other paths are UTF-8 and reach the system through Utf8ToUtf16. Rust's std gives the path through the system's wide-character call. Matching would need a Windows system call the port's crates can't make: owner decision 2026-11-02, no new Windows system call for 1.0.0. The fix upstream would be _wgetcwd and Utf16ToUtf8, which is what the port's path already gives"
+approved_by = "Project owner, answer \"yes to all\" to the release decisions brief (section 4c, question 1), relayed by the coordinator on 2026-11-02"
+date = "2026-11-02"
+
+[[waiver]]
+id = "W0027"
+scope = "Windows only: the Python calls that give the wheel's C runtime a file name, with a name that isn't ASCII: GroupTransform.write, Baker.bake, Config.serialize and Config.archive (docs/improvements.md U-113; the binding's std::ofstream at PyGroupTransform.cpp:97, PyBaker.cpp:130, PyConfig.cpp:245 and 973 @ v2.5.2). ASCII names, Linux, and the forms of those calls that take no file name are not waived"
+check = "The result of such a call: the port raises ValueError and creates no file, where the wheel opens a file under the name its C runtime makes of the bytes. crates/ocio-py/tests/group_write_oracle.rs (write_to_a_file_as_the_wheel) checks GroupTransform.write's error on Windows without the wheel, and compares every other case with it, on Linux with a name that isn't ASCII too"
+reason = "The binding opens the file with std::ofstream on a narrow name that MSVC's C runtime reads in the process's ANSI code page, or in UTF-8 after a setlocale to a UTF-8 locale (PyGroupTransform.cpp:81-101 @ v2.5.2). So the UTF-8 bytes pybind11 makes of a Python str become another name, or none, by the machine's settings: the wheel's result isn't fixed by the OS and CPU. The port has no narrow open to copy it with, and writes nothing rather than choose a name"
+approved_by = "Project owner, answer \"yes to all\" to the release decisions brief (section 4c, question 1), relayed by the coordinator on 2026-11-02"
+date = "2026-11-02"
+
 [[not_applicable]]
 test = "Platform/aligned_memory_test"
 reason = "P9-6 (owner decision2026-10-23): native C++ AlignedMalloc/AlignedFree allocation of1001 bytes at16-byte alignment. The current Rust renderer owns a Vec and uses unaligned loads; no corresponding C++ allocator API applies. Reopen if Phase8 introduces applicable aligned storage."

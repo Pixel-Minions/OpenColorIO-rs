@@ -2998,7 +2998,7 @@ impl<'o, 'a> ColorspacesMerger<'o, 'a> {
         self.0.merged_config.clear_named_transforms();
 
         // Make a temp copy to merge the input color spaces into (will reorder them later).
-        let mut merge_config = self.0.merged_config.clone();
+        let mut merge_config = self.0.merged_config.create_editable_copy()?;
 
         merge_config.clear_named_transforms();
 
@@ -4024,7 +4024,7 @@ impl<'o, 'a> NamedTransformsMerger<'o, 'a> {
         self.0.merged_config.clear_named_transforms();
 
         // Make a temp copy to merge the input color spaces into (will reorder them later).
-        let mut merge_config = self.0.merged_config.clone();
+        let mut merge_config = self.0.merged_config.create_editable_copy()?;
 
         let mut added_input_named_transforms: Vec<Vec<u8>> = Vec::new();
 

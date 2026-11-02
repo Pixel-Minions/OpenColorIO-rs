@@ -578,8 +578,10 @@ impl Clone for Config {
     /// them. The context is copied too (`Context::createEditableCopy`, whose copy has the
     /// default environment mode, docs/improvements.md I-111).
     ///
-    /// Port of `Config::createEditableCopy` and `Config::Impl::operator=`
-    /// (src/OpenColorIO/Config.cpp:379-457, 1352-1357 @ v2.5.2), in part.
+    /// `Clone` can't fail, so it doesn't read the environment as upstream's copy does: code that
+    /// must answer as upstream calls [`Config::create_editable_copy`].
+    ///
+    /// Port of `Config::Impl::operator=` (src/OpenColorIO/Config.cpp:379-457 @ v2.5.2).
     fn clone(&self) -> Config {
         let context = Arc::new((*self.shared_context.get()).clone());
         let config = Config {
@@ -816,6 +818,16 @@ impl Config {
         config.inactive_color_space_names_env = trim(&inactive).to_vec();
 
         Ok(config)
+    }
+
+    /// An editable copy: [`Config::new`], whose environment lists can fail, and then this config's
+    /// state over everything that read (docs/improvements.md, I-134).
+    ///
+    /// Port of `Config::createEditableCopy` (src/OpenColorIO/Config.cpp:1352-1357 @ v2.5.2).
+    #[doc(alias = "createEditableCopy")]
+    pub fn create_editable_copy(&self) -> Result<Config> {
+        Config::new()?;
+        Ok(self.clone())
     }
 
     fn lock_cache_ids(&self) -> MutexGuard<'_, CacheIds> {

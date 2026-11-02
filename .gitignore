@@ -16,3 +16,9 @@ __pycache__/
 # Intel SDE's Pin writes these into the working directory when it fails (scripts/sde.sh).
 pin-log.txt
 pin-tool-log.txt
+
+# The wheel's project: what `cargo xtask wheel-build` lays out next to these files.
+/py-wheel/*
+!/py-wheel/build-constraints.txt
+!/py-wheel/pyproject.toml
+!/py-wheel/README.md

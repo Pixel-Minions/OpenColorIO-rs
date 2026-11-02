@@ -223,6 +223,7 @@ pub(crate) fn run() -> Result<(), String> {
     let (sources, manifests) = workspace_files(root)?;
     problems.extend(check_files(&sources, &manifests, &waived));
     problems.extend(check_dependency_pins(&manifests));
+    problems.extend(crate::package_copies::check(root, &manifests));
     problems.extend(crate::registers::check(root));
     problems.extend(crate::upstream::validate(&crate::upstream::load_map()?));
     check_submodule(root, &mut problems);
@@ -1176,6 +1177,8 @@ const INTERNALS_GATE: &str = "#[cfg(feature = \"internals\")]";
 const INTERNALS_USERS: &str = "crates/ocio/tests/";
 /// The only manifest that may enable the feature, in its dev-dependency on itself.
 const INTERNALS_MANIFEST: &str = "crates/ocio/Cargo.toml";
+/// The name of that crate's package; its library is `ocio`.
+const OCIO_PACKAGE: &str = "opencolorio-rs";
 
 /// The lines where `text` may relax the `unsafe_code` lint: each identifier `unsafe_code` in
 /// code (comments and literals aside) other than a lint of an attribute `#[deny(...)]`,
@@ -1583,8 +1586,10 @@ fn check_internals_feature(rel: &str, text: &str) -> Vec<String> {
     let mut ocio_names = vec!["ocio".to_string()];
     for (section, table) in &tables {
         for (name, spec) in *table {
+            // A crate inherits the `package` of the workspace's key `ocio`: without its own
+            // `package`, the key is the name; under another key, the package's name is.
             let package = spec.get("package").and_then(|p| p.as_str()).unwrap_or(name);
-            if package != "ocio" {
+            if package != "ocio" && package != OCIO_PACKAGE {
                 continue;
             }
             ocio_names.push(name.clone());
@@ -2988,7 +2993,7 @@ workspace = true
 
     #[test]
     fn only_ocio_s_dev_dependency_on_itself_enables_internals() {
-        let own = "[package]\nname = \"ocio\"\n\n[features]\ninternals = []\n\n\
+        let own = "[package]\nname = \"opencolorio-rs\"\n\n[features]\ninternals = []\n\n\
                    [dev-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n";
         assert!(check_internals_feature(INTERNALS_MANIFEST, own).is_empty());
         // A manifest without the feature at all (before the feature existed).
@@ -3008,10 +3013,12 @@ workspace = true
             "[build-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
             "[dependencies]\nocio = { workspace = true, features = [\"x\", \"internals\"] }\n",
             "[dependencies]\nx = { package = \"ocio\", workspace = true, features = [\"internals\"] }\n",
+            "[dependencies]\nx = { package = \"opencolorio-rs\", workspace = true, features = [\"internals\"] }\n",
             "[target.'cfg(windows)'.dev-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
             "[features]\nt = [\"ocio/internals\"]\n",
             "[features]\nt = [\"ocio?/internals\"]\n",
             "[dependencies]\nx = { package = \"ocio\", workspace = true }\n[features]\nt = [\"x/internals\"]\n",
+            "[dependencies]\nx = { package = \"opencolorio-rs\", workspace = true }\n[features]\nt = [\"x/internals\"]\n",
         ] {
             assert_eq!(refused(tools, text), 1, "{text}");
             // xtask's manifest is no exception.

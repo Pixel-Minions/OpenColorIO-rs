@@ -23,7 +23,9 @@ it on Rocky through `scripts/rocky9.sh`.
 Each <check> is a prefix of the test names in crates/ocio-gpu-exec/tests/compile_glsl.rs or
 compile_hlsl.rs: suite_* (upstream's 264 GPU tests) or family_* (crates/ocio-gpu's *_oracle
 tests). The compilers' controls (control_*) always run. Only the corpora the checks name are
-captured. Writes target/shader-corpus/report/<check>.json, and fails if a shader fails.
+captured. Writes target/shader-corpus/report/<check>.json, and fails if a shader fails for
+anything but a registered cause of ocio_testkit::shader_compile (P7-9), or if such a cause no
+longer explains any shader of a check it applies to.
 ";
 
 /// Upstream's GPU tests, as the suite's targets hold them.
@@ -54,7 +56,7 @@ fn plan(checks: &[&str], compile_target: &str) -> Vec<Vec<String>> {
         steps.push(strings(&[
             "test",
             "-p",
-            "ocio-gpu",
+            "opencolorio-rs-gpu",
             "--tests",
             "--no-fail-fast",
         ]));
@@ -113,11 +115,17 @@ fn summarize(report: &Path, checks: &[&str]) -> Result<u64, String> {
         let value: serde_json::Value =
             serde_json::from_str(&text).map_err(|e| format!("{name}: {e}"))?;
         println!(
-            "compile-shaders: {name}: {} distinct shaders, {} passed, {} failed",
-            value["compiled"], value["passed"], value["failed"]
+            "compile-shaders: {name}: {} distinct shaders, {} passed, {} by a known cause, {} failed",
+            value["compiled"], value["passed"], value["explained"], value["failed"]
         );
+        for cause in value["causes"].as_array().into_iter().flatten() {
+            println!(
+                "    {:6} {} ({})",
+                cause["count"], cause["cause"], cause["entry"]
+            );
+        }
         for group in value["groups"].as_array().into_iter().flatten() {
-            println!("    {:6} {}", group["count"], group["cause"]);
+            println!("    {:6} no cause: {}", group["count"], group["cause"]);
         }
         failed += value["failed"].as_u64().unwrap_or(0);
     }
@@ -162,7 +170,7 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "compile-shaders: {failed} shaders failed to compile; failed steps:\n  {}",
+            "compile-shaders: {failed} shaders failed to compile with no cause; failed steps:\n  {}",
             errors.join("\n  ")
         ))
     }
@@ -204,7 +212,7 @@ mod tests {
         assert_eq!(steps.len(), 2);
         assert!(steps[0].contains(&"lut3d_op_test".to_string()));
         assert!(steps[0].iter().any(|arg| arg == FEATURE));
-        assert!(cargo_args(&steps, "ocio-gpu").is_empty());
+        assert!(cargo_args(&steps, "opencolorio-rs-gpu").is_empty());
         let compile = steps.last().unwrap();
         assert_eq!(
             compile[compile.len() - 2..],
@@ -213,7 +221,7 @@ mod tests {
 
         let steps = plan(&["family_"], "compile_hlsl");
         assert_eq!(steps.len(), 2);
-        assert_eq!(steps[0][..3], ["test", "-p", "ocio-gpu"]);
+        assert_eq!(steps[0][..3], ["test", "-p", "opencolorio-rs-gpu"]);
 
         assert_eq!(plan(&["family_", "suite_"], "compile_hlsl").len(), 3);
     }
@@ -245,30 +253,23 @@ mod tests {
           ",
             " ",
         );
-        // (the checks of one CI command, its target's source, whether the step may fail).
-        for (checks, source, open) in [
-            ("suite_hlsl_fxc suite_hlsl_dxc", &hlsl, false),
-            ("family_", &hlsl, true),
+        // No step may fail: P7-9 is decided, and its causes are the checks' own (the checks of one
+        // CI command, its target's source).
+        assert!(!ci.contains("continue-on-error"));
+        for (checks, source) in [
+            ("suite_hlsl_fxc suite_hlsl_dxc", &hlsl),
+            ("family_", &hlsl),
             (
                 "suite_glsl_1_2 suite_glsl_1_3 suite_glsl_4_0 suite_glsl_es_3_0 suite_glsl_vk_4_6",
                 &glsl,
-                false,
             ),
-            ("suite_glsl_es_1_0 family_", &glsl, true),
+            ("suite_glsl_es_1_0 family_", &glsl),
         ] {
             let command = format!(
                 "cargo xtask compile-shaders {checks}
 "
             );
-            let at = flat
-                .find(&command)
-                .unwrap_or_else(|| panic!("ci.yml doesn't run `{command}`"));
-            let step = flat[..at].rfind("- name:").unwrap();
-            assert_eq!(
-                flat[step..at].contains("continue-on-error"),
-                open,
-                "{checks}"
-            );
+            assert!(flat.contains(&command), "ci.yml doesn't run `{command}`");
             for check in checks.split(' ') {
                 assert!(source.contains(&format!("fn {check}")), "{check}");
             }

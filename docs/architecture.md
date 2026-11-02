@@ -11,6 +11,11 @@ ocio-ops  ←  ocio-formats
     └──────  ocio  ←  ocio-py, ocio-tools
 ```
 
+These are the libraries' names, in code (`ocio_ops::...`) and in this repository (`crates/ocio-ops`).
+The packages Cargo knows them by, for `-p` and on crates.io (PLAN.md D6), are `opencolorio-rs-ops`,
+`opencolorio-rs-formats`, `opencolorio-rs-gpu` and `opencolorio-rs` (`ocio`). `cargo xtask gate --crates`
+takes either name. The other crates keep one name and aren't published.
+
 | Crate | Holds (upstream files) |
 |---|---|
 | `ocio-ops` | The bottom layer and CPU engine: `utils/` (StringUtils, NumberUtils), `cfmt` (C/iostream formatting), `exception`, `platform`, `hash_utils`, `logging`, `bit_depth_utils`, `math_utils`, `sse`/`sse2`/`avx*` (fast math, SIMD helpers), `cpu_info`, image descriptions and packing (`ImageDesc`, `ImagePacking`, `ScanlineHelper`), `FormatMetadataImpl`, dynamic properties, `op`, `op_data`, every `ops/<family>/` op data plus CPU renderers, `OpOptimizers`, the CPU processor engine |

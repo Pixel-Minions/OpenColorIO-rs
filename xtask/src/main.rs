@@ -9,12 +9,15 @@ use std::process::{Command, ExitCode};
 use parity::{Baseline, RatchetMode};
 
 mod compile_shaders;
+#[cfg(test)]
+mod corpus_ci;
 mod fixtures;
 mod gate;
 mod guards;
 mod land;
 mod links;
 mod metadata;
+mod package_copies;
 mod parity;
 mod py;
 mod py_driver;
@@ -24,6 +27,9 @@ mod registers;
 mod scratch;
 mod shards;
 mod upstream;
+mod wheel;
+mod wheel_audit;
+mod wheel_check;
 
 const USAGE: &str = "\
 cargo xtask <command>
@@ -93,6 +99,12 @@ Python (Phase 6):
                               rewrites the list)
   py-check                    clippy and tests of the Python bindings, then py-suite (CI's
                               step)
+  wheel-build                 build the wheel opencolorio-rs into target/wheel with uv and
+                              maturin (`cargo xtask wheel-build --help`)
+  wheel-check [--wheel <file>]
+                              build the wheel, install only it in a new environment outside
+                              the source tree, and run upstream's Python suite and the console
+                              scripts against it (`cargo xtask wheel-check --help`)
 
 Upstream:
   upstream-map update         add new upstream files to upstream-map.toml (keeps edits)
@@ -143,6 +155,16 @@ fn main() -> ExitCode {
             Ok(())
         }
         ["py-check", rest @ ..] => py::py_check(rest),
+        ["wheel-build", "--help" | "-h"] => {
+            print!("{}", wheel::USAGE);
+            Ok(())
+        }
+        ["wheel-build", rest @ ..] => wheel::wheel_build(rest),
+        ["wheel-check", "--help" | "-h"] => {
+            print!("{}", wheel_check::USAGE);
+            Ok(())
+        }
+        ["wheel-check", rest @ ..] => wheel_check::wheel_check(rest),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),

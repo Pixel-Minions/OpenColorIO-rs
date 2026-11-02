@@ -6,7 +6,9 @@ OpenColorIO 2.5.2 is built with, whose behavior the port must reproduce, and fro
 OpenColorIO carries under their own notices. This file lists each one, what the port takes from
 it and where, and reproduces its copyright and license notice.
 
-A chunk that translates code from another source adds its entry here, in the same chunk.
+A chunk that translates code from another source adds its entry here, in the same chunk. A crate
+published on crates.io carries the sections that name it, verbatim, in its own
+`THIRD-PARTY-NOTICES.md`, and `cargo xtask guards` checks them.
 
 The Rust crates the workspace depends on are not translated. `cargo deny` checks their licenses
 against [`deny.toml`](deny.toml). In source form each ships with its own license; a built wheel or
@@ -706,6 +708,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ## Rust crates in built artifacts
+
+A built wheel or tool also links Rust's standard library statically, under the licenses of the
+toolchain that built it. [`docs/licenses/`](docs/licenses) holds that toolchain's
+`COPYRIGHT-library.html`, verbatim, and the wheel carries it.
 
 The crates `ocio-py` (with its `python` feature) and `ocio-tools` depend on, at the versions of
 `Cargo.lock`, on every target. These can be linked into a wheel or a tool:

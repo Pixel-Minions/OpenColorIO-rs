@@ -14,8 +14,8 @@
 //! Phase 0 evidence runs use ten million per format in release mode, on both platforms:
 //!
 //! ```text
-//! OCIO_RS_CFMT_SWEEP=10000000 cargo test --release -p ocio-ops --test cfmt_crt
-//! OCIO_RS_CFMT_SWEEP=10000000 scripts/rocky9.sh cargo test --release -p ocio-ops --test cfmt_crt
+//! OCIO_RS_CFMT_SWEEP=10000000 cargo test --release -p opencolorio-rs-ops --test cfmt_crt
+//! OCIO_RS_CFMT_SWEEP=10000000 scripts/rocky9.sh cargo test --release -p opencolorio-rs-ops --test cfmt_crt
 //! ```
 
 use ocio_ops::cfmt::{self, Adjust, Base, Crt, FloatField, OStringStream};

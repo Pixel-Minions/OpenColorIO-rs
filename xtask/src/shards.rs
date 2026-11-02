@@ -86,7 +86,7 @@ impl Group {
 
 /// The API format sweep. ICC is separate on Linux: the owner measured 170 of
 /// 221 debug minutes and 76 of 115 release minutes in the old formats job.
-const FORMATS: &[(&str, &str)] = &[("ocio", "api_formats_oracle")];
+const FORMATS: &[(&str, &str)] = &[("opencolorio-rs", "api_formats_oracle")];
 
 /// Kept whole on Windows; Linux partitions only the two large original input
 /// sweeps. The required native union job preserves their aggregate assertions.
@@ -95,17 +95,17 @@ const ICC_PARTS: u8 = 4;
 
 /// Windows debug minutes (run 39641166482): 15.3, 9.0, 7.9 and 3.8.
 const HEAVY: &[(&str, &str)] = &[
-    ("ocio-ops", "lut3d_inv_oracle"),
-    ("ocio-ops", "lut1d_renderer_oracle"),
-    ("ocio", "api_battery_oracle"),
-    ("ocio", "api_gpu_oracle"),
-    ("ocio-ops", "grading_primary_oracle"),
+    ("opencolorio-rs-ops", "lut3d_inv_oracle"),
+    ("opencolorio-rs-ops", "lut1d_renderer_oracle"),
+    ("opencolorio-rs", "api_battery_oracle"),
+    ("opencolorio-rs", "api_gpu_oracle"),
+    ("opencolorio-rs-ops", "grading_primary_oracle"),
 ];
 
 /// Tone and hue curve together took 68.5 minutes on Windows release in run 41126692114.
 const GRADING: &[(&str, &str)] = &[
-    ("ocio-ops", "grading_tone_oracle"),
-    ("ocio-ops", "grading_hue_curve_oracle"),
+    ("opencolorio-rs-ops", "grading_tone_oracle"),
+    ("opencolorio-rs-ops", "grading_hue_curve_oracle"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -665,7 +665,7 @@ mod tests {
     fn sample() -> Vec<Package> {
         vec![
             Package {
-                name: "ocio-ops".into(),
+                name: "opencolorio-rs-ops".into(),
                 dir: "crates/ocio-ops".into(),
                 targets: vec![
                     target("ocio_ops", "lib", true),
@@ -679,7 +679,7 @@ mod tests {
                 ],
             },
             Package {
-                name: "ocio".into(),
+                name: "opencolorio-rs".into(),
                 dir: "crates/ocio".into(),
                 targets: vec![
                     target("ocio", "lib", true),
@@ -694,7 +694,7 @@ mod tests {
                 dir: "crates/ocio-testkit".into(),
                 targets: vec![
                     target("ocio_testkit", "lib", true),
-                    // The same name as a test of `ocio`: shards select by package.
+                    // The same name as a test of `opencolorio-rs`: shards select by package.
                     target("config_version_oracle", "test", false),
                 ],
             },
@@ -891,7 +891,7 @@ mod tests {
         let units = units(&packages).unwrap();
         let rest = selected(&units, &[Group::Rest]);
         assert!(rest.contains(&Unit::Target {
-            package: "ocio".into(),
+            package: "opencolorio-rs".into(),
             flag: "--test",
             name: "new_oracle".into()
         }));
@@ -915,7 +915,7 @@ mod tests {
         assert!(
             units(&packages)
                 .unwrap_err()
-                .contains("`ocio` test target `api_formats_oracle`")
+                .contains("`opencolorio-rs` test target `api_formats_oracle`")
         );
         // `--test lut3d_inv_oracle` would run a test target that `cargo test` skips.
         let mut packages = sample();
@@ -933,7 +933,7 @@ mod tests {
         assert!(
             units(&packages)
                 .unwrap_err()
-                .contains("2 packages have (ocio, ocio-testkit)")
+                .contains("2 packages have (opencolorio-rs, ocio-testkit)")
         );
         // A bin with `test = false` is no unit; the others select bins by name.
         let mut packages = sample();
@@ -1097,7 +1097,9 @@ mod tests {
                 .count(),
             2
         );
-        assert!(text.contains("needs: [windows-checks, windows-tests]"));
-        assert!(text.contains("needs: [rocky9-checks, rocky9-tests, rocky9-icc-audit]"));
+        assert!(text.contains("needs: [windows-checks, windows-tests, windows-wheel]"));
+        assert!(
+            text.contains("needs: [rocky9-checks, rocky9-tests, rocky9-icc-audit, rocky9-wheel]")
+        );
     }
 }

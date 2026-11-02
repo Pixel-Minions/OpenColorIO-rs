@@ -1,5 +1,5 @@
 [package]
-name = "ocio-gpu"
+name = "opencolorio-rs-gpu"
 description = "OpenColorIO GPU shader generation, textures and uniforms"
 version.workspace = true
 edition.workspace = true
@@ -7,7 +7,19 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-publish.workspace = true
+publish = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+# Tests read the repository (fixtures, upstream/, the oracle) and stay out of the package.
+exclude = [
+    "/tests/",
+    "*_tests.rs",
+]
+
+[lib]
+# Published as this package's name; in code it stays `ocio_gpu`.
+name = "ocio_gpu"
 
 [dependencies]
 ocio-ops.workspace = true

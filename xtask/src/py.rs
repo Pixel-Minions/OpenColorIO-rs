@@ -90,7 +90,7 @@ impl Layout {
 }
 
 /// The interpreter of the virtual environment `env`.
-fn python_in(env: &Path) -> PathBuf {
+pub(crate) fn python_in(env: &Path) -> PathBuf {
     if cfg!(windows) {
         env.join("Scripts").join("python.exe")
     } else {
@@ -140,19 +140,24 @@ pub(crate) fn build(layout: &Layout, release: bool) -> Result<(), String> {
             std::fs::remove_file(entry.path()).map_err(|e| format!("{name}: {e}"))?;
         }
     }
-    copy(
-        &layout
-            .root
-            .join("crates/ocio-py/python/PyOpenColorIO/__init__.py"),
-        &package.join("__init__.py"),
-    )?;
     copy(&library, &package.join(format!("PyOpenColorIO{suffix}")))?;
-    crate::py_tools::stage(layout, release)?;
+    lay_out_package(&layout.root, &package, release)?;
     let pth = Path::new(&site).join(PTH);
     std::fs::write(&pth, pth_contents(&layout.py)).map_err(|e| format!("{}: {e}", pth.display()))
 }
 
-fn copy(from: &Path, to: &Path) -> Result<(), String> {
+/// The package's files other than the extension, in the directory `package`: upstream's
+/// `__init__.py` and `command_line.py`, and the tools in `bin`. `cargo xtask py-build` and the
+/// wheel both lay it out here, so the two can't drift.
+pub(crate) fn lay_out_package(root: &Path, package: &Path, release: bool) -> Result<(), String> {
+    copy(
+        &root.join("crates/ocio-py/python/PyOpenColorIO/__init__.py"),
+        &package.join("__init__.py"),
+    )?;
+    crate::py_tools::stage(root, package, release)
+}
+
+pub(crate) fn copy(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::copy(from, to)
         .map(|_| ())
         .map_err(|e| format!("copying {} to {}: {e}", from.display(), to.display()))
@@ -198,7 +203,7 @@ pub(crate) fn cargo_vars(
 
 /// `uv sync` of the project `py-port/` into the environment (from uv's cache when it holds
 /// Python 3.13 and NumPy already, as the oracle's environment leaves them).
-fn sync_env(layout: &Layout) -> Result<(), String> {
+pub(crate) fn sync_env(layout: &Layout) -> Result<(), String> {
     // A directory without its interpreter, which uv refuses to sync into ("not a valid Python
     // environment"): CI's build cache restored target/py-port without its executables
     // (PR #69's Windows checks). It is made again.
@@ -228,12 +233,12 @@ fn remove_broken_env(env: &Path, python: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn uv() -> std::ffi::OsString {
+pub(crate) fn uv() -> std::ffi::OsString {
     std::env::var_os("OCIO_RS_UV").unwrap_or_else(|| "uv".into())
 }
 
 /// What `code` prints in the environment's interpreter, without its line end.
-fn query(python: &Path, code: &str) -> Result<String, String> {
+pub(crate) fn query(python: &Path, code: &str) -> Result<String, String> {
     let out = Command::new(python)
         .args(["-I", "-c", code])
         .stdin(Stdio::null())
@@ -318,74 +323,23 @@ pub(crate) fn py_suite(args: &[&str]) -> Result<(), String> {
         "py-suite: build profile={}",
         build_profile.unwrap_or("existing (--no-build)")
     );
-    let tests = layout.root.join("upstream/OpenColorIO/tests");
-    let modules = driver_modules(&tests)?;
-    let scratch = layout.py.with_file_name("py-suite-tmp");
-    let mut reports = Vec::new();
-    for module in &modules {
-        reports.push(run_module(&layout, &tests, module, &scratch)?);
-    }
-    let _ = std::fs::remove_dir_all(&scratch);
-    let json = layout.py.with_file_name(if release {
+    let json = if release {
         "py-suite-release.json"
     } else {
         "py-suite.json"
-    });
-    let text = serde_json::to_string_pretty(
-        &serde_json::json!({ "build_profile": build_profile, "modules": reports }),
-    )
-    .map_err(|e| e.to_string())?;
-    std::fs::write(&json, text).map_err(|e| format!("{}: {e}", json.display()))?;
-
-    let runs = runs(&reports);
-    let expected = wheel_runs(&tests, &modules)?;
-    let passing = passing_functions(&expected, &runs);
-    let (listed, problems) = crate::parity::passing_python()?;
-    if !problems.is_empty() {
-        return Err(problems.join("\n"));
-    }
-    let failing: Vec<&String> = listed.iter().filter(|f| !passing.contains(*f)).collect();
-    let unlisted = passing.iter().filter(|f| !listed.contains(*f)).count();
-    let total = crate::parity::upstream_python_tests().len();
-    println!(
-        "py-suite: {} runs of {} modules; {} of {total} test functions pass, {} listed in {}; \
-         outcomes in {}",
-        runs.len(),
-        modules.len(),
-        passing.len(),
-        listed.len(),
-        crate::parity::PASSING_PYTHON,
-        crate::display_path(&json)
-    );
-    if !failing.is_empty() {
-        let mut why = format!(
-            "{} test functions {} lists don't pass:",
-            failing.len(),
-            crate::parity::PASSING_PYTHON
-        );
-        for f in failing {
-            let _ = std::fmt::Write::write_fmt(&mut why, format_args!("\n    {f}"));
-            for (defined, id, outcome, message) in &runs {
-                if defined.as_deref() == Some(f.as_str()) && outcome != "pass" {
-                    let _ = std::fmt::Write::write_fmt(
-                        &mut why,
-                        format_args!("\n        {id}: {outcome} {}", message.trim_end()),
-                    );
-                }
-            }
-        }
-        return Err(why);
-    }
-    crate::py_driver::run(&layout, &tests, &expected)?;
+    };
+    let suite = run_suite(&layout, json, build_profile)?;
+    let unlisted = check_listed(&suite)?;
+    crate::py_driver::run(&layout, &suite.tests, &suite.expected)?;
     crate::py_tools::check(&layout)?;
     if update {
         let path = layout.root.join(crate::parity::PASSING_PYTHON);
-        let text: String = passing.iter().map(|f| format!("{f}\n")).collect();
+        let text: String = suite.passing.iter().map(|f| format!("{f}\n")).collect();
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
         println!(
             "py-suite: {} now lists {} test functions",
             crate::parity::PASSING_PYTHON,
-            passing.len()
+            suite.passing.len()
         );
     } else if unlisted > 0 {
         println!(
@@ -395,6 +349,113 @@ pub(crate) fn py_suite(args: &[&str]) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// One run of upstream's suite against an environment.
+pub(crate) struct Suite {
+    /// `tests/` of the upstream checkout.
+    pub(crate) tests: PathBuf,
+    runs: Vec<Run>,
+    /// The runs the wheel makes of each test function.
+    pub(crate) expected: std::collections::BTreeMap<String, Vec<(String, String)>>,
+    /// The test functions that pass ([`passing_functions`]).
+    pub(crate) passing: std::collections::BTreeSet<String>,
+}
+
+/// Runs upstream's suite in the layout's environment, each module in a new process, and writes
+/// each test's outcome next to the layout's package directory, in the file `json`.
+pub(crate) fn run_suite(
+    layout: &Layout,
+    json: &str,
+    build_profile: Option<&str>,
+) -> Result<Suite, String> {
+    let tests = layout.root.join("upstream/OpenColorIO/tests");
+    let modules = driver_modules(&tests)?;
+    let scratch = layout.py.with_file_name("py-suite-tmp");
+    let mut reports = Vec::new();
+    for module in &modules {
+        reports.push(run_module(layout, &tests, module, &scratch)?);
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+    let json = layout.py.with_file_name(json);
+    let text = serde_json::to_string_pretty(
+        &serde_json::json!({ "build_profile": build_profile, "modules": reports }),
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::write(&json, text).map_err(|e| format!("{}: {e}", json.display()))?;
+    let runs = runs(&reports);
+    let expected = wheel_runs(&tests, &modules)?;
+    let passing = passing_functions(&expected, &runs);
+    println!(
+        "py-suite: {} runs of {} modules; {} of {} test functions pass; outcomes in {}",
+        runs.len(),
+        modules.len(),
+        passing.len(),
+        crate::parity::upstream_python_tests().len(),
+        crate::display_path(&json)
+    );
+    Ok(Suite {
+        tests,
+        runs,
+        expected,
+        passing,
+    })
+}
+
+/// That every test function `py-port/passing.txt` lists passes; how many that pass it doesn't
+/// list.
+pub(crate) fn check_listed(suite: &Suite) -> Result<usize, String> {
+    let (listed, problems) = crate::parity::passing_python()?;
+    if !problems.is_empty() {
+        return Err(problems.join(
+            "
+",
+        ));
+    }
+    let failing: Vec<&String> = listed
+        .iter()
+        .filter(|f| !suite.passing.contains(*f))
+        .collect();
+    let unlisted = suite
+        .passing
+        .iter()
+        .filter(|f| !listed.contains(*f))
+        .count();
+    println!(
+        "py-suite: {} test functions listed in {}",
+        listed.len(),
+        crate::parity::PASSING_PYTHON,
+    );
+    if !failing.is_empty() {
+        let mut why = format!(
+            "{} test functions {} lists don't pass:",
+            failing.len(),
+            crate::parity::PASSING_PYTHON
+        );
+        for f in failing {
+            let _ = std::fmt::Write::write_fmt(
+                &mut why,
+                format_args!(
+                    "
+    {f}"
+                ),
+            );
+            for (defined, id, outcome, message) in &suite.runs {
+                if defined.as_deref() == Some(f.as_str()) && outcome != "pass" {
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut why,
+                        format_args!(
+                            "
+        {id}: {outcome} {}",
+                            message.trim_end()
+                        ),
+                    );
+                }
+            }
+        }
+        return Err(why);
+    }
+    Ok(unlisted)
 }
 
 pub(crate) fn py_check(args: &[&str]) -> Result<(), String> {

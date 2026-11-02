@@ -14,7 +14,7 @@ assert text.count(needle) == 1
 out = pathlib.Path('kept/p29-validation/partition-controls')
 out.mkdir(parents=True, exist_ok=True)
 target = 'apphelpers::mergeconfigs::section_merger::oracle_tests::whole_merge_parts_cover_original_cases_once'
-command = ['cargo', 'test', '--locked', '-j2', '-p', 'ocio', '--lib', target, '--', '--exact', '--nocapture']
+command = ['cargo', 'test', '--locked', '-j2', '-p', 'opencolorio-rs', '--lib', target, '--', '--exact', '--nocapture']
 rows = []
 try:
     for name, predicate in (

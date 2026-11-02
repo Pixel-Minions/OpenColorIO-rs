@@ -9,8 +9,8 @@ publish = false
 
 [dependencies]
 half = "=2.7.1"
-ocio = { path = "../../crates/ocio" }
-ocio-ops = { path = "../../crates/ocio-ops" }
+ocio = { path = "../../crates/ocio", package = "opencolorio-rs" }
+ocio-ops = { path = "../../crates/ocio-ops", package = "opencolorio-rs-ops" }
 serde_json = "=1.0.151"
 
 # The workspace root profile.

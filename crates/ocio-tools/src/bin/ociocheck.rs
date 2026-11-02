@@ -225,7 +225,7 @@ fn check(
 
     // This program calls getProcessor for every color space and display/view in the config,
     // so turn off the Processor cache.
-    let config: Config = (*src_config).clone();
+    let config: Config = src_config.create_editable_copy()?;
     config.set_processor_cache_flags(ProcessorCacheFlags::OFF);
 
     cout_endl();
@@ -269,7 +269,7 @@ fn check(
         // The work-around used here is to create a copy of the config and add a unique
         // src color space that will definitely allow the Processor to be created.
 
-        let mut display_test_config = config.clone();
+        let mut display_test_config = config.create_editable_copy()?;
         let mut cs = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
         let src_color_space = b"ocioCheckTotallyUniqueColorSpaceName";
         cs.set_name(src_color_space);

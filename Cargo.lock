@@ -282,58 +282,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "ocio"
-version = "0.0.0+ocio.2.5.2"
-dependencies = [
- "flate2",
- "ocio-formats",
- "ocio-gpu",
- "ocio-ops",
- "ocio-testkit",
- "serde_json",
- "xxhash-rust",
-]
-
-[[package]]
-name = "ocio-formats"
-version = "0.0.0+ocio.2.5.2"
-dependencies = [
- "ocio-ops",
- "ocio-testkit",
-]
-
-[[package]]
-name = "ocio-gpu"
-version = "0.0.0+ocio.2.5.2"
-dependencies = [
- "ocio-ops",
- "ocio-testkit",
- "serde_json",
-]
-
-[[package]]
 name = "ocio-gpu-exec"
 version = "0.0.0+ocio.2.5.2"
 dependencies = [
  "glow",
  "khronos-egl",
  "libloading",
- "ocio",
- "ocio-gpu",
- "ocio-ops",
  "ocio-testkit",
+ "opencolorio-rs",
+ "opencolorio-rs-gpu",
+ "opencolorio-rs-ops",
  "serde_json",
-]
-
-[[package]]
-name = "ocio-ops"
-version = "0.0.0+ocio.2.5.2"
-dependencies = [
- "half",
- "ocio-testkit",
- "serde_json",
- "xxhash-rust",
- "zerocopy",
 ]
 
 [[package]]
@@ -342,11 +301,11 @@ version = "0.0.0+ocio.2.5.2"
 dependencies = [
  "half",
  "numpy",
- "ocio",
- "ocio-gpu",
- "ocio-ops",
  "ocio-py-ffi",
  "ocio-testkit",
+ "opencolorio-rs",
+ "opencolorio-rs-gpu",
+ "opencolorio-rs-ops",
  "pyo3",
  "serde_json",
 ]
@@ -374,9 +333,9 @@ dependencies = [
 name = "ocio-tools"
 version = "0.0.0+ocio.2.5.2"
 dependencies = [
- "ocio",
- "ocio-ops",
  "ocio-testkit",
+ "opencolorio-rs",
+ "opencolorio-rs-ops",
  "serde_json",
 ]
 
@@ -385,6 +344,47 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "opencolorio-rs"
+version = "0.0.0+ocio.2.5.2"
+dependencies = [
+ "flate2",
+ "ocio-testkit",
+ "opencolorio-rs-formats",
+ "opencolorio-rs-gpu",
+ "opencolorio-rs-ops",
+ "serde_json",
+ "xxhash-rust",
+]
+
+[[package]]
+name = "opencolorio-rs-formats"
+version = "0.0.0+ocio.2.5.2"
+dependencies = [
+ "ocio-testkit",
+ "opencolorio-rs-ops",
+]
+
+[[package]]
+name = "opencolorio-rs-gpu"
+version = "0.0.0+ocio.2.5.2"
+dependencies = [
+ "ocio-testkit",
+ "opencolorio-rs-ops",
+ "serde_json",
+]
+
+[[package]]
+name = "opencolorio-rs-ops"
+version = "0.0.0+ocio.2.5.2"
+dependencies = [
+ "half",
+ "ocio-testkit",
+ "serde_json",
+ "xxhash-rust",
+ "zerocopy",
+]
 
 [[package]]
 name = "pin-project-lite"

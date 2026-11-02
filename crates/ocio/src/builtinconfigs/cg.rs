@@ -10,18 +10,10 @@
 
 use super::{embedded_len, embedded_text};
 
-const CG_V100_SOURCE: &[u8] = include_bytes!(
-    "../../../../upstream/OpenColorIO/src/OpenColorIO/builtinconfigs/configs/cg-config-v1.0.0_aces-v1.3_ocio-v2.1.ocio"
-);
-const CG_V210_SOURCE: &[u8] = include_bytes!(
-    "../../../../upstream/OpenColorIO/src/OpenColorIO/builtinconfigs/configs/cg-config-v2.1.0_aces-v1.3_ocio-v2.3.ocio"
-);
-const CG_V220_SOURCE: &[u8] = include_bytes!(
-    "../../../../upstream/OpenColorIO/src/OpenColorIO/builtinconfigs/configs/cg-config-v2.2.0_aces-v1.3_ocio-v2.4.ocio"
-);
-const CG_V400_SOURCE: &[u8] = include_bytes!(
-    "../../../../upstream/OpenColorIO/src/OpenColorIO/builtinconfigs/configs/cg-config-v4.0.0_aces-v2.0_ocio-v2.5.ocio"
-);
+const CG_V100_SOURCE: &[u8] = include_bytes!("configs/cg-config-v1.0.0_aces-v1.3_ocio-v2.1.ocio");
+const CG_V210_SOURCE: &[u8] = include_bytes!("configs/cg-config-v2.1.0_aces-v1.3_ocio-v2.3.ocio");
+const CG_V220_SOURCE: &[u8] = include_bytes!("configs/cg-config-v2.2.0_aces-v1.3_ocio-v2.4.ocio");
+const CG_V400_SOURCE: &[u8] = include_bytes!("configs/cg-config-v4.0.0_aces-v2.0_ocio-v2.5.ocio");
 
 /// `CG_CONFIG_V100_ACES_V13_OCIO_V21`.
 pub(crate) const CG_CONFIG_V100_ACES_V13_OCIO_V21: &[u8] =

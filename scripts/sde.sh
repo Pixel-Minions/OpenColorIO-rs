@@ -2,8 +2,8 @@
 # Runs a command on an emulated x86 CPU with Intel SDE, so the official wheel and the port both
 # dispatch to the SIMD kernels that CPU gets (PLAN.md §8). The workstation and GitHub's runners
 # only cover the kernels their own CPUs select.
-#   scripts/sde.sh snb cargo test -p ocio-ops --release
-#   scripts/rocky9.sh scripts/sde.sh hsw cargo test -p ocio-ops --release
+#   scripts/sde.sh snb cargo test -p opencolorio-rs-ops --release
+#   scripts/rocky9.sh scripts/sde.sh hsw cargo test -p opencolorio-rs-ops --release
 #
 # Cargo runs each test binary through SDE (its target runner), and SDE follows child processes,
 # so the oracle's Python process sees the same CPU. The CPUs, and the kernels OCIO's CPUInfo

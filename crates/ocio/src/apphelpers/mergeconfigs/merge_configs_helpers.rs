@@ -938,7 +938,9 @@ impl ConfigMerger {
 
         merger.merged_configs.reserve(self.merged_configs.len());
         for config in &self.merged_configs {
-            merger.merged_configs.push(Arc::new(Config::clone(config)));
+            merger
+                .merged_configs
+                .push(Arc::new(config.create_editable_copy()?));
         }
         Ok(merger)
     }
@@ -1273,7 +1275,7 @@ impl ConfigMerger {
             };
 
             // The merged config must be initialized with a copy of the base config.
-            let mut merged_config = (*base_cfg).clone();
+            let mut merged_config = base_cfg.create_editable_copy()?;
 
             // Process merge.
             merge_all_sections(&base_cfg, &input_cfg, Some(params), &mut merged_config)
@@ -1316,7 +1318,7 @@ pub mod config_merging_helpers {
         };
 
         // The merged config must be initialized with a copy of the base config.
-        let mut merged_config = base_config.clone();
+        let mut merged_config = base_config.create_editable_copy()?;
 
         // Process the merge.
         merge_all_sections(base_config, input_config, params, &mut merged_config)
@@ -1351,7 +1353,7 @@ pub mod config_merging_helpers {
         input_config.add_color_space(colorspace)?;
 
         // The merged config must be initialized with a copy of the base config.
-        let mut merged_config = base_config.clone();
+        let mut merged_config = base_config.create_editable_copy()?;
 
         // With only the color space, the reference space is unknown, so turn off
         // automatic reference space conversion to the reference space of the base config.

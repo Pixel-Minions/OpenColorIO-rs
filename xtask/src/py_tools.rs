@@ -4,15 +4,15 @@
 //! Upstream's package launcher with the four in-scope Rust developer executables.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const TOOLS: [&str; 4] = ["ociobakelut", "ociocheck", "ociochecklut", "ociowrite"];
+pub(crate) const TOOLS: [&str; 4] = ["ociobakelut", "ociocheck", "ociochecklut", "ociowrite"];
 
 /// Lay out the native tools where upstream's `package/command_line.py` looks for them.
-pub(crate) fn stage(layout: &crate::py::Layout, release: bool) -> Result<(), String> {
+pub(crate) fn stage(root: &Path, package: &Path, release: bool) -> Result<(), String> {
     let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-    cmd.current_dir(&layout.root)
+    cmd.current_dir(root)
         .args([
             "build",
             "--package",
@@ -36,17 +36,15 @@ pub(crate) fn stage(layout: &crate::py::Layout, release: bool) -> Result<(), Str
         ));
     }
     let artifacts = tool_artifacts(&String::from_utf8_lossy(&out.stdout))?;
-    let bin = layout.package().join("bin");
+    let bin = package.join("bin");
     std::fs::create_dir_all(&bin).map_err(|e| format!("{}: {e}", bin.display()))?;
     for (name, source) in artifacts {
         let destination = bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         std::fs::copy(&source, &destination)
             .map_err(|e| format!("{} -> {}: {e}", source.display(), destination.display()))?;
     }
-    let source = layout
-        .root
-        .join("crates/ocio-py/python/PyOpenColorIO/command_line.py");
-    let destination = layout.package().join("command_line.py");
+    let source = root.join("crates/ocio-py/python/PyOpenColorIO/command_line.py");
+    let destination = package.join("command_line.py");
     std::fs::copy(&source, &destination)
         .map_err(|e| format!("{} -> {}: {e}", source.display(), destination.display()))?;
     Ok(())
@@ -94,51 +92,114 @@ pub(crate) fn check(layout: &crate::py::Layout) -> Result<(), String> {
         let executable = format!("{name}{}", std::env::consts::EXE_SUFFIX);
         for (mode, script) in [("call_program", CALL), ("main", MAIN)] {
             for args in [["--help"], ["--no-such-ocio-launcher-option"]] {
-                let mut outputs = Vec::new();
-                for python in [oracle.python(), port_python.as_path()] {
+                let launcher = |python: &Path| {
                     let mut cmd = Command::new(python);
                     cmd.args(["-I", "-B", "-X", "utf8", "-c", script])
                         .arg(&executable)
-                        .args(args)
-                        .current_dir(&layout.root)
-                        .env_clear()
-                        .stdin(Stdio::null());
-                    for variable in ["SYSTEMROOT", "TEMP", "TMP", "TMPDIR"] {
-                        if let Some(value) = std::env::var_os(variable) {
-                            cmd.env(variable, value);
-                        }
-                    }
-                    let out = cmd
-                        .output()
-                        .map_err(|e| format!("packaged {name}/{mode}: {e}"))?;
-                    outputs.push(out);
-                }
-                let reference = &outputs[0];
-                let port = &outputs[1];
-                let matches = reference.status.code() == port.status.code()
-                    && reference.status.code().is_some()
-                    && reference.stdout == port.stdout
-                    && reference.stderr == port.stderr;
-                reports.push(serde_json::json!({ "tool": name, "mode": mode, "args": args, "matches": matches,
-                    "wheel": { "returncode": reference.status.code(), "stdout": reference.stdout, "stderr": reference.stderr },
-                    "port": { "returncode": port.status.code(), "stdout": port.stdout, "stderr": port.stderr } }));
-                let path = layout.py.with_file_name("py-tools.json");
-                std::fs::write(
-                    &path,
-                    serde_json::to_vec_pretty(&reports).map_err(|e| e.to_string())?,
-                )
-                .map_err(|e| format!("{}: {e}", path.display()))?;
-                if !matches {
-                    return Err(format!(
-                        "packaged {name}/{mode} {args:?} differs from the wheel; {}\n{reference:?}\n{port:?}",
-                        path.display()
-                    ));
-                }
+                        .args(args);
+                    cmd
+                };
+                compare(
+                    layout,
+                    (name, mode, &args),
+                    launcher(oracle.python()),
+                    launcher(&port_python),
+                    &mut reports,
+                )?;
             }
         }
     }
     println!("py-tools: both launcher paths for all four tools match the wheel (16 comparisons)");
     Ok(())
+}
+
+/// Compare each console script the environment got with the official wheel's. uv writes both;
+/// `ociocheck` without arguments is upstream's own check of its wheel (`pyproject.toml`,
+/// `[tool.cibuildwheel]` `test-command`).
+pub(crate) fn check_console_scripts(layout: &crate::py::Layout) -> Result<(), String> {
+    let oracle = ocio_testkit::Oracle::get();
+    let port_python = layout.python();
+    let mut reports = Vec::new();
+    for name in TOOLS {
+        let script = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+        for args in [
+            &[][..],
+            &["--help"][..],
+            &["--no-such-ocio-launcher-option"][..],
+        ] {
+            let command = |python: &Path| {
+                let mut cmd = Command::new(python.with_file_name(&script));
+                cmd.args(args);
+                cmd
+            };
+            compare(
+                layout,
+                (name, "console script", args),
+                command(oracle.python()),
+                command(&port_python),
+                &mut reports,
+            )?;
+        }
+    }
+    println!(
+        "py-tools: every console script matches the wheel's ({} comparisons)",
+        reports.len()
+    );
+    Ok(())
+}
+
+/// Runs both commands in the same clean conditions and requires the same exit code, stdout and
+/// stderr, and that they said something. The reports go to `py-tools.json`.
+fn compare(
+    layout: &crate::py::Layout,
+    (name, mode, args): (&str, &str, &[&str]),
+    mut reference: Command,
+    mut port: Command,
+    reports: &mut Vec<serde_json::Value>,
+) -> Result<(), String> {
+    let mut outputs = Vec::new();
+    for cmd in [&mut reference, &mut port] {
+        cmd.current_dir(&layout.root)
+            .env_clear()
+            .stdin(Stdio::null());
+        for variable in ["SYSTEMROOT", "TEMP", "TMP", "TMPDIR"] {
+            if let Some(value) = std::env::var_os(variable) {
+                cmd.env(variable, value);
+            }
+        }
+        let out = cmd
+            .output()
+            .map_err(|e| format!("packaged {name}/{mode}: {e}"))?;
+        outputs.push(out);
+    }
+    let reference = &outputs[0];
+    let port = &outputs[1];
+    let matches = same_output(reference, port);
+    reports.push(serde_json::json!({ "tool": name, "mode": mode, "args": args, "matches": matches,
+        "wheel": { "returncode": reference.status.code(), "stdout": reference.stdout, "stderr": reference.stderr },
+        "port": { "returncode": port.status.code(), "stdout": port.stdout, "stderr": port.stderr } }));
+    let path = layout.py.with_file_name("py-tools.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&reports).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("{}: {e}", path.display()))?;
+    if !matches {
+        return Err(format!(
+            "packaged {name}/{mode} {args:?} differs from the wheel; {}\n{reference:?}\n{port:?}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// The same exit code, stdout and stderr, from a process that exited and said something.
+fn same_output(reference: &std::process::Output, port: &std::process::Output) -> bool {
+    reference.status.code() == port.status.code()
+        && reference.status.code().is_some()
+        && reference.stdout == port.stdout
+        && reference.stderr == port.stderr
+        && !(reference.stdout.is_empty() && reference.stderr.is_empty())
 }
 
 #[cfg(test)]
@@ -158,6 +219,31 @@ mod tests {
             include_bytes!("../../crates/ocio-py/python/PyOpenColorIO/command_line.py").as_slice(),
             upstream.as_bytes()
         );
+    }
+
+    #[test]
+    fn outputs_match_only_when_all_three_agree_and_say_something() {
+        let reference = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .arg("--version")
+            .output()
+            .unwrap();
+        assert!(!reference.stdout.is_empty());
+        assert!(same_output(&reference, &reference.clone()));
+        let mut stdout = reference.clone();
+        stdout.stdout.push(b'x');
+        assert!(!same_output(&reference, &stdout));
+        let mut stderr = reference.clone();
+        stderr.stderr.push(b'x');
+        assert!(!same_output(&reference, &stderr));
+        let failed = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .arg("--no-such-cargo-option")
+            .stderr(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(!same_output(&reference, &failed));
+        let mut silent = reference.clone();
+        silent.stdout.clear();
+        assert!(!same_output(&silent, &silent.clone()));
     }
 
     #[test]
