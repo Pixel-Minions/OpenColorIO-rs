@@ -37,7 +37,8 @@ establish its cause.
 Evidence outside target: `kept/continuation/2026-11-02/sde-run/`,
 `sde-windows-missing-inventory.json`, `sde-windows-retained-cases.json`,
 `sde-rocky-recovered-profile.json`, `sde-resume-plan.json`, and
-`p97-resume-controls.log`. The eleven adversarial controls include a full synthetic
+`p97-resume-controls.log`. P99 adds a cross-host ordering regression: twelve
+adversarial controls now include a full synthetic
 protocol reconstruction and missing/duplicate/altered/failed evidence rejection.
 They synthesize input names and libtest protocol framing, never OCIO expected
 outputs. The standard native controls import them on both platforms.

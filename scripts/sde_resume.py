@@ -113,6 +113,8 @@ def baseline(directory, head=ORIGINAL_HEAD):
 
 def plan(directory, head=ORIGINAL_HEAD):
     summary, expected, targets, retained, missing, _ = baseline(directory, head)
+    # Artifact extraction and directory iteration need not agree across hosts.
+    missing = sorted(missing, key=lambda case: (case['Target'], case['Name']))
     weights = {}
     rocky = directory / 'sde-snb-Rocky-complete-profile'
     if rocky.exists():

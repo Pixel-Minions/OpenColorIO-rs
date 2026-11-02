@@ -10,6 +10,7 @@ import pathlib
 import shutil
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import p77_profile_controls as fixtures
@@ -140,6 +141,13 @@ class ResumeControls(unittest.TestCase):
         self.assertEqual(proof['BoundaryInputUnion']['OriginalRequests'], 1400)
         self.assertTrue(proof['BoundaryInputUnion']['ExactlyOnce'])
         self.assertEqual(read(self.root / 'joined/rocky-proof.json')['ExecutedMissingCases'], 0)
+
+    def test_equivalent_baseline_iteration_produces_identical_plan(self):
+        original = baseline(self.base)
+        reordered = (*original[:4], list(reversed(original[4])), original[5])
+        self.assertGreater(len(original[4]), 1)
+        with mock.patch('sde_resume.baseline', return_value=reordered):
+            self.assertEqual(plan(self.base), self.value)
 
     def test_missing_partition_rejected(self):
         self.parts.pop()
