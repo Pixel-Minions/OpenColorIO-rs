@@ -68,6 +68,12 @@ then wait for explicit owner confirmation before starting the final full matrix.
 A separate Claude release audit is still in progress and may add work first.
 No full-matrix authorization is implied by closing the source ledger.
 
+Release-audit instruction,2026-11-02: the final full matrix must run on the exact
+commit that gets tagged, after the owner's confirmation. Closing upstream-map.toml
+is not its trigger. Keep the opt-level 0 depth tests in that final matrix; the
+targeted snb follow-up does not run or qualify them. Release-path work, GPU compile
+checks and notices are assigned to Claude after the owner's release decisions.
+
 The one follow-up is run41386558773 on ee5671bc, targeted_scope=owner-snb.
 Report every job's final status and whether the snb oracle crash recurs. The
 strict boundary audit is inside the two complete-profile joins, not a separately

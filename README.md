@@ -133,8 +133,9 @@ bit exact. Post-extraction dynamic updates compare the same descriptor after sou
 shader setters for all seven property types, across 5,880 live reference requests
 ([coverage](docs/cards/p88-legacy-live-qualification.md)). Complete SDE qualification remains
 open in the [execution and qualification card](docs/cards/p63-sde-followups.md).
-The final full matrix waits for clean snb results and explicit owner confirmation;
-release-audit findings and packaging also remain open.
+The final full matrix waits for clean snb results and explicit owner confirmation,
+and must run on the exact commit that gets tagged. Its opt-level 0 depth tests
+are part of that final run. Release-audit findings and packaging also remain open.
 SDE is advisory for merging; it remains part of the definition of a finished port. Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
