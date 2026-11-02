@@ -438,11 +438,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** a host that changes `OCIO_ACTIVE_DISPLAYS` or `OCIO_ACTIVE_VIEWS` to a
   malformed list while it holds a config, then copies the config.
 - **A fix:** copy the state without constructing a new `Impl` from the environment.
-- **Status:** not matched, by Rust's `Clone`: `Clone for Config` can't fail, and copies without
-  reading the environment (`crates/ocio/src/config.rs`). A binding that must raise as the wheel
-  does can call `Config::new()` first and drop its result, as upstream's construction does.
-  Seen in the source; the oracle sets the environment once per process, before the config is
-  made, so it can't show the case.
+- **Status:** matched in `p10-decisions` (owner, 2026-11-02): `Config::create_editable_copy` calls
+  `Config::new()` first, and the Python calls that copy a config go through it or do the same
+  (`copy.deepcopy`, `__deepcopy__`, `SetCurrentConfig`, `Baker.setConfig`, `Baker(config, ...)`,
+  `ConfigMergingHelpers`), as do the merger's internal copies and `ociocheck`. Checked against the
+  wheel: `crates/ocio-py/tests/config_copy_env_oracle.rs`, which sets the environment in the
+  script, and `a_config_copy_raises_what_the_environment_raises`
+  (`crates/ocio/tests/config_merger_oracle.rs`). Probed on Windows on 2026-11-02, the wheel raises
+  as this entry says. In the Rust API, `Clone for Config`, `Baker::set_config` and
+  `set_current_config` return no `Result`, so they still don't read the environment: a Rust host
+  that must fail as upstream calls `create_editable_copy`. Changing those signatures is an API
+  decision.
 
 ### I-135. A viewing rule's color space and encoding indices are cut to `int`
 

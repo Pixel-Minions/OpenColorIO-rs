@@ -788,7 +788,7 @@ static DEEPCOPY: Function = method_def!(
         if !a[1].is_instance_of::<PyDict>() {
             return Ok(None);
         }
-        let copy = with_config(&rc, |n| Ok(n.config.clone()))?;
+        let copy = with_config(&rc, |n| py_result(py, n.config.create_editable_copy()))?;
         config_out(py, copy)
     }
 );
@@ -3749,6 +3749,9 @@ static SET_CURRENT_CONFIG: Function = function(
             let config = config.ok_or_else(|| null_object("SetCurrentConfig(config)"))?;
             ocio::config::set_current_config_hook(Some(publish_current_config));
             let library = with_config(&config, |n| {
+                // `set_current_config` copies the config (`createEditableCopy`), and can't fail:
+                // the environment's error comes first, and leaves the current config as it was.
+                py_result(py, ocio::Config::new())?;
                 ocio::config::set_current_config(&n.config);
                 py_result(py, ocio::config::current_config_as_is())
             })?;

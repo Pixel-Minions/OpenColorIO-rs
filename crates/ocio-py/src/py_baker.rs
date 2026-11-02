@@ -77,8 +77,8 @@ fn null_argument(what: &str) -> PyErr {
 
 /// Port of `Baker::setConfig` (src/OpenColorIO/Baker.cpp:93-96 @ v2.5.2): a copy of the
 /// config (`createEditableCopy`), its objects written back first.
-fn set_config(node: &mut BakerNode, config: &ConfigRc) -> PyResult<()> {
-    let copy = with_config(config, |n| Ok(n.config.clone()))?;
+fn set_config(py: Python<'_>, node: &mut BakerNode, config: &ConfigRc) -> PyResult<()> {
+    let copy = with_config(config, |n| py_result(py, n.config.create_editable_copy()))?;
     node.config = Some(Shared::new(ConfigNode::new(copy)));
     Ok(())
 }
@@ -173,7 +173,7 @@ static INIT: Function = Function {
                 let shaper_size = arg!(a, 8, convert, i32);
                 let config = config.ok_or_else(|| null_argument("Baker(config)"))?;
                 let mut p = BakerNode::new();
-                set_config(&mut p, &config)?;
+                set_config(py, &mut p, &config)?;
                 set_format(
                     py,
                     &mut p,
@@ -251,7 +251,7 @@ static SET_CONFIG: Function = method_def!(
         let config = config.ok_or_else(|| null_argument("Baker.setConfig(config)"))?;
         // The copy is made before the baker is locked: the config's own lock is the only one
         // held while its objects are written back.
-        let copy = with_config(&config, |n| Ok(n.config.clone()))?;
+        let copy = with_config(&config, |n| py_result(py, n.config.create_editable_copy()))?;
         rc.lock().config = Some(Shared::new(ConfigNode::new(copy)));
         none(py)
     }

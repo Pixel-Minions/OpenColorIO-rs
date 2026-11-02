@@ -25,7 +25,7 @@ mod common;
 use std::sync::Arc;
 
 use common::app_helpers::{Rng, capture};
-use ocio::{ConfigMerger, ConfigMergingParameters, ExceptionKind, MergeStrategies};
+use ocio::{Config, ConfigMerger, ConfigMergingParameters, ExceptionKind, MergeStrategies};
 use ocio_ops::platform::{MapEnv, set_thread_env_provider};
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -826,6 +826,70 @@ fn copy_script(value: &str, params: usize) -> Value {
     }
     steps.push(json!({"call": {"name": "copy.deepcopy"}, "args": [{"ref": 4}]}));
     json!({"steps": steps})
+}
+
+/// A py_eval script that makes a config, sets `OCIO_ACTIVE_DISPLAYS` to `value` as
+/// [`copy_script`] does, and copies the config: its last step (docs/improvements.md, I-134).
+fn config_copy_script(value: &str) -> Value {
+    json!({"steps": [
+        {"call": {"name": "OCIO.Config.CreateRaw"}},
+        {"call": {"name": "operator.getitem"},
+         "args": [{"name": "copy.__builtins__"}, s("__import__")]},
+        {"call": {"ref": 1}, "args": [s("os")]},
+        {"eval": {"ref": 2, "attr": "environ"}},
+        {"setitem": {"ref": 3}, "index": s("OCIO_ACTIVE_DISPLAYS"), "value": s(value)},
+        {"call": {"name": "copy.deepcopy"}, "args": [{"ref": 0}]},
+    ]})
+}
+
+/// The library's copy of a config raises what the wheel's raises under an environment
+/// `Config::Create` refuses (`Config::createEditableCopy`, Config.cpp:1352-1357 @ v2.5.2,
+/// docs/improvements.md, I-134), and copies under one it takes. `Clone` can't fail. The Python
+/// calls that copy a config are in `crates/ocio-py/tests/config_copy_env_oracle.rs`.
+#[test]
+fn a_config_copy_raises_what_the_environment_raises() {
+    const BAD: &str = "\"open, c";
+    let report = Oracle::get()
+        .call(
+            "py_eval",
+            json!({"scripts": [config_copy_script(BAD), config_copy_script("a, b")]}),
+            &[],
+        )
+        .result;
+    let reports = report["scripts"].as_array().expect("scripts");
+    assert_eq!(reports.len(), 2, "{report}");
+    let last = |r: &Value| {
+        let steps = r["steps"].as_array().expect("steps").clone();
+        assert_eq!(steps.len(), 6, "{r}");
+        steps[5].clone()
+    };
+
+    let config = Config::create_raw().expect("a raw config");
+    set_thread_env_provider(Some(Arc::new(MapEnv::from_entries::<&str, &str>(&[(
+        "OCIO_ACTIVE_DISPLAYS",
+        BAD,
+    )]))));
+    let wheel = last(&reports[0]);
+    let raised = wheel
+        .get("raised")
+        .unwrap_or_else(|| panic!("the wheel's copy went through: {wheel}"));
+    let error = config.create_editable_copy().expect_err("the environment");
+    assert_eq!(error.kind(), ExceptionKind::Exception);
+    assert_eq!(raised["message"], bytes_arg(error.what()));
+    assert_eq!(
+        raised["mro"][0],
+        json!("PyOpenColorIO.PyOpenColorIO.Exception")
+    );
+
+    set_thread_env_provider(Some(Arc::new(MapEnv::from_entries::<&str, &str>(&[(
+        "OCIO_ACTIVE_DISPLAYS",
+        "a, b",
+    )]))));
+    let wheel = last(&reports[1]);
+    assert!(wheel.get("raised").is_none(), "{wheel}");
+    assert!(config.create_editable_copy().is_ok());
+
+    set_thread_env_provider(None);
 }
 
 /// A copy of a merger holding `None` parameters, under an environment `Config::Create` refuses
