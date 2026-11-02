@@ -4,15 +4,15 @@
 //! Upstream's package launcher with the four in-scope Rust developer executables.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const TOOLS: [&str; 4] = ["ociobakelut", "ociocheck", "ociochecklut", "ociowrite"];
 
 /// Lay out the native tools where upstream's `package/command_line.py` looks for them.
-pub(crate) fn stage(layout: &crate::py::Layout, release: bool) -> Result<(), String> {
+pub(crate) fn stage(root: &Path, package: &Path, release: bool) -> Result<(), String> {
     let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-    cmd.current_dir(&layout.root)
+    cmd.current_dir(root)
         .args([
             "build",
             "--package",
@@ -36,17 +36,15 @@ pub(crate) fn stage(layout: &crate::py::Layout, release: bool) -> Result<(), Str
         ));
     }
     let artifacts = tool_artifacts(&String::from_utf8_lossy(&out.stdout))?;
-    let bin = layout.package().join("bin");
+    let bin = package.join("bin");
     std::fs::create_dir_all(&bin).map_err(|e| format!("{}: {e}", bin.display()))?;
     for (name, source) in artifacts {
         let destination = bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         std::fs::copy(&source, &destination)
             .map_err(|e| format!("{} -> {}: {e}", source.display(), destination.display()))?;
     }
-    let source = layout
-        .root
-        .join("crates/ocio-py/python/PyOpenColorIO/command_line.py");
-    let destination = layout.package().join("command_line.py");
+    let source = root.join("crates/ocio-py/python/PyOpenColorIO/command_line.py");
+    let destination = package.join("command_line.py");
     std::fs::copy(&source, &destination)
         .map_err(|e| format!("{} -> {}: {e}", source.display(), destination.display()))?;
     Ok(())

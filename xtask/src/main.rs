@@ -25,6 +25,7 @@ mod registers;
 mod scratch;
 mod shards;
 mod upstream;
+mod wheel;
 
 const USAGE: &str = "\
 cargo xtask <command>
@@ -94,6 +95,8 @@ Python (Phase 6):
                               rewrites the list)
   py-check                    clippy and tests of the Python bindings, then py-suite (CI's
                               step)
+  wheel-build                 build the wheel opencolorio-rs into target/wheel with uv and
+                              maturin (`cargo xtask wheel-build --help`)
 
 Upstream:
   upstream-map update         add new upstream files to upstream-map.toml (keeps edits)
@@ -144,6 +147,11 @@ fn main() -> ExitCode {
             Ok(())
         }
         ["py-check", rest @ ..] => py::py_check(rest),
+        ["wheel-build", "--help" | "-h"] => {
+            print!("{}", wheel::USAGE);
+            Ok(())
+        }
+        ["wheel-build", rest @ ..] => wheel::wheel_build(rest),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),

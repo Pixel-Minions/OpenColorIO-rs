@@ -140,19 +140,24 @@ pub(crate) fn build(layout: &Layout, release: bool) -> Result<(), String> {
             std::fs::remove_file(entry.path()).map_err(|e| format!("{name}: {e}"))?;
         }
     }
-    copy(
-        &layout
-            .root
-            .join("crates/ocio-py/python/PyOpenColorIO/__init__.py"),
-        &package.join("__init__.py"),
-    )?;
     copy(&library, &package.join(format!("PyOpenColorIO{suffix}")))?;
-    crate::py_tools::stage(layout, release)?;
+    lay_out_package(&layout.root, &package, release)?;
     let pth = Path::new(&site).join(PTH);
     std::fs::write(&pth, pth_contents(&layout.py)).map_err(|e| format!("{}: {e}", pth.display()))
 }
 
-fn copy(from: &Path, to: &Path) -> Result<(), String> {
+/// The package's files other than the extension, in the directory `package`: upstream's
+/// `__init__.py` and `command_line.py`, and the tools in `bin`. `cargo xtask py-build` and the
+/// wheel both lay it out here, so the two can't drift.
+pub(crate) fn lay_out_package(root: &Path, package: &Path, release: bool) -> Result<(), String> {
+    copy(
+        &root.join("crates/ocio-py/python/PyOpenColorIO/__init__.py"),
+        &package.join("__init__.py"),
+    )?;
+    crate::py_tools::stage(root, package, release)
+}
+
+pub(crate) fn copy(from: &Path, to: &Path) -> Result<(), String> {
     std::fs::copy(from, to)
         .map(|_| ())
         .map_err(|e| format!("copying {} to {}: {e}", from.display(), to.display()))
@@ -198,7 +203,7 @@ pub(crate) fn cargo_vars(
 
 /// `uv sync` of the project `py-port/` into the environment (from uv's cache when it holds
 /// Python 3.13 and NumPy already, as the oracle's environment leaves them).
-fn sync_env(layout: &Layout) -> Result<(), String> {
+pub(crate) fn sync_env(layout: &Layout) -> Result<(), String> {
     // A directory without its interpreter, which uv refuses to sync into ("not a valid Python
     // environment"): CI's build cache restored target/py-port without its executables
     // (PR #69's Windows checks). It is made again.
@@ -228,7 +233,7 @@ fn remove_broken_env(env: &Path, python: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn uv() -> std::ffi::OsString {
+pub(crate) fn uv() -> std::ffi::OsString {
     std::env::var_os("OCIO_RS_UV").unwrap_or_else(|| "uv".into())
 }
 

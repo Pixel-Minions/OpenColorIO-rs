@@ -1,0 +1,65 @@
+# The wheel `opencolorio-rs` (PLAN.md D14). `cargo xtask wheel-build` makes it: it lays the
+# package out with the function `cargo xtask py-build` uses, copies the license files, and runs
+# `uv build`, which runs maturin. The directory's other files are that step's output, and
+# gitignored; a plain `uv build` here stops at the license files it can't find.
+[build-system]
+requires = ["maturin==1.15.0"]
+build-backend = "maturin"
+
+[project]
+name = "opencolorio-rs"
+# The workspace's version without its local segment `+ocio.2.5.2`, which PyPI refuses (owner
+# decision 2026-11-02). A test of xtask (wheel.rs) holds the two together; the OCIO version the
+# port matches is in `description`.
+version = "0.0.0"
+description = "A Rust port matching OpenColorIO 2.5.2, with its PyOpenColorIO module. Not the official OpenColorIO package."
+readme = "README.md"
+# The oracle's and py-port's interpreter (P6-5; PLAN.md D14): cp313, not abi3.
+requires-python = "==3.13.*"
+license = "BSD-3-Clause"
+# Copied here from the repository's root and from Cargo's registry: PEP 639 keeps these paths
+# inside the project.
+license-files = [
+    "LICENSE",
+    "NOTICE",
+    "THIRD-PARTY-NOTICES.md",
+    "crate-licenses/**/*",
+]
+authors = [
+    { name = "Contributors to the OpenColorIO Project" },
+    { name = "Pixel Minions" },
+]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Multimedia :: Graphics",
+]
+
+[project.urls]
+Repository = "https://github.com/Pixel-Minions/OpenColorIO-rs"
+
+# The official wheel's entry point for each tool (its entry_points.txt, which `cargo xtask
+# wheel-check` compares), for the four tools 1.0.0 ships (PLAN.md section 4).
+[project.scripts]
+ociobakelut = "PyOpenColorIO.command_line:main"
+ociocheck = "PyOpenColorIO.command_line:main"
+ociochecklut = "PyOpenColorIO.command_line:main"
+ociowrite = "PyOpenColorIO.command_line:main"
+
+[tool.maturin]
+manifest-path = "../crates/ocio-py/Cargo.toml"
+# Generated: upstream's package as `cargo xtask py-build` lays it out, with the tools in `bin`.
+python-source = "python"
+module-name = "PyOpenColorIO.PyOpenColorIO"
+bindings = "pyo3"
+features = ["extension-module"]
+strip = true
+
+# maturin's default SBOM records the absolute build path, a time and a random id.
+[tool.maturin.sbom]
+rust = false
