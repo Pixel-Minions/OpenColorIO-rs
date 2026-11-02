@@ -17,8 +17,12 @@ matrix until step 3 is done.
    distribution name is `opencolorio-rs`, and the Rust crates go to crates.io under it, D6) and
    the final state of `docs/improvements.md`, and every exception has its row in
    `docs/deviations.md` or `waivers.toml`.
-3. **Make the release commit.** Bump the version to `1.0.0+ocio.2.5.2`. This commit is the one to
-   be tagged.
+3. **Make the release commit.** Bump the version to `1.0.0+ocio.2.5.2`, and the four crates'
+   `version = "=..."` requirements in `[workspace.dependencies]` to `=1.0.0` with it. This commit
+   is the one to be tagged. Check the packages on it:
+   `cargo package --offline -p opencolorio-rs-ops -p opencolorio-rs-formats -p opencolorio-rs-gpu -p opencolorio-rs`,
+   on Windows and in Rocky Linux 9. Not `--workspace`: that also packages the `publish = false`
+   crates, and fails on them.
 4. **Qualify it.** Dispatch the one full SDE run on that commit.
 5. **If something fails or changes.** A fix makes a new release commit. Rerun only the CPU profiles
    it affects, and record which commit each profile passed on.
@@ -28,3 +32,6 @@ matrix until step 3 is done.
    - the four tools shipped (PLAN.md section 4);
    - the accepted speed misses (`docs/cards/phase8.md`);
    - fuzzing comes after 1.0.0 (PLAN.md section 8).
+7. **Publish.** The owner publishes the four crates on crates.io (PLAN.md D6), from the tag, each
+   after what it depends on: `opencolorio-rs-ops`, then `opencolorio-rs-formats` and
+   `opencolorio-rs-gpu`, then `opencolorio-rs`. A published version can't be replaced.

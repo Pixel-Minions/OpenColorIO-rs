@@ -223,6 +223,7 @@ pub(crate) fn run() -> Result<(), String> {
     let (sources, manifests) = workspace_files(root)?;
     problems.extend(check_files(&sources, &manifests, &waived));
     problems.extend(check_dependency_pins(&manifests));
+    problems.extend(crate::package_copies::check(root, &manifests));
     problems.extend(crate::registers::check(root));
     problems.extend(crate::upstream::validate(&crate::upstream::load_map()?));
     check_submodule(root, &mut problems);

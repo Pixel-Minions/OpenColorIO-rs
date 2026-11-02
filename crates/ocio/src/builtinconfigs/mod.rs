@@ -7,9 +7,10 @@
 //! Upstream's build embeds each `builtinconfigs/configs/*.ocio` file byte for byte, as its
 //! checkout wrote it (`src/OpenColorIO/CMakeLists.txt:262-283` @ v2.5.2). The Windows wheel's
 //! checkout wrote the files with CR LF line ends and the Linux wheel's with LF, so the texts
-//! differ by platform (docs/improvements.md I-148). The port embeds upstream's files from the
-//! submodule and gives each line the end of the wheel of its platform, whatever line ends the
-//! submodule's checkout has.
+//! differ by platform (docs/improvements.md I-148). The port embeds copies of upstream's files
+//! (`configs/`, in this crate because a package reads nothing outside its directory; `cargo
+//! xtask guards` compares them with the submodule) and gives each line the end of the wheel of
+//! its platform, whatever line ends a checkout has.
 
 pub mod builtin_config_registry;
 pub(crate) mod cg;

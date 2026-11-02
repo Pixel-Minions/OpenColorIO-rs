@@ -15,6 +15,7 @@ mod guards;
 mod land;
 mod links;
 mod metadata;
+mod package_copies;
 mod parity;
 mod py;
 mod py_driver;

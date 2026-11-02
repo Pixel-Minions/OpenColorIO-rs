@@ -32,14 +32,19 @@ rust-version = "1.98"
 license = "BSD-3-Clause"
 authors = ["Contributors to the OpenColorIO Project", "Pixel Minions"]
 repository = "https://github.com/Pixel-Minions/OpenColorIO-rs"
+keywords = ["opencolorio", "ocio", "color-management", "color", "vfx"]
+categories = ["graphics", "multimedia::images"]
 publish = false
 
 [workspace.dependencies]
-ocio-ops = { path = "crates/ocio-ops", package = "opencolorio-rs-ops" }
-ocio-formats = { path = "crates/ocio-formats", package = "opencolorio-rs-formats" }
-ocio-gpu = { path = "crates/ocio-gpu", package = "opencolorio-rs-gpu" }
+# The four published crates (PLAN.md D6) require each other exactly: they release together. The
+# version has no build metadata here, which cargo ignores in a requirement; it moves with
+# [workspace.package] version, and a resolve fails when it doesn't.
+ocio-ops = { path = "crates/ocio-ops", package = "opencolorio-rs-ops", version = "=0.0.0" }
+ocio-formats = { path = "crates/ocio-formats", package = "opencolorio-rs-formats", version = "=0.0.0" }
+ocio-gpu = { path = "crates/ocio-gpu", package = "opencolorio-rs-gpu", version = "=0.0.0" }
 ocio-gpu-exec = { path = "crates/ocio-gpu-exec" }
-ocio = { path = "crates/ocio", package = "opencolorio-rs" }
+ocio = { path = "crates/ocio", package = "opencolorio-rs", version = "=0.0.0" }
 ocio-testkit = { path = "crates/ocio-testkit" }
 # The Python binding's C API calls that need `unsafe` (its only unsafe code, PLAN.md D8).
 ocio-py-ffi = { path = "crates/ocio-py/ffi" }

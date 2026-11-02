@@ -4,6 +4,7 @@
 # Byte-exact data: never convert line endings or apply any filter.
 fixtures/** -text -diff
 corpus/** -text -diff
+crates/ocio/src/builtinconfigs/configs/** -text -diff
 *.bin -text -diff
 *.exr binary
 *.png binary

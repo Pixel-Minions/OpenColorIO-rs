@@ -6,7 +6,9 @@ OpenColorIO 2.5.2 is built with, whose behavior the port must reproduce, and fro
 OpenColorIO carries under their own notices. This file lists each one, what the port takes from
 it and where, and reproduces its copyright and license notice.
 
-A chunk that translates code from another source adds its entry here, in the same chunk.
+A chunk that translates code from another source adds its entry here, in the same chunk. A crate
+published on crates.io carries the sections that name it, verbatim, in its own
+`THIRD-PARTY-NOTICES.md`, and `cargo xtask guards` checks them.
 
 The Rust crates the workspace depends on are not translated. `cargo deny` checks their licenses
 against [`deny.toml`](deny.toml). In source form each ships with its own license; a built wheel or

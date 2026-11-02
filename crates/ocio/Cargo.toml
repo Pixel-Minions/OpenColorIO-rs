@@ -7,7 +7,21 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-publish.workspace = true
+publish = true
+readme = "README.md"
+keywords.workspace = true
+categories.workspace = true
+# Tests read the repository (fixtures, upstream/, the oracle) and stay out of the package.
+exclude = [
+    "/tests/",
+    "*_tests.rs",
+    "/src/file_tests/",
+    "/src/test_env.rs",
+    "/src/fileformats/test_utils.rs",
+    "/src/yaml_cpp/handler_test.rs",
+    "/src/yaml_cpp/spec_examples.rs",
+    "/src/apphelpers/configs_data.rs",
+]
 
 [lib]
 # Published as this package's name; in code it stays `ocio`.

@@ -815,56 +815,56 @@ path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v1.0.0_aces-v1.3_ocio-v
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v2.1.0_aces-v1.3_ocio-v2.3.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v2.2.0_aces-v1.3_ocio-v2.4.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v4.0.0_aces-v2.0_ocio-v2.5.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v1.0.0_aces-v1.3_ocio-v2.1.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v2.1.0_aces-v1.3_ocio-v2.3.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v2.2.0_aces-v1.3_ocio-v2.4.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v4.0.0_aces-v2.0_ocio-v2.5.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "done"
-note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy)"
+note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/src/builtinconfigs/configs/ (a package reads nothing outside its directory), which guards compare with this file"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormat3DL.cpp"
