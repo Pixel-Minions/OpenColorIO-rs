@@ -499,7 +499,7 @@ fn check(layout: &Layout, wheel: &Path, scratch: &Path) -> Result<(), String> {
 
     // 1. The wheel's files.
     let contents = read_wheel(layout, wheel)?;
-    let expected = expected(layout, wheel)?;
+    let expected = expected(layout)?;
     let found = problems(
         wheel
             .file_name()
@@ -655,7 +655,7 @@ fn read_wheel(layout: &Layout, wheel: &Path) -> Result<Contents, String> {
     serde_json::from_slice(&out.stdout).map_err(|e| format!("{}: {e}", wheel.display()))
 }
 
-fn expected(layout: &Layout, _wheel: &Path) -> Result<Expected, String> {
+fn expected(layout: &Layout) -> Result<Expected, String> {
     let root = &layout.root;
     let workspace = workspace_version(root)?;
     let (version, ocio_version) = plain_and_ocio(&workspace)
