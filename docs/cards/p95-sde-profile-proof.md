@@ -13,9 +13,10 @@ every source, CPU, inventory, raw-log, filter and exact-once rejection unchanged
 
 The new actual-CLI regression reproduces FileNotFoundError on the old code, then
 requires a valid persisted proof in a missing nested parent. A second CLI control
-requires invalid source evidence to create neither a proof nor its parent. Run
-the profile controls in both required platform-check jobs alongside the existing
-native SDE controls. These controls do not emulate a CPU or fabricate OCIO output.
+requires invalid source evidence to create neither a proof nor its parent. The
+existing p64 native controls import ProfileControls, so both required platform
+checks already execute these regressions; a separate invocation is unnecessary.
+These controls do not emulate a CPU or fabricate OCIO output.
 
 The original Windows join failed before the strict external boundary audit, due
 to its cancelled shard1. Its successful shard2 contains every original boundary

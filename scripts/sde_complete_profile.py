@@ -43,7 +43,7 @@ def load(root):
     return summary, found
 
 
-def complete(kernel_root, lut_root, cpu, head):
+def complete(kernel_root, lut_root, cpu, head, kernel_shards=4, lut_shards=None):
     require(re.fullmatch(r'[0-9a-f]{40}', head) is not None, 'Invalid expected source SHA')
     kernels, kernel_reports = load(kernel_root)
     luts, lut_reports = load(lut_root)
@@ -52,7 +52,10 @@ def complete(kernel_root, lut_root, cpu, head):
             and kernels['SDEPrefix'][-1] == '--', 'Profile CPU/emulator differs')
     require(kernels['CargoCommand'] == STEM + ['--skip', LUT[0], '--skip', LUT[1]]
             and luts['CargoCommand'] == STEM + LUT, 'Profile changed the original partition')
-    require(kernels.get('AggregatedShards') == 4, 'Missing original four kernel shards')
+    require(type(kernel_shards) is int and 1 <= kernel_shards <= 16, 'Invalid expected kernel partition')
+    require(lut_shards is None or type(lut_shards) is int and 1 <= lut_shards <= 16, 'Invalid expected LUT partition')
+    require(kernels.get('AggregatedShards') == kernel_shards, 'Missing expected kernel shards')
+    require(luts.get('AggregatedShards') == lut_shards, 'Missing expected LUT shards')
     require(set(kernel_reports) == set(lut_reports), 'Kernel/LUT target sets differ')
     total = 0
     boundary = None
@@ -75,6 +78,7 @@ def complete(kernel_root, lut_root, cpu, head):
         targets.append(dict(Target=key, Cases=len(original), Kernels=len(selected_kernel), LUT=len(selected_lut)))
     require(boundary is not None, 'The complete profile did not prove the original boundary union')
     return dict(Head=head, CPU=cpu, CompleteCPUProfile=True, ExactlyOnce=True,
+                KernelShards=kernel_shards, LUTShards=lut_shards,
                 NativeTargets=len(targets), NativeTests=total, BoundaryInputUnion=boundary,
                 Targets=targets, KernelSummary=str(kernel_root / 'summary.json'),
                 LUTSummary=str(lut_root / 'summary.json'))
@@ -87,10 +91,12 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=pathlib.Path, required=True)
     parser.add_argument('--cpu', required=True)
     parser.add_argument('--head', required=True)
+    parser.add_argument('--kernel-shards', type=int, default=4)
+    parser.add_argument('--lut-shards', type=int)
     args = parser.parse_args()
     roots = [p.parent for p in args.lut.rglob('summary.json') if p.parent.name != 'preflight']
     require(len(roots) == 1, 'Expected one complete LUT run')
-    proof = complete(args.kernel, roots[0], args.cpu, args.head)
+    proof = complete(args.kernel, roots[0], args.cpu, args.head, args.kernel_shards, args.lut_shards)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     write_json(args.output, proof)
     print(json.dumps(proof, indent=2))

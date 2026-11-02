@@ -174,6 +174,22 @@ class ProfileControls(unittest.TestCase):
         self.assertFalse(output.exists())
         self.assertFalse(output.parent.exists())
 
+    def test_new_partition_counts_must_match_the_recorded_plan(self):
+        for folder, count in [(self.kernel, 16), (self.lut, 2)]:
+            path = folder / 'summary.json'
+            summary = json.loads(path.read_text())
+            summary['AggregatedShards'] = count
+            write(path, summary)
+        with self.assertRaises(RuntimeError):
+            self.proof()
+        proof = complete(self.kernel, self.lut, 'snb', self.head, 16, 2)
+        self.assertTrue(proof['CompleteCPUProfile'])
+        self.assertEqual((proof['KernelShards'], proof['LUTShards']), (16, 2))
+        with self.assertRaises(RuntimeError):
+            complete(self.kernel, self.lut, 'snb', self.head, 15, 2)
+        with self.assertRaises(RuntimeError):
+            complete(self.kernel, self.lut, 'snb', self.head, 16, None)
+
 
 if __name__ == '__main__':
     unittest.main()

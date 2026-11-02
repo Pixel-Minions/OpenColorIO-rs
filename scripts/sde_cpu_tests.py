@@ -7,6 +7,7 @@ directories; its runner inventories native libtest names and emulates each selec
 """
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
@@ -21,6 +22,9 @@ import time
 PREFIX_KEY = 'OCIO_RS_SDE_EXEC_PREFIX_JSON'
 REPORT_KEY = 'OCIO_RS_SDE_EXEC_REPORT_ROOT'
 SHARD_KEY = 'OCIO_RS_SDE_SHARD'
+JOB_BUDGET_KEY = 'OCIO_RS_SDE_JOB_BUDGET_SECONDS'
+JOB_DEADLINE_KEY = 'OCIO_RS_SDE_JOB_DEADLINE_MONOTONIC'
+MAX_JOB_BUDGET_SECONDS = 14400
 LUT_SWEEPS = ('lut1d_transform_matches_the_wheel_at_every_format_and_level',
               'lut3d_transform_matches_the_wheel_at_every_format_and_level')
 
@@ -77,6 +81,8 @@ def selected_shard(metadata, names, shard):
         return names
     key = target_key(metadata)
     def belongs(name):
+        if shard['Count'] == 2 and key == 'ocio/test/api_formats_oracle' and name in LUT_SWEEPS:
+            return LUT_SWEEPS.index(name) == shard['Index']
         if shard['Count'] == 4 and key == 'ocio/test/legacy_gpu_oracle' and name in LEGACY_FOUR_WAY:
             return LEGACY_FOUR_WAY[name] == shard['Index']
         digest = hashlib.sha256((key + '\0' + name).encode()).digest()
@@ -86,6 +92,29 @@ def selected_shard(metadata, names, shard):
 
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
+
+
+def job_budget():
+    try:
+        value = float(os.environ.get(JOB_BUDGET_KEY, str(MAX_JOB_BUDGET_SECONDS)))
+    except ValueError as error:
+        raise RuntimeError('SDE job budget must be a finite positive number') from error
+    if not math.isfinite(value) or not 0 < value <= MAX_JOB_BUDGET_SECONDS:
+        raise RuntimeError('SDE job budget must be within the four-hour execution limit')
+    return value
+
+
+def job_deadline():
+    value = os.environ.get(JOB_DEADLINE_KEY)
+    if value is None:
+        return None
+    try:
+        deadline = float(value)
+    except ValueError as error:
+        raise RuntimeError('Invalid SDE job deadline') from error
+    if not math.isfinite(deadline):
+        raise RuntimeError('Invalid SDE job deadline')
+    return deadline
 
 
 def executable_key(path):
@@ -192,12 +221,22 @@ def test_binary(binary, arguments):
                       LogicalTarget=target_key(expected[executable]))
     write_json(directory / 'report.json', report)
     prefix = json.loads(os.environ[PREFIX_KEY])
+    deadline = job_deadline()
+    report['JobBudgetExhausted'] = False
     for index, name in enumerate(selected):
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            report['JobBudgetExhausted'] = True
+            break
         print(f'SDE {index+1}/{len(selected)} {pathlib.Path(binary).name}::{name}', flush=True)
         # Preserve the original six-hour LUT-job allowance with a bounded five-hour
         # per-sweep watchdog; ordinary cases retain their existing two-hour budget.
         budget = 18000 if expected[executable]['Target']['name'] == 'api_formats_oracle' and name in LUT_SWEEPS else 7200
+        if remaining is not None:
+            budget = min(budget, remaining)
         row = one_test(prefix, binary, name, len(all_names), directory / f'test-{index:05}.log', budget)
+        if deadline is not None and row['TimedOut'] and time.monotonic() >= deadline:
+            report['JobBudgetExhausted'] = True
         report['Results'].append(row)
         write_json(directory / 'report.json', report)
         if not row['Passed']:
@@ -214,6 +253,7 @@ def cargo_command(original, config):
 
 
 def run_cargo(original):
+    execution_budget = job_budget()
     head = source_head(pathlib.Path(__file__).resolve().parents[1])
     shard = shard_spec(os.environ.get(SHARD_KEY))
     if len(original) < 2 or original[0] != 'cargo' or original[1] != 'cpu-tests':
@@ -250,6 +290,7 @@ def run_cargo(original):
     # Every job must run the real preflight audit, regardless of its production bucket.
     environment.pop(SHARD_KEY, None)
     environment[PREFIX_KEY] = json.dumps(prefix)
+    environment[JOB_DEADLINE_KEY] = str(time.monotonic() + execution_budget)
     runner = [sys.executable, str(pathlib.Path(__file__).resolve()), '--test-binary']
     # CLI configuration has precedence over the inherited SDE runner; the array also
     # preserves spaces in executable paths. Keep the original environment for child Cargo.
@@ -288,6 +329,8 @@ def run_cargo(original):
                    PassedTests=sum(row['Passed'] for report in reports for row in report['Results']),
                    ExcludedByOriginalArgs=[name for report in reports for name in report['ExcludedByOriginalArgs']],
                    AllSelectedTestsPassed=passed, CargoExit=result.returncode)
+    summary.update(JobBudgetSeconds=execution_budget,
+                   JobBudgetExhausted=any(report.get('JobBudgetExhausted', False) for report in reports))
     if shard is not None:
         summary.update(Shard=shard, RequiresShardAggregation=True,
                        OriginalSelectedTests=sum(len(report['OriginalSelected']) for report in reports))

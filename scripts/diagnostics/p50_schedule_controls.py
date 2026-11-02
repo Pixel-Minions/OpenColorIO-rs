@@ -10,7 +10,7 @@ import unittest
 
 root = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(root / 'scripts'))
-from sde_cpu_tests import selected_shard
+from sde_cpu_tests import LUT_SWEEPS, selected_shard
 
 NAMES = re.findall(r'#\[test\]\s+fn\s+(\w+)', (root / 'crates/ocio/tests/legacy_gpu_oracle.rs').read_text())
 META = dict(Package='path+file:///work/crates/ocio#0.1.0',
@@ -61,6 +61,20 @@ class ScheduleControls(unittest.TestCase):
 
     def test_unsharded_probe_selection_is_unchanged(self):
         self.assertEqual(selected_shard(META, NAMES, None), NAMES)
+
+    def test_each_original_lut_sweep_has_its_own_partition(self):
+        metadata = dict(Package=META['Package'], Target=dict(kind=['test'], name='api_formats_oracle'))
+        parts = [selected_shard(metadata, list(LUT_SWEEPS), dict(Index=i, Count=2)) for i in range(2)]
+        self.assertEqual(parts, [[LUT_SWEEPS[0]], [LUT_SWEEPS[1]]])
+
+    def test_lut_and_future_names_remain_exactly_once(self):
+        metadata = dict(Package=META['Package'], Target=dict(kind=['test'], name='api_formats_oracle'))
+        names = [*LUT_SWEEPS, 'future_case', 'another_case']
+        for count in range(1, 17):
+            parts = [selected_shard(metadata, names, dict(Index=i, Count=count)) for i in range(count)]
+            flattened = [name for part in parts for name in part]
+            self.assertEqual(len(flattened), len(set(flattened)))
+            self.assertEqual(sorted(flattened), sorted(names))
 
 
 if __name__ == '__main__':
