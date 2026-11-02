@@ -147,12 +147,16 @@ mod tests {
 
     #[test]
     fn package_launcher_is_upstreams_file_verbatim() {
+        // The submodule may be checked out with CRLF on Windows. Compare with
+        // its pinned Git blob, without normalising or weakening either side.
+        let upstream = crate::git(
+            &crate::root().join("upstream/OpenColorIO"),
+            &["show", "HEAD:src/bindings/python/package/command_line.py"],
+        )
+        .expect("the pinned upstream package launcher blob");
         assert_eq!(
             include_bytes!("../../crates/ocio-py/python/PyOpenColorIO/command_line.py").as_slice(),
-            include_bytes!(
-                "../../upstream/OpenColorIO/src/bindings/python/package/command_line.py"
-            )
-            .as_slice()
+            upstream.as_bytes()
         );
     }
 
