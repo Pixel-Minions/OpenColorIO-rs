@@ -462,6 +462,9 @@ impl GpuShaderReply {
     /// Reads the command's response.
     pub fn from_response(response: Response) -> GpuShaderReply {
         let shader = response.result.get("shader").map(|s| shader(s, &response));
+        if let Some(shader) = &shader {
+            crate::shader_compile::record_family(shader);
+        }
         GpuShaderReply {
             result: response.result,
             shader,
