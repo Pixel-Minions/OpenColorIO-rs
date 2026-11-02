@@ -31,6 +31,8 @@ Runs, in order, stopping at the first failure:
   py-suite       then: cargo xtask py-suite (upstream's Python suite against the port's
                  module; every test function py-port/passing.txt lists must pass)
   test-release   the same in release, with --release (and test-release-py)
+  py-suite-release then: cargo xtask py-suite --release (the complete upstream Python suite
+                 against the release extension, with the same checks as debug)
   rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh),
                  started once ci (and deny) pass and the debug test binaries are built
                  (test-build), beside the test steps above
@@ -303,7 +305,7 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     Ok(())
 }
 
-/// The test steps of this platform: debug, Python, the Python suite, then release.
+/// The test steps of this platform: debug, Python and its suite, then all three in release.
 fn run_tests(
     root: &Path,
     opts: &Options,
@@ -347,6 +349,9 @@ fn run_tests(
                 python_test_command(root, python, true, tier),
                 Kind::Tests,
             )?;
+            let mut suite = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+            suite.args(["py-suite", "--release"]).current_dir(root);
+            runner.step("py-suite-release", suite, Kind::Plain)?;
         }
     }
     Ok(())
@@ -991,8 +996,8 @@ impl Runner {
     }
 }
 
-/// Width of the step names in summary lines (`rocky/test-release-py` fits).
-const NAME_WIDTH: usize = 21;
+/// Width of the step names in summary lines (`rocky/py-suite-release` fits).
+const NAME_WIDTH: usize = 22;
 
 /// Runs `cmd` with stdout and stderr in `log`. For a nested gate, stdout is read line by line
 /// and its step summary lines are printed as they arrive, renamed `<step>/<its step>`.

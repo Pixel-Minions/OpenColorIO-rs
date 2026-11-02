@@ -19,7 +19,8 @@
 //! module: each module of upstream's driver (`OpenColorIOTestSuite.py`) in a new process,
 //! through the runner the oracle runs it with against the wheel
 //! (`oracle/ocio_oracle/py_suite_runner.py`, O6.3), in the same conditions. Each run's
-//! outcome goes to `<target>/py-suite.json`. A test function passes when the port makes every
+//! outcome goes to `<target>/py-suite.json` (or `py-suite-release.json`). A test function
+//! passes when the port makes every
 //! run of it that the wheel makes (the oracle's py_suite of the same modules: a test a class
 //! inherits runs once per class), and each passes. `py-port/passing.txt` lists the functions
 //! that pass: a listed function that doesn't fails the command; `--update` rewrites the list.
@@ -40,15 +41,17 @@ cargo xtask py-build [--release]
 cargo xtask py-suite [--update] [--release] [--no-build]
     Builds the module (as py-build; --no-build: the one in target/py), runs upstream's Python
     suite against it (each module of tests/python/OpenColorIOTestSuite.py in a new process of
-    target/py-port), writes each test's outcome to target/py-suite.json, and fails when a test
-    function py-port/passing.txt lists doesn't pass. Also runs the original single-process
+    target/py-port), writes each test's outcome to target/py-suite.json (py-suite-release.json
+    with --release), and fails when a test function py-port/passing.txt lists doesn't pass.
+    Also runs the original single-process
     driver and its selection/error CLI against both packages; logs in target/py-driver.json.
     --update: rewrite the list with the functions that pass (it may only grow).
 
 cargo xtask py-check
     CI's step for the Python module: clippy (-D warnings) of ocio-py and ocio-py-ffi and the
     tests of ocio-py, with their python feature, against target/py-port's Python, then
-    py-suite.
+    py-suite in debug and release. Both rebuild the extension in the selected profile
+    and run the complete unmodified upstream suite and original driver.
 ";
 
 /// The name of the `.pth` file that puts the package's directory on the environment's path.
@@ -304,11 +307,17 @@ pub(crate) fn py_suite(args: &[&str]) -> Result<(), String> {
         }
     }
     let layout = Layout::new();
+    let profile = if release { "release" } else { "debug" };
     if no_build {
         sync_env(&layout)?;
     } else {
         build(&layout, release)?;
     }
+    let build_profile = (!no_build).then_some(profile);
+    println!(
+        "py-suite: build profile={}",
+        build_profile.unwrap_or("existing (--no-build)")
+    );
     let tests = layout.root.join("upstream/OpenColorIO/tests");
     let modules = driver_modules(&tests)?;
     let scratch = layout.py.with_file_name("py-suite-tmp");
@@ -317,9 +326,15 @@ pub(crate) fn py_suite(args: &[&str]) -> Result<(), String> {
         reports.push(run_module(&layout, &tests, module, &scratch)?);
     }
     let _ = std::fs::remove_dir_all(&scratch);
-    let json = layout.py.with_file_name("py-suite.json");
-    let text = serde_json::to_string_pretty(&serde_json::json!({ "modules": reports }))
-        .map_err(|e| e.to_string())?;
+    let json = layout.py.with_file_name(if release {
+        "py-suite-release.json"
+    } else {
+        "py-suite.json"
+    });
+    let text = serde_json::to_string_pretty(
+        &serde_json::json!({ "build_profile": build_profile, "modules": reports }),
+    )
+    .map_err(|e| e.to_string())?;
     std::fs::write(&json, text).map_err(|e| format!("{}: {e}", json.display()))?;
 
     let runs = runs(&reports);
@@ -425,7 +440,8 @@ pub(crate) fn py_check(args: &[&str]) -> Result<(), String> {
             ));
         }
     }
-    py_suite(&[])
+    py_suite(&[])?;
+    py_suite(&["--release"])
 }
 
 /// The modules upstream's driver runs, in its order: the entries `("Name", Name),` of
