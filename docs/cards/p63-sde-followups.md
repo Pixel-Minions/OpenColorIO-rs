@@ -8,7 +8,8 @@ P45/P61's all-ten-profile merge hold and final-attempt/no-reruns wording.
 One new **targeted** SDE workflow execution is authorized. Do not dispatch or rerun
 the whole matrix. Record its exact source SHA, selection, input union and results.
 PR90 carries the `sde-targeted` label: its automatic SDE workflow selects no full
-matrix jobs. Other PRs and the scheduled matrix retain their existing selection.
+matrix jobs. The latest owner decision below now holds automatic/full-matrix
+qualification until all library work has landed; P77 provides the bounded snb run.
 The separate CI repair chunk adds the targeted execution and fixes the remaining
 thread-limit and time-budget problems without weakening any comparison.
 

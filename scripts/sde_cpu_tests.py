@@ -21,6 +21,20 @@ import time
 PREFIX_KEY = 'OCIO_RS_SDE_EXEC_PREFIX_JSON'
 REPORT_KEY = 'OCIO_RS_SDE_EXEC_REPORT_ROOT'
 SHARD_KEY = 'OCIO_RS_SDE_SHARD'
+LUT_SWEEPS = ('lut1d_transform_matches_the_wheel_at_every_format_and_level',
+              'lut3d_transform_matches_the_wheel_at_every_format_and_level')
+
+
+def source_head(root):
+    # Trust only the mounted checkout, for this read; never write Git configuration.
+    root = pathlib.Path(root).resolve()
+    head = subprocess.check_output([
+        'git', '-c', 'safe.directory=' + root.as_posix(), '-C', str(root),
+        'rev-parse', '--verify', 'HEAD',
+    ], text=True).strip()
+    if not re.fullmatch(r'[0-9a-f]{40}', head):
+        raise RuntimeError('Expected the actual checked-out source commit')
+    return head
 
 # Original quick-tier input plans (P55 divides only P32 into four420-request executions) in crates/ocio/tests/legacy_gpu_oracle.rs:
 # 1680 / 2000 / 1680 / 1680 requests, rather than hash-only 0 / 980 / 2000 / 4060.
@@ -180,7 +194,10 @@ def test_binary(binary, arguments):
     prefix = json.loads(os.environ[PREFIX_KEY])
     for index, name in enumerate(selected):
         print(f'SDE {index+1}/{len(selected)} {pathlib.Path(binary).name}::{name}', flush=True)
-        row = one_test(prefix, binary, name, len(all_names), directory / f'test-{index:05}.log')
+        # Preserve the original six-hour LUT-job allowance with a bounded five-hour
+        # per-sweep watchdog; ordinary cases retain their existing two-hour budget.
+        budget = 18000 if expected[executable]['Target']['name'] == 'api_formats_oracle' and name in LUT_SWEEPS else 7200
+        row = one_test(prefix, binary, name, len(all_names), directory / f'test-{index:05}.log', budget)
         report['Results'].append(row)
         write_json(directory / 'report.json', report)
         if not row['Passed']:
@@ -197,6 +214,7 @@ def cargo_command(original, config):
 
 
 def run_cargo(original):
+    head = source_head(pathlib.Path(__file__).resolve().parents[1])
     shard = shard_spec(os.environ.get(SHARD_KEY))
     if len(original) < 2 or original[0] != 'cargo' or original[1] != 'cpu-tests':
         raise RuntimeError('This runner accepts the original cargo cpu-tests command only')
@@ -264,7 +282,7 @@ def run_cargo(original):
     observed = [report['Executable'] for report in reports]
     complete = len(observed) == len(set(observed)) == len(expected) and set(observed) == set(expected)
     passed = result.returncode == 0 and complete and all(report['AllSelectedPassed'] for report in reports)
-    summary = dict(CargoCommand=original, SDEPrefix=prefix, ExpectedExecutables=len(expected),
+    summary = dict(Head=head, CargoCommand=original, SDEPrefix=prefix, ExpectedExecutables=len(expected),
                    ObservedExecutables=len(observed), CompleteExecutableManifest=complete,
                    SelectedTests=sum(len(report['Selected']) for report in reports),
                    PassedTests=sum(row['Passed'] for report in reports for row in report['Results']),

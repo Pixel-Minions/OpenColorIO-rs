@@ -36,11 +36,11 @@ on:
         required: true
         default: true
       targeted_scope:
-        description: Focused jobs; icc selects only the two owed Rocky snb sweeps
+        description: owner-snb selects complete snb profiles, boundary audit and both Rocky ICC sweeps
         type: choice
         required: true
         default: all
-        options: [all, icc]
+        options: [all, icc, owner-snb]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
@@ -61,8 +61,8 @@ on:
       - ".github/workflows/sde.yml"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event_name }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -84,8 +84,9 @@ env:
 jobs:
   windows-kernels:
     # The owner selects a separate targeted run for PRs carrying this label.
-    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
+    if: github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
     name: SDE ${{ matrix.cpu }} kernel shard${{ matrix.shard }} (Windows)
+    needs: targeted-controls
     runs-on: windows-2025
     # Original comparisons retained; the runner bounds individual executions separately.
     timeout-minutes: 360
@@ -93,7 +94,7 @@ jobs:
       fail-fast: false
       max-parallel: 8
       matrix:
-        cpu: [nhm, snb, hsw, skl, skx]
+        cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v5
@@ -136,15 +137,16 @@ jobs:
 
   windows-lut:
     # The owner selects a separate targeted run for PRs carrying this label.
-    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
+    if: github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
     name: SDE ${{ matrix.cpu }} LUT sweep (Windows)
+    needs: targeted-controls
     runs-on: windows-2025
     timeout-minutes: 360
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        cpu: [nhm, snb, hsw, skl, skx]
+        cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
 
     steps:
       - uses: actions/checkout@v5
@@ -170,16 +172,24 @@ jobs:
       - name: CPU tests on an emulated ${{ matrix.cpu }}
         shell: bash
         run: |
-          scripts/sde.sh ${{ matrix.cpu }} cargo test --release -p ocio --test api_formats_oracle --no-fail-fast -- $LUT_SWEEP
+          scripts/sde.sh ${{ matrix.cpu }} python scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- $LUT_SWEEP
       - name: SDE logs
         if: failure()
         shell: bash
         run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sde-${{ matrix.cpu }}-Windows-lut
+          path: kept/sde-cpu-tests/
+          retention-days: 30
+
   rocky9-kernels:
     # The owner selects a separate targeted run for PRs carrying this label.
-    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
+    if: github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
     name: SDE ${{ matrix.cpu }} kernel shard${{ matrix.shard }} (Rocky Linux 9)
+    needs: targeted-controls
     runs-on: ubuntu-24.04
     # Original comparisons retained; the runner bounds individual executions separately.
     timeout-minutes: 360
@@ -187,7 +197,7 @@ jobs:
       fail-fast: false
       max-parallel: 8
       matrix:
-        cpu: [nhm, snb, hsw, skl, skx]
+        cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v5
@@ -226,15 +236,16 @@ jobs:
 
   rocky9-lut:
     # The owner selects a separate targeted run for PRs carrying this label.
-    if: (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
+    if: github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
     name: SDE ${{ matrix.cpu }} LUT sweep (Rocky Linux 9)
+    needs: targeted-controls
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        cpu: [nhm, snb, hsw, skl, skx]
+        cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
 
     steps:
       - uses: actions/checkout@v5
@@ -257,22 +268,29 @@ jobs:
             export OCIO_RS_TIER=quick
             cargo xtask oracle info
             cargo cpu-tests --release --no-run
-            scripts/sde.sh ${{ matrix.cpu }} cargo test --release -p ocio --test api_formats_oracle --no-fail-fast -- ${{ env.LUT_SWEEP }}
+            scripts/sde.sh ${{ matrix.cpu }} python3 scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- ${{ env.LUT_SWEEP }}
           '
       - name: SDE logs
         if: failure()
         run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sde-${{ matrix.cpu }}-Rocky-lut
+          path: kept/sde-cpu-tests/
+          retention-days: 30
+
   kernels:
     name: SDE ${{ matrix.cpu }} (${{ matrix.system == 'Rocky' && 'Rocky Linux 9' || 'Windows' }})
-    if: always() && (github.event_name != 'pull_request' || (!github.event.pull_request.draft && !contains(github.event.pull_request.labels.*.name, 'sde-targeted'))) && !inputs.targeted
-    needs: [windows-kernels, rocky9-kernels]
+    if: always() && github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
+    needs: [windows-kernels, rocky9-kernels, windows-lut, rocky9-lut]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        cpu: [nhm, snb, hsw, skl, skx]
+        cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
         system: [Windows, Rocky]
     steps:
       - uses: actions/checkout@v5
@@ -280,16 +298,25 @@ jobs:
         with:
           pattern: sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-*
           path: kept/sde-shard-inputs
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sde-${{ matrix.cpu }}-${{ matrix.system }}-lut
+          path: kept/sde-lut-input
       - name: Every original target and selected test passed exactly once
         run: |
           python3 scripts/diagnostics/p50_schedule_controls.py
           python3 scripts/diagnostics/p46_join_order_controls.py
           python3 scripts/sde_join_shards.py kept/sde-cpu-tests-joined/profile             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-0             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-1             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-2             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-3
+      - name: Complete CPU alias and strict boundary union
+        run: python3 scripts/sde_complete_profile.py --kernel kept/sde-cpu-tests-joined/profile --lut kept/sde-lut-input --output kept/sde-complete-profile/proof.json --cpu ${{ matrix.cpu }} --head ${{ github.sha }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-manifest
-          path: kept/sde-cpu-tests-joined/
+          name: sde-${{ matrix.cpu }}-${{ matrix.system }}-complete-profile
+          path: |
+            kept/sde-cpu-tests-joined/
+            kept/sde-lut-input/
+            kept/sde-complete-profile/
           retention-days: 30
 
   # The limits of nested transforms and CTF references (docs/improvements.md, U-58 and U-76)
@@ -297,7 +324,7 @@ jobs:
   # the frames are largest. Nightly only: the test profile (opt-level 1) runs them on every PR.
   stack-windows:
     name: Depth limits at opt-level 0 (Windows)
-    if: github.event_name != 'pull_request' && !inputs.targeted
+    if: github.event_name == 'workflow_dispatch' && !inputs.targeted
     runs-on: windows-2025
     timeout-minutes: 120
     env:
@@ -327,7 +354,7 @@ jobs:
 
   stack-rocky9:
     name: Depth limits at opt-level 0 (Rocky Linux 9)
-    if: github.event_name != 'pull_request' && !inputs.targeted
+    if: github.event_name == 'workflow_dispatch' && !inputs.targeted
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -347,7 +374,7 @@ jobs:
 
   targeted-controls:
     name: Targeted SDE execution controls
-    if: github.event_name == 'workflow_dispatch' && inputs.targeted
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -358,9 +385,13 @@ jobs:
           python3 scripts/diagnostics/p50_schedule_controls.py
           python3 scripts/diagnostics/p46_join_order_controls.py
 
+      - name: Full matrix waits for completed library work
+        if: ${{ !inputs.targeted }}
+        run: python3 scripts/sde_release_ready.py
+
   targeted-windows:
     name: Targeted ${{ matrix.plan }} ${{ matrix.cpu }} (Windows)
-    if: github.event_name == 'workflow_dispatch' && inputs.targeted && inputs.targeted_scope != 'icc'
+    if: github.event_name == 'workflow_dispatch' && inputs.targeted && inputs.targeted_scope == 'all'
     needs: targeted-controls
     runs-on: windows-2025
     timeout-minutes: 360

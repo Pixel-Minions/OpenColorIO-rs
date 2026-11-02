@@ -11,20 +11,7 @@ import shlex
 import subprocess
 import sys
 
-from sde_cpu_tests import native_list, one_test, write_json
-
-
-def source_head(root):
-    # Docker's /work is owned by the checkout's host user. Trust only this path,
-    # for this read: do not modify a global config or trust unrelated repositories.
-    root = pathlib.Path(root).resolve()
-    head = subprocess.check_output([
-        'git', '-c', 'safe.directory=' + root.as_posix(), '-C', str(root),
-        'rev-parse', '--verify', 'HEAD',
-    ], text=True).strip()
-    if not re.fullmatch(r'[0-9a-f]{40}', head):
-        raise RuntimeError('Expected the actual checked-out source commit')
-    return head
+from sde_cpu_tests import native_list, one_test, source_head, write_json
 
 
 def selection(plan):
