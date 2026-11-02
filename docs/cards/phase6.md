@@ -80,8 +80,8 @@ chunk gate, oracle-first, owner items. What changes in Phase 6:
   then with implicit conversions), and it decodes `std::string` results as strict UTF-8 (a
   non-UTF-8 name raises `UnicodeDecodeError`). The port reproduces these rules in one place
   (6.4a), and the oracle checks them through O6.2. pybind11's behaviour is what the wheel
-  shows, whichever pybind11 version built it; nothing of pybind11 is translated, so it needs
-  no third-party notice.
+  shows, whichever pybind11 version built it. Later chunks did translate parts of it, so
+  `THIRD-PARTY-NOTICES.md` lists it (corrected 2026-11-01, G10).
 - **Objects that alias.** pybind11 holds OCIO's `shared_ptr`s: a Python object may be the same
   C++ object as one its config holds, so a change through it shows in the config. Which
   getters alias is decided per getter by the oracle (P6-8), and the Rust API gives the binding

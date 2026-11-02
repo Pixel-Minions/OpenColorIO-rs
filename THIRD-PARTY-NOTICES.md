@@ -8,8 +8,10 @@ it and where, and reproduces its copyright and license notice.
 
 A chunk that translates code from another source adds its entry here, in the same chunk.
 
-The Rust crates the workspace depends on are not translated: each ships with its own license,
-and `cargo deny` checks those licenses against [`deny.toml`](deny.toml).
+The Rust crates the workspace depends on are not translated. `cargo deny` checks their licenses
+against [`deny.toml`](deny.toml). In source form each ships with its own license; a built wheel or
+tool doesn't carry those files, so [the last section](#rust-crates-in-built-artifacts) lists the
+crates, and a binary release has to include their license files.
 
 ## Imath 3.2.1
 
@@ -556,6 +558,47 @@ sale, use or other dealings in this Software without written
 authorization from SunSoft Inc.
 ```
 
+## pybind11
+
+<https://github.com/pybind/pybind11>, the binding library of the wheel's Python module, which
+is built with pybind11 3 (OpenColorIO's build recommends 3.0.1,
+`share/cmake/modules/FindExtPackages.cmake:180-182`). `crates/ocio-py` reproduces its dispatcher,
+casters, classes and enums, and translates parts of it, such as `module_::def_submodule` in
+`crates/ocio-py/src/pybind11.rs`. Its source is not pinned in this repository. Its `LICENSE`, at
+tag v3.0.1:
+
+```text
+Copyright (c) 2016 Wenzel Jakob <wenzel.jakob@epfl.ch>, All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Please also refer to the file .github/CONTRIBUTING.md, which clarifies licensing of
+external contributions to this project including patches, pull requests, etc.
+```
+
 ## OpenColorIO's CDL reader
 
 OpenColorIO 2.5.2's `src/OpenColorIO/fileformats/FileFormatCDL.cpp` and its tests
@@ -661,3 +704,45 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ```
+
+## Rust crates in built artifacts
+
+The crates `ocio-py` (with its `python` feature) and `ocio-tools` depend on, at the versions of
+`Cargo.lock`, on every target. These can be linked into a wheel or a tool:
+
+| Crate | Version | License, as its manifest states it |
+|---|---|---|
+| cfg-if | 1.0.5 | MIT OR Apache-2.0 |
+| crunchy | 0.2.4 | MIT |
+| flate2 | 1.1.10 | MIT OR Apache-2.0 |
+| half | 2.7.1 | MIT OR Apache-2.0 |
+| libc | 0.2.189 | MIT OR Apache-2.0 |
+| matrixmultiply | 0.3.11 | MIT/Apache-2.0 |
+| ndarray | 0.17.2 | MIT OR Apache-2.0 |
+| num-complex | 0.4.6 | MIT OR Apache-2.0 |
+| num-integer | 0.1.47 | MIT OR Apache-2.0 |
+| num-traits | 0.2.19 | MIT OR Apache-2.0 |
+| numpy | 0.29.0 | BSD-2-Clause |
+| once_cell | 1.21.4 | MIT OR Apache-2.0 |
+| portable-atomic | 1.15.0 | Apache-2.0 OR MIT |
+| portable-atomic-util | 0.2.8 | Apache-2.0 OR MIT |
+| pyo3 | 0.29.3 | MIT OR Apache-2.0 |
+| pyo3-ffi | 0.29.3 | MIT OR Apache-2.0 |
+| rawpointer | 0.2.1 | MIT/Apache-2.0 |
+| rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
+| xxhash-rust | 0.8.19 | BSL-1.0 |
+| zerocopy | 0.8.59 | BSD-2-Clause OR Apache-2.0 OR MIT |
+| zlib-rs | 0.6.8 | Zlib |
+
+These run only at compile time, for macros:
+
+| Crate | Version | License, as its manifest states it |
+|---|---|---|
+| heck | 0.5.0 | MIT OR Apache-2.0 |
+| proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
+| pyo3-macros | 0.29.3 | MIT OR Apache-2.0 |
+| pyo3-macros-backend | 0.29.3 | MIT OR Apache-2.0 |
+| quote | 1.0.47 | MIT OR Apache-2.0 |
+| syn | 2.0.119 | MIT OR Apache-2.0 |
+| unicode-ident | 1.0.26 | (MIT OR Apache-2.0) AND Unicode-3.0 |
+| zerocopy-derive | 0.8.59 | BSD-2-Clause OR Apache-2.0 OR MIT |
