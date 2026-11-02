@@ -8,15 +8,15 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and Python.
 
-> **Status: under development, about 93% done.** Milestones M0 (the op engine and the analytic
+> **Status: under development; all 913 upstream source files accounted for.** Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker), M3 (dynamic properties,
 > grading and app helpers), and M4 (the `PyOpenColorIO` Python module) are complete.
 > CPU results and generated GPU shaders match the official library. All 384 upstream
 > Python tests pass unmodified; SystemMonitors and complete module metadata are checked
 > on Windows and Rocky Linux 9, within the approved [D-16 scope](docs/deviations.md).
-> Next: remaining library tests, legacy GPU parity and release work
-> (M5). See [Progress](#progress).
+> Source accounting is complete; full emulated-CPU qualification and release work
+> (M5) remain open. See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -92,9 +92,11 @@ one.
 
 ## Progress
 
-Status as of 2026-11-02: **milestones M0, M1, M2, M3 and M4 are complete**, about 93% of the
-planned work (910 of 913 upstream source files ported or reviewed not applicable; 1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
-all 1,191; 384 of 384 upstream Python tests pass unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
+Status as of 2026-11-02: **milestones M0, M1, M2, M3 and M4 are complete**. Source accounting
+is **913 of 913 files (100%)**: 685 mapped done and 228 reviewed not applicable, with no
+partial or todo entries. This measures source accounting, not release readiness. There are
+1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
+all 1,191; 384 of 384 upstream Python tests pass unmodified. Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
 test configs): the grading values (GradingPrimary, GradingTone,
 GradingHueCurve) with their dynamic properties; the ExposureContrast, GradingPrimary,
@@ -105,7 +107,7 @@ the mixing helpers). Phase 9 in main: ConfigUtils, OS monitor support and comple
 including every section, OCIOM chains, whole-config merges and single-color-space merges.
 Forty-four stale library/binding/harness source mappings now record their existing complete implementations.
 The GPU-language string parser is available to Rust and shared with the Python binding.
-These source-map counts include bookkeeping closures; complete CPU qualification and the remaining legacy dynamic-update checks stay open. Phase 6 (M4) in main: the
+These source-map counts include bookkeeping closures; complete CPU qualification and release acceptance stay open. Phase 6 (M4) in main: the
 `PyOpenColorIO` module's foundation (the module and its build, upstream's Python suite runner,
 pybind11's dispatcher, casters, classes and enums as the wheel shows them, every enum, constant
 and string conversion), every transform class, and the objects the config holds (context,
@@ -127,8 +129,12 @@ result is rejected. Legacy shader and LUT data are also checked against the whee
 in all 10 languages: all seven named optimization levels on small lattices, shared-cache request
 orders, allocation/file boundaries, mixed LUT/range/alpha chains and initial dynamic snapshots.
 The DEFAULT sweep also checks larger lattices through 129 cubed, with every texture value
-bit exact. Post-extraction dynamic updates and complete SDE qualification remain
+bit exact. Post-extraction dynamic updates compare the same descriptor after source and
+shader setters for all seven property types, across 5,880 live reference requests
+([coverage](docs/cards/p88-legacy-live-qualification.md)). Complete SDE qualification remains
 open in the [execution and qualification card](docs/cards/p63-sde-followups.md).
+The final full matrix waits for clean snb results and explicit owner confirmation;
+release-audit findings and packaging also remain open.
 SDE is advisory for merging; it remains part of the definition of a finished port. Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
@@ -138,8 +144,8 @@ Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pa
 files, and the CLF/CTF writer; the baker, in every format the official library bakes, CLF and
 CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
 4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
-ops in M3. Next: remaining legacy GPU parity (Phase 7), the remaining library-file audit
-(Phase 9), and release work (Phase 10). Hardware SIMD (Phase 8) is in: most paths run within 10% of C++ OCIO on the same machine, a few are still slower (`docs/cards/phase8.md`), and `CpuProcessor::apply_threaded`, which upstream doesn't have, renders rows on several threads.
+ops in M3. Next: complete CPU qualification and release work (Phase 10). The final public-header
+audit is recorded in [P89](docs/cards/p89-public-header-completion.md). Hardware SIMD (Phase 8) is in: most paths run within 10% of C++ OCIO on the same machine, a few are still slower (`docs/cards/phase8.md`), and `CpuProcessor::apply_threaded`, which upstream doesn't have, renders rows on several threads.
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
