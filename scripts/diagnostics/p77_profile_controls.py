@@ -4,8 +4,10 @@
 import copy
 import hashlib
 import json
+import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import unittest
 
@@ -144,6 +146,33 @@ class ProfileControls(unittest.TestCase):
         write(path, summary)
         with self.assertRaises(RuntimeError):
             self.proof()
+
+    def cli(self, output, head=None):
+        return subprocess.run([
+            sys.executable, str(pathlib.Path(__file__).resolve().parents[1] / 'sde_complete_profile.py'),
+            '--kernel', str(self.kernel), '--lut', str(self.lut), '--output', str(output),
+            '--cpu', 'snb', '--head', self.head if head is None else head,
+        ], env=dict(os.environ), capture_output=True, text=True, timeout=15)
+
+    def test_cli_creates_the_missing_proof_parent_after_validation(self):
+        output = self.directory / 'new-output' / 'nested' / 'proof.json'
+        self.assertFalse(output.parent.exists())
+        result = self.cli(output)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        proof = json.loads(output.read_text())
+        self.assertEqual(proof['Head'], self.head)
+        self.assertEqual(proof['CPU'], 'snb')
+        self.assertTrue(proof['CompleteCPUProfile'])
+        self.assertTrue(proof['BoundaryInputUnion']['ExactlyOnce'])
+        self.assertEqual(json.loads(result.stdout), proof)
+
+    def test_cli_invalid_evidence_creates_no_proof_or_parent(self):
+        output = self.directory / 'invalid-output' / 'nested' / 'proof.json'
+        result = self.cli(output, 'b' * 40)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Profile source SHA differs', result.stderr)
+        self.assertFalse(output.exists())
+        self.assertFalse(output.parent.exists())
 
 
 if __name__ == '__main__':

@@ -91,5 +91,6 @@ if __name__ == '__main__':
     roots = [p.parent for p in args.lut.rglob('summary.json') if p.parent.name != 'preflight']
     require(len(roots) == 1, 'Expected one complete LUT run')
     proof = complete(args.kernel, roots[0], args.cpu, args.head)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     write_json(args.output, proof)
     print(json.dumps(proof, indent=2))

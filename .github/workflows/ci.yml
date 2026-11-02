@@ -65,7 +65,9 @@ jobs:
           key: checks
       - run: cargo fmt --all --check
       - name: Native SDE execution and checkout-provenance controls
-        run: python scripts/diagnostics/p64_targeted_controls.py
+        run: |
+          python scripts/diagnostics/p64_targeted_controls.py
+          python scripts/diagnostics/p77_profile_controls.py
       - run: cargo clippy --workspace --all-targets
       - name: Guardrails, fixtures, ratchet (--main also parity)
         run: cargo xtask ci ${{ steps.mode.outputs.flags }}
@@ -201,7 +203,9 @@ jobs:
       - name: Software GPU prerequisites (EGL, llvmpipe, compatibility GLSL)
         run: scripts/rocky9.sh uv run --offline --python 3.13 --no-project python scripts/egl-probe.py
       - name: Native SDE execution and mounted-checkout provenance controls
-        run: scripts/rocky9.sh python3 scripts/diagnostics/p64_targeted_controls.py
+        run: |
+          scripts/rocky9.sh python3 scripts/diagnostics/p64_targeted_controls.py
+          scripts/rocky9.sh python3 scripts/diagnostics/p77_profile_controls.py
       - name: fmt, clippy, guardrails, fixtures and Python suite in debug and release
         run: |
           scripts/rocky9.sh bash -ec '
