@@ -1424,7 +1424,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   original's child too.
 - **Who notices:** code and Python scripts that copy a group and then change its children.
 - **A fix:** copy the children as well.
-- **Status:** to be matched when `GroupTransform` is ported (1.8a).
+- **Status:** not matched in the Rust library, by the owner's API decision of 2026-10-01: its
+  group owns its children, so a copy copies them (`crates/ocio/src/transforms/group_transform.rs`).
+  Matched in Python: a group's copy shares its children's nodes, as upstream's
+  (`crates/ocio-py/src/py_transform.rs`, `create_editable_copy`; `transforms_oracle.rs`).
+  Deviation D-20.
 
 ### I-14. Metadata attribute names match exactly when set, but ignoring case when read
 
