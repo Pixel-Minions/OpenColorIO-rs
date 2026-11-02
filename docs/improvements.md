@@ -556,8 +556,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   newline, it reads `back()` of the string it has just emptied, an access out of range (the
   byte before its buffer); the loop then stops whatever the byte is, as the string is empty.
   Both wheels give the empty description (`description: "\n\n"`), seen through the wheel.
-- **Who notices:** no one: the value read is never used. Decided (coordinator, 2026-10-07):
-  match the result, as both wheels give it predictably.
+- **Who notices:** no one: the value read is never used. Decided (coordinator, 2026-10-07,
+  approved by the owner 2026-11-02): match the result, as both wheels give it predictably.
 - **A fix:** test the length before reading the last character.
 - **Status:** matched in `p3-yaml-load-2` (3.3j), checked against the wheel in
   `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs`.
@@ -2216,7 +2216,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   from Python without raising an unraisable error first, and the binding's FFI file
   (`crates/ocio-py/ffi`) doesn't make that call (a new FFI call is the owner's decision).
 - **Status:** not matched, by the owner's decision (2026-10-23, relayed by the coordinator: no
-  new FFI call; the entry stays as it is) (`p6-config` 6.6a, `crates/ocio-py/src/callback.rs`,
+  new FFI call), and recorded as outside the byte-exact definition of done, with no waiver (owner,
+  2026-11-02; `docs/deviations.md`, "Outside the byte-exact definition of done") (`p6-config` 6.6a,
+  `crates/ocio-py/src/callback.rs`,
   `error_already_set_what`): the message is the wheel's, and the port reports nothing;
   `callbacks_oracle.rs`, `callbacks_as_the_wheels` (`what_script`).
 
@@ -2425,8 +2427,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** `_wgetcwd` and `Utf16ToUtf8`.
 - **Status:** not matched (p3-context 3.5f, `crates/ocio/src/path_utils.rs`, `get_cwd`): the
   port gives the path as UTF-8, as the rest of OCIO's paths are; the ANSI conversion needs a
-  system call the port's crates can't make (`unsafe`). ASCII paths are the same on both. For
-  the owner.
+  system call the port's crates can't make (`unsafe`). ASCII paths are the same on both. Owner
+  decision 2026-11-02: no new Windows system call for 1.0.0, and waiver W0026.
 
 ### I-117. Windows folds environment variable names by the system's table
 
@@ -2445,7 +2447,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   review): the port folds with Rust's simple uppercase mapping and the reference machine's
   252 exceptions (`crates/ocio-ops/src/platform_nls_upcase.rs`); `tests/platform_crt.rs`
   checks every code unit against `RtlUpcaseUnicodeChar`, so a machine with another table fails
-  there. The alternative, calling the system (FFI, `unsafe`), is the owner's decision.
+  there. Owner decision 2026-11-02: no new Windows system call for 1.0.0, so the port keeps this
+  table. The test depends on the Windows build's casing table, not on the ANSI code page, which
+  `RtlUpcaseUnicodeChar` doesn't take. It passes on CI's `windows-2025` and on the reference
+  machine; no machine with another table or code page was tried. On a Windows whose table differs
+  the library keeps the reference machine's table, where the wheel there uses its own.
 
 ### I-122. A file rule's regular expression means different things on Windows and Linux
 
@@ -2592,7 +2598,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   the wheel's inverse processors made after a forward one in the same process (their cache ID
   and the inverse LUT's green and blue entries). The oracle tests run every request after
   `ClearAllCaches` (`crates/ocio/tests/common/lut_files.rs`).
-- **Status:** not reproduced (p4-registry 4.2a2).
+- **Status:** not reproduced (p4-registry 4.2a2); waiver W0021 (owner, 2026-11-02).
 
 ### I-164. The Discreet 1D LUT header check reads past the line's end
 
@@ -2764,7 +2770,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`ocio-py`) decides whether its objects share the cached ones.
 - **Decided** (the owner, 2026-10-08): the port keeps copies; the Python binding decides later
   whether its objects share the cached ones.
-- **Status:** not reproduced: the port gives copies (`p4-cdl` 4.4e,
+- **Status:** not reproduced, waiver W0022 (owner, 2026-11-02): the port gives copies (`p4-cdl` 4.4e,
   `crates/ocio/src/transforms/cdl_transform.rs`), which differs from the wheel after such an
   edit. The Python binding gives new objects too (`p6-transforms` 6.3c,
   `crates/ocio-py/src/transforms/py_cdl_transform.rs`): a second `CreateFromFile` of the same
@@ -3274,8 +3280,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   hand-written.
 - **A fix:** build each color space's conversion once per processor (a cache by color space and
   direction), or refuse chains whose op count passes a bound.
-- **Status:** matched (the port takes the same time and memory, 8.1 s for 21 links): the owner
-  decides whether to bound it.
+- **Status:** matched (the port takes the same time and memory, 8.1 s for 21 links). Owner decision
+  2026-11-02: no bound for 1.0.0; revisit with I-141 as one hostile-config item.
 
 ### I-206. A LUT baked to a file has Windows line endings on Windows
 
@@ -4447,7 +4453,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** anyone who gives `ociobakelut` a missing or broken config.
 - **A fix:** move the two calls inside the `try`, which would print the error and exit with 1.
 - **Status:** matched (card phase10-tools, `ociobakelut_oracle.rs`,
-  `an_exception_upstream_does_not_catch`).
+  `an_exception_upstream_does_not_catch`). Owner decision 2026-11-02: keep it for 1.0.0, fix it
+  after.
 
 ### I-608. Windows paths over `MAX_PATH` in the tools
 
@@ -4492,8 +4499,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** none known. The cause is unproven: a `COUT_BUFFER` of 4096 or 1024 and splitting
   writes at 4096 bytes changed nothing. The likely cause is timing: the wheel writes while it
   formats, and the port may write in one burst.
-- **Status:** open: not matched (card phase10-tools). The closed-pipe and ignored cases match, and
-  `sigpipe_oracle.rs` compares them with the wheel.
+- **Status:** not matched, accepted with its cause unexplained: waiver W0025 (owner, 2026-11-02;
+  card phase10-tools). The closed-pipe and ignored cases match, and `sigpipe_oracle.rs` compares them
+  with the wheel.
 
 ### I-650. `--cubesize` of 256 and over writes no profile, and exits with 0
 
@@ -4597,9 +4605,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   The CPU processor checks the codes before the lookup (`CpuOp::check_input`), and
   `CpuProcessor::apply_rgb` and `apply_rgba` return a `Result` for it (an API change the
   owner approved), leaving the pixel as it was.
-- **Future improvement** (owner, 2026-10-01): a candidate for the end-of-port review, which
-  picks one of the alternatives considered: clamp the code to the largest one, or mask the
-  extra high bits.
+- **Future improvement** (owner, 2026-11-02): keep the error for 1.0.0, and clamp the code to the
+  largest one after 1.0.0.
 - **Status:** matched with an error in `p1-optimizer` (chunk C); `lut1d_op_cpu_tests.rs`
   checks the errors.
 
@@ -5082,7 +5089,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Decided** (general rule, the wheel crashes): the port refuses groups nested deeper than
   5,000 with `error_stack`, the error MSVC gives its own limit, and compiles a deeply nested
   expression on a thread with the stack it needs. Between 5,000 levels and the wheel's limit
-  the port refuses what the wheel accepts; the limit is a choice for the owner.
+  the port refuses what the wheel accepts. The owner ratified the limit on 2026-11-02 (D-21).
 - **Status:** matched in `p3-regex` (3.9a, `std_regex/msvc.rs`). The Linux wheel's limits, in
   compiling (3.9c) and in matching (3.9d), are U-54.
 
@@ -5207,7 +5214,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Who notices:** a config with a cycle (a mistake: upstream crashes on it), or a
   machine-made chain hundreds of color spaces deep.
 - **Decided** (general rule, precedent U-60: refuse at about half the lowest measured crash;
-  coordinator, 2026-10-09): `BuildOps` and `CollectContextVariables` each refuse to nest more
+  coordinator, 2026-10-09; approved and ratified by the owner, 2026-11-02, D-21): `BuildOps` and
+  `CollectContextVariables` each refuse to nest more
   than 256 levels (`MAX_TRANSFORM_NESTING`), with "The transforms nest more than 256 levels
   deep: a color space, look, view transform or named transform may refer to itself." Group
   transforms don't count: they name nothing, so they can't refer to themselves, and the loader
@@ -5372,7 +5380,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   text of more than 247 nested groups first.
 - **Who notices:** machine-made configs; real configs nest groups a few levels deep.
 - **Decided** (owner's precedent for the regular expressions, U-54: refuse at about half the
-  lowest measured crash; coordinator, 2026-10-06): the port refuses a group that 590 groups
+  lowest measured crash; coordinator, 2026-10-06; approved and ratified by the owner, 2026-11-02,
+  D-21): the port refuses a group that 590 groups
   hold, with "At line N, 'GroupTransform' parsing failed: GroupTransforms nested more than
   590 deep can't be loaded: upstream's stack overflows.", which a group that holds itself
   reaches too. The port loads and copies nested groups without recursion; printing,
@@ -5980,7 +5989,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   style), as the library's readers do.
 - **Status:** on Windows the port raises ValueError "the wheel opens a file name that isn't
   ASCII through the C runtime's ANSI code page (docs/improvements.md, U-113)" and creates no
-  file; on Linux it writes the file under the bytes, as the wheel; in `p6-transforms` (6.3a,
+  file, and so do `Baker.bake`, `Config.serialize` and `Config.archive`, which open a file the same
+  way (waiver W0027, owner, 2026-11-02); on Linux it writes the file under the bytes, as the wheel;
+  in `p6-transforms` (6.3a,
   `crates/ocio-py/src/transforms/py_group_transform.rs`, `open_text_file`);
   `group_write_oracle.rs`.
 
@@ -6242,7 +6253,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   error ("ColorSpaceMenuHelper: the menu item of the role '<role>' is null (the role refers to
   no color space): ... (docs/improvements.md, U-142)"), before the added color spaces are read.
   The wheel builds the menu and dies when the null item is read, so the port is stricter than
-  the wheel (owner-approved, 2026-10-22). What that costs (verifier probes, 2026-10-22): the
+  the wheel (owner-approved, 2026-10-22; waiver W0023, 2026-11-02). What that costs (verifier
+  probes, 2026-10-22): the
   wheel gives a defined result in some of these cases, where the port refuses. With an added
   name the config lacks, the wheel raises its normal "Element '...' is neither a color space
   not a named transform." (the check fails before reaching the null item); with an added name
@@ -6884,7 +6896,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   0xa3d7, 0x547b, 0x10000, 0x4ccd, 0x999a in the other 13, at every temperature and at random.
 - **Who notices:** anyone who mistypes a temperature, and gets a profile with exit 0.
 - **A fix:** refuse the value, which is what the port does.
-- **Status:** the port stops, with exit 1 and no profile, by the owner's decision of 2026-10-31,
+- **Status:** the port stops, with exit 1 and no profile, by the owner's decision of 2026-10-31
+  (waiver W0024, 2026-11-02),
   although the wheel exits with 0 with one bad tag, and its read is of an uninitialised local in its
   own frame, not of memory outside it. It can't be matched: the two wheels write different values,
   and the Linux wheel's change from run to run. The port says all the wheel says up to the save,

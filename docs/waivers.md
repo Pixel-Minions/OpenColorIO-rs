@@ -82,6 +82,7 @@ metadata remains in [the archive](archive/gpu-matrix-waivers-2026-10-27.toml).
 W0013 below remains the single non-finite GPU class; retired Matrix rules are rejected.
 The five finite exact pins W0014-W0018 are separately owner-approved on 2026-10-30.
 W0019 and W0020, for the dev tools, are owner-approved on 2026-10-31.
+W0021 to W0027, known non-matches the register records, are owner-approved on 2026-11-02.
 
 ## W0003 — MatrixOps/matrix (retired 2026-10-29; historical evidence)
 
@@ -529,6 +530,55 @@ Deviation D-18 (`deviations.md`), `improvements.md` I-608. The wheel's `.exe` fi
 through Rust's `std`, which handles such paths. Paths under 260 characters and Linux are not
 waived. No sweep passes such a path on Windows, so no check is relaxed in code: the waiver records
 what isn't compared. The measurements are in `waivers.toml` and D-18.
+
+## W0021 - An inverse LUT after a forward processor of the same file (owner approved 2026-11-02)
+
+`improvements.md` I-163. The wheel's processor finalizes the op data its file cache holds, so an
+inverse processor made after a forward one of the same file has another cache ID, and other green
+and blue LUT entries, than one made from a fresh cache. The port's processors never change the
+cache, so they give the fresh cache's answer. Pixels agree. The tests start each request from a
+fresh cache, so no check is relaxed in code. The measurements are in `waivers.toml` and I-163.
+
+## W0022 - CDLs read from files are copies (owner approved 2026-11-02)
+
+`improvements.md` I-174. The wheel returns the transforms its file cache holds, so an edit reaches
+later reads of the file, and two reads are one Python object. The port returns copies, as a fix
+upstream would. `cdl_files_oracle.rs` reads each CDL once when it compares, and pins the difference
+separately. A read nothing edited isn't waived.
+
+## W0023 - A menu with a role set to the empty name (owner approved 2026-11-02)
+
+`improvements.md` U-142. The wheel builds the menu with a null item, and its process dies when that
+item is read. The port refuses when the menu is made, which also refuses the cases where the wheel
+gives a defined result: this waiver covers those. No other menu is waived.
+
+## W0024 - A white point outside 4000 to 25000 K in an ICC bake (owner approved 2026-11-02)
+
+`improvements.md` U-651. The wheel goes on with an uninitialized white point and writes a profile
+whose `chad` tags can't be matched: the wheels differ, and the Linux wheel's change from run to
+run. The port stops with exit 1 and no file. `ociobakelut_icc_oracle.rs` compares up to that point
+(`Stop::Always`, `Stop::IfTheWheelDies`).
+
+## W0025 - A tool's exit status when its reader stops early, on Linux (owner approved 2026-11-02)
+
+`improvements.md` I-609. **The cause is unexplained.** `tool --stdout | head -c 3` gives exit status
+0 in the port where the wheel gives 141, for outputs of about 4 to 90 KB. The bytes are the same.
+Closed and ignored pipes, and longer outputs, match and are compared. Timing is the likely cause,
+and that is unproven. The measurements are in `waivers.toml` and I-609.
+
+## W0026 - A working directory that isn't ASCII, on Windows (owner approved 2026-11-02)
+
+`improvements.md` I-116. The wheel reads the working directory in the ANSI code page and then treats
+it as UTF-8; the port gives it as UTF-8. Matching needs a new Windows system call, which the owner
+declined for 1.0.0. ASCII working directories and Linux aren't waived. No sweep runs from such a
+directory on Windows, so no check is relaxed in code.
+
+## W0027 - File names that aren't ASCII in Python calls, on Windows (owner approved 2026-11-02)
+
+`improvements.md` U-113: `GroupTransform.write`, `Baker.bake`, `Config.serialize` and
+`Config.archive`. The wheel's file name depends on the machine's ANSI code page and the process's
+locale, so its result isn't fixed by the OS and CPU. The port raises ValueError and creates no
+file. ASCII names and Linux aren't waived, and `group_write_oracle.rs` compares them.
 
 ## P9-6 - Reviewed C++ tests not applicable (owner approved 2026-10-23)
 
