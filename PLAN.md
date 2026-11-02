@@ -129,9 +129,9 @@ Consumers adopt each section as it lands, through OCIO's API, and they align wit
 | Upstream pin | Submodule at the matched tag; oracle wheel of the same version | `upstream/OpenColorIO` @ `v2.5.2`; `opencolorio==2.5.2` |
 | Runtime version | `ocio::version()` and Python's `__version__` report OCIO's version, as OCIO does; `ocio::PORT_VERSION` reports ours | `"2.5.2"` and `"1.0.0"` |
 | Accepted configs | Exactly the matched release's | `ocio_profile_version` ≤ 2.5; a 2.6 config fails with 2.5.2's error |
-| Distribution | A git dependency; not published to crates.io | Consumers pin `tag = "v1.0.0"` |
+| Distribution | Rust crates on crates.io as `opencolorio-rs` (D6); the library's name in code stays `ocio` | `opencolorio-rs = "1"`, then `use ocio::Config;` |
 
-If you ever publish to crates.io, this scheme works unchanged:
+This scheme works unchanged on crates.io:
 - every release has its own number;
 - a new OCIO minor is always a major bump, so Cargo's default `^` requirement never crosses one.
 
@@ -235,7 +235,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **D3** | Target | OCIO 2.5.2 exactly; later OCIO versions become new major versions | Decided |
 | **D4** | Equivalence | Byte-exact as defined in §3; waivers only with your sign-off | Decided |
 | **D5** | Existing port (`doubleailes/ocio-rs`) | Skip the audit for now and port independently. Note that it is MIT-licensed although derived from BSD-3 code | Decided (skipped for now) |
-| **D6** | Distribution | Not published to crates.io; consumed as a git dependency. The GitHub repository is public, which is fine for now | Decided |
+| **D6** | Distribution | The Rust crates are published on crates.io under the name `opencolorio-rs` (`ocio` and `opencolorio` are taken there), with `opencolorio-rs-ops`, `opencolorio-rs-formats` and `opencolorio-rs-gpu` beside it. `use ocio::...` doesn't change. Nothing has been published or reserved yet. The GitHub repository is public, which is fine for now | Decided; crates.io and the name 2026-11-02 |
 | **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`; edition 2024; `rust-version = "1.98"` | Decided (Phase 0) |
 | **D8** | `unsafe` policy | `#![forbid(unsafe_code)]` everywhere except the SIMD and Python-binding modules; P9-3 permits the single Windows monitor FFI file `crates/ocio/src/system_monitor_windows_ffi.rs`, as the existing minizip Windows FFI exception | Proposed; monitor exception approved 2026-10-23 (P9-3) |
 | **D9** | License | BSD-3-Clause, keeping upstream's notice ("Copyright Contributors to the OpenColorIO Project") | Required (the port is a derivative work) |
@@ -243,7 +243,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **D11** | Platforms | Windows x86-64 and Linux x86-64 (Rocky Linux 9, glibc 2.34), both bit-exact reference platforms from Phase 0. ARM and macOS come later | Decided |
 | **D12** | Output across platforms | Do what OCIO does on each platform: where OCIO is byte-identical across Windows and Linux, so is the port; where OCIO differs, the port differs the same way | Decided |
 | **D13** | Python module | Import name `PyOpenColorIO`, so existing scripts run unchanged. A standalone wheel, which Rust applications can also embed (`append_to_inittab`), sharing objects with the host. It can't share a Python environment with the official wheel, so the oracle gets its own | Decided |
-| **D14** | Python wheel for 1.0.0 | Python 3.13 only, under a distribution name separate from `opencolorio`. The name and the hosting are not decided yet | Decided 2026-11-01, name and hosting open |
+| **D14** | Python wheel for 1.0.0 | Python 3.13 only, under the distribution name `opencolorio-rs`, separate from `opencolorio`. The wheel's hosting is not decided yet | Decided 2026-11-01, name 2026-11-02, hosting open |
 
 ---
 

@@ -13,8 +13,9 @@ matrix until step 3 is done.
 1. **Close the work.** `upstream-map.toml` is closed (`scripts/sde_release_ready.py` passes), and
    every release item the owner hasn't moved past 1.0.0 has landed, packaging included. The
    packages carry the license files of the crates in `THIRD-PARTY-NOTICES.md`.
-2. **Close the decisions.** The owner has decided the distribution name and hosting (PLAN.md
-   D14) and the final state of `docs/improvements.md`, and every exception has its row in
+2. **Close the decisions.** The owner has decided the Python wheel's hosting (PLAN.md D14; the
+   distribution name is `opencolorio-rs`, and the Rust crates go to crates.io under it, D6) and
+   the final state of `docs/improvements.md`, and every exception has its row in
    `docs/deviations.md` or `waivers.toml`.
 3. **Make the release commit.** Bump the version to `1.0.0+ocio.2.5.2`. This commit is the one to
    be tagged.
