@@ -16,6 +16,7 @@ from sde_cpu_tests import (JOB_BUDGET_KEY, JOB_DEADLINE_KEY, PREFIX_KEY, REPORT_
 from sde_targeted import PACKAGE_DIRECTORY, selection, source_head
 from p76_boundary_controls import BoundaryControls
 from p77_profile_controls import ProfileControls
+from p97_resume_controls import ResumeControls
 
 
 class TargetedControls(unittest.TestCase):
