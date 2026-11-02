@@ -113,8 +113,9 @@ chunk gate, oracle-first, owner items. What changes in Phase 6:
 | 6.1c | The embedding API (P6-9): registering the module with `append_to_inittab` before the interpreter starts, and handing Rust objects to Python and back; a Rust test that embeds the interpreter and runs Python against objects the Rust side made | `ocio-py/src/embed.rs` | — |
 
 - `__version__` is `2.5.2` and `GetVersion()` returns it, as everywhere in the port (PLAN.md §2).
-- `package/command_line.py` runs the wheel's `bin/` tools: it is `n/a` until the tools come
-  (Phase 10).
+- `package/command_line.py` runs the package's `bin/` tools. P78 retains that Python file
+  unchanged and stages the four in-scope Phase10 Rust tools during py-build; distribution
+  entry-point installation still belongs to release packaging (P6-3).
 
 ## WP 6.2: enums and constants (`ocio-py`)
 
