@@ -17,7 +17,7 @@ thread-limit and time-budget problems without weakening any comparison.
 | Item | Recorded evidence | Status / required next step |
 |---|---|---|
 | Windows nhm boundary-case timeout | [PR90 run41215068146](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/41215068146), artifact `sde-nhm-Windows-kernel-shard-2`: `legacy_boundary_edges_match_native_wheel` hit7200.19s after batch1300..1350 of1400 | Open. Partition the original execution while proving all1400 requests and comparisons remain, then run the complete union under nhm. |
-| Windows snb oracle crash | Same run, artifact `sde-snb-Windows-kernel-shard-2`: oracle exit`0xc0000005` during batch1350..1400, about6104.72s | Open. Reproduce on the unchanged requests with the native helper and preserve crash diagnostics; do not retry a completed or partially executed comparison as if it passed. |
+| Windows snb oracle crash | Same run, artifact `sde-snb-Windows-kernel-shard-2`: oracle exit`0xc0000005` during batch1350..1400, about6104.72s | OPEN, unexplained. It did not reproduce in run41351906906: all seven original boundary parts passed on snb. A separate post-run parser error failed that job; P76 recovers the strict input-union proof from its unchanged raw logs. Non-reproduction does not establish the crash's cause or close it. |
 | Python313.dll emulator error | [Earlier combined run41165677912](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/41165677912), Windows snb: illegal-instruction emulator error in hosted `Python313.dll` during `grading_rgb_curve_dynamic_sets_match_the_wheel_at_every_format_and_level` | Open. Include that exact test in the targeted snb execution. Partial earlier reports are not a pass. |
 | Four-hour job cancellations | [PR95 run41265170638](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/41265170638): ten kernel job timeouts; [combined run41215068146](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/41215068146):21 shard timeouts; [PR97 run41317603548](https://github.com/Pixel-Minions/OpenColorIO-rs/actions/runs/41317603548): ten kernel timeouts | Open execution problem, not a recorded pixel comparison failure. PR97's ten logs all report `SDE ERROR: Run exceeds the maxmimal number of threads` in the first ocio library target before the time limit. Fresh emulators per selected test address the cumulative budget; per-case timeouts still need bounded execution. |
 | Rocky snb ICC sweeps | [PR96 known gaps](https://github.com/Pixel-Minions/OpenColorIO-rs/pull/96): `ociobakelut_icc_oracle::display_profiles_generated` and `corrupted_profiles` did not compare past byte31 before the date-bound repair; the full ICC target is absent from `cpu-tests` | Open. Explicitly select both unchanged tests on Rocky snb, retaining their creation-time validation and every other output byte. Sampled `tools_cpu_oracle` is not a substitute. |
@@ -49,3 +49,10 @@ CDL, Gamma, Log, FixedFunction and GradingPrimary's complete SDE coverage remain
 
 Post-extraction legacy dynamic updates also remain separate library/test work.
 No threshold, waiver, CPU flag, SDE pin, original filter or expected output is changed.
+
+Latest owner decision: land PR100's exact6fe76c84 after its three normal required
+checks pass; it contains90/98/99, so do not merge those separately. After P76's small
+boundary-audit correction is on main, ONE further SDE workflow is authorized for
+the two Rocky snb ICC sweeps, strict boundary audit and one COMPLETE snb CPU profile
+on Windows and Rocky Linux9. No other CPU profiles or full matrix are authorized
+now. After all library work lands, run the full matrix once as final qualification.

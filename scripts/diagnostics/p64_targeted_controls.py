@@ -11,6 +11,7 @@ from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from sde_cpu_tests import one_test
 from sde_targeted import selection, source_head
+from p76_boundary_controls import BoundaryControls
 
 
 class TargetedControls(unittest.TestCase):
