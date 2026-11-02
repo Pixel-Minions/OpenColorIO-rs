@@ -246,8 +246,8 @@ fn license_names(dir: &Path) -> Result<Vec<String>, String> {
 /// toolchain `rust-toolchain.toml` pins: a toolchain change needs that toolchain's file.
 fn rust_library_copyright(root: &Path) -> Result<PathBuf, String> {
     let manifest = root.join("rust-toolchain.toml");
-    let text = std::fs::read_to_string(&manifest)
-        .map_err(|e| format!("{}: {e}", manifest.display()))?;
+    let text =
+        std::fs::read_to_string(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
     let channel = text
         .lines()
         .find_map(|line| line.strip_prefix("channel = "))
