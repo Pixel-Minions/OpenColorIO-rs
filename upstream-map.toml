@@ -425,8 +425,8 @@ note = "S2: Clamp, FloatAsInt, IntAsFloat, AddULP, plus std::min/std::max and SS
 path = "src/OpenColorIO/Mutex.h"
 kind = "src"
 target = ["crates/ocio/src/caching.rs", "crates/ocio/src/context.rs", "crates/ocio/src/processor.rs", "crates/ocio-ops/src/logging.rs"]
-status = "partial"
-note = "P79: release Mutex/AutoMutex uses already map to Rust std::sync::Mutex/MutexGuard at cache/logging call sites. Noncopyable guards release on scope exit/unwind and cannot be sent to another thread; no manual unlock API is exposed. This accounts for balanced ownership, but does not reproduce DebugLock's explicit recursive-acquisition assertion, so retain partial rather than claiming all debug diagnostics complete. DebugLock::try_lock has no caller outside its own definition. No lock implementation, public API or diagnostic exclusion changes here."
+status = "done"
+note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. Existing std::sync::Mutex/MutexGuard supply valid locking and scope/unwind release. C++ DebugLock invalid-owner/recursive/unbalanced-use assertion diagnostics and its unused try_lock are outside this private-support boundary; they are not claimed implemented."
 
 [[file]]
 path = "src/OpenColorIO/NamedTransform.cpp"
@@ -4612,9 +4612,9 @@ note = "see UnitTestLogUtils.cpp"
 [[file]]
 path = "tests/cpu/UnitTestMain.cpp"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_main.rs"]
-status = "partial"
-note = "P56 records the only OCIO_ADD_TEST here, UnitTest/windows_debug, as the already owner-approved P9-6 not-applicable native CRT harness check (2026-10-23; waivers.toml). The native C++ test-runner main/CLI is not separately ported; Rust libtest drives the translated suite."
+target = ["xtask/src/shards.rs", "scripts/sde_cpu_tests.py", "crates/ocio-testkit/src/upstream/mod.rs"]
+status = "done"
+note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. Cargo/libtest and xtask drive the original translated cases; actual SDE profiles select the wheel and port CPU kernels. Private C++ runner CLI, banners and failure formatting are replaced. The sole UnitTest/windows_debug case retains the existing separately approved P9-6 N/A; this decision adds no test exclusion."
 
 [[file]]
 path = "tests/cpu/UnitTestOptimFlags.cpp"
@@ -4633,16 +4633,16 @@ note = "P70 maps the optimization-environment scope to the existing test_env::En
 [[file]]
 path = "tests/cpu/UnitTestUtils.cpp"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_utils.rs", "crates/ocio/src/fileformats/test_utils.rs"]
-status = "partial"
-note = "p4-readers 4.7b: BuildOpsTest (50-61) in crates/ocio/src/fileformats/test_utils.rs"
+target = ["crates/ocio/src/fileformats/test_utils.rs", "crates/ocio/src/transforms/file_transform_tests.rs", "crates/ocio/src/fileformats/file_format_ctf_tests.rs", "crates/ocio/src/ocioz_archive_tests.rs"]
+status = "done"
+note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. Existing GetTestFilesDir, LoadTestFile, BuildOpsTest and FileTransform processor helpers plus per-test temporary directories supply actual test inputs and filesystem assertions. Private C++ shared-directory naming/cleanup machinery is replaced by scoped Rust test inputs."
 
 [[file]]
 path = "tests/cpu/UnitTestUtils.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/mod.rs", "crates/ocio/src/fileformats/test_utils.rs"]
-status = "partial"
-note = "S2: EqualWithSafeRelError; p4-registry 4.2a1: GetTestFilesDir and LoadTestFile in crates/ocio/src/fileformats/test_utils.rs"
+target = ["crates/ocio-testkit/src/upstream/mod.rs", "crates/ocio/src/fileformats/test_utils.rs", "crates/ocio/src/test_env.rs"]
+status = "done"
+note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. EqualWithSafeRelError and file helpers already exist; typed Rust inputs replace private templates/U8 casts, scoped temporary directories replace shared directory plumbing, and EnvGuard uses the separately approved D-5 environment model. Actual library filesystem operations and assertions remain checked."
 
 [[file]]
 path = "tests/cpu/ViewTransform_tests.cpp"
@@ -6034,15 +6034,16 @@ note = "build system"
 [[file]]
 path = "tests/testutils/UnitTest.cpp"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test.rs"]
-status = "todo"
+target = ["crates/ocio-testkit/src/upstream/mod.rs", "xtask/src/shards.rs"]
+status = "done"
+note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. libtest provides registration, selection and execution; upstream::check_str_float_vec_close ports StringFloatVecClose. The documented panic-at-first-failure adaptation replaces the private global C++ failure accumulator/runner, not assertion pass/fail requirements."
 
 [[file]]
 path = "tests/testutils/UnitTest.h"
 kind = "test-support"
 target = ["crates/ocio-testkit/src/upstream/mod.rs"]
-status = "partial"
-note = "S2: OCIO_CHECK_CLOSE; S4: OCIO_CHECK_EQUAL; 1.2a: OCIO_CHECK_THROW_WHAT"
+status = "done"
+note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. Rust #[test] and existing upstream assertion, throw and float helpers replace the private C++ macros/static registry/SkipException and diagnostic spelling. Every translated assertion remains required."
 
 [[file]]
 path = "tests/utils/CMakeLists.txt"
@@ -6067,5 +6068,6 @@ note = "All 8 tests."
 [[file]]
 path = "tests/utils/UnitTestMain.cpp"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_main.rs"]
-status = "todo"
+target = ["xtask/src/shards.rs", "crates/ocio-testkit/src/upstream/mod.rs"]
+status = "done"
+note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. Cargo/libtest entry points and xtask shards replace the private C++ banner and runner delegation. No library function or OCIO case lives in this entry point."
