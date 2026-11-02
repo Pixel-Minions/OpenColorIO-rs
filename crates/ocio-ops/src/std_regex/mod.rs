@@ -175,6 +175,20 @@ pub fn regex_replace(text: &[u8], re: &Regex, fmt: &[u8]) -> Result<Vec<u8>, Reg
     }
 }
 
+/// The first std::regex_search span, for the crate's private upstream log-test helper.
+/// This is not exported by the library; existing matcher stack/refusal limits apply.
+#[cfg(test)]
+pub(crate) fn test_log_search(
+    text: &[u8],
+    re: &Regex,
+) -> Result<Option<(usize, usize)>, RegexError> {
+    match &re.program {
+        Program::Msvc(p) => on_stack(MSVC_MATCH_STACK, || msvc_match::test_log_search(p, text))
+            .unwrap_or_else(|| Err(msvc::error(ErrorType::Space))),
+        Program::Libstdcxx(p) => libstdcxx_match::test_log_search(p, text),
+    }
+}
+
 /// The stack MSVC's matcher needs at its depth limit (600 nested matches): at most 1.43 MiB
 /// measured at opt-level 0, where frames are largest (`(a|b|c)*` on 298 `c`, `(?:(?=a|b).)*`
 /// on 299 `a`), with a margin.

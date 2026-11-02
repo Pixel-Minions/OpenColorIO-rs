@@ -513,6 +513,39 @@ impl Matcher<'_> {
     }
 }
 
+/// First-match span for the private LogGuard (UnitTestLogUtils.cpp:88-101 @ v2.5.2),
+/// using the existing platform matcher and its stack/refusal limits.
+#[cfg(test)]
+pub(super) fn test_log_search(
+    program: &Program,
+    text: &[u8],
+) -> Result<Option<(usize, usize)>, RegexError> {
+    if text.len() > MAX_TEXT {
+        return Err(refused());
+    }
+    let run = || {
+        let matcher = Matcher {
+            text,
+            loops: RefCell::new(HashMap::new()),
+            begin: Cell::new(0),
+            prev_avail: Cell::new(false),
+            cost: Cell::new(0),
+            stack_base: stack_address(),
+            aborted: Cell::new(false),
+        };
+        let span = matcher.search(program, 0, SearchFlags::default());
+        if matcher.aborted.get() {
+            Err(refused())
+        } else {
+            Ok(span)
+        }
+    };
+    super::on_stack(STACK_SIZE, run).unwrap_or(Err(RegexError {
+        code: ErrorType::Space,
+        what: "regex_error",
+    }))
+}
+
 /// `regex_replace(s, re, fmt)` with `format_default`, for a format without `$`: `text` with
 /// each match replaced by `fmt`. The matches are those a `regex_iterator` gives
 /// ([re.regiter.incr]): after a match, the search goes on from its end with

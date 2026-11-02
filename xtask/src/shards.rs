@@ -3,8 +3,12 @@
 
 //! `cargo xtask test-shard <shard>`: one CI job's share of `cargo test --workspace`.
 //!
-//! Each reference platform and profile runs four disjoint groups: `formats`, `heavy`,
-//! `grading` and `rest`. The latter contains every new or otherwise unlisted target.
+//! Each reference platform and profile runs disjoint groups: `formats`, `heavy`,
+//! `grading`, `icc` and `rest`. The latter contains every new or otherwise unlisted target.
+//! Windows keeps ICC in its existing formats job. Linux gives the two large ICC
+//! input sweeps four parallel partitions, with their original aggregate assertions
+//! required by a complete-union job in debug and release. Other ICC cases run once
+//! in partition zero. Original input order, RNG draws and case directories remain.
 //! The commands retain workspace-wide feature unification and include doctests. Unit tests
 //! prove the complete target union exactly once and require the workflow matrices to match.
 //!
@@ -19,7 +23,7 @@
 //!
 //! No individual test, input, tier, assertion, oracle call or comparison changes. Every group
 //! uses target filters over `cargo test --workspace --no-fail-fast`, with doctests separate;
-//! a request for all four groups runs the original complete workspace command directly.
+//! a request for all groups runs the original complete workspace command directly.
 
 use std::path::Path;
 use std::process::Command;
@@ -45,17 +49,25 @@ pub(crate) enum Group {
     Formats,
     Heavy,
     Grading,
+    Icc,
     Rest,
 }
 
 impl Group {
-    const ALL: [Group; 4] = [Group::Formats, Group::Heavy, Group::Grading, Group::Rest];
+    const ALL: [Group; 5] = [
+        Group::Formats,
+        Group::Heavy,
+        Group::Grading,
+        Group::Icc,
+        Group::Rest,
+    ];
 
     fn name(self) -> &'static str {
         match self {
             Group::Formats => "formats",
             Group::Heavy => "heavy",
             Group::Grading => "grading",
+            Group::Icc => "icc",
             Group::Rest => "rest",
         }
     }
@@ -66,18 +78,20 @@ impl Group {
             Group::Formats => FORMATS,
             Group::Heavy => HEAVY,
             Group::Grading => GRADING,
+            Group::Icc => ICC,
             Group::Rest => &[],
         }
     }
 }
 
-/// 68.9 minutes in debug on Windows (run 39641166482), dominated by one test: `builtin_transform`
-/// (see the module documentation). The ICC sweeps of `ociobakelut` took 87 minutes on Rocky
-/// release at the full tier (run 41284214313), which made `rest` the longest job by far.
-const FORMATS: &[(&str, &str)] = &[
-    ("ocio", "api_formats_oracle"),
-    ("ocio-tools", "ociobakelut_icc_oracle"),
-];
+/// The API format sweep. ICC is separate on Linux: the owner measured 170 of
+/// 221 debug minutes and 76 of 115 release minutes in the old formats job.
+const FORMATS: &[(&str, &str)] = &[("ocio", "api_formats_oracle")];
+
+/// Kept whole on Windows; Linux partitions only the two large original input
+/// sweeps. The required native union job preserves their aggregate assertions.
+const ICC: &[(&str, &str)] = &[("ocio-tools", "ociobakelut_icc_oracle")];
+const ICC_PARTS: u8 = 4;
 
 /// Windows debug minutes (run 39641166482): 15.3, 9.0, 7.9 and 3.8.
 const HEAVY: &[(&str, &str)] = &[
@@ -126,6 +140,7 @@ pub(crate) struct Shard {
     platform: Platform,
     release: bool,
     groups: &'static [Group],
+    icc_part: Option<u8>,
 }
 
 /// Every CI test job. The ids name the platform and the profile; ci.yml's `windows-tests`
@@ -135,55 +150,64 @@ pub(crate) const SHARDS: &[Shard] = &[
         id: "windows-debug-formats",
         platform: Platform::Windows,
         release: false,
-        groups: &[Group::Formats],
+        groups: &[Group::Formats, Group::Icc],
+        icc_part: None,
     },
     Shard {
         id: "windows-debug-heavy",
         platform: Platform::Windows,
         release: false,
         groups: &[Group::Heavy],
+        icc_part: None,
     },
     Shard {
         id: "windows-debug-grading",
         platform: Platform::Windows,
         release: false,
         groups: &[Group::Grading],
+        icc_part: None,
     },
     Shard {
         id: "windows-debug-rest",
         platform: Platform::Windows,
         release: false,
         groups: &[Group::Rest],
+        icc_part: None,
     },
     Shard {
         id: "windows-release-formats",
         platform: Platform::Windows,
         release: true,
-        groups: &[Group::Formats],
+        groups: &[Group::Formats, Group::Icc],
+        icc_part: None,
     },
     Shard {
         id: "windows-release-heavy",
         platform: Platform::Windows,
         release: true,
         groups: &[Group::Heavy],
+        icc_part: None,
     },
     Shard {
         id: "windows-release-grading",
         platform: Platform::Windows,
         release: true,
         groups: &[Group::Grading],
+        icc_part: None,
     },
     Shard {
         id: "windows-release-rest",
         platform: Platform::Windows,
         release: true,
         groups: &[Group::Rest],
+        icc_part: None,
     },
     Shard {
         id: "linux-debug-formats",
         platform: Platform::Linux,
         release: false,
         groups: &[Group::Formats],
+        icc_part: None,
     },
     // Debug builds of the heavy and the other targets in one job outgrew the hosted runner's
     // disk (PR #65), as on Windows they run apart.
@@ -192,24 +216,28 @@ pub(crate) const SHARDS: &[Shard] = &[
         platform: Platform::Linux,
         release: false,
         groups: &[Group::Heavy],
+        icc_part: None,
     },
     Shard {
         id: "linux-debug-grading",
         platform: Platform::Linux,
         release: false,
         groups: &[Group::Grading],
+        icc_part: None,
     },
     Shard {
         id: "linux-debug-rest",
         platform: Platform::Linux,
         release: false,
         groups: &[Group::Rest],
+        icc_part: None,
     },
     Shard {
         id: "linux-release-formats",
         platform: Platform::Linux,
         release: true,
         groups: &[Group::Formats],
+        icc_part: None,
     },
     // Release builds of the heavy and the other targets in one job outgrew the hosted
     // runner's disk (PR #66, run 39933842156), as on Windows they run apart.
@@ -218,18 +246,77 @@ pub(crate) const SHARDS: &[Shard] = &[
         platform: Platform::Linux,
         release: true,
         groups: &[Group::Heavy],
+        icc_part: None,
     },
     Shard {
         id: "linux-release-grading",
         platform: Platform::Linux,
         release: true,
         groups: &[Group::Grading],
+        icc_part: None,
     },
     Shard {
         id: "linux-release-rest",
         platform: Platform::Linux,
         release: true,
         groups: &[Group::Rest],
+        icc_part: None,
+    },
+    Shard {
+        id: "linux-debug-icc-0",
+        platform: Platform::Linux,
+        release: false,
+        groups: &[Group::Icc],
+        icc_part: Some(0),
+    },
+    Shard {
+        id: "linux-debug-icc-1",
+        platform: Platform::Linux,
+        release: false,
+        groups: &[Group::Icc],
+        icc_part: Some(1),
+    },
+    Shard {
+        id: "linux-debug-icc-2",
+        platform: Platform::Linux,
+        release: false,
+        groups: &[Group::Icc],
+        icc_part: Some(2),
+    },
+    Shard {
+        id: "linux-debug-icc-3",
+        platform: Platform::Linux,
+        release: false,
+        groups: &[Group::Icc],
+        icc_part: Some(3),
+    },
+    Shard {
+        id: "linux-release-icc-0",
+        platform: Platform::Linux,
+        release: true,
+        groups: &[Group::Icc],
+        icc_part: Some(0),
+    },
+    Shard {
+        id: "linux-release-icc-1",
+        platform: Platform::Linux,
+        release: true,
+        groups: &[Group::Icc],
+        icc_part: Some(1),
+    },
+    Shard {
+        id: "linux-release-icc-2",
+        platform: Platform::Linux,
+        release: true,
+        groups: &[Group::Icc],
+        icc_part: Some(2),
+    },
+    Shard {
+        id: "linux-release-icc-3",
+        platform: Platform::Linux,
+        release: true,
+        groups: &[Group::Icc],
+        icc_part: Some(3),
     },
 ];
 
@@ -257,7 +344,7 @@ impl Unit {
         else {
             return Group::Rest;
         };
-        [Group::Formats, Group::Heavy, Group::Grading]
+        [Group::Formats, Group::Heavy, Group::Grading, Group::Icc]
             .into_iter()
             .find(|g| g.listed().contains(&(package.as_str(), name.as_str())))
             .unwrap_or(Group::Rest)
@@ -419,6 +506,31 @@ fn commands(
     Ok(out)
 }
 
+/// Part zero runs every other ICC test once. The other parts select only the
+/// two original large sweeps; each receives a disjoint case-index selection.
+fn shard_commands(packages: &[Package], shard: &Shard) -> Result<Vec<Vec<String>>, String> {
+    let mut runs = commands(packages, shard.groups, shard.release)?;
+    if let Some(part) = shard.icc_part {
+        if part >= ICC_PARTS || shard.platform != Platform::Linux || shard.groups != [Group::Icc] {
+            return Err("invalid ICC partition shard".into());
+        }
+        assert_eq!(runs.len(), 1);
+        runs[0].push("--".into());
+        if part != 0 {
+            runs[0].extend(
+                [
+                    "display_profiles_generated",
+                    "corrupted_profiles",
+                    "--exact",
+                ]
+                .map(str::to_string),
+            );
+        }
+        runs[0].push("--nocapture".into());
+    }
+    Ok(runs)
+}
+
 pub(crate) fn run(args: &[&str]) -> Result<(), String> {
     let root = crate::root();
     match args {
@@ -438,7 +550,7 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
                 ));
             }
             let packages = metadata::workspace(&root)?;
-            let commands = commands(&packages, shard.groups, shard.release)?;
+            let commands = shard_commands(&packages, shard)?;
             println!(
                 "test-shard {id}: groups {} ({} cargo run{})",
                 group_names(shard.groups),
@@ -448,10 +560,15 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
             for args in &commands {
                 println!("    cargo {}", args.join(" "));
             }
+            if let Some(part) = shard.icc_part {
+                println!(
+                    "    ICC original-input partition {part}/{ICC_PARTS}; complete-union audit required"
+                );
+            }
             if dry_run {
                 return Ok(());
             }
-            run_all(&root, &commands)
+            run_all(&root, &commands, shard)
         }
         _ => Err(USAGE.into()),
     }
@@ -488,14 +605,29 @@ fn list(root: &Path) -> Result<(), String> {
 }
 
 /// Runs every command, going on after failures; an error naming the failed ones.
-fn run_all(root: &Path, commands: &[Vec<String>]) -> Result<(), String> {
+fn run_all(root: &Path, commands: &[Vec<String>], shard: &Shard) -> Result<(), String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut failed = Vec::new();
     for (i, args) in commands.iter().enumerate() {
         println!("test-shard: cargo run {} of {}", i + 1, commands.len());
-        let status = Command::new(&cargo)
-            .args(args)
-            .current_dir(root)
+        let mut command = Command::new(&cargo);
+        command.args(args).current_dir(root);
+        command.env_remove("OCIO_RS_ICC_AUDIT_DIR");
+        if let Some(part) = shard.icc_part {
+            let head = crate::git(root, &["rev-parse", "--verify", "HEAD"])?;
+            command
+                .env("OCIO_RS_ICC_PART", format!("{part}/{ICC_PARTS}"))
+                .env(
+                    "OCIO_RS_ICC_REPORT_DIR",
+                    root.join("kept/icc-ci").join(shard.id),
+                )
+                .env("OCIO_RS_ICC_SOURCE", head.trim());
+        } else {
+            command
+                .env_remove("OCIO_RS_ICC_PART")
+                .env_remove("OCIO_RS_ICC_REPORT_DIR");
+        }
+        let status = command
             .status()
             .map_err(|e| format!("could not run cargo: {e}"))?;
         if !status.success() {
@@ -589,7 +721,11 @@ mod tests {
             for release in [false, true] {
                 let mut groups: Vec<Group> = SHARDS
                     .iter()
-                    .filter(|s| s.platform == platform && s.release == release)
+                    .filter(|s| {
+                        s.platform == platform
+                            && s.release == release
+                            && s.icc_part.is_none_or(|p| p == 0)
+                    })
                     .flat_map(|s| s.groups.iter().copied())
                     .collect();
                 groups.sort();
@@ -616,6 +752,57 @@ mod tests {
     }
 
     #[test]
+    fn linux_icc_partitions_keep_original_filters_and_other_cases_once() {
+        let packages = sample();
+        for release in [false, true] {
+            let shards: Vec<_> = SHARDS
+                .iter()
+                .filter(|s| s.release == release && s.icc_part.is_some())
+                .collect();
+            assert_eq!(shards.len(), usize::from(ICC_PARTS));
+            assert_eq!(
+                shards
+                    .iter()
+                    .map(|s| s.icc_part.unwrap())
+                    .collect::<Vec<_>>(),
+                (0..ICC_PARTS).collect::<Vec<_>>()
+            );
+            for shard in shards {
+                assert_eq!(shard.platform, Platform::Linux);
+                assert_eq!(shard.groups, [Group::Icc]);
+                let runs = shard_commands(&packages, shard).unwrap();
+                assert_eq!(runs.len(), 1);
+                let args = &runs[0];
+                assert!(
+                    args.windows(2)
+                        .any(|v| v == ["--test", "ociobakelut_icc_oracle"])
+                );
+                assert_eq!(args.iter().any(|s| s == "--release"), release);
+                let tail = &args[args.iter().position(|v| v == "--").unwrap() + 1..];
+                if shard.icc_part == Some(0) {
+                    assert_eq!(tail, strings(&["--nocapture"]));
+                } else {
+                    assert_eq!(
+                        tail,
+                        strings(&[
+                            "display_profiles_generated",
+                            "corrupted_profiles",
+                            "--exact",
+                            "--nocapture"
+                        ])
+                    );
+                }
+            }
+        }
+        let workflow =
+            std::fs::read_to_string(crate::root().join(".github/workflows/ci.yml")).unwrap();
+        assert!(workflow.contains("profile: [debug, release]"));
+        assert!(workflow.contains("name: Linux ICC exact-once audit"));
+        assert!(workflow.contains("icc_partition_audit -- --exact --nocapture"));
+        assert!(workflow.contains("OCIO_RS_TIER: full"));
+    }
+
+    #[test]
     fn commands_filter_the_workspace_by_target() {
         let packages = sample();
         assert_eq!(
@@ -625,9 +812,7 @@ mod tests {
                 "--workspace",
                 "--no-fail-fast",
                 "--test",
-                "api_formats_oracle",
-                "--test",
-                "ociobakelut_icc_oracle"
+                "api_formats_oracle"
             ])]
         );
         assert_eq!(
@@ -805,11 +990,16 @@ mod tests {
                     .iter()
                     .filter(|s| s.platform == platform && s.release == release)
                 {
-                    let commands = commands(packages, shard.groups, release).unwrap();
+                    let commands = shard_commands(packages, shard).unwrap();
                     assert!(!commands.is_empty(), "{}", shard.id);
                     for args in &commands {
                         assert_eq!(args.iter().any(|a| a == "--release"), release, "{args:?}");
-                        run.extend(cargo_selects(args, &all));
+                        // This logical target is partitioned at the original case
+                        // level, proven separately by the required ICC union audit.
+                        let selected = cargo_selects(args, &all);
+                        run.extend(selected.into_iter().filter(|unit| {
+                            shard.icc_part.is_none_or(|p| p == 0) || !matches!(unit, Unit::Target {name,..} if name == "ociobakelut_icc_oracle")
+                        }));
                     }
                 }
                 run.sort();
@@ -908,6 +1098,6 @@ mod tests {
             2
         );
         assert!(text.contains("needs: [windows-checks, windows-tests]"));
-        assert!(text.contains("needs: [rocky9-checks, rocky9-tests]"));
+        assert!(text.contains("needs: [rocky9-checks, rocky9-tests, rocky9-icc-audit]"));
     }
 }

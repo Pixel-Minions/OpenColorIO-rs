@@ -6936,3 +6936,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   owner approved W0014's exact observed failure on Mesa25.2.7/LLVM21.1.8, retaining
   whole-image port/wheel GPU identity and rejecting any changed or newly passing
   result. See `docs/gpu-finite-exact-pins.md` and the preserved debugger report.
+
+### I-800. The private test-log remover does not progress on empty regex matches
+
+- **Upstream:** `tests/cpu/UnitTestLogUtils.cpp:88-101 @ v2.5.2` repeatedly searches
+  and erases one match. If a pattern matches an empty span, erasing zero bytes
+  leaves the same match for the next iteration, so the helper loops indefinitely.
+- **Who notices:** developers supplying such a pattern to `LogGuard::findAllAndRemove`;
+  the ported test callers use consuming log-message patterns.
+- **Status:** preserved in the private test helper. No public OCIO API or numerical
+  comparison is changed. A future fix could reject empty spans or advance the search.
