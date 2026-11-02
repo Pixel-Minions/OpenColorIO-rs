@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from sde_cpu_tests import one_test
-from sde_targeted import selection, source_head
+from sde_targeted import PACKAGE_DIRECTORY, selection, source_head
 from p76_boundary_controls import BoundaryControls
 from p77_profile_controls import ProfileControls
 
@@ -62,14 +62,21 @@ class TargetedControls(unittest.TestCase):
 
     def test_boundary_selects_input_audit_and_every_original_execution_part(self):
         package, target, names = selection('boundary')
-        self.assertEqual((package, target), ('ocio', 'legacy_gpu_oracle'))
+        self.assertEqual((package, target), ('opencolorio-rs', 'legacy_gpu_oracle'))
         self.assertEqual(names[0], 'boundary_legacy_parts_cover_original_requests_once')
         self.assertEqual(names[1:], [f'legacy_boundary_edges_match_native_wheel_part{i}' for i in range(7)])
+
+    def test_each_selected_package_runs_in_its_own_directory(self):
+        root = pathlib.Path(__file__).resolve().parents[2]
+        for plan in ['boundary', 'python313', 'icc-generated', 'icc-corrupt']:
+            package = selection(plan)[0]
+            manifest = (root / 'crates' / PACKAGE_DIRECTORY[package] / 'Cargo.toml').read_text(encoding='utf-8')
+            self.assertIn(f'name = "{package}"', manifest)
 
     def test_icc_and_python_cases_are_the_recorded_cases(self):
         self.assertEqual(selection('icc-generated'), ('ocio-tools', 'ociobakelut_icc_oracle', ['display_profiles_generated']))
         self.assertEqual(selection('icc-corrupt'), ('ocio-tools', 'ociobakelut_icc_oracle', ['corrupted_profiles']))
-        self.assertEqual(selection('python313'), ('ocio', 'api_formats_oracle', ['grading_rgb_curve_dynamic_sets_match_the_wheel_at_every_format_and_level']))
+        self.assertEqual(selection('python313'), ('opencolorio-rs', 'api_formats_oracle', ['grading_rgb_curve_dynamic_sets_match_the_wheel_at_every_format_and_level']))
 
 
 if __name__ == '__main__':

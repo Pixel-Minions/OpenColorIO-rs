@@ -35,11 +35,11 @@ repository = "https://github.com/Pixel-Minions/OpenColorIO-rs"
 publish = false
 
 [workspace.dependencies]
-ocio-ops = { path = "crates/ocio-ops" }
-ocio-formats = { path = "crates/ocio-formats" }
-ocio-gpu = { path = "crates/ocio-gpu" }
+ocio-ops = { path = "crates/ocio-ops", package = "opencolorio-rs-ops" }
+ocio-formats = { path = "crates/ocio-formats", package = "opencolorio-rs-formats" }
+ocio-gpu = { path = "crates/ocio-gpu", package = "opencolorio-rs-gpu" }
 ocio-gpu-exec = { path = "crates/ocio-gpu-exec" }
-ocio = { path = "crates/ocio" }
+ocio = { path = "crates/ocio", package = "opencolorio-rs" }
 ocio-testkit = { path = "crates/ocio-testkit" }
 # The Python binding's C API calls that need `unsafe` (its only unsafe code, PLAN.md D8).
 ocio-py-ffi = { path = "crates/ocio-py/ffi" }

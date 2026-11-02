@@ -54,7 +54,7 @@ fn plan(checks: &[&str], compile_target: &str) -> Vec<Vec<String>> {
         steps.push(strings(&[
             "test",
             "-p",
-            "ocio-gpu",
+            "opencolorio-rs-gpu",
             "--tests",
             "--no-fail-fast",
         ]));
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(steps.len(), 2);
         assert!(steps[0].contains(&"lut3d_op_test".to_string()));
         assert!(steps[0].iter().any(|arg| arg == FEATURE));
-        assert!(cargo_args(&steps, "ocio-gpu").is_empty());
+        assert!(cargo_args(&steps, "opencolorio-rs-gpu").is_empty());
         let compile = steps.last().unwrap();
         assert_eq!(
             compile[compile.len() - 2..],
@@ -213,7 +213,7 @@ mod tests {
 
         let steps = plan(&["family_"], "compile_hlsl");
         assert_eq!(steps.len(), 2);
-        assert_eq!(steps[0][..3], ["test", "-p", "ocio-gpu"]);
+        assert_eq!(steps[0][..3], ["test", "-p", "opencolorio-rs-gpu"]);
 
         assert_eq!(plan(&["family_", "suite_"], "compile_hlsl").len(), 3);
     }

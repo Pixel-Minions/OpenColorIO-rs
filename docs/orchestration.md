@@ -112,7 +112,8 @@ left unused stay unused).
 An exact Rust port of OpenColorIO 2.5.2, accepted only on byte-for-byte parity with the official
 `opencolorio==2.5.2` wheel on Windows x86-64 and Rocky Linux 9. The C++ source is the submodule
 `upstream/OpenColorIO` (pinned at v2.5.2). Crates: `ocio-ops` (ops, CPU renderers), `ocio-gpu`
-(shaders), `ocio-formats`, `ocio` (config, processors, file formats, app helpers), `ocio-py`
+(shaders), `ocio-formats`, `ocio` (config, processors, file formats, app helpers; these four are
+packages `opencolorio-rs-ops`, `-gpu`, `-formats` and `opencolorio-rs` for `cargo -p`), `ocio-py`
 (the `PyOpenColorIO`-compatible module) and its `ffi`, `ocio-testkit` (oracle client, battery,
 fixtures), `xtask` (gates, land, guards, parity).
 

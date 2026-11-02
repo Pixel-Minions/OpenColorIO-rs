@@ -1,5 +1,5 @@
 [package]
-name = "ocio"
+name = "opencolorio-rs"
 description = "OpenColorIO 2.5.2, ported to Rust: configs, transforms, processors"
 version.workspace = true
 edition.workspace = true
@@ -8,6 +8,10 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[lib]
+# Published as this package's name; in code it stays `ocio`.
+name = "ocio"
 
 [dependencies]
 ocio-ops.workspace = true

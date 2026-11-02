@@ -134,7 +134,7 @@ mod tests {
     /// trimmed to the fields read here.
     const SAMPLE: &str = r#"{
         "packages": [
-            {"name": "ocio-ops", "id": "path+file:///D:/w/crates/ocio-ops#0.0.0",
+            {"name": "opencolorio-rs-ops", "id": "path+file:///D:/w/crates/ocio-ops#opencolorio-rs-ops@0.0.0",
              "manifest_path": "D:\\w\\crates\\ocio-ops\\Cargo.toml",
              "targets": [
                 {"kind": ["lib"], "name": "ocio_ops", "test": true, "doctest": true},
@@ -147,7 +147,7 @@ mod tests {
              ]}
         ],
         "workspace_members": [
-            "path+file:///D:/w/crates/ocio-ops#0.0.0",
+            "path+file:///D:/w/crates/ocio-ops#opencolorio-rs-ops@0.0.0",
             "path+file:///D:/w/xtask#0.0.0"
         ],
         "workspace_root": "D:\\w"
@@ -157,7 +157,7 @@ mod tests {
     fn reads_packages_and_targets() {
         let packages = parse(SAMPLE).unwrap();
         assert_eq!(packages.len(), 2);
-        assert_eq!(packages[0].name, "ocio-ops");
+        assert_eq!(packages[0].name, "opencolorio-rs-ops");
         assert_eq!(packages[0].dir, "crates/ocio-ops");
         assert_eq!(packages[1].dir, "xtask");
         assert_eq!(
@@ -192,7 +192,7 @@ mod tests {
         assert!(
             packages
                 .iter()
-                .any(|p| p.name == "ocio-ops" && p.dir == "crates/ocio-ops")
+                .any(|p| p.name == "opencolorio-rs-ops" && p.dir == "crates/ocio-ops")
         );
     }
 }

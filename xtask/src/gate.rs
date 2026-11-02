@@ -41,7 +41,8 @@ Runs, in order, stopping at the first failure:
                  untracked files out: the index as a temporary commit on HEAD, checked out
                  in target/gate-staged/wt (kept, with its logs, until the next --staged run)
   --crates a,b   run the test steps for these packages only (fmt, clippy and ci always cover
-                 the workspace)
+                 the workspace); a package's name or its directory's (ocio-ops for
+                 opencolorio-rs-ops)
   --touched      run the test steps only for the packages whose files the HEAD commit
                  changes (with --staged: the staged changes); `xtask land` gates each
                  replayed commit so. The whole workspace when it changes oracle/, fixtures/,
@@ -154,13 +155,8 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         return run_staged(&root, &opts.others);
     }
     let packages = workspace_packages(&root)?;
-    for name in &opts.crates {
-        if !packages.contains(name) {
-            return Err(format!(
-                "--crates: `{name}` is not a workspace package ({})",
-                packages.join(", ")
-            ));
-        }
+    for name in &mut opts.crates {
+        *name = package_named(name, &packages)?;
     }
     let nested = opts.log_dir.is_some();
     if opts.auto {
@@ -754,8 +750,30 @@ pub(crate) fn bash() -> Result<PathBuf, String> {
         })
 }
 
-/// Package names of the workspace members.
-fn workspace_packages(root: &Path) -> Result<Vec<String>, String> {
+/// The package a `--crates` name means, given `(package, member directory)` pairs: a package's
+/// name, or the last component of its directory, the crate's name in code and in the docs
+/// (`ocio-ops` for `opencolorio-rs-ops`, in `crates/ocio-ops`).
+fn package_named(name: &str, packages: &[(String, String)]) -> Result<String, String> {
+    packages
+        .iter()
+        .find(|(package, _)| package == name)
+        .or_else(|| {
+            packages
+                .iter()
+                .find(|(_, dir)| dir.rsplit('/').next() == Some(name))
+        })
+        .map(|(package, _)| package.clone())
+        .ok_or_else(|| {
+            let names: Vec<&str> = packages.iter().map(|(p, _)| p.as_str()).collect();
+            format!(
+                "--crates: `{name}` is not a workspace package ({})",
+                names.join(", ")
+            )
+        })
+}
+
+/// `(package name, member directory)` of the workspace members.
+fn workspace_packages(root: &Path) -> Result<Vec<(String, String)>, String> {
     let read = |path: PathBuf| -> Result<toml::Table, String> {
         let text =
             std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -776,7 +794,7 @@ fn workspace_packages(root: &Path) -> Result<Vec<String>, String> {
             .and_then(|p| p.get("name"))
             .and_then(|n| n.as_str())
         {
-            names.push(name.to_string());
+            names.push((name.to_string(), member.to_string()));
         }
     }
     Ok(names)
@@ -1188,14 +1206,44 @@ mod tests {
         }
     }
 
+    #[test]
+    fn crates_takes_a_package_or_its_directory() {
+        let packages = workspace_packages(&crate::root()).unwrap();
+        for (name, want) in [
+            ("opencolorio-rs", "opencolorio-rs"),
+            ("ocio", "opencolorio-rs"),
+            ("ocio-ops", "opencolorio-rs-ops"),
+            ("ocio-formats", "opencolorio-rs-formats"),
+            ("ocio-gpu", "opencolorio-rs-gpu"),
+            ("ocio-gpu-exec", "ocio-gpu-exec"),
+            ("ocio-tools", "ocio-tools"),
+            ("xtask", "xtask"),
+        ] {
+            assert_eq!(package_named(name, &packages).unwrap(), want);
+        }
+        // `crates/ocio-py/ffi` is `ffi` by directory, and a name that matches a package wins.
+        assert_eq!(package_named("ffi", &packages).unwrap(), "ocio-py-ffi");
+        let swapped = [
+            ("a".to_string(), "crates/b".to_string()),
+            ("b".to_string(), "crates/c".to_string()),
+        ];
+        assert_eq!(package_named("b", &swapped).unwrap(), "b");
+        let error = package_named("nope", &packages).unwrap_err();
+        assert!(
+            error.contains("`nope` is not a workspace package"),
+            "{error}"
+        );
+        assert!(error.contains("opencolorio-rs-gpu"), "{error}");
+    }
+
     /// This workspace's layout.
     fn packages() -> Vec<crate::metadata::Package> {
         vec![
-            package("ocio-ops", "crates/ocio-ops"),
+            package("opencolorio-rs-ops", "crates/ocio-ops"),
             package("ocio-testkit", "crates/ocio-testkit"),
-            package("ocio-formats", "crates/ocio-formats"),
-            package("ocio-gpu", "crates/ocio-gpu"),
-            package("ocio", "crates/ocio"),
+            package("opencolorio-rs-formats", "crates/ocio-formats"),
+            package("opencolorio-rs-gpu", "crates/ocio-gpu"),
+            package("opencolorio-rs", "crates/ocio"),
             package("ocio-py", "crates/ocio-py"),
             package("ocio-tools", "crates/ocio-tools"),
             package("xtask", "xtask"),
@@ -1214,7 +1262,7 @@ mod tests {
     fn touched_packages() {
         assert_eq!(
             touched(&["crates/ocio-ops/src/ops/log/log_op_cpu.rs"]),
-            only(&["ocio-ops"])
+            only(&["opencolorio-rs-ops"])
         );
         // Workspace order, once each; documentation alongside adds nothing.
         assert_eq!(
@@ -1225,7 +1273,7 @@ mod tests {
                 "crates/ocio/tests/config_oracle.rs",
                 "upstream-map.toml",
             ]),
-            only(&["ocio-ops", "ocio", "xtask"])
+            only(&["opencolorio-rs-ops", "opencolorio-rs", "xtask"])
         );
         assert_eq!(touched(&["xtask/src/land.rs"]), only(&["xtask"]));
         assert_eq!(touched(&["scripts/rocky9.sh"]), only(&["xtask"]));
@@ -1326,14 +1374,14 @@ mod tests {
         // The shape of a test binary that aborts (cargo 1.98.1 on Windows).
         let crashed = "running 3 tests\n\
             memory allocation of 17052710 bytes failed\n\
-            error: test failed, to rerun pass `-p ocio-ops --test gamma_oracle`\n\
+            error: test failed, to rerun pass `-p opencolorio-rs-ops --test gamma_oracle`\n\
             \n\
             Caused by:\n  process didn't exit successfully: `D:\\t\\gamma_oracle.exe` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)\n\
             error: test failed, to rerun pass `-p xtask --bin xtask`\n";
         assert_eq!(
             failed_targets(crashed),
             [
-                "-p ocio-ops --test gamma_oracle (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)",
+                "-p opencolorio-rs-ops --test gamma_oracle (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)",
                 "-p xtask --bin xtask"
             ]
         );

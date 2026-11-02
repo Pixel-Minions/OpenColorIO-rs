@@ -1,5 +1,5 @@
 [package]
-name = "ocio-ops"
+name = "opencolorio-rs-ops"
 description = "OpenColorIO ops: op data, CPU renderers (numeric profiles), optimizer, pixel formats, CPUInfo"
 version.workspace = true
 edition.workspace = true
@@ -8,6 +8,10 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 publish.workspace = true
+
+[lib]
+# Published as this package's name; in code it stays `ocio_ops`.
+name = "ocio_ops"
 
 [dependencies]
 half.workspace = true

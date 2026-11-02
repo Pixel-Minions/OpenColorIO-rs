@@ -12,16 +12,17 @@ import subprocess
 import sys
 
 from sde_cpu_tests import native_list, one_test, source_head, write_json
+# The directories under crates/ of the selected packages; a test runs where cargo would run it.PACKAGE_DIRECTORY = {'opencolorio-rs': 'ocio', 'ocio-tools': 'ocio-tools'}
 
 
 def selection(plan):
     if plan == 'boundary':
-        return 'ocio', 'legacy_gpu_oracle', [
+        return 'opencolorio-rs', 'legacy_gpu_oracle', [
             'boundary_legacy_parts_cover_original_requests_once',
             *[f'legacy_boundary_edges_match_native_wheel_part{i}' for i in range(7)],
         ]
     if plan == 'python313':
-        return 'ocio', 'api_formats_oracle', [
+        return 'opencolorio-rs', 'api_formats_oracle', [
             'grading_rgb_curve_dynamic_sets_match_the_wheel_at_every_format_and_level',
         ]
     name = {'icc-generated': 'display_profiles_generated',
@@ -111,7 +112,7 @@ def run(plan, cpu):
                   NativeInventory=native, Selected=selected, Results=[],
                   CompleteCPUProfile=False, AllSelectedPassed=False)
     write_json(directory / 'report.json', report)
-    os.chdir(root / 'crates' / package)
+    os.chdir(root / 'crates' / PACKAGE_DIRECTORY[package])
     for index, name in enumerate(selected):
         # Larger full ICC sweeps may take hours; their date check uses the actual run bounds.
         # Other cases retain the existing two-hour limit. Neither changes comparisons.
