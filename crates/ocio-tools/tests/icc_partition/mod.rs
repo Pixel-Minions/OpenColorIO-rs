@@ -50,16 +50,28 @@ fn indices(total: usize, part: usize) -> Vec<usize> {
 /// SHA256 covers every case input/control and each file's original bytes. Paths
 /// and argv retain the original global case index on both wheel and port runs.
 pub(crate) fn plan(cases: &[Case]) -> Vec<Value> {
-    cases.iter().enumerate().map(|(index, case)| {
-        assert!(case.original_index.is_none());
-        let files: Vec<_> = case.files.iter().map(|(name, bytes)| json!([name, bytes.len(), sha256_hex(bytes)])).collect();
-        let inputs = json!({"label":case.label, "argv":case.argv, "env":case.env,
+    cases
+        .iter()
+        .enumerate()
+        .map(|(index, case)| {
+            assert!(case.original_index.is_none());
+            case_record(case, index)
+        })
+        .collect()
+}
+
+fn case_record(case: &Case, index: usize) -> Value {
+    let files: Vec<_> = case
+        .files
+        .iter()
+        .map(|(name, bytes)| json!([name, bytes.len(), sha256_hex(bytes)]))
+        .collect();
+    let inputs = json!({"label":case.label, "argv":case.argv, "env":case.env,
             "files":files, "dies":case.dies, "attributes":case.attributes,
             "merged":case.merged, "closed_pipe":case.closed_pipe,
             "sigpipe_ignored":case.sigpipe_ignored, "head_bytes":case.head_bytes,
             "icc":case.icc, "stop":format!("{:?}",case.stop)});
-        json!({"index":index, "label":case.label, "input_sha256":sha256_hex(&serde_json::to_vec(&inputs).unwrap())})
-    }).collect()
+    json!({"index":index, "label":case.label, "input_sha256":sha256_hex(&serde_json::to_vec(&inputs).unwrap())})
 }
 
 fn profile() -> &'static str {
@@ -102,6 +114,12 @@ pub(crate) fn run(group: &str, tool: &str, program: &str, cases: &[Case]) -> Opt
             case
         })
         .collect();
+    // Fingerprint the ACTUAL immutable cases passed to sweep, independently of
+    // the declared indices. A wrong-case substitution must fail the union audit.
+    let executed_inputs: Vec<_> = chosen
+        .iter()
+        .map(|case| case_record(case, case.original_index.expect("selected original index")))
+        .collect();
     let summary = sweep(group, tool, program, &chosen);
     let outcomes: Vec<_> = summary
         .outcomes
@@ -116,7 +134,8 @@ pub(crate) fn run(group: &str, tool: &str, program: &str, cases: &[Case]) -> Opt
     let report = json!({"schema":1, "source":source(), "profile":profile(),
         "tier":std::env::var("OCIO_RS_TIER").unwrap(), "group":group,
         "part":part, "parts":PARTS, "original":original, "indices":selected,
-        "outcomes":outcomes, "port_stops":summary.port_stops, "exact_comparisons_passed":true});
+        "executed_inputs":executed_inputs, "outcomes":outcomes,
+        "port_stops":summary.port_stops, "exact_comparisons_passed":true});
     let directory =
         std::env::var_os("OCIO_RS_ICC_REPORT_DIR").expect("ICC partition report directory");
     let directory = Path::new(&directory);
@@ -173,6 +192,12 @@ fn validate(
             report["indices"],
             json!(selected),
             "missing/duplicate/foreign original case index"
+        );
+        let expected_inputs: Vec<_> = selected.iter().map(|&index| &original[index]).collect();
+        assert_eq!(
+            report["executed_inputs"],
+            json!(expected_inputs),
+            "actual executed case inputs differ from the original selection"
         );
         let outcomes = report["outcomes"].as_array().expect("actual outcomes");
         assert_eq!(
@@ -237,14 +262,18 @@ mod controls {
     use super::*;
 
     fn fixture() -> (Vec<Value>, Vec<Value>) {
-        let original: Vec<_> = (0..17)
-            .map(|i| json!({"index":i,"input_sha256":format!("input-{i}")}))
+        let cases: Vec<_> = (0..17)
+            .map(|i| {
+                Case::new(format!("case-{i}"), &["--input"]).file("input", format!("bytes-{i}"))
+            })
             .collect();
+        let original = plan(&cases);
         let reports = (0..PARTS).map(|part| {
             let selected = indices(original.len(),part);
             let outcomes: Vec<_> = selected.iter().map(|_| json!({"exit_code":0,"writing_files":true,"stderr":""})).collect();
             json!({"schema":1,"source":"source","profile":"debug","tier":"full", "group":GROUPS[0],
-                "part":part,"parts":PARTS,"original":original,"indices":selected,"outcomes":outcomes,
+                "part":part,"parts":PARTS,"original":original,"indices":selected,
+                "executed_inputs":selected.iter().map(|&index|case_record(&cases[index],index)).collect::<Vec<_>>(),"outcomes":outcomes,
                 "port_stops":0,"exact_comparisons_passed":true})
         }).collect();
         (original, reports)
@@ -267,6 +296,7 @@ mod controls {
             "parts",
             "original",
             "indices",
+            "executed_inputs",
             "outcomes",
             "port_stops",
             "exact_comparisons_passed",
@@ -338,6 +368,18 @@ mod controls {
         );
         let mut changed = reports.clone();
         changed[0]["outcomes"].as_array_mut().unwrap().pop();
+        assert!(
+            std::panic::catch_unwind(|| validate(
+                &changed, GROUPS[0], &original, "source", "debug", "full"
+            ))
+            .is_err()
+        );
+        let mut changed = reports.clone();
+        // Declared index0 remains valid, but the actual executed input is foreign.
+        changed[0]["executed_inputs"][0] = case_record(
+            &Case::new("wrong-case", &["--input"]).file("input", "foreign bytes"),
+            0,
+        );
         assert!(
             std::panic::catch_unwind(|| validate(
                 &changed, GROUPS[0], &original, "source", "debug", "full"

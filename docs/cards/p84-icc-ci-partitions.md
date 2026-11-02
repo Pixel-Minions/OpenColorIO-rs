@@ -26,6 +26,9 @@ and deaths, and <=count/50 stops. No threshold is divided or weakened per part.
 Each part emits a report only after common::sweep has passed every exact original
 wheel/port comparison. Its original plan fingerprints every case/control and file
 byte with SHA256, then records selected global indices and actual outcome facts.
+P86 independently fingerprints the immutable cases actually passed into sweep;
+the join requires these to equal the selected original input records, so declaring
+the right indices while substituting different case bytes cannot satisfy the audit.
 Separate REQUIRED debug/release joins regenerate the original full input plans,
 require four matching source/profile/full-tier reports per sweep, verify all
 input fingerprints and exactly one outcome per original index, and enforce the
