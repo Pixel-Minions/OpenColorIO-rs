@@ -1,9 +1,13 @@
 # Linux reference platform (PLAN.md D11): Rocky Linux 9, glibc 2.34, VFX Reference Platform CY2027.
 # OCIO calls glibc's libm at runtime, so the oracle wheel and the port must run on this image
 # for Linux pixel checks to be meaningful.
-FROM rockylinux/rockylinux:9.8
+FROM rockylinux/rockylinux:9.8@sha256:8101994123cf3d0a8fee517bee7f39e555c7d92bd2d9eb3303cc988a0eeed00f
 
-RUN dnf install -y --setopt=install_weak_deps=False \
+# Fixed minor-release URLs also try Rocky's vault when 9.8 leaves the live tree.
+# Do not let the base image's major-version mirrorlists select a later renderer.
+COPY reference.repo /etc/ocio-reference.repos.d/reference.repo
+RUN dnf --releasever=9.8 --setopt=reposdir=/etc/ocio-reference.repos.d \
+        install -y --setopt=install_weak_deps=False \
         gcc gcc-c++ make git which findutils diffutils tar xz procps-ng \
     && dnf clean all
 
@@ -32,7 +36,8 @@ ENV CARGO_TARGET_DIR=/work/target/rocky9
 # Python and uv layers are reused when this image is rebuilt locally.
 # Exact NVRs from Rocky 9 AppStream (2026-10-25); do not silently upgrade the
 # renderer that defines the GPU suite's baseline.
-RUN dnf install -y --setopt=install_weak_deps=False \
+RUN dnf --releasever=9.8 --setopt=reposdir=/etc/ocio-reference.repos.d \
+        install -y --setopt=install_weak_deps=False \
         mesa-dri-drivers-25.2.7-5.el9_8.x86_64 \
         mesa-filesystem-25.2.7-5.el9_8.x86_64 \
         mesa-libEGL-25.2.7-5.el9_8.x86_64 \
@@ -43,6 +48,8 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         libglvnd-glx-1.3.4-1.el9.x86_64 \
         libglvnd-opengl-1.3.4-1.el9.x86_64 \
         glslang-16.0.0-1.el9.x86_64 \
+        llvm-libs-21.1.8-2.el9.x86_64 \
+    && test "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' llvm-libs)" = '21.1.8-2.el9.x86_64' \
     && dnf clean all
 
 ENV EGL_PLATFORM=surfaceless \

@@ -71,7 +71,7 @@ jobs:
         run: cargo xtask ci ${{ steps.mode.outputs.flags }}
       - name: Committed fixtures are identical on this platform
         run: cargo xtask oracle check-all
-      - name: The Python module (clippy and tests of ocio-py's python feature, upstream's Python suite)
+      - name: The Python module (clippy, binding tests, upstream's Python suite in debug and release)
         run: cargo xtask py-check
       - name: Compile the GPU suite's HLSL (fxc, dxc; P7-5)
         run: cargo xtask compile-shaders suite_hlsl_fxc suite_hlsl_dxc
@@ -157,7 +157,7 @@ jobs:
         run: scripts/rocky9.sh uv run --offline --python 3.13 --no-project python scripts/egl-probe.py
       - name: Native SDE execution and mounted-checkout provenance controls
         run: scripts/rocky9.sh python3 scripts/diagnostics/p64_targeted_controls.py
-      - name: fmt, clippy, guardrails, fixtures
+      - name: fmt, clippy, guardrails, fixtures and Python suite in debug and release
         run: |
           scripts/rocky9.sh bash -ec '
             git config --global --add safe.directory "*"

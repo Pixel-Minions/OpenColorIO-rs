@@ -43,12 +43,16 @@ P55's complete1680-request small-legacy plan passed on Windows/Rocky nhm in
 but it is also narrower than a complete profile. The old scheduled ICC-main Rocky
 skx success predates Phase8 and does not qualify the merged SIMD head.
 
-The rebased alias retains all41 main named test targets plus legacy_gpu_oracle.
-Cargo metadata predicts46 executables:42 integration targets and four libraries.
+The ee5671bc alias retains all41 prior main named test targets plus legacy_gpu_oracle.
+Its Cargo metadata predicts46 executables:42 integration targets and four libraries.
+P88 retains all42 targets and adds legacy_gpu_live_oracle, so the library-complete
+head has43 integration targets plus the same four libraries.
 Collect and validate actual native inventories before claiming complete profiles.
 CDL, Gamma, Log, FixedFunction and GradingPrimary's complete SDE coverage remains open.
 
-Post-extraction legacy dynamic updates also remain separate library/test work.
+P87/P90's independently verified oracle and P88's 5,880 live requests cover
+post-extraction legacy dynamic updates. The new CPU-dependent target is added to
+cpu-tests; it has not been exercised by the earlier snb run, which is pinned to ee5671bc.
 No threshold, waiver, CPU flag, SDE pin, original filter or expected output is changed.
 
 Latest owner decision: land PR100's exact6fe76c84 after its three normal required
@@ -56,4 +60,24 @@ checks pass; it contains90/98/99, so do not merge those separately. After P76's 
 boundary-audit correction is on main, ONE further SDE workflow is authorized for
 the two Rocky snb ICC sweeps, strict boundary audit and one COMPLETE snb CPU profile
 on Windows and Rocky Linux9. No other CPU profiles or full matrix are authorized
-now. After all library work lands, run the full matrix once as final qualification.
+now.
+
+The subsequent owner instruction supersedes automatic final qualification: first
+land OpenColorIO.h, Processor.cpp and Processor.h, establish clean snb results,
+then wait for explicit owner confirmation before starting the final full matrix.
+A separate Claude release audit is still in progress and may add work first.
+No full-matrix authorization is implied by closing the source ledger.
+
+Release-audit instruction,2026-11-02: the final full matrix must run on the exact
+commit that gets tagged, after the owner's confirmation. Closing upstream-map.toml
+is not its trigger. Keep the opt-level 0 depth tests in that final matrix; the
+targeted snb follow-up does not run or qualify them. Release-path work, GPU compile
+checks and notices are assigned to Claude after the owner's release decisions.
+
+The one follow-up is run41386558773 on ee5671bc, targeted_scope=owner-snb.
+Report every job's final status and whether the snb oracle crash recurs. The
+strict boundary audit is inside the two complete-profile joins, not a separately
+named matrix job; require the actual artifact proof before claiming it ran.
+If it did not run, the owner authorized only the smallest possible boundary-audit
+job. Do not rerun either complete CPU profile or the ICC sweeps under that condition.
+The unexplained historical snb oracle crash remains open even if it does not recur.
