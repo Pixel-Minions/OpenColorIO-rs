@@ -94,6 +94,13 @@ fn lay_out(root: &Path, project: &Path) -> Result<(), String> {
     let package = project.join("python").join("PyOpenColorIO");
     std::fs::create_dir_all(&package).map_err(|e| format!("{}: {e}", package.display()))?;
     py::lay_out_package(root, &package, true)?;
+    let laid_out = files_under(&package)?;
+    let expected = crate::wheel_check::package_files(std::env::consts::EXE_SUFFIX);
+    if laid_out != expected {
+        return Err(format!(
+            "the package holds {laid_out:?}, but the wheel's check expects {expected:?}"
+        ));
+    }
     if !cfg!(windows) {
         strip_tools(&package.join("bin"))?;
     }
@@ -105,6 +112,23 @@ fn lay_out(root: &Path, project: &Path) -> Result<(), String> {
         py::copy(&source, &destination)?;
     }
     Ok(())
+}
+
+/// The files in `dir` and below, by their paths from it, with `/`.
+fn files_under(dir: &Path) -> Result<BTreeSet<String>, String> {
+    let mut files = BTreeSet::new();
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(next) = dirs.pop() {
+        for entry in std::fs::read_dir(&next).map_err(|e| format!("{}: {e}", next.display()))? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if let Ok(relative) = path.strip_prefix(dir) {
+                files.insert(relative.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    Ok(files)
 }
 
 /// Strips the tools, as `[tool.maturin] strip` does the extension: a Linux tool is 30 MB with the

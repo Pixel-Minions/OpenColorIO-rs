@@ -27,6 +27,7 @@ mod shards;
 mod upstream;
 mod wheel;
 mod wheel_audit;
+mod wheel_check;
 
 const USAGE: &str = "\
 cargo xtask <command>
@@ -98,6 +99,10 @@ Python (Phase 6):
                               step)
   wheel-build                 build the wheel opencolorio-rs into target/wheel with uv and
                               maturin (`cargo xtask wheel-build --help`)
+  wheel-check [--wheel <file>]
+                              build the wheel, install only it in a new environment outside
+                              the source tree, and run upstream's Python suite and the console
+                              scripts against it (`cargo xtask wheel-check --help`)
 
 Upstream:
   upstream-map update         add new upstream files to upstream-map.toml (keeps edits)
@@ -153,6 +158,11 @@ fn main() -> ExitCode {
             Ok(())
         }
         ["wheel-build", rest @ ..] => wheel::wheel_build(rest),
+        ["wheel-check", "--help" | "-h"] => {
+            print!("{}", wheel_check::USAGE);
+            Ok(())
+        }
+        ["wheel-check", rest @ ..] => wheel_check::wheel_check(rest),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),
