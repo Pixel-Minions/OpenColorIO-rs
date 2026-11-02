@@ -913,6 +913,16 @@ fn regex_search2(
     Ok(found)
 }
 
+/// First-match span for the private LogGuard, using `_Regex_search2`
+/// (`<regex>`:2234-2276; UnitTestLogUtils.cpp:88-101 @ v2.5.2).
+#[cfg(test)]
+pub(super) fn test_log_search(
+    program: &Program,
+    text: &[u8],
+) -> MatchResult<Option<(usize, usize)>> {
+    regex_search2(program, text, 0, text.len(), MATCH_DEFAULT)
+}
+
 /// `regex_replace(s, re, fmt)` with `format_default`, for a format without `$`: `text` with
 /// each match replaced by `fmt`, as the ECMAScript format rules copy a format without escapes
 /// (`_Format_default`, `<regex>`:2092-2135).
