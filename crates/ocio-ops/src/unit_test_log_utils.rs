@@ -256,6 +256,15 @@ impl Drop for MuteLogging {
     }
 }
 
+impl Drop for LogGuard {
+    /// Port of `LogGuard::~LogGuard` (UnitTestLogUtils.cpp:47-52 @ v2.5.2).
+    fn drop(&mut self) {
+        reset_to_default_logging_function();
+        set_logging_level(self.log_level);
+        self.clear();
+    }
+}
+
 #[cfg(test)]
 mod helper_controls {
     use super::*;
@@ -310,14 +319,5 @@ mod helper_controls {
             assert!(guard.empty());
             assert_eq!(get_logging_level(), LoggingLevel::Info);
         }
-    }
-}
-
-impl Drop for LogGuard {
-    /// Port of `LogGuard::~LogGuard` (UnitTestLogUtils.cpp:47-52 @ v2.5.2).
-    fn drop(&mut self) {
-        reset_to_default_logging_function();
-        set_logging_level(self.log_level);
-        self.clear();
     }
 }
