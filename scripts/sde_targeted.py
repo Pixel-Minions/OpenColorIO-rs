@@ -12,7 +12,9 @@ import subprocess
 import sys
 
 from sde_cpu_tests import native_list, one_test, source_head, write_json
-# The directories under crates/ of the selected packages; a test runs where cargo would run it.PACKAGE_DIRECTORY = {'opencolorio-rs': 'ocio', 'ocio-tools': 'ocio-tools'}
+
+# The directories under crates/ of the selected packages; a test runs where cargo would run it.
+PACKAGE_DIRECTORY = {'opencolorio-rs': 'ocio', 'ocio-tools': 'ocio-tools'}
 
 
 def selection(plan):
