@@ -4040,13 +4040,14 @@ path = "src/bindings/python/package/__init__.py"
 kind = "binding"
 target = ["crates/ocio-py/python/PyOpenColorIO/__init__.py"]
 status = "done"
-note = "6.1a: upstream's file, verbatim (its Windows DLL search finds no bin/ next to the port's module and changes nothing)"
+note = "6.1a/P78: upstream's file verbatim, including Windows DLL search. P78 now supplies package/bin with the four Rust developer executables; the Python extension remains the port's compiled module."
 
 [[file]]
 path = "src/bindings/python/package/command_line.py"
 kind = "binding"
-target = ["crates/ocio-py/src/package/command_line.rs"]
-status = "todo"
+target = ["crates/ocio-py/python/PyOpenColorIO/command_line.py", "xtask/src/py_tools.rs", "xtask/src/py.rs"]
+status = "done"
+note = "P78: unchanged upstream Python launcher; py-build stages the four in-scope Rust developer executables under package/bin using Cargo's executable manifest. Both call_program and basename-derived main are checked against the wheel for each tool's help/error exit status and exact stdout/stderr. Console-script distribution installation remains release packaging, as P6-3 already records."
 
 [[file]]
 path = "src/bindings/python/transforms/PyAllocationTransform.cpp"

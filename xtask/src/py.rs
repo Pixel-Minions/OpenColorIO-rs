@@ -144,6 +144,7 @@ pub(crate) fn build(layout: &Layout, release: bool) -> Result<(), String> {
         &package.join("__init__.py"),
     )?;
     copy(&library, &package.join(format!("PyOpenColorIO{suffix}")))?;
+    crate::py_tools::stage(layout, release)?;
     let pth = Path::new(&site).join(PTH);
     std::fs::write(&pth, pth_contents(&layout.py)).map_err(|e| format!("{}: {e}", pth.display()))
 }
@@ -361,6 +362,7 @@ pub(crate) fn py_suite(args: &[&str]) -> Result<(), String> {
         return Err(why);
     }
     crate::py_driver::run(&layout, &tests, &expected)?;
+    crate::py_tools::check(&layout)?;
     if update {
         let path = layout.root.join(crate::parity::PASSING_PYTHON);
         let text: String = passing.iter().map(|f| format!("{f}\n")).collect();

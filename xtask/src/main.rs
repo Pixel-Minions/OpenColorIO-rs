@@ -17,6 +17,7 @@ mod metadata;
 mod parity;
 mod py;
 mod py_driver;
+mod py_tools;
 mod register_merge;
 mod registers;
 mod scratch;
