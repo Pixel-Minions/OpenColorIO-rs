@@ -115,7 +115,8 @@ impl Drop for LoggingTestLock {
 /// them with a logging function of its own.
 ///
 /// Port of `LogGuard` (tests/cpu/UnitTestLogUtils.h:12-34, UnitTestLogUtils.cpp:17-67 @
-/// v2.5.2). Not ported yet: `findAndRemove`, `findAllAndRemove` and `print`.
+/// v2.5.2). The check-and-mute message helpers live with their callers in ocio's
+/// test_env and merge-config tests.
 pub(crate) struct LogGuard {
     log_level: LoggingLevel,
     output: Arc<Mutex<Vec<u8>>>,
@@ -184,6 +185,131 @@ impl LogGuard {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .is_empty()
+    }
+
+    /// Port of `LogGuard::findAndRemove` (UnitTestLogUtils.cpp:71-86 @ v2.5.2).
+    /// The escaped literal followed by one or more CR/LF bytes is a byte search.
+    pub(crate) fn find_and_remove(&self, line: &[u8]) -> bool {
+        let mut output = self.output.lock().unwrap_or_else(PoisonError::into_inner);
+        let is_break = |b: &u8| matches!(*b, b'\r' | b'\n');
+        let Some(start) = (0..output.len().saturating_sub(line.len())).find(|&i| {
+            output[i..].starts_with(line) && output.get(i + line.len()).is_some_and(is_break)
+        }) else {
+            return false;
+        };
+        let mut end = start + line.len();
+        while output.get(end).is_some_and(is_break) {
+            end += 1;
+        }
+        output.drain(start..end);
+        true
+    }
+
+    /// Port of `LogGuard::findAllAndRemove` (UnitTestLogUtils.cpp:88-101 @ v2.5.2).
+    /// Restart after each single removal, including matches formed at its boundary.
+    pub(crate) fn find_all_and_remove(&self, pattern: &[u8]) -> bool {
+        use crate::std_regex::{Library, Regex, test_log_search};
+        let library = if cfg!(windows) {
+            Library::Msvc
+        } else {
+            Library::Libstdcxx
+        };
+        let regex = Regex::new(pattern, library).expect("the upstream test's regular expression");
+        let mut output = self.output.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut found = false;
+        while let Some((start, end)) =
+            test_log_search(&output, &regex).expect("the upstream test's log search")
+        {
+            output.drain(start..end);
+            found = true;
+        }
+        found
+    }
+
+    /// Port of `LogGuard::print` (UnitTestLogUtils.cpp:103-106 @ v2.5.2).
+    pub(crate) fn print(&self) {
+        self.write_output(&mut std::io::stdout());
+    }
+
+    fn write_output(&self, output: &mut impl Write) {
+        // The default C++ ostream records write failure without throwing.
+        let _ = output.write_all(&self.output());
+    }
+}
+
+/// Port of `MuteLogging` (UnitTestLogUtils.cpp:109-116 @ v2.5.2).
+pub(crate) struct MuteLogging {
+    _lock: LoggingTestLock,
+}
+
+impl MuteLogging {
+    pub(crate) fn new() -> Self {
+        let lock = logging_test_lock();
+        set_logging_function(Some(Arc::new(|_| {}))).expect("the function is not null");
+        Self { _lock: lock }
+    }
+}
+
+impl Drop for MuteLogging {
+    fn drop(&mut self) {
+        reset_to_default_logging_function();
+    }
+}
+
+#[cfg(test)]
+mod helper_controls {
+    use super::*;
+
+    #[test]
+    fn literal_line_removal_preserves_the_other_input_bytes() {
+        let guard = LogGuard::new();
+        guard
+            .output
+            .lock()
+            .unwrap()
+            .extend_from_slice(b"keep\n[.*]\r\n\n[.*]\n");
+        assert!(guard.find_and_remove(b"[.*]"));
+        assert_eq!(guard.output(), b"keep\n[.*]\n");
+        assert!(guard.find_and_remove(b"[.*]"));
+        assert_eq!(guard.output(), b"keep\n");
+        assert!(!guard.find_and_remove(b"[.*]"));
+    }
+
+    #[test]
+    fn regex_removal_restarts_after_one_match() {
+        let guard = LogGuard::new();
+        // Protocol input: erasing x-space first joins a and y. The word boundary
+        // before y disappears, so erasing all original matches at once is wrong.
+        guard.output.lock().unwrap().extend_from_slice(b"ax y");
+        assert!(guard.find_all_and_remove(br"x |\by"));
+        assert_eq!(guard.output(), b"ay");
+        assert!(!guard.find_all_and_remove(br"x |\by"));
+    }
+
+    #[test]
+    fn diagnostics_copy_raw_input_bytes() {
+        let guard = LogGuard::new();
+        guard
+            .output
+            .lock()
+            .unwrap()
+            .extend_from_slice(b"input\0\xff\n");
+        let mut sink = Vec::new();
+        guard.write_output(&mut sink);
+        assert_eq!(sink, b"input\0\xff\n");
+        guard.clear();
+        guard.print();
+    }
+
+    #[test]
+    fn mute_keeps_the_level_and_suppresses_the_callback() {
+        let guard = LogGuard::with_level(LoggingLevel::Info);
+        {
+            let _mute = MuteLogging::new();
+            crate::logging::log_info("Dummy message");
+            assert!(guard.empty());
+            assert_eq!(get_logging_level(), LoggingLevel::Info);
+        }
     }
 }
 
