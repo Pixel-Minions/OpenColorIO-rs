@@ -141,6 +141,7 @@ def aggregate(directories, output):
     for _, summary, _, found in loaded:
         require(summary['CargoCommand'] == first_summary['CargoCommand']
                 and summary['SDEPrefix'] == first_summary['SDEPrefix'], 'Command or CPU prefix differs')
+        require(summary.get('Head') == first_summary.get('Head'), 'Source commit differs')
         require(set(found) == set(first_reports), 'Native target sets differ')
         for key, (_, report) in found.items():
             _, first = first_reports[key]

@@ -11,20 +11,7 @@ import shlex
 import subprocess
 import sys
 
-from sde_cpu_tests import native_list, one_test, write_json
-
-
-def source_head(root):
-    # Docker's /work is owned by the checkout's host user. Trust only this path,
-    # for this read: do not modify a global config or trust unrelated repositories.
-    root = pathlib.Path(root).resolve()
-    head = subprocess.check_output([
-        'git', '-c', 'safe.directory=' + root.as_posix(), '-C', str(root),
-        'rev-parse', '--verify', 'HEAD',
-    ], text=True).strip()
-    if not re.fullmatch(r'[0-9a-f]{40}', head):
-        raise RuntimeError('Expected the actual checked-out source commit')
-    return head
+from sde_cpu_tests import native_list, one_test, source_head, write_json
 
 
 def selection(plan):
@@ -42,15 +29,41 @@ def selection(plan):
     return 'ocio-tools', 'ociobakelut_icc_oracle', [name]
 
 
-def boundary_union(rows, directory):
+def boundary_union(rows, directory, native_count):
+    names = selection('boundary')[2]
+    if [row['Name'] for row in rows] != names:
+        raise RuntimeError('Missing, duplicated or reordered boundary test result')
+    texts = []
+    for row in rows:
+        if (not row['Passed'] or row['ExitCode'] != 0 or row['EmulatorError'] or row['TimedOut']
+                or pathlib.PurePath(row['Log']).name != row['Log']
+                or '/' in row['Log'] or '\\' in row['Log']):
+            raise RuntimeError('Invalid boundary test result or log name')
+        raw = (directory / row['Log']).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != row['LogSHA256']:
+            raise RuntimeError('Boundary raw log hash mismatch')
+        text = raw.decode('utf-8').replace('\r\n', '\n')
+        footer = rf'^test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; {native_count-1} filtered out;'
+        if (not re.search(footer, text, re.M) or 'running 1 test' not in text
+                or f"test {row['Name']} " not in text
+                or 'SDE ERROR' in text or 'maxmimal number of threads' in text):
+            raise RuntimeError('Boundary log does not contain an actual one-test pass')
+        # With --nocapture, libtest's test-name prefix may share the first output
+        # line. Remove only this exact case's prefix, never arbitrary leading text.
+        prefix = f"test {row['Name']} ... "
+        texts.append('\n'.join(line[len(prefix):] if line.startswith(prefix) else line
+                               for line in text.splitlines()))
+    audit = 'P64 input audit: all 1400 original requests exactly once in seven 200-request parts'
+    if texts[0].splitlines().count(audit) != 1:
+        raise RuntimeError('Missing or duplicate original boundary plan audit')
     observed = []
-    for part, row in enumerate(rows[1:]):
-        text = (directory / row['Log']).read_text(encoding='utf-8')
-        matches = re.findall(rf'^P64 boundary part {part}/7 original indices: (\[.*\])$', text, re.M)
-        if len(matches) != 1:
+    for part, text in enumerate(texts[1:]):
+        records = [line for line in text.splitlines() if 'P64 boundary part ' in line]
+        match = re.fullmatch(rf'P64 boundary part {part}/7 original indices: (\[.*\])', records[0]) if len(records) == 1 else None
+        if match is None:
             raise RuntimeError('Missing or duplicate original boundary input selection')
-        indices = json.loads(matches[0])
-        if indices != list(range(part, 1400, 7)):
+        indices = json.loads(match[1])
+        if not isinstance(indices, list) or any(type(i) is not int for i in indices) or indices != list(range(part, 1400, 7)):
             raise RuntimeError('Boundary execution changed its original request indices')
         counts = re.findall(r'^P35 boundary: 200 exact legacy requests: (\d+) shaders/textures, (\d+) matching refusals$', text, re.M)
         if len(counts) != 1 or sum(map(int, counts[0])) != 200:
@@ -109,7 +122,7 @@ def run(plan, cpu):
         print(json.dumps(row), flush=True)
     report['AllSelectedPassed'] = all(row['Passed'] for row in report['Results'])
     if plan == 'boundary' and report['AllSelectedPassed']:
-        report['OriginalInputUnion'] = boundary_union(report['Results'], directory)
+        report['OriginalInputUnion'] = boundary_union(report['Results'], directory, len(native))
     write_json(directory / 'report.json', report)
     print(json.dumps(report, indent=2), flush=True)
     return 0 if report['AllSelectedPassed'] else 1
