@@ -29,15 +29,15 @@ pins it. `imageworks` has no licence and studio configs never leave this machine
 # The public corpora. A requested corpus that is absent, or not byte for byte the manifest's,
 # fails the test.
 OCIO_RS_CORPUS=aces,imageworks OCIO_RS_CORPUS_ROOT=/path/to/corpus-data \
-  cargo test -p ocio --test corpus_oracle public_corpora -- --nocapture
+  cargo test -p opencolorio-rs --test corpus_oracle public_corpora -- --nocapture
 
 # The same in Rocky Linux 9: the script mounts the root read-only at /corpus.
 OCIO_RS_CORPUS=aces OCIO_RS_CORPUS_ROOT=/path/to/corpus-data \
-  scripts/rocky9.sh cargo test -p ocio --test corpus_oracle public_corpora -- --nocapture
+  scripts/rocky9.sh cargo test -p opencolorio-rs --test corpus_oracle public_corpora -- --nocapture
 
 # Studio configs, on this machine only: directories separated as in PATH.
 OCIO_RS_STUDIO_CORPUS='/path/one;/path/two' \
-  cargo test -p ocio --test corpus_oracle studio_configs > target/corpus-studio.log 2>&1
+  cargo test -p opencolorio-rs --test corpus_oracle studio_configs > target/corpus-studio.log 2>&1
 ```
 
 Without `OCIO_RS_CORPUS`, the public test does nothing and upstream's configs still run. The

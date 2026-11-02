@@ -13,3 +13,5 @@ The port is checked byte by byte against the official `opencolorio==2.5.2` wheel
 
 License: BSD-3-Clause. The wheel's `licenses` directory holds this project's notices and those
 of the Rust crates it links.
+
+This is an independent project. It isn't the official OpenColorIO package, and it isn't affiliated with or endorsed by the OpenColorIO project or the Academy Software Foundation.

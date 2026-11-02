@@ -7,3 +7,5 @@ The OpenColorIO LUT and transform file readers and writers. It is part of
 The package is `opencolorio-rs-formats`; the library is `ocio_formats`.
 
 BSD-3-Clause, as OpenColorIO. See `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES.md`.
+
+This is an independent project. It isn't the official OpenColorIO package, and it isn't affiliated with or endorsed by the OpenColorIO project or the Academy Software Foundation.

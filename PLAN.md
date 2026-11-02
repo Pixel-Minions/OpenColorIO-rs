@@ -243,7 +243,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **D11** | Platforms | Windows x86-64 and Linux x86-64 (Rocky Linux 9, glibc 2.34), both bit-exact reference platforms from Phase 0. ARM and macOS come later | Decided |
 | **D12** | Output across platforms | Do what OCIO does on each platform: where OCIO is byte-identical across Windows and Linux, so is the port; where OCIO differs, the port differs the same way | Decided |
 | **D13** | Python module | Import name `PyOpenColorIO`, so existing scripts run unchanged. A standalone wheel, which Rust applications can also embed (`append_to_inittab`), sharing objects with the host. It can't share a Python environment with the official wheel, so the oracle gets its own | Decided |
-| **D14** | Python wheel for 1.0.0 | Python 3.13 only, under the distribution name `opencolorio-rs`, separate from `opencolorio`. The wheel's hosting is not decided yet | Decided 2026-11-01, name 2026-11-02, hosting open |
+| **D14** | Python wheel for 1.0.0 | Python 3.13 only (`cp313`), Windows x86-64 and Linux x86-64, under the distribution name `opencolorio-rs`, separate from `opencolorio`, hosted on PyPI, built by `uv build` with `maturin`. The wheel's version is plain, without `+ocio.2.5.2`; `Summary` names the OCIO release | Decided 2026-11-01, name and hosting 2026-11-02 |
 
 ---
 

@@ -93,7 +93,7 @@ jobs:
         env:
           OCIO_RS_CORPUS: aces
           OCIO_RS_CORPUS_ROOT: ${{ runner.temp }}/ocio-corpus
-        run: cargo test -p ocio --test corpus_oracle public_corpora -- --nocapture
+        run: cargo test -p opencolorio-rs --test corpus_oracle public_corpora -- --nocapture
 
   windows-tests:
     name: Windows tests (${{ matrix.shard }})
@@ -148,6 +148,8 @@ jobs:
           key: wheel
       - name: Build the wheel, install only it, run upstream's Python suite and the tools
         run: cargo xtask wheel-check
+      - name: Package the crates for crates.io, with cargo's verify build
+        run: cargo package --offline -p opencolorio-rs-ops -p opencolorio-rs-formats -p opencolorio-rs-gpu -p opencolorio-rs
       - name: Keep the wheel
         uses: actions/upload-artifact@v4
         with:
@@ -232,7 +234,7 @@ jobs:
           OCIO_RS_CORPUS: aces
           OCIO_RS_CORPUS_ROOT: ${{ runner.temp }}/ocio-corpus
         run: >-
-          scripts/rocky9.sh cargo test -p ocio --test corpus_oracle public_corpora --
+          scripts/rocky9.sh cargo test -p opencolorio-rs --test corpus_oracle public_corpora --
           --nocapture
 
   rocky9-tests:

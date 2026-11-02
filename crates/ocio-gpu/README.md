@@ -7,3 +7,5 @@ OpenColorIO's GPU shader generation, textures and uniforms. It is part of
 The package is `opencolorio-rs-gpu`; the library is `ocio_gpu`.
 
 BSD-3-Clause, as OpenColorIO. See `LICENSE` and `NOTICE`.
+
+This is an independent project. It isn't the official OpenColorIO package, and it isn't affiliated with or endorsed by the OpenColorIO project or the Academy Software Foundation.

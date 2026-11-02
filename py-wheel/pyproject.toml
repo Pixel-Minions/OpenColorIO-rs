@@ -24,6 +24,7 @@ license-files = [
     "NOTICE",
     "THIRD-PARTY-NOTICES.md",
     "crate-licenses/**/*",
+    "rust-library/COPYRIGHT-library.html",
 ]
 authors = [
     { name = "Contributors to the OpenColorIO Project" },

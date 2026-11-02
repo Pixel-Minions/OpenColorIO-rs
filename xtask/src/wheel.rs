@@ -32,12 +32,13 @@ cargo xtask wheel-build
 const PROJECT: &str = "py-wheel";
 
 /// What [`lay_out`] writes in the project: the rest of it is committed.
-const GENERATED: [&str; 5] = [
+const GENERATED: [&str; 6] = [
     "python",
     "LICENSE",
     "NOTICE",
     "THIRD-PARTY-NOTICES.md",
     "crate-licenses",
+    "rust-library",
 ];
 
 /// The project's own license files, at the repository's root.
@@ -199,6 +200,10 @@ pub(crate) fn license_files(root: &Path) -> Result<BTreeMap<String, PathBuf>, St
         .iter()
         .map(|name| ((*name).to_string(), root.join(name)))
         .collect();
+    files.insert(
+        "rust-library/COPYRIGHT-library.html".to_string(),
+        rust_library_copyright(root)?,
+    );
     for (name, version) in &linked {
         let manifest = metadata["packages"]
             .as_array()
@@ -235,6 +240,27 @@ fn license_names(dir: &Path) -> Result<Vec<String>, String> {
         }
     }
     Ok(names)
+}
+
+/// The attribution of Rust's standard library, which every binary links statically, for the
+/// toolchain `rust-toolchain.toml` pins: a toolchain change needs that toolchain's file.
+fn rust_library_copyright(root: &Path) -> Result<PathBuf, String> {
+    let manifest = root.join("rust-toolchain.toml");
+    let text = std::fs::read_to_string(&manifest)
+        .map_err(|e| format!("{}: {e}", manifest.display()))?;
+    let channel = text
+        .lines()
+        .find_map(|line| line.strip_prefix("channel = "))
+        .map(|value| value.trim().trim_matches('"'))
+        .ok_or_else(|| format!("{} names no channel", manifest.display()))?;
+    let path = root.join(format!("docs/licenses/rust-library-{channel}.html"));
+    if !path.is_file() {
+        return Err(format!(
+            "{} is missing: copy it from that toolchain's share/doc/rust/COPYRIGHT-library.html",
+            path.display()
+        ));
+    }
+    Ok(path)
 }
 
 /// The names `LICEN[CS]E*`, `COPYING*`, `NOTICE*`, as PEP 639's default globs have them.

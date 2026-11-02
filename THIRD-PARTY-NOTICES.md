@@ -709,6 +709,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ## Rust crates in built artifacts
 
+A built wheel or tool also links Rust's standard library statically, under the licenses of the
+toolchain that built it. [`docs/licenses/`](docs/licenses) holds that toolchain's
+`COPYRIGHT-library.html`, verbatim, and the wheel carries it.
+
 The crates `ocio-py` (with its `python` feature) and `ocio-tools` depend on, at the versions of
 `Cargo.lock`, on every target. These can be linked into a wheel or a tool:
 

@@ -22,3 +22,5 @@ Status, how the port is checked and the rest of the project (the `PyOpenColorIO`
 Python module, the tools): <https://github.com/Pixel-Minions/OpenColorIO-rs>.
 
 BSD-3-Clause, as OpenColorIO. See `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES.md`.
+
+This is an independent project. It isn't the official OpenColorIO package, and it isn't affiliated with or endorsed by the OpenColorIO project or the Academy Software Foundation.
