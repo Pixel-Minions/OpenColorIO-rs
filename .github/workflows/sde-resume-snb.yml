@@ -1,0 +1,136 @@
+name: Resume missing snb evidence
+
+# This dispatch can only complete run41386558773 at its original source. It does
+# not select another profile, rerun passing cases, or qualify the release commit.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: sde-resume-snb-${{ github.run_id }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  OCIO_RS_ORACLE_NO_CACHE: "1"
+  OCIO_RS_TIER: quick
+  OCIO_RS_SDE_JOB_BUDGET_SECONDS: "14400"
+
+jobs:
+  plan:
+    name: Audit original snb receipts and missing-only plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Native rejection controls
+        run: python3 scripts/diagnostics/p64_targeted_controls.py
+      - name: Recover immutable original receipts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p kept/sde-baseline
+          gh api repos/Pixel-Minions/OpenColorIO-rs/actions/runs/41386558773 > kept/sde-baseline/run.json
+          gh run download 41386558773 --repo Pixel-Minions/OpenColorIO-rs --pattern 'sde-snb-*' --dir kept/sde-baseline
+      - name: Retain every pass and partition only unproven cases
+        run: python3 scripts/sde_resume.py plan --baseline kept/sde-baseline --output kept/sde-plan/plan.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snb-missing-plan
+          path: kept/sde-plan/
+          retention-days: 30
+
+  missing:
+    name: Missing snb cases part${{ matrix.part }} (Windows)
+    needs: plan
+    runs-on: windows-2025
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        part: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ee5671bc54ee23eb2e5ce4a8a05a86f096fd0bf8
+          submodules: true
+      - name: Obtain reviewed controller without changing the qualification source
+        shell: bash
+        env:
+          CONTROLLER_SHA: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin "$CONTROLLER_SHA"
+          mkdir -p "$RUNNER_TEMP/sde-resume-controller"
+          for name in sde_resume.py sde_cpu_tests.py sde_join_shards.py sde_complete_profile.py sde_targeted.py; do
+            git show "$CONTROLLER_SHA:scripts/$name" > "$RUNNER_TEMP/sde-resume-controller/$name"
+          done
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.7"
+      - name: Original toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sde
+      - uses: actions/cache@v4
+        with:
+          path: target/sde-archives
+          key: sde-10.13.1-2026-07-28-windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: snb-missing-plan
+          path: kept/sde-plan
+      - name: Original native oracle and source-keyed client
+        run: |
+          cargo xtask oracle info
+          python scripts/sde_native_warmup.py
+      - name: Rebuild the original alias and execute only missing names
+        shell: bash
+        run: |
+          scripts/sde.sh snb python "$RUNNER_TEMP/sde-resume-controller/sde_resume.py" execute \
+            --plan kept/sde-plan/plan.json --checkout . --part ${{ matrix.part }} --output kept/sde-resume-raw
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snb-missing-part-${{ matrix.part }}
+          path: kept/sde-resume-raw/
+          retention-days: 30
+
+  proof:
+    name: Exact-once snb profile and boundary audits
+    needs: [plan, missing]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Recover immutable original receipts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p kept/sde-baseline
+          gh api repos/Pixel-Minions/OpenColorIO-rs/actions/runs/41386558773 > kept/sde-baseline/run.json
+          gh run download 41386558773 --repo Pixel-Minions/OpenColorIO-rs --pattern 'sde-snb-*' --dir kept/sde-baseline
+      - uses: actions/download-artifact@v4
+        with:
+          name: snb-missing-plan
+          path: kept/sde-plan
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: snb-missing-part-*
+          path: kept/sde-resumed
+      - name: Revalidate both original profiles and the 1400-request boundary unions
+        shell: bash
+        run: |
+          python3 scripts/sde_resume.py join --baseline kept/sde-baseline --plan kept/sde-plan/plan.json \
+            --output kept/sde-recovered-profile kept/sde-resumed/snb-missing-part-{0,1,2,3}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snb-recovered-profile-proofs
+          path: kept/sde-recovered-profile/
+          retention-days: 30

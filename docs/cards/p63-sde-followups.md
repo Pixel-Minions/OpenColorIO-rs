@@ -81,3 +81,24 @@ named matrix job; require the actual artifact proof before claiming it ran.
 If it did not run, the owner authorized only the smallest possible boundary-audit
 job. Do not rerun either complete CPU profile or the ICC sweeps under that condition.
 The unexplained historical snb oracle crash remains open even if it does not recur.
+
+## Run41386558773 outcome and missing-only repair,2026-11-02
+
+All Rocky kernel/LUT jobs and both full ICC sweeps passed at ee5671bc; its join
+completed the strict boundary audit and then failed creating proof.json's missing
+parent. P95 fixes persistence. Windows kernel shards0/2/3 and its LUT job passed;
+shard1 was cancelled at GitHub's six-hour limit, retaining380 verified passes with
+169 cases unproven. Its join failed before the external boundary audit ran. The
+seven boundary executions and plan audit themselves passed; their retained logs
+also pass the strict native1400-input union recovery. P97 reruns that external
+audit in CI, alongside both recovered profile proofs, without rerunning its OCIO
+requests. The Python313.dll case passed in the retained Windows results. Neither
+full Rocky ICC sweep needs another execution.
+
+The owner authorized execution of only the missing snb cases. P96 adds16 kernel
+partitions, two disjoint LUT partitions and a fail-closed four-hour execution budget
+for future profiles. P97 provides a separate four-part missing-only Windows snb
+dispatch at the original source, retaining every validated earlier pass. All ten
+profiles of the eventual release commit remain unqualified until the separately
+confirmed final full matrix. Keep the historical snb0xc0000005 crash OPEN and
+unexplained; it has not been observed in the retained run41386558773 results.

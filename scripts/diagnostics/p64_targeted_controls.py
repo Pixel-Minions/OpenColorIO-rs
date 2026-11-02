@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright Contributors to the OpenColorIO Project.
 """Native watchdog and selection controls; launches no SDE, oracle or OCIO process."""
+import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -9,10 +11,12 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from sde_cpu_tests import one_test
+from sde_cpu_tests import (JOB_BUDGET_KEY, JOB_DEADLINE_KEY, PREFIX_KEY, REPORT_KEY,
+                           SHARD_KEY, executable_key, job_budget, one_test, test_binary)
 from sde_targeted import PACKAGE_DIRECTORY, selection, source_head
 from p76_boundary_controls import BoundaryControls
 from p77_profile_controls import ProfileControls
+from p97_resume_controls import ResumeControls
 
 
 class TargetedControls(unittest.TestCase):
@@ -59,6 +63,48 @@ class TargetedControls(unittest.TestCase):
         for value in [0, -1, 18001]:
             with self.assertRaises(RuntimeError):
                 one_test([], '', '', 0, pathlib.Path('unused'), value)
+
+    def test_whole_job_budget_cannot_disable_its_four_hour_limit(self):
+        for value in ['0', '-1', '14401', 'nan', 'inf', 'not-a-number']:
+            with self.subTest(value=value), mock.patch.dict(os.environ, {JOB_BUDGET_KEY: value}):
+                with self.assertRaises(RuntimeError):
+                    job_budget()
+
+    def budget_case(self, seconds):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            script = root / 'child.py'
+            script.write_text('import time\ntime.sleep(60)\n', encoding='utf-8')
+            exe = executable_key(script)
+            (root / 'expected-executables.json').write_text(json.dumps({exe: dict(
+                Package='file:///work/crates/probe#0', Target=dict(name='probe', kind=['test']))}))
+            environment = {REPORT_KEY: str(root), PREFIX_KEY: json.dumps([sys.executable]),
+                           JOB_DEADLINE_KEY: str(time.monotonic() + seconds)}
+            with mock.patch.dict(os.environ, environment), mock.patch(
+                    'sde_cpu_tests.native_list', return_value=['first', 'second']):
+                os.environ.pop(SHARD_KEY, None)
+                status = test_binary(str(script), [])
+            reports = list(root.glob('*/report.json'))
+            self.assertEqual(len(reports), 1)
+            return status, json.loads(reports[0].read_text())
+
+    def test_expired_job_keeps_the_plan_and_cannot_pass(self):
+        status, report = self.budget_case(-1)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(report['Selected'], ['first', 'second'])
+        self.assertEqual(report['Results'], [])
+        self.assertTrue(report['JobBudgetExhausted'])
+        self.assertFalse(report['ExactlyOnce'])
+        self.assertFalse(report['AllSelectedPassed'])
+
+    def test_job_deadline_terminates_a_case_and_retains_unexecuted_names(self):
+        status, report = self.budget_case(1)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(report['Selected'], ['first', 'second'])
+        self.assertEqual([row['Name'] for row in report['Results']], ['first'])
+        self.assertTrue(report['Results'][0]['TimedOut'])
+        self.assertTrue(report['JobBudgetExhausted'])
+        self.assertFalse(report['AllSelectedPassed'])
 
     def test_boundary_selects_input_audit_and_every_original_execution_part(self):
         package, target, names = selection('boundary')

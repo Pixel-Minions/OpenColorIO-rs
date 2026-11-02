@@ -14,7 +14,7 @@ name: SDE
 # SDE is downloaded from Intel's mirror under Intel's license (accepted by the owner), and
 # scripts/sde.sh checks its SHA256 before using it. The archive is cached between runs.
 # Kernel jobs retain Cargo's complete selected target/name manifest and run each test in a
-# fresh emulator (scripts/sde_cpu_tests.py). Four bounded partitions retain the full plan;
+# fresh emulator (scripts/sde_cpu_tests.py). Sixteen kernel partitions and two LUT partitions retain the full plan;
 # the profile joiner rejects missing/duplicate cases and checks actual raw pass logs.
 # This resets SDE's cumulative thread budget;
 # the split whole-config test keeps all original cases and exact comparisons.
@@ -95,7 +95,7 @@ jobs:
       max-parallel: 8
       matrix:
         cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -122,7 +122,7 @@ jobs:
       - name: CPU tests on an emulated ${{ matrix.cpu }}
         shell: bash
         run: |
-          export OCIO_RS_SDE_SHARD="${{ matrix.shard }}/4"
+          export OCIO_RS_SDE_SHARD="${{ matrix.shard }}/16"
           scripts/sde.sh ${{ matrix.cpu }} python scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- $SKIP_LUT_SWEEP
       - name: SDE logs
         if: failure()
@@ -138,7 +138,7 @@ jobs:
   windows-lut:
     # The owner selects a separate targeted run for PRs carrying this label.
     if: github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
-    name: SDE ${{ matrix.cpu }} LUT sweep (Windows)
+    name: SDE ${{ matrix.cpu }} LUT part${{ matrix.part }} (Windows)
     needs: targeted-controls
     runs-on: windows-2025
     timeout-minutes: 360
@@ -147,6 +147,7 @@ jobs:
       max-parallel: 2
       matrix:
         cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
+        part: [0, 1]
 
     steps:
       - uses: actions/checkout@v5
@@ -172,6 +173,7 @@ jobs:
       - name: CPU tests on an emulated ${{ matrix.cpu }}
         shell: bash
         run: |
+          export OCIO_RS_SDE_SHARD="${{ matrix.part }}/2"
           scripts/sde.sh ${{ matrix.cpu }} python scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- $LUT_SWEEP
       - name: SDE logs
         if: failure()
@@ -181,10 +183,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sde-${{ matrix.cpu }}-Windows-lut
+          name: sde-${{ matrix.cpu }}-Windows-lut-part-${{ matrix.part }}
           path: kept/sde-cpu-tests/
           retention-days: 30
-
   rocky9-kernels:
     # The owner selects a separate targeted run for PRs carrying this label.
     if: github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
@@ -198,7 +199,7 @@ jobs:
       max-parallel: 8
       matrix:
         cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -221,7 +222,7 @@ jobs:
             cargo xtask oracle info
             python3 scripts/sde_native_warmup.py
             cargo cpu-tests --release --no-run
-            export OCIO_RS_SDE_SHARD="${{ matrix.shard }}/4"
+            export OCIO_RS_SDE_SHARD="${{ matrix.shard }}/16"
             scripts/sde.sh ${{ matrix.cpu }} python3 scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- ${{ env.SKIP_LUT_SWEEP }}
           '
       - name: SDE logs
@@ -237,7 +238,7 @@ jobs:
   rocky9-lut:
     # The owner selects a separate targeted run for PRs carrying this label.
     if: github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
-    name: SDE ${{ matrix.cpu }} LUT sweep (Rocky Linux 9)
+    name: SDE ${{ matrix.cpu }} LUT part${{ matrix.part }} (Rocky Linux 9)
     needs: targeted-controls
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -246,6 +247,7 @@ jobs:
       max-parallel: 2
       matrix:
         cpu: ${{ fromJSON(inputs.targeted_scope == 'owner-snb' && '["snb"]' || '["nhm","snb","hsw","skl","skx"]') }}
+        part: [0, 1]
 
     steps:
       - uses: actions/checkout@v5
@@ -268,6 +270,7 @@ jobs:
             export OCIO_RS_TIER=quick
             cargo xtask oracle info
             cargo cpu-tests --release --no-run
+            export OCIO_RS_SDE_SHARD="${{ matrix.part }}/2"
             scripts/sde.sh ${{ matrix.cpu }} python3 scripts/sde_cpu_tests.py cargo cpu-tests --release --no-fail-fast -- ${{ env.LUT_SWEEP }}
           '
       - name: SDE logs
@@ -277,10 +280,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sde-${{ matrix.cpu }}-Rocky-lut
+          name: sde-${{ matrix.cpu }}-Rocky-lut-part-${{ matrix.part }}
           path: kept/sde-cpu-tests/
           retention-days: 30
-
   kernels:
     name: SDE ${{ matrix.cpu }} (${{ matrix.system == 'Rocky' && 'Rocky Linux 9' || 'Windows' }})
     if: always() && github.event_name == 'workflow_dispatch' && (!inputs.targeted || inputs.targeted_scope == 'owner-snb')
@@ -300,15 +302,16 @@ jobs:
           path: kept/sde-shard-inputs
       - uses: actions/download-artifact@v4
         with:
-          pattern: sde-${{ matrix.cpu }}-${{ matrix.system }}-lut
+          pattern: sde-${{ matrix.cpu }}-${{ matrix.system }}-lut-part-*
           path: kept/sde-lut-input
       - name: Every original target and selected test passed exactly once
         run: |
           python3 scripts/diagnostics/p50_schedule_controls.py
           python3 scripts/diagnostics/p46_join_order_controls.py
-          python3 scripts/sde_join_shards.py kept/sde-cpu-tests-joined/profile             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-0             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-1             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-2             kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-3
+          python3 scripts/sde_join_shards.py kept/sde-cpu-tests-joined/profile kept/sde-shard-inputs/sde-${{ matrix.cpu }}-${{ matrix.system }}-kernel-shard-*
+          python3 scripts/sde_join_shards.py kept/sde-lut-joined/profile kept/sde-lut-input/sde-${{ matrix.cpu }}-${{ matrix.system }}-lut-part-*
       - name: Complete CPU alias and strict boundary union
-        run: python3 scripts/sde_complete_profile.py --kernel kept/sde-cpu-tests-joined/profile --lut kept/sde-lut-input --output kept/sde-complete-profile/proof.json --cpu ${{ matrix.cpu }} --head ${{ github.sha }}
+        run: python3 scripts/sde_complete_profile.py --kernel kept/sde-cpu-tests-joined/profile --lut kept/sde-lut-joined/profile --output kept/sde-complete-profile/proof.json --cpu ${{ matrix.cpu }} --head ${{ github.sha }} --kernel-shards 16 --lut-shards 2
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -316,6 +319,7 @@ jobs:
           path: |
             kept/sde-cpu-tests-joined/
             kept/sde-lut-input/
+            kept/sde-lut-joined/
             kept/sde-complete-profile/
           retention-days: 30
 
