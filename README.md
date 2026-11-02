@@ -92,7 +92,7 @@ one.
 
 ## Progress
 
-Status as of 2026-11-01: **milestones M0, M1, M2, M3 and M4 are complete**, about 93% of the
+Status as of 2026-11-02: **milestones M0, M1, M2, M3 and M4 are complete**, about 93% of the
 planned work (910 of 913 upstream source files ported or reviewed not applicable; 1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
 all 1,191; 384 of 384 upstream Python tests pass unmodified). Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
@@ -274,14 +274,14 @@ shader text are compared with the official library.
 
 Each milestone completes a section of OCIO with exact oracle checks:
 
-| Milestone | Section | Status (2026-11-01) | Version |
+| Milestone | Section | Status (2026-11-02) | Version |
 |---|---|---|---|
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
 | **M4** | The `PyOpenColorIO`-compatible Python module | **Done:** all 384 upstream Python tests, SystemMonitors and complete module metadata checks pass on both reference platforms, within the approved [D-16 scope](docs/deviations.md) | `0.5.0` |
-| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. Initial legacy shader/texture snapshots are checked; remaining: library completion, post-extraction legacy dynamic updates, complete SDE qualification and release checks | `1.0.0` |
+| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. All 46 public real-world configs match the wheel on both platforms. Every shader of the 264 upstream GPU tests compiles on real compilers except 36 in GLSL ES 1.0; those and the family tests' shaders that fail are upstream's own text (open item P7-9). Initial legacy shader/texture snapshots are checked; remaining: library completion, post-extraction legacy dynamic updates, complete SDE qualification and release checks | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
 
