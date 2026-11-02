@@ -11,7 +11,7 @@
 //!   from Cargo's registry, at `Cargo.lock`'s versions.
 //!
 //! Those are generated, gitignored and removed again after the build. The wheel goes to
-//! `<target>/wheel/`.
+//! `<target>/wheel/`. On Linux, `wheel_audit` then proves its platform tag.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -24,7 +24,8 @@ cargo xtask wheel-build
     Builds the wheel opencolorio-rs into <target>/wheel/ in a release build: lays out py-wheel/
     (the package as py-build does, the license files) and runs `uv build`, which runs maturin
     at the pin of py-wheel/pyproject.toml and the hashes of py-wheel/build-constraints.txt.
-    Never publishes anything.
+    On Linux, its platform tag must be what all its binaries need (wheel_audit.rs). Never
+    publishes anything.
 ";
 
 /// The uv project of the wheel.
@@ -43,7 +44,9 @@ const GENERATED: [&str; 5] = [
 const ROOT_LICENSES: [&str; 3] = ["LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.md"];
 
 /// What maturin's PEP 517 hook adds to its command: without this it passes
-/// `--compatibility off`, which skips the tag's audit on Linux.
+/// `--compatibility off`, which skips the tag's audit on Linux. `pypi`: the lowest `manylinux`
+/// tag the extension fits, or an error if PyPI wouldn't take it. `check`: an error instead of
+/// bundling a library.
 const MATURIN_ARGS: &str = "maturin.build-args=--compatibility pypi --auditwheel check";
 
 pub(crate) fn wheel_build(args: &[&str]) -> Result<(), String> {
@@ -62,7 +65,13 @@ pub(crate) fn build(layout: &Layout) -> Result<PathBuf, String> {
     remove_generated(&project)?;
     let built = lay_out(&layout.root, &project).and_then(|()| uv_build(layout, &project));
     remove_generated(&project)?;
-    built
+    let wheel = built?;
+    if !cfg!(windows) {
+        let scratch = wheel.with_file_name("audit");
+        let found = crate::wheel_audit::audit(&layout.python(), &wheel, &scratch)?;
+        println!("wheel-build: {found}");
+    }
+    Ok(wheel)
 }
 
 fn remove_generated(project: &Path) -> Result<(), String> {
@@ -85,12 +94,32 @@ fn lay_out(root: &Path, project: &Path) -> Result<(), String> {
     let package = project.join("python").join("PyOpenColorIO");
     std::fs::create_dir_all(&package).map_err(|e| format!("{}: {e}", package.display()))?;
     py::lay_out_package(root, &package, true)?;
+    if !cfg!(windows) {
+        strip_tools(&package.join("bin"))?;
+    }
     for (name, source) in license_files(root)? {
         let destination = project.join(name);
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
         py::copy(&source, &destination)?;
+    }
+    Ok(())
+}
+
+/// Strips the tools, as `[tool.maturin] strip` does the extension: a Linux tool is 30 MB with the
+/// release profile's line tables, 5 MB without them. Windows keeps those in `.pdb` files.
+fn strip_tools(bin: &Path) -> Result<(), String> {
+    for entry in std::fs::read_dir(bin).map_err(|e| format!("{}: {e}", bin.display()))? {
+        let tool = entry.map_err(|e| e.to_string())?.path();
+        let status = Command::new("strip")
+            .arg(&tool)
+            .stdin(Stdio::null())
+            .status()
+            .map_err(|e| format!("could not run strip: {e}"))?;
+        if !status.success() {
+            return Err(format!("strip {}: {status}", tool.display()));
+        }
     }
     Ok(())
 }

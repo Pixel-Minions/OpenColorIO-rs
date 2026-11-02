@@ -26,6 +26,7 @@ mod scratch;
 mod shards;
 mod upstream;
 mod wheel;
+mod wheel_audit;
 
 const USAGE: &str = "\
 cargo xtask <command>
