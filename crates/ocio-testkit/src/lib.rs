@@ -34,6 +34,7 @@
 
 pub mod battery;
 pub mod compare;
+pub mod corpus;
 pub mod crt;
 pub mod fixtures;
 pub mod gpu;
