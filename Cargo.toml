@@ -26,7 +26,7 @@ default-members = [
 [workspace.package]
 # Our own semver, with the matched OCIO release as build metadata (PLAN.md §2).
 # 0.0.x is Phase 0; M0 is 0.1.0.
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 edition = "2024"
 rust-version = "1.98.1"
 license = "BSD-3-Clause"
@@ -40,11 +40,11 @@ publish = false
 # The four published crates (PLAN.md D6) require each other exactly: they release together. The
 # version has no build metadata here, which cargo ignores in a requirement; it moves with
 # [workspace.package] version, and a resolve fails when it doesn't.
-ocio-ops = { path = "crates/ocio-ops", package = "opencolorio-rs-ops", version = "=0.0.0" }
-ocio-formats = { path = "crates/ocio-formats", package = "opencolorio-rs-formats", version = "=0.0.0" }
-ocio-gpu = { path = "crates/ocio-gpu", package = "opencolorio-rs-gpu", version = "=0.0.0" }
+ocio-ops = { path = "crates/ocio-ops", package = "opencolorio-rs-ops", version = "=1.0.0" }
+ocio-formats = { path = "crates/ocio-formats", package = "opencolorio-rs-formats", version = "=1.0.0" }
+ocio-gpu = { path = "crates/ocio-gpu", package = "opencolorio-rs-gpu", version = "=1.0.0" }
 ocio-gpu-exec = { path = "crates/ocio-gpu-exec" }
-ocio = { path = "crates/ocio", package = "opencolorio-rs", version = "=0.0.0" }
+ocio = { path = "crates/ocio", package = "opencolorio-rs", version = "=1.0.0" }
 ocio-testkit = { path = "crates/ocio-testkit" }
 # The Python binding's C API calls that need `unsafe` (its only unsafe code, PLAN.md D8).
 ocio-py-ffi = { path = "crates/ocio-py/ffi" }

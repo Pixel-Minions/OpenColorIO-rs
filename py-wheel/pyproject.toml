@@ -11,7 +11,7 @@ name = "opencolorio-rs"
 # The workspace's version without its local segment `+ocio.2.5.2`, which PyPI refuses (owner
 # decision 2026-11-02). A test of xtask (wheel.rs) holds the two together; the OCIO version the
 # port matches is in `description`.
-version = "0.0.0"
+version = "1.0.0"
 description = "A Rust port matching OpenColorIO 2.5.2, with its PyOpenColorIO module. Not the official OpenColorIO package."
 readme = "README.md"
 # The oracle's and py-port's interpreter (P6-5; PLAN.md D14): cp313, not abi3.

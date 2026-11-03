@@ -5,6 +5,9 @@ Upstream bugs and limitations that the port copies, so that its results match Op
 end, the owner decides on each one: keep it, or fix it as a deviation (`docs/deviations.md`),
 which changes the port's results for the inputs the entry names.
 
+**The decision for 1.0.0** (owner, 2026-11-03): every entry stays as its status says. 1.0.0
+fixes none of them; fixes are considered after 1.0.0, each as a deviation.
+
 The last section lists places where upstream's behaviour is undefined because it reads or
 writes memory it doesn't own. The port can't copy those. The owner's general rule
 (2026-09-30): the port returns an error there instead, unless an entry says otherwise. Other
@@ -85,7 +88,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** non-F32 images through a matrix that offsets alpha, with the default
   optimization.
 - **A fix:** keep alpha's offset through the bake.
-- **Status:** to be matched in Phase 2 (WP 2.5, the Lut1D bake).
+- **Status:** matched in `p1-optimizer` (the bake, `OptimizeSeparablePrefix`);
+  `tests/lut1d_bake_oracle.rs` (`alpha_offset_bakes_match_the_wheel`,
+  `alpha_offsets_render_every_code_as_the_wheel`) compares a Matrix that offsets alpha, before
+  and after a Log, with the wheel at UINT8, UINT10, UINT12, UINT16, F16 and F32 input.
 
 ### I-18. Very large strides wrap around in the checks
 
@@ -157,7 +163,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   that differ only after it share a cache ID.
 - **Who notices:** configs that contain malformed UTF-8.
 - **A fix:** keep or refuse such bytes instead of truncating.
-- **Status:** to be matched in Phase 3 (YAML).
+- **Status:** matched in `p3-yaml-save` (3.7d), checked against the wheel in
+  `crates/ocio/tests/s1_byte_strings.rs` (`text_after_an_overlong_nul_is_lost`: the text and
+  the cache ID stop at the NUL, as the wheel's).
 
 ### I-7. NaN parameters print differently on Windows and Linux
 
@@ -202,7 +210,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `serialize()` and cache IDs are the same.
 - **Who notices:** code that reads a built-in config's text directly.
 - **A fix:** LF on both platforms.
-- **Status:** to be matched in Phase 3 (built-in configs), per D12.
+- **Status:** matched in `p3-loading` (3.10a), as I-148, the same finding: checked against the
+  wheel live on each platform (`crates/ocio/tests/builtin_configs_oracle.rs`), and the embedded
+  texts' line ends in `crates/ocio/src/builtinconfigs/builtin_config_tests.rs`
+  (`embedded_texts_end_lines_as_the_wheel_of_the_platform`).
 
 ### I-9. A search path string is split at every colon, even on Windows
 
@@ -240,7 +251,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** anyone who saves and reloads a config with such values: they come back as
   the defaults.
 - **A fix:** leave a value out only when it equals its default exactly.
-- **Status:** to be matched in Phase 3 (the YAML writer), with `p1-math`'s helpers.
+- **Status:** matched in `p3-yaml-save` (3.7a, `crates/ocio/src/ocio_yaml.rs`, the CDL and
+  Matrix savers, with `p1-math`'s helpers), checked against the wheel in
+  `crates/ocio/src/ocio_yaml_save_oracle_tests.rs` (values within the tolerance of their
+  defaults left out, values just past it written).
 
 ### I-53. Processor caches key by a hash, which differs between Windows and Linux
 
@@ -821,9 +835,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** the bake is matched in `p1-optimizer` (D, `OptimizeSeparablePrefix`): it renders the
   prefix with each op's renderer and the platform's math library, and
   `tests/lut1d_bake_oracle.rs` compares the baked LUTs with each platform's wheel, entry for
-  entry. The ACES 2 tables are to be matched in Phase 2 (D12: the port calls the platform's
-  functions, as OCIO does). The values may also depend on the CPU (SIMD renderers, glibc's
-  ifunc variants), so their checks belong in `cpu-tests` (the bake's are there).
+  entry. The ACES 2 tables are matched in `p2-aces2-cpu` (D12: the port calls the platform's
+  functions, as OCIO does); `tests/aces2_tables_oracle.rs` compares them with the wheel. The
+  values may also depend on the CPU (SIMD renderers, glibc's ifunc variants), so both checks
+  are in `cpu-tests`.
 
 ## Ops
 
@@ -2055,8 +2070,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `0xC0000409` on Windows.
 - **Who notices:** Python code that makes a language from a number outside 0-9.
 - **A fix:** refuse the number when the language is set, with "Unsupported GPU shader language.".
-- **Status:** open; decided in Phase 6. The Rust `GpuLanguage` holds only upstream's languages,
-  so only the Python module can meet it.
+- **Status:** not matched: the Python module refuses a language that is no enumerator when it
+  is set, with ValueError, so `getCacheID` never meets it. Values 10 to 15 are deviation D-15
+  (owner decision 2026-10-25), values outside them U-112 (`crates/ocio-py/src/
+  py_gpu_shader_creator.rs`, `gpu_language`); checked against the wheel's steps in
+  `crates/ocio-py/tests/gpu_shader_desc_oracle.rs` (`a_language_inside_the_enums_values_is_d15`,
+  `an_enum_value_outside_the_enumerators_is_the_ports_error`).
 
 ### I-32. `repr()` of a GradingRGBCurve prints an address
 
@@ -2067,7 +2086,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   run to run (seen through the wheel in the p1-oracle review).
 - **Who notices:** Python users who print a GradingRGBCurve.
 - **A fix:** the repr its values give, like the other grading classes'.
-- **Status:** to be matched in Phase 6 (D13).
+- **Status:** matched in `p6-after-p5` (6.7a, `crates/ocio-py/src/py_grading_data.rs`):
+  GradingRGBCurve has no `__repr__` (pybind11's default) and GradingHueCurve two; checked
+  against the wheel's class surface in `crates/ocio-py/tests/grading_data_oracle.rs`
+  (`the_curves_have_the_wheels_surface`).
 
 ### I-223. Python makes enum values that no enumerator has
 
@@ -2434,9 +2456,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   length wraps.
 - **Who notices:** nobody in practice: OCIO passes it file paths and names.
 - **A fix:** none needed. The port computes with the true lengths (`i64`).
-- **Status:** not matched (p3-context 3.5b), for the owner: matching would mean computing every
-  pystring index as a wrapping `int`, whose results then index outside the string (undefined
-  behaviour, which the general rule turns into errors), for inputs no one passes.
+- **Status:** not matched (p3-context 3.5b): the port computes with the true lengths (`i64`),
+  deviation D-20 (owner decision 2026-11-01).
 
 ### I-116. Windows reads the working directory in the ANSI code page
 
@@ -3499,8 +3520,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** Python scripts that iterate the encodings; C++ callers don't go through the
   binding.
 - **A fix:** bind `__next__` with `MixingEncodingIterator &`.
-- **Status:** open: the Python module (Phase 6) matches it. The oracle's `checks.dump` reads
-  the binding's iterators by index, so `object_calls` can write a manager out (`p5-oracle`).
+- **Status:** matched in `p6-after-p5` (6.7c, `crates/ocio-py/src/apphelpers/
+  py_mixing_helpers.rs`, `ENCODING_NEXT`, with I-396): `next()` and `list()` of the encodings
+  raise, `len()` and indexing read them; checked against the wheel in
+  `crates/ocio-py/tests/apphelpers_oracle.rs` (`mixing_helpers_behave_as_the_wheels`). The
+  oracle's `checks.dump` reads the binding's iterators by index, so `object_calls` can write a
+  manager out (`p5-oracle`).
 
 ### I-217. The reverse log ExposureContrast ignores the log exposure step
 
@@ -4639,7 +4664,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Upstream:** in Python, `PlanarImageDesc.getAData()` on an image without an alpha plane
   returns uninitialized memory (seen through the wheel in O1.2).
 - **Options:** return `None`, or an empty array.
-- **Status:** open; decided in Phase 6.
+- **Status:** the port raises ValueError, as U-149, the same finding
+  (`crates/ocio-py/src/py_planar_image_desc.rs`, `no_alpha`), in `p6-buffers` (6.5a);
+  `crates/ocio-py/tests/image_desc_oracle.rs`
+  (`the_ports_errors_where_the_wheel_reads_memory_it_doesnt_own`).
 
 ### U-3. Very wide or very tall images
 

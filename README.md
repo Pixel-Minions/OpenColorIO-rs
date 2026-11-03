@@ -102,7 +102,9 @@ is **913 of 913 files (100%)**: 685 mapped done and 228 reviewed not applicable,
 partial or todo entries. This measures source accounting, not release readiness. Release
 preparation in main: the release documents and changelog, the GPU types re-exported from
 `opencolorio-rs` so that one dependency suffices, and clean-room rewrites of the three pieces
-that had been translated from libstdc++. There are
+that had been translated from libstdc++. The release commit, version `1.0.0+ocio.2.5.2`,
+is in main; every entry of the improvement register is decided and stays as it is for 1.0.0.
+There are
 1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
 all 1,191; 384 of 384 upstream Python tests pass unmodified. Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's
