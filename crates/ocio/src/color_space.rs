@@ -364,7 +364,7 @@ impl ColorSpace {
     }
 
     /// The value of the interchange attribute `attr_name` (`amf_transform_ids` or
-    /// `icc_profile_name`, ignoring case), or empty; "Unknown attribute name '<name>'." for any
+    /// `icc_profile_name`, ignoring case), or empty; "Unknown attribute name '\<name>'." for any
     /// other name.
     ///
     /// Port of `ColorSpace::getInterchangeAttribute` (ColorSpace.cpp:297-318 @ v2.5.2).

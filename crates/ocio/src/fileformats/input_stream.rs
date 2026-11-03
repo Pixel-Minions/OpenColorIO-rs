@@ -11,7 +11,7 @@
 //! when it opens. A `std::istringstream` (the readers' tests, a `ConfigIOProxy`'s data) holds
 //! its bytes as given.
 //!
-//! The extractions follow the C++ standard's unformatted and formatted input ([istream]),
+//! The extractions follow the C++ standard's unformatted and formatted input (\[istream]),
 //! which both wheels' libraries implement; each comes with the first reader that uses it.
 
 use std::io::Read;

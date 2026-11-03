@@ -102,7 +102,7 @@ pub struct Lut3DArray {
 }
 
 impl Lut3DArray {
-    /// An identity LUT of `length` entries per side: "LUT 3D: Grid size '<length>' must not be
+    /// An identity LUT of `length` entries per side: "LUT 3D: Grid size '\<length>' must not be
     /// greater than '129'." over the limit.
     ///
     /// Port of `Lut3DArray::Lut3DArray(unsigned long)` (Lut3DOpData.cpp:155-159 @ v2.5.2).
@@ -138,7 +138,7 @@ impl Lut3DArray {
         }
     }
 
-    /// Sets the dimensions: "LUT 3D: Grid size '<length>' must not be greater than '129'."
+    /// Sets the dimensions: "LUT 3D: Grid size '\<length>' must not be greater than '129'."
     /// over the limit. The values are `length^3 * 3`, new ones 0.
     ///
     /// Port of `Lut3DArray::resize` (Lut3DOpData.cpp:194-204 @ v2.5.2).
@@ -377,7 +377,7 @@ impl Lut3DOpData {
     }
 
     /// Sets the values from `lut`, red fastest: "Lut3D length 'N * N * N * 3' does not match
-    /// the vector size '<size>'." if it doesn't have `N^3 * 3` values.
+    /// the vector size '\<size>'." if it doesn't have `N^3 * 3` values.
     ///
     /// Port of `Lut3DOpData::setArrayFromRedFastestOrder` (Lut3DOpData.cpp:310-337 @ v2.5.2).
     pub fn set_array_from_red_fastest_order(&mut self, lut: &[f32]) -> Result<()> {

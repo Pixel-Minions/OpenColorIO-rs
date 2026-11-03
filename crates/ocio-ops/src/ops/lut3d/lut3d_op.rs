@@ -101,8 +101,8 @@ pub fn generate_identity_lut3d(
 }
 
 /// The edge length of a 3D LUT of `num_pixels` entries, `roundf(powf(numPixels, 1/3))`:
-/// "Cannot infer 3D LUT size. <n> element(s) does not correspond to a unform cube edge
-/// length. (nearest edge length is <dim>)." if its cube isn't `num_pixels`.
+/// "Cannot infer 3D LUT size. \<n> element(s) does not correspond to a unform cube edge
+/// length. (nearest edge length is \<dim>)." if its cube isn't `num_pixels`.
 ///
 /// Port of `Get3DLutEdgeLenFromNumPixels` (src/OpenColorIO/ops/lut3d/Lut3DOp.cpp:59-73 @
 /// v2.5.2).

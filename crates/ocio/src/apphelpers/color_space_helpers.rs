@@ -672,7 +672,7 @@ impl ColorSpaceMenuHelper {
     /// the first menu, keeps none (docs/improvements.md, I-317).
     ///
     /// An added color space that is neither a color space nor a named transform of the config
-    /// fails ("Element '<name>' is neither a color space not a named transform."). A role that
+    /// fails ("Element '\<name>' is neither a color space not a named transform."). A role that
     /// names a missing color space fails, where upstream's process dies (docs/improvements.md,
     /// U-141), and so does a role set to the empty name with the roles included, where
     /// upstream makes a menu with a null item and its process dies when that item is read
@@ -1175,8 +1175,8 @@ fn add_color_space_from_info(
 /// without categories shows in menus.
 ///
 /// Fails with "Invalid connection color space name." for an empty connection name, "Color
-/// space name '<name>' already exists." for a color space (or alias, or role) of that name,
-/// "Connection color space name '<name>' does not exist.", and what validating the
+/// space name '\<name>' already exists." for a color space (or alias, or role) of that name,
+/// "Connection color space name '\<name>' does not exist.", and what validating the
 /// transforms and `Config::add_color_space` refuse; `config` is unchanged then.
 ///
 /// Port of `ColorSpaceHelpers::AddColorSpace(ConfigRcPtr &, const char *, const char *, const

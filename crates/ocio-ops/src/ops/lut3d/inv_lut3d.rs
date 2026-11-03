@@ -666,7 +666,7 @@ pub struct InvLut3DRenderer {
 }
 
 impl InvLut3DRenderer {
-    /// The renderer of the inverse of `lut`: "LUT 3D: Grid size '<n>' must not be greater
+    /// The renderer of the inverse of `lut`: "LUT 3D: Grid size '\<n>' must not be greater
     /// than '129'." for a grid size of 128 or 129, whose extrapolated LUT is over the limit
     /// (I-153); [`GRID_SIZE_1_INVERSE`] for a grid size of 1 (U-65).
     ///

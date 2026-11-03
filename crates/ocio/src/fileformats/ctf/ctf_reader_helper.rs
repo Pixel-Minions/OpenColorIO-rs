@@ -13,6 +13,8 @@
 //! [`CtfReaderTransformRc`] (`Rc<RefCell<...>>`), which the reader hands on as a
 //! [`CtfReaderTransformPtr`] once the file is read. An element's `getIdentifier` returns a
 //! reference upstream; here the elements keep a copy of what they set.
+//!
+//! [`CtfReaderTransformPtr`]: crate::fileformats::ctf::ctf_transform::CtfReaderTransformPtr
 
 use std::any::Any;
 use std::cell::{RefCell, RefMut};

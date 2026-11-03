@@ -162,7 +162,7 @@ impl Lut3DTransform {
     }
 
     /// The entry of red index `index_r`, green `index_g` and blue `index_b`: "Lut3DTransform
-    /// getValue: <Red|Green|Blue> index (<index>) should be less than the grid size (<size>)."
+    /// getValue: <Red|Green|Blue> index (\<index>) should be less than the grid size (\<size>)."
     /// past the end.
     ///
     /// Port of `Lut3DTransformImpl::getValue` (Lut3DTransform.cpp:147-162 @ v2.5.2).
@@ -180,8 +180,8 @@ impl Lut3DTransform {
     }
 
     /// Sets the entry of red index `index_r`, green `index_g` and blue `index_b`:
-    /// "Lut3DTransform setValue: <Red|Green|Blue> index (<index>) should be less than the grid
-    /// size (<size>)." past the end.
+    /// "Lut3DTransform setValue: <Red|Green|Blue> index (\<index>) should be less than the grid
+    /// size (\<size>)." past the end.
     ///
     /// Port of `Lut3DTransformImpl::setValue` (Lut3DTransform.cpp:129-144 @ v2.5.2).
     #[doc(alias = "setValue")]

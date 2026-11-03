@@ -62,7 +62,7 @@ impl Lut1DTransform {
     }
 
     /// A forward identity LUT of `length` entries, over the half domain when `is_half_domain`:
-    /// "LUT 1D length needs to be at least 2." under 2 entries, "LUT 1D: Length '<length>' must
+    /// "LUT 1D length needs to be at least 2." under 2 entries, "LUT 1D: Length '\<length>' must
     /// not be greater than 1024x1024 (1048576)." over that.
     ///
     /// Port of `Lut1DTransform::Create(unsigned long, bool)` (Lut1DTransform.cpp:20-26 @
@@ -162,7 +162,7 @@ impl Lut1DTransform {
 
     /// Replaces the values with an identity LUT of `length` entries over the transform's
     /// domain (the half domain's NaN codes keep their NaNs): "LUT 1D length needs to be at
-    /// least 2." under 2 entries, "LUT 1D: Length '<length>' must not be greater than 1024x1024
+    /// least 2." under 2 entries, "LUT 1D: Length '\<length>' must not be greater than 1024x1024
     /// (1048576)." over that, and the values are unchanged.
     ///
     /// Port of `Lut1DTransformImpl::setLength` (Lut1DTransform.cpp:101-106 @ v2.5.2).
@@ -174,8 +174,8 @@ impl Lut1DTransform {
         Ok(())
     }
 
-    /// The entry `index`: "Lut1DTransform getValue: index (<index>) should be less than the
-    /// length (<length>)." past the end.
+    /// The entry `index`: "Lut1DTransform getValue: index (\<index>) should be less than the
+    /// length (\<length>)." past the end.
     ///
     /// Port of `Lut1DTransformImpl::getValue` (Lut1DTransform.cpp:156-162 @ v2.5.2).
     #[doc(alias = "getValue")]
@@ -186,8 +186,8 @@ impl Lut1DTransform {
         Ok([array[i], array[i + 1], array[i + 2]])
     }
 
-    /// Sets the entry `index`: "Lut1DTransform setValue: index (<index>) should be less than
-    /// the length (<length>)." past the end.
+    /// Sets the entry `index`: "Lut1DTransform setValue: index (\<index>) should be less than
+    /// the length (\<length>)." past the end.
     ///
     /// Port of `Lut1DTransformImpl::setValue` (Lut1DTransform.cpp:123-129 @ v2.5.2).
     #[doc(alias = "setValue")]

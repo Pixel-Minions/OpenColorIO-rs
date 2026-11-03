@@ -152,7 +152,7 @@ impl GroupTransform {
         Exception::new(format!("Invalid transform index {index}."))
     }
 
-    /// Child `index`: "Invalid transform index <index>." outside the children.
+    /// Child `index`: "Invalid transform index \<index>." outside the children.
     ///
     /// Port of `GroupTransformImpl::getTransform() const` (GroupTransform.cpp:80-90 @ v2.5.2).
     #[doc(alias = "getTransform")]
@@ -163,7 +163,7 @@ impl GroupTransform {
         Ok(&self.transforms[index as usize])
     }
 
-    /// Child `index`, to change: "Invalid transform index <index>." outside the children.
+    /// Child `index`, to change: "Invalid transform index \<index>." outside the children.
     ///
     /// Port of `GroupTransformImpl::getTransform()` (GroupTransform.cpp:92-102 @ v2.5.2).
     #[doc(alias = "getTransform")]

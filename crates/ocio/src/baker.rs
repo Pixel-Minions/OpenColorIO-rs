@@ -131,7 +131,7 @@ impl Baker {
             .as_bytes()
     }
 
-    /// Sets the format, by name (ignoring case), up to its first NUL: "File format <name> does
+    /// Sets the format, by name (ignoring case), up to its first NUL: "File format \<name> does
     /// not support baking." unless one of the named format's infos bakes.
     ///
     /// Port of `Baker::setFormat` (Baker.cpp:118-139 @ v2.5.2). Its null pointer, which

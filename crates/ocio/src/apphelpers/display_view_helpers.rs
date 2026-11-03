@@ -427,9 +427,9 @@ fn add_display_view_with_color_space(
 /// `transform_file_path` (a FileTransform). The display and view become active where the
 /// config's active lists need it.
 ///
-/// Fails with "Color space name '<name>' already exists." for a color space (or alias, or role)
+/// Fails with "Color space name '\<name>' already exists." for a color space (or alias, or role)
 /// of that name, "Invalid display name.", "Invalid view name.", "Connection color space name
-/// '<name>' does not exist.", "Forbidden to add an active display as 'OCIO_ACTIVE_DISPLAYS'
+/// '\<name>' does not exist.", "Forbidden to add an active display as 'OCIO_ACTIVE_DISPLAYS'
 /// controls the active list." (or view, `OCIO_ACTIVE_VIEWS`), and what validating the
 /// transforms, `Config::add_color_space` and `Config::add_display_view` refuse. As upstream's,
 /// the config keeps what was done before an error (the active lists, then the color space).
@@ -503,7 +503,7 @@ pub fn add_display_view(
 ///
 /// The color space is the view's, or, for a view the display doesn't have, the color space
 /// named like the display: `Config::remove_display_view` then refuses the missing view.
-/// "Missing color space for '<display>' and '<view>'." for an empty display name (upstream
+/// "Missing color space for '\<display>' and '\<view>'." for an empty display name (upstream
 /// reaches it only for a view without a color space of a display named "").
 ///
 /// Port of `DisplayViewHelpers::RemoveDisplayView` (include/OpenColorIO/

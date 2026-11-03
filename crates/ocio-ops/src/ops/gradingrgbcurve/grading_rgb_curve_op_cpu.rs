@@ -11,6 +11,9 @@
 //! ([`KnotsCoefs::eval_curve`], [`KnotsCoefs::eval_curve_rev`]): red, green and blue, then
 //! master, forward; master, then red, green and blue, inverse.
 //!
+//! [`KnotsCoefs::eval_curve`]: crate::ops::gradingrgbcurve::grading_b_spline_curve::KnotsCoefs::eval_curve
+//! [`KnotsCoefs::eval_curve_rev`]: crate::ops::gradingrgbcurve::grading_b_spline_curve::KnotsCoefs::eval_curve_rev
+//!
 //! # The linear style's conversion and alpha
 //!
 //! Every x86-64 wheel takes the `OCIO_USE_SSE2` branch of `LinLog` and `LogLin`

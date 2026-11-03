@@ -116,7 +116,7 @@ impl ViewTransform {
     }
 
     /// The value of the interchange attribute `attr_name` (`amf_transform_ids`, ignoring
-    /// case), or empty; "Unknown attribute name '<name>'." for any other name.
+    /// case), or empty; "Unknown attribute name '\<name>'." for any other name.
     ///
     /// Port of `ViewTransform::getInterchangeAttribute` (ViewTransform.cpp:125-146 @ v2.5.2).
     #[doc(alias = "getInterchangeAttribute")]
