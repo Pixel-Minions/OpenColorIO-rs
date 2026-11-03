@@ -1,9 +1,33 @@
 # Waivers
 
-The owner approves each exception to PLAN.md section3. waivers.toml is the
-machine-readable authority. W0001 (Windows PQ exact-math bounds) and W0002
-(NaN transform-parameter payload/sign and their baked-LUT scope) retain their
-existing approval and exact text there; this proposal changes neither.
+The owner approves each exception to PLAN.md section 3. `waivers.toml` is the
+machine-readable authority, and only the owner changes it; this file explains its entries.
+Where the two differ, `waivers.toml` holds. A retired waiver keeps its section here as a
+record.
+
+## W0001 - PQ on the exact-math path, on Windows (owner approved 2026-09-29; scope split 2026-10-05)
+
+The PQ fixed functions (`LIN_TO_PQ`, `PQ_TO_LIN`, `FixedFunctionOpCPU.cpp` @ v2.5.2) with fast
+math off. The Windows wheel's MSVC build compiles `_mm_pow_ps` to SVML's `__vdecl_powf4`; the
+port calls the UCRT's `powf`. In R, G and B, `LIN_TO_PQ` at every input and `PQ_TO_LIN` at
+inputs up to 1 in magnitude (and NaN inputs) may differ by at most the entry's `bound_ulp`
+(339 and 3,356,700 ulp, the maxima measured over every f32), with NaN positions and infinities
+exact and NaN bits free; `PQ_TO_LIN` above 1 in magnitude, toward its pole near 1.992, may
+differ in any way. Alpha, fast math and Linux, whose wheel uses `powf`, stay bit-exact. Only
+`Case::compare_pixels` applies it, for the cases marked `Case::w0001`, and a test pins its
+callers. The measurements are in `waivers.toml`.
+
+## W0002 - NaN transform parameters (owner approved 2026-09-29; extended 2026-10-04)
+
+Every op, both platforms. OCIO 2.5.2 accepts a NaN parameter (YAML `.nan`), and it makes its
+channel NaN for every pixel. Which NaN comes out depends on the operand order MSVC and GCC
+chose, and they differ. In that channel the port must give NaN exactly where the wheel does,
+but the NaN's sign and payload bits may differ. Since 2026-10-04 this also covers the NaN
+entries of the 1D LUT the optimizer bakes from such ops, and the CPU cache ID's hash of that
+LUT. Everything else stays exact. It applies only through the battery (`CLAUDE.md`, "W0002
+only through the battery"): `Case::compare_pixels` and `Case::compare_baked_luts`, whose
+callers a test pins, apply it automatically to the channels of NaN parameters, and a case may
+narrow it but not widen it.
 
 ## P7-6 renderer exceptions — owner approved; validated and retired 2026-10-29
 
