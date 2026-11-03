@@ -27,8 +27,9 @@ matrix until step 3 is done.
 4. **Qualify it.** Dispatch the one full SDE run on that commit.
 5. **If something fails or changes.** A fix makes a new release commit. Rerun only the CPU profiles
    it affects, and record which commit each profile passed on.
-6. **Tag.** With section 3 holding on the release commit, tag `v1.0.0`. The release note starts
-   with the OCIO version it matches, and states:
+6. **Tag.** With section 3 holding on the release commit, tag `v1.0.0`. The release note is the
+   `1.0.0` section of `CHANGELOG.md`, which gets its date with the tag. It starts with the OCIO
+   version it matches, and states:
    - Python 3.13 only (D14), on Windows x86-64 and on Linux x86-64 with glibc 2.34 or newer;
    - the four tools shipped (PLAN.md section 4);
    - the accepted speed misses (`docs/cards/phase8.md`);
