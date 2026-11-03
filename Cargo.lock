@@ -283,7 +283,7 @@ dependencies = [
 
 [[package]]
 name = "ocio-gpu-exec"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "glow",
  "khronos-egl",
@@ -297,7 +297,7 @@ dependencies = [
 
 [[package]]
 name = "ocio-py"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "half",
  "numpy",
@@ -312,14 +312,14 @@ dependencies = [
 
 [[package]]
 name = "ocio-py-ffi"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "pyo3",
 ]
 
 [[package]]
 name = "ocio-testkit"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "half",
  "serde",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "ocio-tools"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "ocio-testkit",
  "opencolorio-rs",
@@ -347,7 +347,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "opencolorio-rs"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "flate2",
  "ocio-testkit",
@@ -360,7 +360,7 @@ dependencies = [
 
 [[package]]
 name = "opencolorio-rs-formats"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "ocio-testkit",
  "opencolorio-rs-ops",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "opencolorio-rs-gpu"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "ocio-testkit",
  "opencolorio-rs-ops",
@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "opencolorio-rs-ops"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "half",
  "ocio-testkit",
@@ -732,7 +732,7 @@ checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 
 [[package]]
 name = "xtask"
-version = "0.0.0+ocio.2.5.2"
+version = "1.0.0+ocio.2.5.2"
 dependencies = [
  "ocio-testkit",
  "serde",
