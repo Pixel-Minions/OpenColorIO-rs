@@ -97,9 +97,12 @@ one.
 
 ## Progress
 
-Status as of 2026-11-02: **milestones M0, M1, M2, M3 and M4 are complete**. Source accounting
+Status as of 2026-11-03: **milestones M0, M1, M2, M3 and M4 are complete**. Source accounting
 is **913 of 913 files (100%)**: 685 mapped done and 228 reviewed not applicable, with no
-partial or todo entries. This measures source accounting, not release readiness. There are
+partial or todo entries. This measures source accounting, not release readiness. Release
+preparation in main: the release documents and changelog, the GPU types re-exported from
+`opencolorio-rs` so that one dependency suffices, and clean-room rewrites of the three pieces
+that had been translated from libstdc++. There are
 1,189 upstream C++ tests ported and two reviewed not applicable, accounting for
 all 1,191; 384 of 384 upstream Python tests pass unmodified. Phase 5 (M3), complete, with its parity sweep (grading text, pixels at every format
 and level, shaders in all 10 languages after dynamic sets, and the app helpers over upstream's

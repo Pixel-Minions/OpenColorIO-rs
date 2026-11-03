@@ -6,13 +6,14 @@
 //! the platform's own.
 //!
 //! - **Linux (glibc).** `atoi` is `(int) strtol(s, NULL, 10)`: a value past `long` clamps to it,
-//!   then the cast keeps the low 32 bits. `atof` and `strtof` are `ocio_ops`' port of glibc's
-//!   `strtod` and `strtof`.
+//!   then the cast keeps the low 32 bits. `atof` and `strtof` are `ocio_ops`' `strtod` and
+//!   `strtof`, which implement the C standard's behaviour, checked against glibc.
 //! - **Windows (UCRT).** `atoi` parses with `long`, 32 bits there, and clamps to it. `atof` and
 //!   `strtof` skip white space and take a sign, then `inf`, `infinity` or `nan`, with
 //!   `nan(snan)` a signaling NaN, `nan(ind)` the indeterminate NaN whatever the sign, and any
-//!   other `nan(chars)` the quiet NaN with every payload bit set; the number itself is `ocio_ops`'
-//!   port of UCRT's conversion.
+//!   other `nan(chars)` the quiet NaN with every payload bit set; the number itself is
+//!   converted by `ocio_ops`, which implements the C standard's behaviour, checked against the
+//!   UCRT.
 
 /// `isspace` in the "C" locale.
 fn is_space(c: u8) -> bool {

@@ -28,8 +28,9 @@ use super::{ErrorType, RegexError};
 /// A capture: its span, or `None` while it matched nothing.
 type Captures = Vec<Option<(usize, usize)>>;
 
-/// What a loop remembers: the position it was last entered at, and how many times.
-type LoopState = (Option<usize>, u32);
+/// How many iterations of one loop may be open at one position, on the path being tried: an
+/// iteration may match empty, and a third one there is refused (I-122).
+const OPEN_ITERATIONS_AT_A_POSITION: u8 = 2;
 
 /// A loop's identity: its repetition node, the copy it is in (a hash of the copies of the
 /// braces around it), and which of the repetition's loops it is.
@@ -70,8 +71,8 @@ const _: () = assert!(2 * MAX_COST < WHEEL_STACK);
 
 struct Matcher<'a> {
     text: &'a [u8],
-    /// Each loop's state.
-    loops: RefCell<HashMap<LoopKey, LoopState>>,
+    /// The iterations open on the path being tried, by loop and the position they started at.
+    open_iterations: RefCell<HashMap<(LoopKey, usize), u8>>,
     /// Where the expression being matched starts: the text's start, a search's start, or a
     /// lookahead's.
     begin: Cell<usize>,
@@ -284,21 +285,30 @@ impl<'a> Matcher<'a> {
         )
     }
 
-    /// Runs `f` as another iteration of loop `key` at `pos`, unless the loop was already
-    /// entered twice there.
-    fn once_more(&self, key: LoopKey, pos: usize, f: impl FnOnce() -> bool) -> bool {
-        let state = self.loops.borrow().get(&key).copied().unwrap_or((None, 0));
-        let next = if state.0 != Some(pos) {
-            (Some(pos), 1)
-        } else if state.1 < 2 {
-            (Some(pos), state.1 + 1)
-        } else {
-            return false;
-        };
-        self.loops.borrow_mut().insert(key, next);
-        let result = f();
-        self.loops.borrow_mut().insert(key, state);
-        result
+    /// Runs `f` as an iteration of loop `key` that starts at `pos`, unless the loop already
+    /// has [`OPEN_ITERATIONS_AT_A_POSITION`] iterations that started at `pos` open on the path
+    /// being tried. An iteration may match empty, and this ends a loop whose body matches
+    /// empty. A path never goes back to an earlier position, so the open iterations of a loop
+    /// at `pos` are its latest ones.
+    fn iterate(&self, key: LoopKey, pos: usize, f: impl FnOnce() -> bool) -> bool {
+        let at = (key, pos);
+        {
+            let mut open = self.open_iterations.borrow_mut();
+            let count = open.entry(at).or_insert(0);
+            if *count == OPEN_ITERATIONS_AT_A_POSITION {
+                return false;
+            }
+            *count += 1;
+        }
+        let matched = f();
+        let mut open = self.open_iterations.borrow_mut();
+        if let Some(count) = open.get_mut(&at) {
+            *count -= 1;
+            if *count == 0 {
+                open.remove(&at);
+            }
+        }
+        matched
     }
 
     /// The loop of a repetition without a maximum.
@@ -313,7 +323,7 @@ impl<'a> Matcher<'a> {
             }
             *caps = saved.clone();
         }
-        let iterated = self.once_more((r.id, r.ctx, STAR_LOOP), pos, || {
+        let iterated = self.iterate((r.id, r.ctx, STAR_LOOP), pos, || {
             self.weighted(r.iteration_cost(), || {
                 self.m(
                     r.body,
@@ -357,7 +367,7 @@ impl<'a> Matcher<'a> {
             *caps = saved.clone();
         }
         let copy = r.max.unwrap_or(r.min) - remaining;
-        let taken = self.once_more((r.id, r.ctx, remaining), pos, || {
+        let taken = self.iterate((r.id, r.ctx, remaining), pos, || {
             self.weighted(r.iteration_cost(), || {
                 self.m(
                     r.body,
@@ -429,7 +439,7 @@ pub(super) fn regex_match(program: &Program, text: &[u8]) -> Result<bool, RegexE
     let run = || {
         let matcher = Matcher {
             text,
-            loops: RefCell::new(HashMap::new()),
+            open_iterations: RefCell::new(HashMap::new()),
             begin: Cell::new(0),
             prev_avail: Cell::new(false),
             cost: Cell::new(0),
@@ -470,7 +480,7 @@ impl Matcher<'_> {
         prev_avail: bool,
         not_null: bool,
     ) -> Option<usize> {
-        self.loops.borrow_mut().clear();
+        self.open_iterations.borrow_mut().clear();
         self.cost.set(0);
         self.begin.set(start);
         self.prev_avail.set(prev_avail);
@@ -526,7 +536,7 @@ pub(super) fn test_log_search(
     let run = || {
         let matcher = Matcher {
             text,
-            loops: RefCell::new(HashMap::new()),
+            open_iterations: RefCell::new(HashMap::new()),
             begin: Cell::new(0),
             prev_avail: Cell::new(false),
             cost: Cell::new(0),
@@ -563,7 +573,7 @@ pub(super) fn regex_replace(
     let run = || {
         let matcher = Matcher {
             text,
-            loops: RefCell::new(HashMap::new()),
+            open_iterations: RefCell::new(HashMap::new()),
             begin: Cell::new(0),
             prev_avail: Cell::new(false),
             cost: Cell::new(0),

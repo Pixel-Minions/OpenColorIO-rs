@@ -435,9 +435,9 @@ fn body_g(exact: Option<&Exact>, precision: usize, upper: bool) -> String {
     }
 }
 
-/// glibc's and UCRT's `%g` trailing-zero removal (UCRT `crop_zeroes`): drops zeros at the end
-/// of the fraction, then the decimal point if nothing is left after it.
-fn crop_zeroes(body: &mut String) {
+/// The `%g` rule of C17 7.21.6.1p8, without the `#` flag: trailing zeros are removed from the
+/// fraction, then the decimal point if no fraction remains.
+fn remove_g_trailing_zeros(body: &mut String) {
     let Some(point) = body.find('.') else {
         return;
     };
@@ -495,7 +495,7 @@ pub fn sprintf(crt: Crt, spec: &Spec, value: f64) -> String {
         }
     };
     if is_g {
-        crop_zeroes(&mut body);
+        remove_g_trailing_zeros(&mut body);
     }
 
     // Both libraries pad infinities and NaNs with spaces, even under '0' (glibc

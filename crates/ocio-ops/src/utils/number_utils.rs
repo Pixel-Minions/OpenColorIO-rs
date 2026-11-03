@@ -192,8 +192,8 @@ struct Converted<F> {
     value: F,
     /// The value was nonzero and rounded to zero, or rounded to infinity.
     out_of_range: bool,
-    /// glibc's underflow: tiny (after rounding, x86 `TININESS_AFTER_ROUNDING`) and inexact,
-    /// or overflow (strtod_l.c `round_and_return`).
+    /// glibc's `ERANGE`: tiny (after rounding, as x86 detects tininess) and inexact, or
+    /// overflow.
     glibc_erange: bool,
 }
 
@@ -578,10 +578,11 @@ fn glibc_strtoull_base0(s: &[u8]) -> (u64, usize, bool) {
     (value, i, overflow)
 }
 
-/// glibc `strtod_l(s, &end, C)` / `strtof_l` (stdlib/strtod_l.c, glibc 2.34) on the C string
-/// `s` (no NUL inside): the C17 7.22.1.3 subject sequence, correctly rounded, with glibc's
-/// `ERANGE` on overflow and on tiny inexact results, its `nan(n-char-sequence)` payloads and
-/// its return values when nothing is converted.
+/// `strtod_l(s, &end, C)` / `strtof_l` as glibc 2.34 behaves, on the C string `s` (no NUL
+/// inside): the subject sequence of C17 7.22.1.3, correctly rounded, with glibc's `ERANGE` on
+/// overflow and on tiny inexact results, its `nan(n-char-sequence)` payloads and its return
+/// values when nothing is converted. Written from the C standard and checked against glibc
+/// itself (`tests/number_utils_crt.rs`, `tests/num_get_crt.rs`).
 fn glibc_strtof<F: Float>(s: &[u8]) -> Strto<F> {
     let zero = F::from_bits_u64(0);
     let mut i = 0;

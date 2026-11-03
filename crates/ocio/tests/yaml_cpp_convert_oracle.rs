@@ -553,6 +553,24 @@ fn numbers_read_as_the_wheel_reads_them() {
     }
 }
 
+/// Significands whose only digits follow the point: an exponent may follow them too, which the
+/// spellings of `numbers_read_as_the_wheel_reads_them` happen not to show.
+const FRACTION_ONLY: &[&str] = &[
+    ".5e1", "-.5e1", "+.5E1", ".25e-1", ".0e5", ".5e", ".5e+", ".5e1e1", ".5e1.5",
+];
+
+#[test]
+fn an_exponent_may_follow_a_fraction_alone() {
+    let spellings: Vec<String> = FRACTION_ONLY.iter().map(|s| s.to_string()).collect();
+    let wheel = entries("base", &spellings);
+    assert_eq!(wheel.len(), spellings.len());
+    // The first ones must be numbers to the wheel, or this checks nothing about the exponent.
+    assert!(wheel[..4].iter().all(|entry| entry.get("value").is_some()));
+    for (spelling, entry) in spellings.iter().zip(&wheel) {
+        check::<f64>("base", spelling, entry);
+    }
+}
+
 #[test]
 fn booleans_read_as_the_wheel_reads_them() {
     let spellings: Vec<String> = BOOLS.iter().map(|s| s.to_string()).collect();

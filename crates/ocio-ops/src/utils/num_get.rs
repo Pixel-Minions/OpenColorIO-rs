@@ -5,7 +5,7 @@
 //! in the "C" locale, as OCIO's YAML reader (yaml-cpp 0.8.0) uses it.
 //!
 //! The two wheels use different libraries: MSVC's STL on Windows (`num_get::_Getifld`, then
-//! `_Stolx`/`_Stoulx`), libstdc++ on Linux (`num_get::_M_extract_int`). For integers they
+//! `_Stolx`/`_Stoulx`), libstdc++'s `num_get` on Linux. For integers they
 //! follow the same rules of the C++ standard ([istream.formatted.arithmetic],
 //! [facet.num.get.virtuals]):
 //! - an optional `+` or `-`;
@@ -16,15 +16,16 @@
 //!   type fails with its nearest limit;
 //! - the end of the text sets `eofbit`.
 //!
-//! The port follows those rules; it doesn't translate either library. The libraries differ
-//! in what they do inside these rules (MSVC keeps at most 31 significant digits, libstdc++
-//! all of them) only where both fail anyway.
+//! [`get_integer`] implements those rules and translates neither library. Inside these rules
+//! the libraries differ only where both fail anyway (MSVC's `num_get` keeps at most 31
+//! significant digits).
 //!
 //! Floating-point numbers differ between the wheels ([`Library`]): MSVC's `num_get` gathers
 //! a field that may be hexadecimal (`0x1p3`) and fails on a result the UCRT's `strtod`
 //! reports out of range, a value rounded to zero included; libstdc++ reads only decimal, and
-//! keeps a value rounded to zero. The MSVC side is a translation of its STL; the libstdc++
-//! side follows the standard and the Linux wheel (libstdc++ is not translated).
+//! keeps a value rounded to zero. The MSVC side is a translation of its STL. The Linux side
+//! (`libstdcxx_extract_float`, `libstdcxx_convert`) is written from the standard's rules and
+//! the Linux wheel's behaviour, and translates no libstdc++ code (owner decision D3).
 
 use crate::utils::number_utils;
 
@@ -242,8 +243,8 @@ fn failed<T>(value: T, eof: bool, consumed: usize) -> Extracted<T> {
     }
 }
 
-/// libstdc++'s conversion of the gathered characters (`__convert_to_v` with `strtod_l` or
-/// `strtof_l` in the "C" locale), as the Linux wheel shows it: the whole field must convert,
+/// The Linux wheel's conversion of the gathered characters (`strtod_l` or `strtof_l` in the
+/// "C" locale), as the wheel shows it: the whole field must convert,
 /// or the extraction fails with 0; an infinite result fails with the largest finite value of
 /// its sign; a result too small for the type is kept (0 or a subnormal).
 fn libstdcxx_convert<F>(value: F, whole: bool, max: F, eof: bool, consumed: usize) -> Extracted<F>
@@ -268,57 +269,75 @@ where
     }
 }
 
-/// libstdc++'s stage 2 for a floating-point number in the "C" locale, as the standard
-/// describes it ([facet.num.get.virtuals]) and the Linux wheel shows it: the characters it
-/// gathers, and how many it read. An optional sign; digits, at most one `.`, then an
-/// exponent: `e` or `E` after at least one digit of the significand (a leading zero counts),
-/// an optional sign and digits. Reading stops at the first character that doesn't fit.
-/// Leading zeros gather as one `0`.
+/// Stage 2 of reading a floating-point number in the "C" locale, for the Linux wheel: the
+/// characters gathered for the conversion, and how many were read. The standard
+/// ([facet.num.get.virtuals]) accumulates a character while it can continue a `%g` field,
+/// and the wheel shows the field to be, in order:
+/// - an optional sign;
+/// - a significand: digits with at most one `.`, where a run of zeros at its start reads in
+///   full and gathers as one `0`;
+/// - if the significand holds a digit, an exponent: `e` or `E`, an optional sign and digits.
+///
+/// Reading stops at the first character that doesn't fit, which may leave a field that can't
+/// convert (`1e+`).
 pub fn libstdcxx_extract_float(input: &[u8]) -> (Vec<u8>, usize) {
-    let mut field = Vec::new();
-    let mut pos = 0usize;
+    let mut scan = FieldScan {
+        rest: input,
+        gathered: Vec::new(),
+    };
+    scan.one_of(b"+-");
+    let mut significand_digits = scan.opening_zeros();
+    significand_digits += scan.digits();
+    if scan.one_of(b".") {
+        significand_digits += scan.digits();
+    }
+    if significand_digits > 0 && scan.one_of(b"eE") {
+        scan.one_of(b"+-");
+        scan.digits();
+    }
+    let read = input.len() - scan.rest.len();
+    (scan.gathered, read)
+}
 
-    if let Some(&c) = input.first()
-        && (c == b'+' || c == b'-')
-    {
-        field.push(c);
-        pos += 1;
+/// The part of a number still to read, and the characters gathered from the rest.
+struct FieldScan<'a> {
+    rest: &'a [u8],
+    gathered: Vec<u8>,
+}
+
+impl FieldScan<'_> {
+    /// Moves `count` characters from `rest` to `gathered`.
+    fn gather(&mut self, count: usize) {
+        let (taken, rest) = self.rest.split_at(count);
+        self.gathered.extend_from_slice(taken);
+        self.rest = rest;
     }
 
-    let mut found_mantissa = false;
-    while input.get(pos) == Some(&b'0') {
-        if !found_mantissa {
-            field.push(b'0');
-            found_mantissa = true;
+    /// Gathers the next character if it is in `set`, and tells whether it was.
+    fn one_of(&mut self, set: &[u8]) -> bool {
+        let found = self.rest.first().is_some_and(|c| set.contains(c));
+        if found {
+            self.gather(1);
         }
-        pos += 1;
+        found
     }
 
-    let mut found_dec = false;
-    let mut found_sci = false;
-    while let Some(&c) = input.get(pos) {
-        if c.is_ascii_digit() {
-            field.push(c);
-            found_mantissa = true;
-        } else if c == b'.' && !found_dec && !found_sci {
-            field.push(b'.');
-            found_dec = true;
-        } else if (c == b'e' || c == b'E') && !found_sci && found_mantissa {
-            field.push(b'e');
-            found_sci = true;
-            pos += 1;
-            match input.get(pos) {
-                Some(&s) if s == b'+' || s == b'-' => field.push(s),
-                // the character after the `e` is read again at the top of the loop
-                Some(_) => continue,
-                None => break,
-            }
-        } else {
-            break;
-        }
-        pos += 1;
+    /// Gathers a run of digits, and tells how long it was.
+    fn digits(&mut self) -> usize {
+        let count = self.rest.iter().take_while(|c| c.is_ascii_digit()).count();
+        self.gather(count);
+        count
     }
-    (field, pos)
+
+    /// Reads a run of zeros and gathers one of them, and tells how long the run was.
+    fn opening_zeros(&mut self) -> usize {
+        let count = self.rest.iter().take_while(|&&c| c == b'0').count();
+        if count > 0 {
+            self.gather(1);
+            self.rest = &self.rest[count - 1..];
+        }
+        count
+    }
 }
 
 // The rest of this section translates MSVC's STL (Microsoft STL, `stl/inc/xlocnum`, as in
