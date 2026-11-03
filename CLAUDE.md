@@ -85,7 +85,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **Fast math.** OCIO's default optimization uses its own approximations (`SSE.h`: `sseLog2`, `sseExp2`, `ssePower`, ...), not libm. Port them operation for operation.
 - **SIMD.**
   - Scalar code comes first. Each profile (SSE2, AVX, AVX2, AVX-512) is its own renderer and replicates the C++ kernel's arithmetic.
-  - `unsafe` is allowed only in SIMD modules, in the `ocio-py` files the guards' allowlist names, and in one Windows FFI file, `crates/ocio/src/minizip/os_windows_ffi.rs` (`CreateSymbolicLinkW`, `FindFirstFileW`/`FindNextFileW`/`FindClose`; owner, 2026-10-17), and one Linux signal file, `crates/ocio-tools/src/sigpipe.rs` (inherit SIGPIPE as the C++ tools do; owner, 2026-10-31). `cargo xtask guards` enforces this.
+  - `unsafe` is allowed only in SIMD modules, in the `ocio-py` files the guards' allowlist names, in two Windows FFI files, `crates/ocio/src/minizip/os_windows_ffi.rs` (`CreateSymbolicLinkW`, `FindFirstFileW`/`FindNextFileW`/`FindClose`; owner, 2026-10-17) and `crates/ocio/src/system_monitor_windows_ffi.rs`, in the test-only EGL/OpenGL harness `crates/ocio-gpu-exec/src/oglapp.rs` and `glsl.rs` (P7-2; owner, 2026-10-25), in the test kit's `crates/ocio-testkit/src/crt.rs`, and in one Linux signal file, `crates/ocio-tools/src/sigpipe.rs` (inherit SIGPIPE as the C++ tools do; owner, 2026-10-31). `cargo xtask guards` enforces this.
 - **Platform differences.** Where OCIO gives different bytes on Windows and on Linux, the port must too (PLAN.md D12). Check both platforms.
 - **Reading the wheel's machine code.** `docs/wheel-inspect.md` shows, in a few commands of `tools/wheel-inspect`, which operand order either wheel compiled, where it computes in float or double, and whether a path calls libm, SVML or an FMA.
 
@@ -106,7 +106,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - Rocky Linux 9: `scripts/rocky9.sh cargo test ...`. It uses the `docker/rocky9` image, with the checkout mounted at `/work`.
 - **Emulated CPUs.** This machine and GitHub's runners only run the SIMD kernels their own CPUs select. `scripts/sde.sh <cpu> <cmd>` runs a command on a CPU emulated by Intel SDE, and the wheel and the port then both pick that CPU's kernels.
   - Tests whose results depend on the CPU (SIMD kernels, CPUInfo, libm calls) belong to a test target in the `cpu-tests` alias (`.cargo/config.toml`). Add new targets of that kind there.
-  - CI runs `cargo cpu-tests --release` on `nhm` (SSE2 kernels), `snb` (AVX), `hsw` (AVX2 with slow gather), `skl` (AVX2) and `skx` (AVX-512), on both platforms.
+  - The SDE workflow (`.github/workflows/sde.yml`) runs `cargo cpu-tests --release` on `nhm` (SSE2 kernels), `snb` (AVX), `hsw` (AVX2 with slow gather), `skl` (AVX2) and `skx` (AVX-512), on both platforms, only when started by hand (`workflow_dispatch`): its schedule and pull-request triggers run no jobs.
   - A chunk that adds or changes a SIMD kernel runs it locally too, on the CPUs whose kernel it touches: `scripts/sde.sh snb cargo cpu-tests --release`, and `scripts/rocky9.sh scripts/sde.sh snb cargo cpu-tests --release`.
 
 ## Oracle tests: use `ocio_testkit::battery`
@@ -115,7 +115,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **What it runs.** Every case in both directions, with fast math on and off, on the probe sets of the tier that `OCIO_RS_TIER` names:
   - `quick` (default, per chunk): sampled, seconds per family;
   - `full` (per land): all halves, the specials, 1.2 million random values, every generated case;
-  - `exhaustive` (nightly): more random values, and every `f32` bit pattern.
+  - `exhaustive` (run by hand; no CI job sets it): more random values, and every `f32` bit pattern.
 
   It sends its oracle calls in batches, a handful of processes per test. Hand-written oracle checks outside the battery batch their calls too (`Oracle::batch`).
 - **Generated cases.** Give the battery a typical case per code path (`mutation_bases`), and it generates extreme finite, NaN and ±Inf parameters. Until the op data's `validate` is ported, declare `Validation::NotPorted`: generated cases the wheel refuses are then left out and listed. For each spec route the generated cases take (JSON transform or YAML), include an explicit case on that route that the wheel accepts; the battery fails otherwise.
@@ -153,6 +153,8 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 | `cargo xtask upstream-tests` | Every upstream test and whether it is ported |
 | `cargo xtask oracle info` | The oracle's versions and this machine's CPU features |
 | `cargo xtask oracle regen <group>` | Regenerate committed fixtures (owner-reviewed) |
+| `cargo xtask wheel-build` | Build the Python wheel into `<target>/wheel/` (`docs/release-checklist.md`) |
+| `cargo xtask wheel-check` | Build the wheel, install it in a fresh environment and run upstream's Python tests on it |
 | `cargo xtask oracle check-all` | Prove committed fixtures are identical on this platform |
 | `scripts/rocky9.sh <cmd>` | Run a command on the Linux reference platform |
 | `cargo cpu-tests` | The tests whose results depend on the CPU |

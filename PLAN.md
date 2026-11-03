@@ -519,7 +519,7 @@ let proc = config.processor(&view.into())?;                 // Arc<Processor>
 let cpu = proc.default_cpu_processor()?;
 cpu.apply_rgba(&mut pixel)?;                                 // &mut [f32; 4]; bit-identical to applyRGBA. Images: cpu.apply(&mut image_desc)
 
-let mut desc = ocio_gpu::GpuShaderDesc::new(ocio_gpu::GpuLanguage::GlslVk4_6); // from opencolorio-rs-gpu
+let mut desc = ocio::GpuShaderDesc::new(ocio::GpuLanguage::GlslVk4_6);
 desc.set_allow_texture_1d(false);
 desc.set_descriptor_set_index(1, 1)?;
 desc.set_function_name("ocio_display");
@@ -725,7 +725,6 @@ The assumption: the team delivers 3–5 conventional person-weeks of *verified* 
 
 - **Re-estimate at the end of Phase 1,** from the measured person-weeks per calendar week.
   - **Measured:** Phases 0 and 0b (7 pw) took 2026-09-28 to 2026-09-30. Phase 1 (18 pw) took 2026-09-30 to 2026-10-04, with 2–4 implementer agents plus verifiers. M0 (~25 pw) was planned at 5–8 weeks.
-  - **Proposed wording (owner to confirm):** "The calendar above is replaced by the measured rate: 18 pw in 5 days in Phase 1. The remaining phases are scaled from it and re-checked at the end of Phase 2, because LUT, config and file-format work is more text and parsing than Phase 1 was."
 - **The critical path is not code generation.** It is:
   - Phase 0 (the harness);
   - exact YAML and float formatting;

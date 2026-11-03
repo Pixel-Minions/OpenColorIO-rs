@@ -31,9 +31,8 @@
 //! let mut pixel = [0.18_f32, 0.18, 0.18, 1.0];
 //! cpu.apply_rgba(&mut pixel)?;
 //!
-//! // On the GPU, the same shader text. The shader classes come from `opencolorio-rs-gpu`,
-//! // whose library is `ocio_gpu`.
-//! let mut desc = ocio_gpu::GpuShaderDesc::new(ocio_gpu::GpuLanguage::GlslVk4_6);
+//! // On the GPU, the same shader text.
+//! let mut desc = ocio::GpuShaderDesc::new(ocio::GpuLanguage::GlslVk4_6);
 //! desc.set_function_name("ocio_display");
 //! desc.set_resource_prefix("ocio_");
 //! desc.set_descriptor_set_index(1, 1)?;
@@ -151,6 +150,11 @@ pub use ocio_ops::platform::{
 };
 pub use ocioz_archive::extract_ocioz_archive;
 pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
+// OCIO declares these in the same namespace as the rest of its API; `opencolorio-rs-gpu` holds
+// them, and `gpu` reaches the rest of that crate.
+pub use ocio_gpu as gpu;
+pub use ocio_gpu::gpu_processor::GpuProcessor;
+pub use ocio_gpu::{GpuLanguage, GpuShaderDesc, UniformDataType};
 pub use system_monitor::SystemMonitors;
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;
