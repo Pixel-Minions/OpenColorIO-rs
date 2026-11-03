@@ -18,7 +18,7 @@
 //!
 //! The behaviour follows C17 7.21.6.2 and what each runtime does where the standard leaves
 //! room, as `ocio-testkit`'s `crt.rs` shows it on each platform (`tests/cscan_crt.rs` compares
-//! generated scans). No glibc or UCRT source is translated (owner decision D3).
+//! generated scans). No glibc source is translated (owner decision D3), and no UCRT source.
 //!
 //! - White space in the format skips any white space of the input ("C" locale `isspace`).
 //! - A literal character must match the input's; at the end of the input it is an input

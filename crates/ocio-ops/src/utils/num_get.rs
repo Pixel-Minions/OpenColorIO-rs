@@ -5,7 +5,7 @@
 //! in the "C" locale, as OCIO's YAML reader (yaml-cpp 0.8.0) uses it.
 //!
 //! The two wheels use different libraries: MSVC's STL on Windows (`num_get::_Getifld`, then
-//! `_Stolx`/`_Stoulx`), libstdc++ on Linux (`num_get::_M_extract_int`). For integers they
+//! `_Stolx`/`_Stoulx`), libstdc++'s `num_get` on Linux. For integers they
 //! follow the same rules of the C++ standard ([istream.formatted.arithmetic],
 //! [facet.num.get.virtuals]):
 //! - an optional `+` or `-`;
@@ -16,15 +16,16 @@
 //!   type fails with its nearest limit;
 //! - the end of the text sets `eofbit`.
 //!
-//! The port follows those rules; it doesn't translate either library. The libraries differ
-//! in what they do inside these rules (MSVC keeps at most 31 significant digits, libstdc++
-//! all of them) only where both fail anyway.
+//! [`get_integer`] implements those rules and translates neither library. Inside these rules
+//! the libraries differ only where both fail anyway (MSVC's `num_get` keeps at most 31
+//! significant digits).
 //!
 //! Floating-point numbers differ between the wheels ([`Library`]): MSVC's `num_get` gathers
 //! a field that may be hexadecimal (`0x1p3`) and fails on a result the UCRT's `strtod`
 //! reports out of range, a value rounded to zero included; libstdc++ reads only decimal, and
-//! keeps a value rounded to zero. The MSVC side is a translation of its STL; the libstdc++
-//! side follows the standard and the Linux wheel (libstdc++ is not translated).
+//! keeps a value rounded to zero. The MSVC side is a translation of its STL. The Linux side
+//! (`libstdcxx_extract_float`, `libstdcxx_convert`) is written from the standard's rules and
+//! the Linux wheel's behaviour, and translates no libstdc++ code (owner decision D3).
 
 use crate::utils::number_utils;
 
@@ -242,8 +243,8 @@ fn failed<T>(value: T, eof: bool, consumed: usize) -> Extracted<T> {
     }
 }
 
-/// libstdc++'s conversion of the gathered characters (`__convert_to_v` with `strtod_l` or
-/// `strtof_l` in the "C" locale), as the Linux wheel shows it: the whole field must convert,
+/// The Linux wheel's conversion of the gathered characters (`strtod_l` or `strtof_l` in the
+/// "C" locale), as the wheel shows it: the whole field must convert,
 /// or the extraction fails with 0; an infinite result fails with the largest finite value of
 /// its sign; a result too small for the type is kept (0 or a subnormal).
 fn libstdcxx_convert<F>(value: F, whole: bool, max: F, eof: bool, consumed: usize) -> Extracted<F>

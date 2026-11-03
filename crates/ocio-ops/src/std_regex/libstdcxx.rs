@@ -4,8 +4,8 @@
 //! `std::regex` as the Linux wheel compiles it: GCC 14's libstdc++ (gcc-toolset-14, 14.2.1),
 //! for `char` in the classic locale and the ECMAScript grammar with no other flag.
 //!
-//! libstdc++ is not translated (owner decision D3: it is GPL with the runtime exception). This
-//! parser follows the ECMAScript grammar of the C++ standard ([re.grammar], ECMA-262 3rd
+//! No libstdc++ code is translated here or in the matcher (owner decision D3: it is GPL with
+//! the runtime exception). This parser follows the ECMAScript grammar of the C++ standard ([re.grammar], ECMA-262 3rd
 //! edition, 15.10) where libstdc++ follows it, and the Linux wheel where it doesn't; each rule
 //! that departs from the standard says what the wheel does, as the oracle shows it
 //! (`tests/std_regex_libstdcxx_*_oracle.rs`):
