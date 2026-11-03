@@ -89,7 +89,7 @@ one.
   bit-identical to the exact version, and the tests enforce that.
 - **One engine for Rust and Python.** The `opencolorio-rs` wheel installs a module compatible with
   `PyOpenColorIO` that runs on the same Rust code, so scripts and applications give identical
-  results.
+  results. Moving over: [`docs/python-migration.md`](docs/python-migration.md).
 - **Tracks new OCIO releases.** Each upstream release is ported as a diff and proven again
   against that release's official package. Versions say what they match:
   `1.0.0+ocio.2.5.2` is the complete port of OCIO 2.5.2, and a later major version will match
@@ -312,7 +312,9 @@ pip install opencolorio-rs    # Python 3.13; `import PyOpenColorIO`
 ```
 
 The wheel can't share an environment with the official `opencolorio`, and needs glibc 2.34 or
-newer on Linux.
+newer on Linux. [`docs/python-migration.md`](docs/python-migration.md) covers the move from
+`opencolorio`. The crate documentation (`cargo doc -p opencolorio-rs --open`) starts with an
+example.
 
 ## Building and testing
 
