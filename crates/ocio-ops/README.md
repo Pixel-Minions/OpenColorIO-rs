@@ -8,6 +8,8 @@ This crate is a building block of [`opencolorio-rs`](https://crates.io/crates/op
 
 The package is `opencolorio-rs-ops`; the library is `ocio_ops`.
 
-BSD-3-Clause, as OpenColorIO. See `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES.md`.
+BSD-3-Clause, as OpenColorIO, for this project's own code, with the code it ports under its own
+licenses: the Microsoft C++ Standard Library's `<regex>` (Apache-2.0 WITH LLVM-exception), and
+Imath and pystring (BSD-3-Clause). See `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES.md`.
 
 This is an independent project. It isn't the official OpenColorIO package, and it isn't affiliated with or endorsed by the OpenColorIO project or the Academy Software Foundation.

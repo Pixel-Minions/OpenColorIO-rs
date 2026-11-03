@@ -433,4 +433,17 @@ mod tests {
             workspace.split('+').next()
         );
     }
+
+    /// `wheel-check` holds the wheel's `License-Expression` to `pyproject.toml`'s `license`.
+    #[test]
+    fn the_checked_license_expression_is_pyprojects() {
+        let wheel: toml::Value = toml::from_str(
+            &std::fs::read_to_string(crate::root().join("py-wheel/pyproject.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            wheel["project"]["license"].as_str(),
+            Some(crate::wheel_check::LICENSE_EXPRESSION)
+        );
+    }
 }

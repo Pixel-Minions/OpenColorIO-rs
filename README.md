@@ -348,7 +348,10 @@ cargo xtask ci --main              # also: the parity dashboard and the ratchet 
 
 ## License
 
-BSD-3-Clause, the same license as OpenColorIO. This project is a derivative work of
+BSD-3-Clause, the same license as OpenColorIO, for this project's own code; the code it ports
+keeps its own license, and each published package's license field names them (SampleICC's ICC
+Software License 0.2 has no SPDX identifier, so the `opencolorio-rs` crate's README names it). This
+project is a derivative work of
 OpenColorIO (Copyright Contributors to the OpenColorIO Project); [`NOTICE`](NOTICE) is its
 notice. [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) lists the third-party code it ports,
 with each notice: Imath, yaml-cpp, pystring, expat, minizip-ng, the Microsoft C++ Standard

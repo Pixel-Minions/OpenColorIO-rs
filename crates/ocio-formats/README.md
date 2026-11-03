@@ -8,6 +8,7 @@ This crate is a building block of [`opencolorio-rs`](https://crates.io/crates/op
 
 The package is `opencolorio-rs-formats`; the library is `ocio_formats`.
 
-BSD-3-Clause, as OpenColorIO. See `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES.md`.
+BSD-3-Clause, as OpenColorIO, for this project's own code, with the port of expat under its own
+license (MIT). See `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES.md`.
 
 This is an independent project. It isn't the official OpenColorIO package, and it isn't affiliated with or endorsed by the OpenColorIO project or the Academy Software Foundation.

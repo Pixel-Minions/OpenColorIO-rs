@@ -4,7 +4,8 @@ description = "OpenColorIO LUT and transform file readers and writers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# The port of expat (THIRD-PARTY-NOTICES.md).
+license = "BSD-3-Clause AND MIT"
 authors.workspace = true
 repository.workspace = true
 publish = true

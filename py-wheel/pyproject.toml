@@ -16,7 +16,9 @@ description = "A Rust port matching OpenColorIO 2.5.2, with its PyOpenColorIO mo
 readme = "README.md"
 # The oracle's and py-port's interpreter (P6-5; PLAN.md D14): cp313, not abi3.
 requires-python = "==3.13.*"
-license = "BSD-3-Clause"
+# Everything the wheel holds or links (THIRD-PARTY-NOTICES.md): the port and what it translates,
+# CPython (PSF-2.0), SampleICC (no SPDX identifier) and the linked crates.
+license = "BSD-3-Clause AND Apache-2.0 WITH LLVM-exception AND MIT AND Zlib AND BSL-1.0 AND PSF-2.0 AND Unicode-3.0 AND LicenseRef-ICC-0.2 AND (MIT OR Apache-2.0) AND (BSD-2-Clause OR Apache-2.0 OR MIT)"
 # Copied here from the repository's root and from Cargo's registry: PEP 639 keeps these paths
 # inside the project.
 license-files = [
