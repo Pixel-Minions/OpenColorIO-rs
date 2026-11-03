@@ -661,58 +661,65 @@ fn current_drive_number() -> u32 {
     }
 }
 
-/// The drive number the UCRT's `_wstat` gives a file on a disk (`A:` is 1): the drive letter
-/// the path starts with, else the current drive (0 when there is none); `None` for a path that
-/// is a drive letter and a colon alone, which `_wstat` refuses. `tests/platform_crt.rs` checks
-/// it against `_wstat`.
+/// The drive number `_wstat` gives a file on a disk (`A:` is 1): the drive letter the path
+/// starts with, else the current drive ([`current_drive_number`], 0 when there is none); `None`
+/// for a path that is a drive letter and a colon alone, which `_wstat` refuses.
+///
+/// Microsoft's documentation of `_stat` gives `st_dev` as the number of the drive that holds
+/// the file. Which drive that is for a path that doesn't start with one (a UNC, `\?\` or `\.\`
+/// path: the current drive), and the refusal of `C:` alone, are the platform's behaviour, which
+/// `tests/platform_crt.rs` checks against `_wstat`.
 #[cfg(windows)]
 fn ucrt_drive_number(path: &[u16]) -> Option<u32> {
-    match path {
-        [letter, colon, rest @ ..] if *colon == u16::from(b':') => match u8::try_from(*letter) {
-            Ok(c) if c.is_ascii_alphabetic() => {
-                if rest.is_empty() {
-                    None
-                } else {
-                    Some(u32::from(c.to_ascii_lowercase() - b'a') + 1)
-                }
-            }
-            _ => Some(current_drive_number()),
-        },
-        _ => Some(current_drive_number()),
+    let letter = match path {
+        [letter, colon, ..] if *colon == u16::from(b':') => {
+            u8::try_from(*letter).ok().filter(u8::is_ascii_alphabetic)
+        }
+        _ => None,
+    };
+    match letter {
+        Some(_) if path.len() == 2 => None,
+        Some(letter) => Some(u32::from(letter.to_ascii_uppercase() - b'A') + 1),
+        None => Some(current_drive_number()),
     }
 }
 
-/// `_wstat`'s `st_dev` for `path`, or `None` when `_wstat` fails, as the UCRT computes it: it
-/// opens the path for its attributes (`CreateFileW` with `FILE_READ_ATTRIBUTES`, every share
-/// mode, `FILE_FLAG_BACKUP_SEMANTICS`) and fails when that fails; a device or a pipe (whose
-/// file information can't be read) has `st_dev` -1, a file on a disk its drive number minus
-/// one ([`ucrt_drive_number`]). No wildcard is refused: `\?\` paths open. `tests/platform_crt.rs`
-/// checks it against `_wstat`.
+/// `_wstat`'s `st_dev` for `path`, or `None` when `_wstat` fails, from Microsoft's
+/// documentation of `_stat` and of the Win32 file API, and the platform's behaviour, which
+/// `tests/platform_crt.rs` checks against `_wstat`:
+/// - the path must name a file that exists: the port opens it for its attributes alone
+///   (`CreateFileW` with `FILE_READ_ATTRIBUTES`, every share mode, `OPEN_EXISTING`, and
+///   `FILE_FLAG_BACKUP_SEMANTICS`, which a directory needs), and fails when that fails. The
+///   path goes to Windows as it is, so `\?\` and `\.\` paths, UNC paths and some device names
+///   open, and a wildcard fails to open;
+/// - a file on a disk has the number of its drive ([`ucrt_drive_number`]) minus one;
+/// - a device has `st_dev` -1, the platform's value (the documentation calls the field
+///   meaningless for a device).
 ///
-/// Not reproduced: the UCRT's fallback for a root that `CreateFileW` can't open
-/// (`C:\`, `\server\share\`, fabricated from `GetDriveTypeW`), which opens on the systems the
-/// wheels run on; and a disk file whose information can't be read, taken here for a device.
+/// Chosen where no test tells the possibilities apart, as the documentation describes them:
+/// a path that doesn't open has no `st_dev` (`_stat` fails for a file it can't find), the root
+/// of a drive or share included; and a file whose information (`GetFileInformationByHandle`)
+/// can't be read is taken for a device, since the port can't ask a handle's file type
+/// (`GetFileType`) without FFI.
 #[cfg(windows)]
 fn ucrt_wstat_dev(path: &[u16]) -> Option<u32> {
     use std::os::windows::ffi::OsStringExt;
     use std::os::windows::fs::OpenOptionsExt;
-    const FILE_READ_ATTRIBUTES: u32 = 0x80;
-    const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x7;
+    // winnt.h and winbase.h, as documented for CreateFileW.
+    const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+    const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x0001 | 0x0002 | 0x0004;
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-    if path.is_empty() {
-        return None;
-    }
+    let drive = ucrt_drive_number(path)?;
     let file = std::fs::OpenOptions::new()
         .access_mode(FILE_READ_ATTRIBUTES)
         .share_mode(FILE_SHARE_READ_WRITE_DELETE)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(std::ffi::OsString::from_wide(path))
         .ok()?;
-    if file.metadata().is_err() {
-        // A character device or a pipe: `st_dev` is the file handle, -1.
-        return Some(u32::MAX);
+    match file.metadata() {
+        Ok(_) => Some(drive.wrapping_sub(1)),
+        Err(_) => Some(u32::MAX),
     }
-    ucrt_drive_number(path).map(|drive| drive.wrapping_sub(1))
 }
 
 /// A file's identity, as a proxy for its contents: `st_dev:st_ino` of `stat` on Linux;

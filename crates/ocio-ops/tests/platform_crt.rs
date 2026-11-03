@@ -283,6 +283,49 @@ fn file_content_hash_matches_the_system() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+/// `CreateFileContentHash` against `_wstat` on files and a directory that another handle holds
+/// open without sharing them (share mode 0, so no other open asking for data succeeds): which
+/// ones `_wstat` finds, and their device.
+#[cfg(windows)]
+#[test]
+fn file_content_hash_matches_the_system_on_files_held_without_sharing() {
+    use ocio_ops::platform::create_file_content_hash;
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let dir = std::env::temp_dir().join(format!("ocio_rs_held_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("held.spi1d");
+    std::fs::write(&file, b"x").unwrap();
+    let inner = dir.join("held_dir");
+    std::fs::create_dir_all(&inner).unwrap();
+    let held = [
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .open(&file)
+            .unwrap(),
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&inner)
+            .unwrap(),
+    ];
+    // The holds are real: an ordinary open of the file fails while they last.
+    assert!(std::fs::File::open(&file).is_err());
+    for path in [&file, &inner] {
+        let text = path.to_str().unwrap();
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        let expected = crt::wstat_dev(&wide)
+            .map(|dev| format!("{dev}:{}", ocio_testkit_fnv(text.as_bytes())).into_bytes());
+        let hash = create_file_content_hash(text.as_bytes());
+        assert_eq!(Some(hash).filter(|h| !h.is_empty()), expected, "{text:?}");
+    }
+    drop(held);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// MSVC's `std::hash<std::string>` (FNV-1a), as the Windows wheel hashes the file name: the
 /// constants of `<type_traits>` (`_FNV_offset_basis`, `_FNV_prime`).
 #[cfg(windows)]
