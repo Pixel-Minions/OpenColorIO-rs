@@ -4,6 +4,9 @@
 //! GPU shader generation: a port of `GpuShader*.cpp`, `GPUProcessor.cpp` and the ops'
 //! GPU writers from OpenColorIO 2.5.2.
 //!
+//! This crate is a building block of [`opencolorio-rs`](https://crates.io/crates/opencolorio-rs):
+//! use that crate. Its API follows OpenColorIO's internals and may change in minor releases.
+//!
 //! - [`gpu_shader_utils`]: `GpuShaderText`, which writes shader code line by line in each
 //!   language, and the helpers the writers share.
 //! - [`gpu_shader_class_wrapper`]: the class wrappers OSL and MSL shaders put around OCIO's
