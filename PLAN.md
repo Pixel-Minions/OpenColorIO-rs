@@ -236,7 +236,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **D4** | Equivalence | Byte-exact as defined in §3; waivers only with your sign-off | Decided |
 | **D5** | Existing port (`doubleailes/ocio-rs`) | Skip the audit for now and port independently. Note that it is MIT-licensed although derived from BSD-3 code | Decided (skipped for now) |
 | **D6** | Distribution | The Rust crates are published on crates.io under the name `opencolorio-rs` (`ocio` and `opencolorio` are taken there), with `opencolorio-rs-ops`, `opencolorio-rs-formats` and `opencolorio-rs-gpu` beside it. `use ocio::...` doesn't change. Nothing has been published or reserved yet. The GitHub repository is public, which is fine for now | Decided; crates.io and the name 2026-11-02 |
-| **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`; edition 2024; `rust-version = "1.98"` | Decided (Phase 0) |
+| **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`; edition 2024; `rust-version = "1.98.1"` | Decided (Phase 0) |
 | **D8** | `unsafe` policy | `#![forbid(unsafe_code)]` everywhere except the SIMD and Python-binding modules; P9-3 permits the single Windows monitor FFI file `crates/ocio/src/system_monitor_windows_ffi.rs`, as the existing minizip Windows FFI exception | Proposed; monitor exception approved 2026-10-23 (P9-3) |
 | **D9** | License | BSD-3-Clause, keeping upstream's notice ("Copyright Contributors to the OpenColorIO Project") | Required (the port is a derivative work) |
 | **D10** | Versioning | Our own semver; the matched OCIO version goes in build metadata (`1.0.0+ocio.2.5.2`) and in the release notes; tags `v1.0.0` (§2) | Decided |
@@ -313,7 +313,7 @@ These exist so that no one can pass by weakening a check.
 - **Exact by default.** Comparisons are exact unless a waiver in `waivers.toml` says otherwise, and every waiver needs your approval.
 - **No hidden gaps.** The main branch may not contain `#[ignore]`, `todo!()` or `unimplemented!()` without a tracked waiver.
 - **Coverage only goes up.** The count of ported upstream tests can only increase. Every upstream test and source file is either mapped or marked not-applicable with a reason.
-- **Tests must catch changes.** `cargo-mutants` runs on the core modules to show that tests fail when the code is deliberately broken.
+- **Tests must catch changes.** Independent verifier rounds break the code on purpose, by hand, and check that tests fail. `cargo-mutants` was not built: see §8, "Not built".
 - **Standard checks:** clippy, fmt, `cargo-deny`, and `forbid(unsafe_code)` outside the SIMD and binding modules.
 
 ### Team shape: 2–3 agents at a time
@@ -441,11 +441,11 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
   - So the CPU-dependent tests (`cargo cpu-tests`) also run under Intel SDE, on emulated Nehalem (SSE2 kernels), Sandy Bridge (AVX), Haswell (AVX2 with slow gather), Skylake (AVX2) and Skylake server (AVX-512), on both platforms (`scripts/sde.sh`, `.github/workflows/sde.yml`).
   - They run nightly and on PRs that touch the kernels, the test kit or the oracle.
   - **Final qualification (owner decision 2026-11-01, G4).** One full SDE run on the release commit, then a rerun of only the affected CPU profiles if needed. `docs/release-checklist.md` holds the dispatch until the release commit exists.
-- **Also in CI:**
-  - the minimum Rust version;
-  - Miri (Rust's undefined-behavior checker) on `unsafe` modules;
-  - nightly sweeps, and quick fuzz runs after 1.0.0;
-  - the Python wheel build and upstream's Python suite.
+- **Also in CI:** the Python wheel build, and upstream's Python suite on the installed wheel.
+- **Not built, after 1.0.0 (owner decision 2026-10-25: no more tooling projects).**
+  - **Miri** (Rust's undefined-behavior checker) on `unsafe` modules. It can't run inline assembly either, so it could only ever cover part of them.
+  - **`cargo-mutants`.** Mutation testing stays by hand, in the verifier rounds.
+  - **A minimum-version job.** `rust-version` is 1.98.1, the pinned toolchain, so CI's own build is the check.
 
 ---
 
@@ -541,7 +541,7 @@ print(OCIO.__version__)                       # "2.5.2"
 | ICC | The subset of SampleICC 1.2.6 OCIO uses, translated, with its notice | OCIO reads only matrix/TRC profiles (P4-4, decided 2026-10-07) |
 | Python | `pyo3` 0.29 and `numpy` 0.29, pinned exactly; `maturin` 1.15 for the release wheel (Phase 10) | Embedded via `append_to_inittab`; a standalone module for CPython 3.13 only (`cp313`, not `abi3`), built by `cargo xtask py-build` until the release (P6-1 to P6-5, decided 2026-10-17, `docs/cards/phase6.md`) |
 | GPU checks | glow 0.17 + khronos-egl 6.0 (dynamic libloading 0.8.9), Mesa llvmpipe; glslang, Windows SDK fxc/dxc | Test-only `ocio-gpu-exec`; owner decisions P7-2 through P7-5, 2026-10-25 |
-| Tests, benchmarks, CLI | `proptest`, `cargo-fuzz` (after 1.0.0), `cargo-mutants`, `criterion`, `clap` | No tolerance crates: comparisons are exact |
+| Tests, benchmarks, CLI | `proptest`, `cargo-fuzz` (after 1.0.0), `criterion`, `clap` | No tolerance crates: comparisons are exact |
 
 ---
 
