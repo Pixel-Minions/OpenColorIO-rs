@@ -1,0 +1,52 @@
+{
+  "Run": 41017434341,
+  "OriginalFiveFailuresReproduced": true,
+  "NativeRowsVerified": 20,
+  "EqualReferenceControlsVerified": 20,
+  "AllRustComparisonsMatchOriginalCpp": true,
+  "NoRustOrOCIOLink": true,
+  "OriginalTestsRemainFailing": true,
+  "Cases": {
+    "style_aces2_4000nit_p3_rndtrip": {
+      "max_diff": 0.0183502641,
+      "max_diff_bits": 1016484683,
+      "index_diff": 19448,
+      "index_inf": null,
+      "index_nan": null,
+      "fails_original_threshold": true
+    },
+    "style_aces2_nan_bug": {
+      "max_diff": 0.838159561,
+      "max_diff_bits": 1062637984,
+      "index_diff": 2,
+      "index_inf": null,
+      "index_nan": null,
+      "fails_original_threshold": true
+    },
+    "style_aces2_rec709_rndtrip": {
+      "max_diff": 0.00448208489,
+      "max_diff_bits": 999480948,
+      "index_diff": 1090,
+      "index_inf": null,
+      "index_nan": null,
+      "fails_original_threshold": true
+    },
+    "style_aces2_rgb_to_jmh_fwd": {
+      "max_diff": 0.000228881836,
+      "max_diff_bits": 963641344,
+      "index_diff": 46,
+      "index_inf": null,
+      "index_nan": null,
+      "fails_original_threshold": true
+    },
+    "style_aces_gamutcomp13_inv": {
+      "max_diff": 2.24113464e-05,
+      "max_diff_bits": 935067648,
+      "index_diff": 14,
+      "index_inf": null,
+      "index_nan": null,
+      "fails_original_threshold": true
+    }
+  },
+  "VerifiedUTC": "2026-10-30T07:03:31.390044+00:00"
+}

@@ -1,0 +1,36 @@
+== style_aces2_nan_bug limit 0.01
+  original     maxerr 0.838159561 at px 0 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  v400         maxerr 0.838159561 at px 0 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  pow          maxerr 0.478338897 at px 0 ch 1 FAIL | image==CI GPU: False | image==CPU bits: False
+  atan         maxerr 0.838159919 at px 0 ch 2 FAIL | image==CI GPU: False | image==CPU bits: False
+  sin/cos      maxerr 0.838159561 at px 0 ch 2 FAIL | image==CI GPU: False | image==CPU bits: False
+  log/log2     maxerr 0.838159561 at px 0 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  all but pow  maxerr 0.838159919 at px 0 ch 2 FAIL | image==CI GPU: False | image==CPU bits: False
+  all          maxerr 0.998304546 at px 0 ch 1 FAIL | image==CI GPU: False | image==CPU bits: False
+== style_aces2_4000nit_p3_rndtrip limit 0.018
+  original     maxerr 0.0183502641 at px 4862 ch 0 FAIL | image==CI GPU: True | image==CPU bits: False
+  v400         maxerr 0.0183502641 at px 4862 ch 0 FAIL | image==CI GPU: True | image==CPU bits: False
+  pow          maxerr 0.0170756113 at px 3145 ch 0 PASS | image==CI GPU: False | image==CPU bits: False
+  atan         maxerr 0.010911027 at px 4590 ch 0 PASS | image==CI GPU: False | image==CPU bits: False
+  sin/cos      maxerr 0.0183502641 at px 4862 ch 0 FAIL | image==CI GPU: False | image==CPU bits: False
+  log/log2     maxerr 0.0183502641 at px 4862 ch 0 FAIL | image==CI GPU: False | image==CPU bits: False
+  all but pow  maxerr 0.0106871659 at px 1683 ch 0 PASS | image==CI GPU: False | image==CPU bits: False
+  all          maxerr 0.0100051789 at px 272 ch 2 PASS | image==CI GPU: False | image==CPU bits: False
+== style_aces2_rec709_rndtrip limit 0.004
+  original     maxerr 0.00448208489 at px 272 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  v400         maxerr 0.00448208489 at px 272 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  pow          maxerr 0.00413852837 at px 272 ch 2 FAIL | image==CI GPU: False | image==CPU bits: False
+  atan         maxerr 0.00353245321 at px 272 ch 0 PASS | image==CI GPU: False | image==CPU bits: False
+  sin/cos      maxerr 0.00448208489 at px 272 ch 2 FAIL | image==CI GPU: False | image==CPU bits: False
+  log/log2     maxerr 0.00448208489 at px 272 ch 2 FAIL | image==CI GPU: False | image==CPU bits: False
+  all but pow  maxerr 0.00325869932 at px 4029 ch 0 PASS | image==CI GPU: False | image==CPU bits: False
+  all          maxerr 0.00293260417 at px 287 ch 2 PASS | image==CI GPU: False | image==CPU bits: False
+== style_aces2_rgb_to_jmh_fwd limit 0.0002
+  original     maxerr 0.000228881836 at px 11 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  v400         maxerr 0.000228881836 at px 11 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  pow          maxerr 9.15527344e-05 at px 5 ch 2 PASS | image==CI GPU: False | image==CPU bits: False
+  atan         maxerr 0.000152587891 at px 11 ch 2 PASS | image==CI GPU: False | image==CPU bits: False
+  sin/cos      maxerr 0.000228881836 at px 11 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  log/log2     maxerr 0.000228881836 at px 11 ch 2 FAIL | image==CI GPU: True | image==CPU bits: False
+  all but pow  maxerr 0.000152587891 at px 11 ch 2 PASS | image==CI GPU: False | image==CPU bits: False
+  all          maxerr 3.05175781e-05 at px 4 ch 2 PASS | image==CI GPU: False | image==CPU bits: False

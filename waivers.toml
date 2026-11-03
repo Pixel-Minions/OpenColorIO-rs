@@ -33,7 +33,7 @@ reason = "Which NaN comes out depends on the operand order MSVC and GCC chose fo
 approved_by = "Jose Enriquez (owner), in chat; scope extended 2026-10-04 (owner decision on the p1-api-parity verifier's finding F1)"
 date = "2026-09-29"
 
-# Owner-approved P7-6 scopes (2026-10-27); runtime validation pending.
+# Owner-approved P7-6 scopes (2026-10-27); validated by CI40926626678 and retired 2026-10-29.
 
 # Owner-approved 2026-10-29. W0003-W0012 were retired only after CI40926626678
 # passed both profiles with every old rule enforced; their metadata is archived.

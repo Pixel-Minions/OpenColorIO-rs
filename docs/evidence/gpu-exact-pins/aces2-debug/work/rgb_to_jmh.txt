@@ -1,0 +1,16 @@
+rgb           38.8496704(421b6610)              40(42200000)              40(42200000)
+lms           31.4460182(41fb9172)      31.6189785(41fcf3ab)      31.7384338(41fde850)
+rgb_a        0.135595366(3e0ad983)     0.135865614(3e0b205b)      0.13605167(3e0b5121)
+Aab           4.19214487(4086260d)     -3.92149353(c07af9c0)     -1.10482788(bf8d6b00)
+JMh           510.205231(43ff1a45)      4.07415724(40825f7f)      195.734482(4343bc07)
+h_rad        -2.86697435(c0377c82)
+CPU replica J,M,h == wheel cpu.bin bits for all 27 pixels: True
+instrumented output == captured GPU image bits: True
+GPU lms   - CPU lms   (ULPs) max |.|: [0 0 0]
+GPU rgb_a - CPU rgb_a (ULPs) max |.|: [3 2 3]
+GPU Aab   - CPU Aab   relative max: [2.2967571e-07 4.1768042e-05 2.9124699e-06]
+GPU as captured      max abs error J 3.05176e-05 M 9.91821e-05 h 0.000228882 | worst pixel 11 channel 2 (limit 0.0002)
+CPU rgb_a injected   max abs error J 3.05176e-05 M 7.62939e-06 h 9.15527e-05 | worst pixel 5 channel 2 (limit 0.0002)
+CPU Aab injected     max abs error J 3.05176e-05 M 0 h 9.15527e-05 | worst pixel 5 channel 2 (limit 0.0002)
+pixel 11 input [0.18476 0.20398 0.31311] CPU JMh [ 47.19155   11.839954 249.10701 ] GPU JMh [ 47.191566  11.839958 249.10678 ]
+pixel 11 rgb_a ULPs GPU-CPU [0 1 1] Aab CPU [  0.51662487  -4.22241    -11.061455  ] GPU [  0.5166249  -4.222439  -11.061447 ]

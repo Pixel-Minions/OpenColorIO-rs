@@ -1,0 +1,21 @@
+inputs: 4096 consecutive f32 values, 0x3f6638e6..0x3f6648e5 (0.89930570..0.89954978)
+CPU (wheel) inverse lands on pole side (gamut-compress M expansion > 2x): 2167 / 4096
+CPU regime flips between adjacent f32 inputs: 101
+GPU vs CPU relative error (upstream formula, min 1.0) <= 0.01: 2100 / 4096
+  ... among CPU pole-side inputs: 186 / 2167 pass
+  ... among CPU regular inputs:   1914 / 1929 pass
+actual input 0x3f6640e6: cpu [ 974.2882  568.002  5954.451 ] gpu [275.40216 814.3779  963.6708 ] rel 0.83815956 pole True
+CPU pole-side map, -40..+40 ULPs ('X' pole, '.' regular, '|' actual input):
+XXXXXXXX.X.X.XXXXXXX.XXXXXXXX...XXXXXXXX|XXXXXXXXXXXXXXXXXXXXXXXXXXX.X.XXXXXX.XXX.
+GPU pass map (rel <= 0.01), same range ('+' pass, '-' fail):
+--------+-+-+-------+--------+--------+-|------+-+++++++++--+----------------+---+
+inputs: 131072 consecutive f32 values, 0x3f6540e6..0x3f6740e5 (0.89552152..0.90333396)
+CPU (wheel) inverse lands on pole side (gamut-compress M expansion > 2x): 65655 / 131072
+CPU regime flips between adjacent f32 inputs: 101
+GPU vs CPU relative error (upstream formula, min 1.0) <= 0.01: 126355 / 131072
+  ... among CPU pole-side inputs: 60953 / 65655 pass
+CPU flip band: -183..+430 ULPs from the input (0.89941686..0.89945340); below it regular=False, above it pole=False
+inside the band: CPU pole-side 302 / 614, GPU-vs-CPU pass 336 / 614
+--------+-+-+-------+--------+--------+-|------+-+++++++++--+----------------+---+
+CPU flip band: -183..+430 ULPs from the input (0.89941686..0.89945340); below it regular=False, above it pole=False
+inside the band: CPU pole-side 302 / 614, GPU-vs-CPU pass 336 / 614

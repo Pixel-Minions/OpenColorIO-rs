@@ -1,0 +1,2672 @@
+{
+  "PreservedUTC": "2026-10-30T20:14:17.991908+00:00",
+  "DebuggerReportedCommit": "370cd592",
+  "SourceReportSHA256": "e2f50ac44700faf37cd1499653d2e348fff4e78ef5785806b8109ce90ef5bbbc",
+  "SourceUnmodified": true,
+  "ProtectedOriginalEvidenceUnmodified": true,
+  "DebugReleaseOriginalCaptureHashesIdentical": true,
+  "WaiverPins": [
+    {
+      "id": "W0014",
+      "test_id": "FixedFunction/style_aces2_nan_bug",
+      "max_diff_bits": "3f5691a0",
+      "component": 2,
+      "threshold_bits": "3c23d70a",
+      "minimum_bits": "3f800000",
+      "relative": true,
+      "entries": 4,
+      "input_sha256": "b04589158c71c748aabac981a96d68df981d0f1740c2cf8eeea0988a379f9198",
+      "cpu_sha256": "edcbe56de18c06e7d9b39c442e848534e6e89ef2307189a8f87e46a668ab6a94",
+      "gpu_sha256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f",
+      "gpu_rgb_bits": [
+        "4389b37a",
+        "444b9830",
+        "4470eaee"
+      ],
+      "cpu_rgb_bits": [
+        "44739272",
+        "440e0021",
+        "45ba139c"
+      ]
+    },
+    {
+      "id": "W0015",
+      "test_id": "FixedFunction/style_aces2_4000nit_p3_rndtrip",
+      "max_diff_bits": "3c96534b",
+      "component": 19448,
+      "threshold_bits": "3c9374bc",
+      "minimum_bits": "358637bd",
+      "relative": false,
+      "entries": 20480,
+      "input_sha256": "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05",
+      "cpu_sha256": "035ac1db28b74f92fa164ffca2a73c0d56e0eb3d602b61ad1ad251ea494cd6fb",
+      "gpu_sha256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "id": "W0016",
+      "test_id": "FixedFunction/style_aces2_rec709_rndtrip",
+      "max_diff_bits": "3b92de74",
+      "component": 1090,
+      "threshold_bits": "3b83126f",
+      "minimum_bits": "358637bd",
+      "relative": false,
+      "entries": 20480,
+      "input_sha256": "f962ffeabbdaa8e167e599a94f937be88e0d5e9bcacf36120f6ecb758dfb7c81",
+      "cpu_sha256": "659059ae9414491556c7cdadb6ed442918f00b9e144054fafc4c16188fb40e4e",
+      "gpu_sha256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "id": "W0017",
+      "test_id": "FixedFunction/style_aces2_rgb_to_jmh_fwd",
+      "max_diff_bits": "39700000",
+      "component": 46,
+      "threshold_bits": "3951b717",
+      "minimum_bits": "358637bd",
+      "relative": false,
+      "entries": 108,
+      "input_sha256": "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319",
+      "cpu_sha256": "00d58accf9b5787ddce23cf6238cc8ccd05a5da7f3c9fad2bf8fd6ee55eea7a7",
+      "gpu_sha256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "id": "W0018",
+      "test_id": "FixedFunction/style_aces_gamutcomp13_inv",
+      "max_diff_bits": "37bc0000",
+      "component": 14,
+      "threshold_bits": "3649539c",
+      "minimum_bits": "358637bd",
+      "relative": false,
+      "entries": 156,
+      "input_sha256": "a1e10b53e849db3bf7c233cb4e5da58e826f66fd7f1189bf4c66e5540e2a21e6",
+      "cpu_sha256": "c7524fe7167c2bd0c390ca84f70502fd257df95721dc33bc8afd3e27e86c59d5",
+      "gpu_sha256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    }
+  ],
+  "Files": [
+    {
+      "Path": "aces2-debug/ACES2-GPU-FINDINGS.md",
+      "Bytes": 14911,
+      "SHA256": "e2f50ac44700faf37cd1499653d2e348fff4e78ef5785806b8109ce90ef5bbbc"
+    },
+    {
+      "Path": "aces2-debug/attrib/attrib.py",
+      "Bytes": 8816,
+      "SHA256": "dc6ae7daf4733f353cff2a63209d2ed1f82a6c94635d3bba2e997ff3e8634fa8"
+    },
+    {
+      "Path": "aces2-debug/attrib/cpu_layout.py",
+      "Bytes": 2182,
+      "SHA256": "014ad551962b22588a1540022c4e5da2bd8a65c09282d7e7e96e2713bd8da2c9"
+    },
+    {
+      "Path": "aces2-debug/nan_bug/cpu_neighbours.py",
+      "Bytes": 926,
+      "SHA256": "af777e0067c870bc25db59233e03d084513c53a1306a617145921c583103ecfd"
+    },
+    {
+      "Path": "aces2-debug/nan_bug/cpu_ops.py",
+      "Bytes": 885,
+      "SHA256": "eca958a7e9430974f3093447234a6e9ea46247a5a93901240465e33dc8d55ae7"
+    },
+    {
+      "Path": "aces2-debug/nan_bug/cpu_stages.py",
+      "Bytes": 2720,
+      "SHA256": "9b90fd554a59b0b8bc1b44164baa1d5c30a0cb2831f02324ccf67ce1c2257471"
+    },
+    {
+      "Path": "aces2-debug/nan_bug/instrument.py",
+      "Bytes": 6458,
+      "SHA256": "001589d140c74942a5049478e043f12d03112d76401f382e47ebb51e8758413d"
+    },
+    {
+      "Path": "aces2-debug/nan_bug/run_gpu.sh",
+      "Bytes": 1712,
+      "SHA256": "033ba44532ad7a3de7ece7f12e6b7ac161273dad59b8896dcb5b82f37c1da162"
+    },
+    {
+      "Path": "aces2-debug/nan_bug/sweep.py",
+      "Bytes": 3973,
+      "SHA256": "155a94dece1986605e0cdd8eb98a0d4efdbce1a904ad5157c733f3af3b938786"
+    },
+    {
+      "Path": "aces2-debug/native/acc_lib.glsl",
+      "Bytes": 2621,
+      "SHA256": "997cf508558d5a6db1429c798b35a4a2f826d923b676e28ccc9b0d2ac52a6acf"
+    },
+    {
+      "Path": "aces2-debug/native/check_acc.py",
+      "Bytes": 3494,
+      "SHA256": "d9d6c3293d782bc15e71625ee93364af7e2f38eb2a5e0388f9962c6974ec07e7"
+    },
+    {
+      "Path": "aces2-debug/native/controls.py",
+      "Bytes": 1842,
+      "SHA256": "95f875c7dae7660f7f769dcb8fd81e63afec00faf97676b216917ba217b6226a"
+    },
+    {
+      "Path": "aces2-debug/native/cpu_rgb_to_jmh.cpp",
+      "Bytes": 4752,
+      "SHA256": "d89239682dc4e0f4110b8a3ffbe686730db3fcaae903f9cfe4f0e6404c296a91"
+    },
+    {
+      "Path": "aces2-debug/native/docker.sh",
+      "Bytes": 920,
+      "SHA256": "9c9603d555de029fa4e19c46c79c53f764fb50b0b3a23beca7ccd3b2694bd34d"
+    },
+    {
+      "Path": "aces2-debug/native/knockout.py",
+      "Bytes": 3076,
+      "SHA256": "c16d5180115018fe1a0c7523bb265c8abf6fa5b77b69c327556aead277d7228b"
+    },
+    {
+      "Path": "aces2-debug/native/nonfinite.cpp",
+      "Bytes": 17190,
+      "SHA256": "536c42da84da23f9bfdd83378d14140b48ec54273103271b760d284eb8087156"
+    },
+    {
+      "Path": "aces2-debug/native/probe.cpp",
+      "Bytes": 5919,
+      "SHA256": "af5bddb6462e6261cd2932172cc4e17037c239f673909a283563e2f17a3ef7e1"
+    },
+    {
+      "Path": "aces2-debug/native/replay_original.sh",
+      "Bytes": 916,
+      "SHA256": "e402a5910602b76fa2c97c8628b22f696cdfd6184678c498be2e9cb354f50435"
+    },
+    {
+      "Path": "aces2-debug/rgb_to_jmh/probe.py",
+      "Bytes": 4338,
+      "SHA256": "c5f0495ce8dbeb05e7b956b486da8e8cdf42bd1a6927441d83dadd70e10b7af0"
+    },
+    {
+      "Path": "aces2-debug/work/.gitignore",
+      "Bytes": 14,
+      "SHA256": "240a3e0d37d2e86b614063f5347eb02d4f99ca6c254de6b82871ff8d95532a7d"
+    },
+    {
+      "Path": "aces2-debug/work/attrib_709.txt",
+      "Bytes": 4947,
+      "SHA256": "7d2a95fac2888adadc6011a957795484fae812f748ce62e0d4c9a2694a0ca6e7"
+    },
+    {
+      "Path": "aces2-debug/work/attrib_p3.txt",
+      "Bytes": 5059,
+      "SHA256": "3ef69498d4eaec003721ced571da5c74ec1274cb23c4eb61aeab537cf6e14201"
+    },
+    {
+      "Path": "aces2-debug/work/attrib_p3_residual.txt",
+      "Bytes": 2170,
+      "SHA256": "ac45f682f17295c809dbc15b909d2cfcb276f3a15f5b4941caa2636da8763b65"
+    },
+    {
+      "Path": "aces2-debug/work/check_acc.txt",
+      "Bytes": 911,
+      "SHA256": "b1efa43fdb4106fecddf0b89ed7a4029fb037431835bb13fd09cdc8b550ba78f"
+    },
+    {
+      "Path": "aces2-debug/work/controls.txt",
+      "Bytes": 1701,
+      "SHA256": "b639a4721df610a0c2fa84ea793f8b15cee0585d6e0dac28f2c6e60b14141fa6"
+    },
+    {
+      "Path": "aces2-debug/work/cpu_layout.txt",
+      "Bytes": 459,
+      "SHA256": "291c9f08f58dbd820596ad62762955b76c6f6dcda46352426845ea644571c8ee"
+    },
+    {
+      "Path": "aces2-debug/work/knockout.txt",
+      "Bytes": 3447,
+      "SHA256": "bdfa72e16024edff94e74fca75dca5667c3ea147858b5e0df060392fa7620963"
+    },
+    {
+      "Path": "aces2-debug/work/rgb_to_jmh.txt",
+      "Bytes": 1358,
+      "SHA256": "7e10e037c59217e9b874559126eba2e9ec1f56be3b65cf9304f4e509260d227e"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/cpu.bin",
+      "Bytes": 81920,
+      "SHA256": "035ac1db28b74f92fa164ffca2a73c0d56e0eb3d602b61ad1ad251ea494cd6fb"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/full.glsl",
+      "Bytes": 31546,
+      "SHA256": "63d7c913d1b8018fa2aa36580f1ad7b3a1312d8f5417f29a0fcced229c8b5ccb"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/observations.json",
+      "Bytes": 6016,
+      "SHA256": "768a19d7d10333f8e11d9bdcf1af7f2e90a5ac017dd7fd30c2ce3088de9ae0d1"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/ocio.glsl",
+      "Bytes": 31406,
+      "SHA256": "b1e592cf615453b73434aa33747ede35235b82e68c9a633859433d3be2a5670a"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/replay.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/texture-0.bin",
+      "Bytes": 278528,
+      "SHA256": "bcf4f9e3547d4b23a7d89e2af2324a4d91b38a53a59ab0abb14dc5ba5d2a3a78"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/texture-1.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/texture-2.bin",
+      "Bytes": 4356,
+      "SHA256": "1dc16f84321c04feafe588d8a52bf920e2105eef87c85839fcde4449506f38eb"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/texture-3.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/texture-4.bin",
+      "Bytes": 4356,
+      "SHA256": "1dc16f84321c04feafe588d8a52bf920e2105eef87c85839fcde4449506f38eb"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/texture-5.bin",
+      "Bytes": 278528,
+      "SHA256": "832985d4f1d32999bba1f414cef06d1929436dbb6ecbcf8bd218de022e70aa97"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_4000nit_p3_rndtrip/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/cpu.bin",
+      "Bytes": 16,
+      "SHA256": "edcbe56de18c06e7d9b39c442e848534e6e89ef2307189a8f87e46a668ab6a94"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/full.glsl",
+      "Bytes": 16926,
+      "SHA256": "da3d8e7f5046f85e34f91113295b526fd46eda0cb53139bdb91c65fba4fd6b55"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "b04589158c71c748aabac981a96d68df981d0f1740c2cf8eeea0988a379f9198"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/observations.json",
+      "Bytes": 3873,
+      "SHA256": "8124bf840c71aefa0c5ff210de1719470af9dc2f1684228fbd97cf20645dbcbe"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/ocio.glsl",
+      "Bytes": 16786,
+      "SHA256": "d2e3e27da31ad58f9aa7032ea913e8e3f0a638f561bdcafb878f35edadb8293e"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/replay.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/texture-0.bin",
+      "Bytes": 278528,
+      "SHA256": "bcf4f9e3547d4b23a7d89e2af2324a4d91b38a53a59ab0abb14dc5ba5d2a3a78"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/texture-1.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/texture-2.bin",
+      "Bytes": 4356,
+      "SHA256": "7b7663536e1ba7f27f808ec71e74338d607ce8de35a5adeb879e3c45f03bbff6"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_nan_bug/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/cpu.bin",
+      "Bytes": 81920,
+      "SHA256": "659059ae9414491556c7cdadb6ed442918f00b9e144054fafc4c16188fb40e4e"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/full.glsl",
+      "Bytes": 29872,
+      "SHA256": "65132ca9604a35fcb322d89231c662761648f32e7148123b288b440af8185fb7"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "f962ffeabbdaa8e167e599a94f937be88e0d5e9bcacf36120f6ecb758dfb7c81"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/observations.json",
+      "Bytes": 4639,
+      "SHA256": "64678ab583d0e2eee6ec8731e916dc1343ccd752b475618cbcdf5daaccc1c8a9"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/ocio.glsl",
+      "Bytes": 29732,
+      "SHA256": "0b92e20de98f85ae5975a3f16bc602cecd8d8af3997907230a18f25965c196e7"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/replay.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/texture-0.bin",
+      "Bytes": 1452,
+      "SHA256": "0b1df450119d7e1875bd72edb598769998cd19836d6bd34520078a33bb5cbd31"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/texture-1.bin",
+      "Bytes": 4356,
+      "SHA256": "9d0573559ce5e70ddc1af13bbcf4ebe8b869f18422f14c0cb6a437cdcccc96b1"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/texture-2.bin",
+      "Bytes": 1452,
+      "SHA256": "0b1df450119d7e1875bd72edb598769998cd19836d6bd34520078a33bb5cbd31"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/texture-3.bin",
+      "Bytes": 4356,
+      "SHA256": "9d0573559ce5e70ddc1af13bbcf4ebe8b869f18422f14c0cb6a437cdcccc96b1"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rec709_rndtrip/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rgb_to_jmh_fwd/cpu.bin",
+      "Bytes": 432,
+      "SHA256": "00d58accf9b5787ddce23cf6238cc8ccd05a5da7f3c9fad2bf8fd6ee55eea7a7"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rgb_to_jmh_fwd/full.glsl",
+      "Bytes": 1299,
+      "SHA256": "0275bfad7c387838da8d15610cbfae904f022bcf680510166fa092bc3e2a377f"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rgb_to_jmh_fwd/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rgb_to_jmh_fwd/observations.json",
+      "Bytes": 1601,
+      "SHA256": "80c8eca1e3ca235c56c019a14b25872e632547874bc8ffc7eecca16c0de95bdc"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rgb_to_jmh_fwd/ocio.glsl",
+      "Bytes": 1159,
+      "SHA256": "143c0f8910cf93d63bd6d8d88d9beef12acdf61928f78d59dcd0a33306d2f3f0"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rgb_to_jmh_fwd/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rgb_to_jmh_fwd/replay.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces2_rgb_to_jmh_fwd/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces_gamutcomp13_inv/cpu.bin",
+      "Bytes": 624,
+      "SHA256": "c7524fe7167c2bd0c390ca84f70502fd257df95721dc33bc8afd3e27e86c59d5"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces_gamutcomp13_inv/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "a1e10b53e849db3bf7c233cb4e5da58e826f66fd7f1189bf4c66e5540e2a21e6"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces_gamutcomp13_inv/observations.json",
+      "Bytes": 1607,
+      "SHA256": "2bb73b294402a00a87180c2c6c1b479f00447e11db133c3ac144b1fae3545384"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces_gamutcomp13_inv/ocio.glsl",
+      "Bytes": 1177,
+      "SHA256": "04062fb0019dbe64c767f86714575564a150d6b6cbfc189c6cb1877bdacfafbe"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces_gamutcomp13_inv/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "aces2-debug/work/style_aces_gamutcomp13_inv/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "aces2-debug/work/sweep.txt",
+      "Bytes": 1631,
+      "SHA256": "ce5a4382523b2e19c8fc2578ce9d37f2eeec06585e4e45503d87064874ac3d06"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306407665433143.glsl",
+      "Bytes": 31546,
+      "SHA256": "63d7c913d1b8018fa2aa36580f1ad7b3a1312d8f5417f29a0fcced229c8b5ccb"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306408155404499.glsl",
+      "Bytes": 31546,
+      "SHA256": "63d7c913d1b8018fa2aa36580f1ad7b3a1312d8f5417f29a0fcced229c8b5ccb"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306409585429325.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306409614386126.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306409618098337.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306409621786162.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306409625814945.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306411457264849.glsl",
+      "Bytes": 16926,
+      "SHA256": "da3d8e7f5046f85e34f91113295b526fd46eda0cb53139bdb91c65fba4fd6b55"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306411729851446.glsl",
+      "Bytes": 16926,
+      "SHA256": "da3d8e7f5046f85e34f91113295b526fd46eda0cb53139bdb91c65fba4fd6b55"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306412809240156.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306412818920456.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306412823044887.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306412826874307.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306412830628496.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306414520455184.glsl",
+      "Bytes": 29872,
+      "SHA256": "65132ca9604a35fcb322d89231c662761648f32e7148123b288b440af8185fb7"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306414983217851.glsl",
+      "Bytes": 29872,
+      "SHA256": "65132ca9604a35fcb322d89231c662761648f32e7148123b288b440af8185fb7"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306416058206640.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306416068234709.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306416072488173.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306416076148380.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306416079830106.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306417755340612.glsl",
+      "Bytes": 1299,
+      "SHA256": "0275bfad7c387838da8d15610cbfae904f022bcf680510166fa092bc3e2a377f"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306417817774840.glsl",
+      "Bytes": 1299,
+      "SHA256": "0275bfad7c387838da8d15610cbfae904f022bcf680510166fa092bc3e2a377f"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306418909170276.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306418919246966.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306418923641213.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306418927557938.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306418931289548.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306419950268713.glsl",
+      "Bytes": 1317,
+      "SHA256": "1b350cde071dc373d012e03217f2553992a6ed1191ae1a71bdd327844e2d90de"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306420008980859.glsl",
+      "Bytes": 1317,
+      "SHA256": "1b350cde071dc373d012e03217f2553992a6ed1191ae1a71bdd327844e2d90de"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306421121015371.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306421131074588.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306421136005237.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306421139999247.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/compiled/shader-1793306421143832366.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-manifest.txt",
+      "Bytes": 2228,
+      "SHA256": "8e3d9fbd4dbb6f745450620af898e4c96e72909b1198b640d71e8caef005ee62"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-O0.json",
+      "Bytes": 1070,
+      "SHA256": "e76fa37fa716a1a7e18e482ce138f1d4b44fe111325715a7c1e40a4f218907f0"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-O2.json",
+      "Bytes": 1070,
+      "SHA256": "de270efdd86656fbd16eefd408b6c1c5e3f1898e75ad3d49b207a1e03e277e67"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-precise-manifest.txt",
+      "Bytes": 2280,
+      "SHA256": "7e41696021cd2d985c19053994f5ea5afd180ec543d12c2500bf126b15ed43ea"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-precise-O0.json",
+      "Bytes": 1085,
+      "SHA256": "42725bf10733a49a37382cdace93959e345ffe47f433cc3c4d3741e44bcd027d"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-precise-O2.json",
+      "Bytes": 1085,
+      "SHA256": "1410fa53a8a198cb0823df02be0a74e1c532a2d6fcba2f2d2421b5570c0c3a15"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-replay-O0",
+      "Bytes": 182656,
+      "SHA256": "c64ce441a05aa5c515810227f29ba5f36a57f0b0238a53f7c023f2e1cec56b2b"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-replay-O2",
+      "Bytes": 113912,
+      "SHA256": "ebe663f052c079597890c71c3a16085d5d7f584eea0817593c04cdcae6d08310"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-replay.log",
+      "Bytes": 116,
+      "SHA256": "9e152315febe256cc5f644996b08438f38594781bc987f8bc9aa8cee8478a7da"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-source-commit.txt",
+      "Bytes": 41,
+      "SHA256": "3632f4183a677eef193378fdd52e73aba086cd4b03fbf865b711d1b0b784aea7"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-validation-commit.txt",
+      "Bytes": 41,
+      "SHA256": "8a0f604f7b065a9777096375e64a67070fd97b94d8ff889ba88c933a036d90f3"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-version400-manifest.txt",
+      "Bytes": 2235,
+      "SHA256": "4e9a687790616ffe8b89363333a0612af24d0989086e9d587ad91d1b67a4f646"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-version400-O0.json",
+      "Bytes": 1081,
+      "SHA256": "c111591ea7da709803807464beb9c974aa80ee08629dc07fdf3e55c633c60ea4"
+    },
+    {
+      "Path": "ci-40956371150/debug/native-version400-O2.json",
+      "Bytes": 1081,
+      "SHA256": "4bbeb4fbae7c9e0625e2c161966d9af1768e5035bd7babc1441835d9f854f21f"
+    },
+    {
+      "Path": "ci-40956371150/debug/power-O0.json",
+      "Bytes": 625,
+      "SHA256": "2be7ccceac6968fc136361405371c0b6d9d2b913972f43e3f18441a30a1f11d7"
+    },
+    {
+      "Path": "ci-40956371150/debug/power-O2.json",
+      "Bytes": 625,
+      "SHA256": "2be7ccceac6968fc136361405371c0b6d9d2b913972f43e3f18441a30a1f11d7"
+    },
+    {
+      "Path": "ci-40956371150/debug/power-probe-O0",
+      "Bytes": 168576,
+      "SHA256": "9ae48a0ab2f82ec1ad829a7be1575d53ef9bf27313e967da2ca230266a8a1e51"
+    },
+    {
+      "Path": "ci-40956371150/debug/power-probe-O2",
+      "Bytes": 114136,
+      "SHA256": "43c53819b0b96f59ddb2449fd7290b839145768d123ec1c588a3fe2d589711e1"
+    },
+    {
+      "Path": "ci-40956371150/debug/precision-variant-metadata.json",
+      "Bytes": 2158,
+      "SHA256": "fa1982534548405d1dd735f1fe807b075336cee7f37e2f7bb0cc82dc32cca407"
+    },
+    {
+      "Path": "ci-40956371150/debug/source-commit.txt",
+      "Bytes": 41,
+      "SHA256": "8fcde2e288a12cef2f0c8892f115b5af83648d5c71227f1255ed807255e26fa5"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "97ee11998e9b368f45f0a6d6ac1f1afde39d9c08fdd76099fb6fd8c87ff201e1"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "97ee11998e9b368f45f0a6d6ac1f1afde39d9c08fdd76099fb6fd8c87ff201e1"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "d73699813315a358eacaf35610741cc2e01f545d0146ca36058fbf5c57632a0f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "d73699813315a358eacaf35610741cc2e01f545d0146ca36058fbf5c57632a0f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "97ee11998e9b368f45f0a6d6ac1f1afde39d9c08fdd76099fb6fd8c87ff201e1"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "97ee11998e9b368f45f0a6d6ac1f1afde39d9c08fdd76099fb6fd8c87ff201e1"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/cpu.bin",
+      "Bytes": 81920,
+      "SHA256": "035ac1db28b74f92fa164ffca2a73c0d56e0eb3d602b61ad1ad251ea494cd6fb"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6edbf632520e68acb32ae6726a20c5613a3afc9b34e727609b68669d0187a87"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6edbf632520e68acb32ae6726a20c5613a3afc9b34e727609b68669d0187a87"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/observations.json",
+      "Bytes": 6015,
+      "SHA256": "916707a6889731dc63a556e0cd136f845dae9526f447817ca01d75a1ca14fa24"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/ocio.glsl",
+      "Bytes": 31406,
+      "SHA256": "b1e592cf615453b73434aa33747ede35235b82e68c9a633859433d3be2a5670a"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "9041766ae854f42ce91eeb0816f6500ced005c36ca14347b93bf3c9eaaba1c6c"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "5798a8d3e5d6be9409ef95a018b15e716fae04cf5214fdd8221dad0e817d3020"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "7a66190aefc344cb6f19e0710ed57bf160d79f67cbdfc7c43592ff723b56c353"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/precision-qualified.glsl",
+      "Bytes": 33288,
+      "SHA256": "451d7463471fb991dd068c30def13ba0c9f3de40272892027ddbaf5faf90f3c9"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/texture-0.bin",
+      "Bytes": 278528,
+      "SHA256": "bcf4f9e3547d4b23a7d89e2af2324a4d91b38a53a59ab0abb14dc5ba5d2a3a78"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/texture-1.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/texture-2.bin",
+      "Bytes": 4356,
+      "SHA256": "1dc16f84321c04feafe588d8a52bf920e2105eef87c85839fcde4449506f38eb"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/texture-3.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/texture-4.bin",
+      "Bytes": 4356,
+      "SHA256": "1dc16f84321c04feafe588d8a52bf920e2105eef87c85839fcde4449506f38eb"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/texture-5.bin",
+      "Bytes": 278528,
+      "SHA256": "832985d4f1d32999bba1f414cef06d1929436dbb6ecbcf8bd218de022e70aa97"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/version400.glsl",
+      "Bytes": 31560,
+      "SHA256": "808d95b8982b0a1979bdf3a6690ebec778d4c3b020d525bcbda6679377bc3128"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_4000nit_p3_rndtrip/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "f161fc691afcb00179739a6ef7b40876d1deeb2ca8ce2c56beac27d80d52d03f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "f161fc691afcb00179739a6ef7b40876d1deeb2ca8ce2c56beac27d80d52d03f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "daf9c62ef79b4446453abfe812a62b4fe78e96de153188e60dcd6321034eeeec"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "daf9c62ef79b4446453abfe812a62b4fe78e96de153188e60dcd6321034eeeec"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "f161fc691afcb00179739a6ef7b40876d1deeb2ca8ce2c56beac27d80d52d03f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "f161fc691afcb00179739a6ef7b40876d1deeb2ca8ce2c56beac27d80d52d03f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/cpu.bin",
+      "Bytes": 16,
+      "SHA256": "edcbe56de18c06e7d9b39c442e848534e6e89ef2307189a8f87e46a668ab6a94"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "b04589158c71c748aabac981a96d68df981d0f1740c2cf8eeea0988a379f9198"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "4e62e5ee6a56b493955da07b5015dccb8b3a905a805415547ec994fe51b8fafa"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "4e62e5ee6a56b493955da07b5015dccb8b3a905a805415547ec994fe51b8fafa"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/observations.json",
+      "Bytes": 3871,
+      "SHA256": "0cd8355bddaa960bff9197990926229bbf739469e32cf0ebea1cc0ee388c7664"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/ocio.glsl",
+      "Bytes": 16786,
+      "SHA256": "d2e3e27da31ad58f9aa7032ea913e8e3f0a638f561bdcafb878f35edadb8293e"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "edcbe56de18c06e7d9b39c442e848534e6e89ef2307189a8f87e46a668ab6a94"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "25265e456d75c70c4270d27fba8a68abcb4f4aba5fbe9dd44c7ab3fa94d4b778"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "1ac18dd4ba2c975fe8d76b621da6091e1ff0aded4b2c75f07d5811f78f4a2d25"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/precision-qualified.glsl",
+      "Bytes": 17852,
+      "SHA256": "f2664c818efc0cf39fb803aa240f28c017c81521bbd298d151a6eb165d7717d0"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/texture-0.bin",
+      "Bytes": 278528,
+      "SHA256": "bcf4f9e3547d4b23a7d89e2af2324a4d91b38a53a59ab0abb14dc5ba5d2a3a78"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/texture-1.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/texture-2.bin",
+      "Bytes": 4356,
+      "SHA256": "7b7663536e1ba7f27f808ec71e74338d607ce8de35a5adeb879e3c45f03bbff6"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/version400.glsl",
+      "Bytes": 16940,
+      "SHA256": "6b7ee0904f49a012691dcf1d272814efa7182e2602194b92cd84eb200fc6b53f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_nan_bug/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/cpu.bin",
+      "Bytes": 81920,
+      "SHA256": "659059ae9414491556c7cdadb6ed442918f00b9e144054fafc4c16188fb40e4e"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "f962ffeabbdaa8e167e599a94f937be88e0d5e9bcacf36120f6ecb758dfb7c81"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "36efaf08502bb21158f22c8d2a1aeb9c4b458f69dbefd8cef8ae1604cd0dc867"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "36efaf08502bb21158f22c8d2a1aeb9c4b458f69dbefd8cef8ae1604cd0dc867"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/observations.json",
+      "Bytes": 4637,
+      "SHA256": "0e023d9a6075d9ef12476632f33789451c73afe4933bb5d9331dcbbfb4c4ad42"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/ocio.glsl",
+      "Bytes": 29732,
+      "SHA256": "0b92e20de98f85ae5975a3f16bc602cecd8d8af3997907230a18f25965c196e7"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "77d057e6a210fc81bdae115ea4bdebc7fb8e45841573327e250c43f3762fc6cf"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "6855960ee428276148fc8745625c44bde7ae835a9e2fa181cc917af9bcad0d6a"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "8c65972254de73c6dc5b36cf092d8204669993f45eb6412fa9ea8f9fda687e8b"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/precision-qualified.glsl",
+      "Bytes": 31534,
+      "SHA256": "d9a1a3f268ff296160f249bdeab452e4a7cd61710157a260e7b5d2e19e4c29b4"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/texture-0.bin",
+      "Bytes": 1452,
+      "SHA256": "0b1df450119d7e1875bd72edb598769998cd19836d6bd34520078a33bb5cbd31"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/texture-1.bin",
+      "Bytes": 4356,
+      "SHA256": "9d0573559ce5e70ddc1af13bbcf4ebe8b869f18422f14c0cb6a437cdcccc96b1"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/texture-2.bin",
+      "Bytes": 1452,
+      "SHA256": "0b1df450119d7e1875bd72edb598769998cd19836d6bd34520078a33bb5cbd31"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/texture-3.bin",
+      "Bytes": 4356,
+      "SHA256": "9d0573559ce5e70ddc1af13bbcf4ebe8b869f18422f14c0cb6a437cdcccc96b1"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/version400.glsl",
+      "Bytes": 29886,
+      "SHA256": "58820253434ee6a66d0634f2c69a65efe69a7af975067020f5cfa8ffe7a81466"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rec709_rndtrip/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/cpu.bin",
+      "Bytes": 432,
+      "SHA256": "00d58accf9b5787ddce23cf6238cc8ccd05a5da7f3c9fad2bf8fd6ee55eea7a7"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/observations.json",
+      "Bytes": 1599,
+      "SHA256": "1d3392729bd62c749b123e9862f36e77fc5cbb318a1e21d0b89a4cb5dd06555c"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/ocio.glsl",
+      "Bytes": 1159,
+      "SHA256": "143c0f8910cf93d63bd6d8d88d9beef12acdf61928f78d59dcd0a33306d2f3f0"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "054f59acc2a2da65fc2adecc97be84cb29ca514b41c4ff8d176dacfd57394115"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "34cf59aff6a349973918d71c4bd32a63a8792eebb0ee836b69870603a1efca6f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "4523357d4520cd0db8bc62fcdfd0f0191d1bf7de153e041882ac594aea3b5cef"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/precision-qualified.glsl",
+      "Bytes": 1393,
+      "SHA256": "04a4e48378eeb0a1b56fe2c22515005ef46ac4fa30e2774dc25bff055391206a"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/version400.glsl",
+      "Bytes": 1313,
+      "SHA256": "12ea3e0e384c68408cb51e119b8955d13b8b1bba80eefc48284df4a923665ba8"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces2_rgb_to_jmh_fwd/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/cpu.bin",
+      "Bytes": 624,
+      "SHA256": "c7524fe7167c2bd0c390ca84f70502fd257df95721dc33bc8afd3e27e86c59d5"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "a1e10b53e849db3bf7c233cb4e5da58e826f66fd7f1189bf4c66e5540e2a21e6"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/minimal-power-substitution.glsl",
+      "Bytes": 440,
+      "SHA256": "3ea65905652022ede7a2c18fbc21a2d6d6aa31b6843f132954ae56a4d14cb0dc"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/minimal-power.glsl",
+      "Bytes": 444,
+      "SHA256": "78247538e42d69194add12abf2790c4b7969fda6928342a2598deb4a452b3b54"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/observations.json",
+      "Bytes": 1605,
+      "SHA256": "66cc8d7e4156e962fd4230470568f9e22500188e30fa25109ef5952eeb21a4ce"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/ocio.glsl",
+      "Bytes": 1177,
+      "SHA256": "04062fb0019dbe64c767f86714575564a150d6b6cbfc189c6cb1877bdacfafbe"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "aae704cd09b425222e0a1e6480ed0c0c75b8a9158652e425c5493ece5312d9b9"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "a2a0f8ebe0550c5e73bfe0dafd59760f19fd8cf60d4035835746ee69bf0b0248"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "26228437bff0682f8627b4f927ff81f53b9a05156719aa167ad01892da598c5f"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/power-platform-substitution-O0.bin",
+      "Bytes": 16,
+      "SHA256": "902be28684cff09417ae1a6dd40f13be98e2bacd18f691179769d8c4690f5a5a"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/power-platform-substitution-O2.bin",
+      "Bytes": 16,
+      "SHA256": "902be28684cff09417ae1a6dd40f13be98e2bacd18f691179769d8c4690f5a5a"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/power-stages-O0.bin",
+      "Bytes": 16,
+      "SHA256": "1568325d581a85d78440054f1345c89b68e21db65d1fc09c6a89a4a7292d0750"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/power-stages-O2.bin",
+      "Bytes": 16,
+      "SHA256": "1568325d581a85d78440054f1345c89b68e21db65d1fc09c6a89a4a7292d0750"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/precision-qualified.glsl",
+      "Bytes": 1419,
+      "SHA256": "79762ce6f85b621ae501b585afef671abb06d39aca48ba093473e8fc850692ed"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/version400.glsl",
+      "Bytes": 1331,
+      "SHA256": "458a8f8d801f247ece712d734a4eb5abd847d8895a405603af758874e5d2850d"
+    },
+    {
+      "Path": "ci-40956371150/debug/style_aces_gamutcomp13_inv/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/debug/tests.log",
+      "Bytes": 14558,
+      "SHA256": "2e9f92fdcf199c33bd434d129544062f4ee3424665c90903ad3831e9856bb30c"
+    },
+    {
+      "Path": "ci-40956371150/debug/validation-commit.txt",
+      "Bytes": 41,
+      "SHA256": "85e9d93ef72f62197c7daf390e30842419d1a5e80bcb986f95b0377ae64788fe"
+    },
+    {
+      "Path": "ci-40956371150/full.log",
+      "Bytes": 320900,
+      "SHA256": "21b5af74c1e0d0f81fba645dd8e2a95384253936129208b52ec236edff2b93fb"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306377833070543.glsl",
+      "Bytes": 31546,
+      "SHA256": "63d7c913d1b8018fa2aa36580f1ad7b3a1312d8f5417f29a0fcced229c8b5ccb"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306378338330348.glsl",
+      "Bytes": 31546,
+      "SHA256": "63d7c913d1b8018fa2aa36580f1ad7b3a1312d8f5417f29a0fcced229c8b5ccb"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306380512225435.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306380542520044.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306380545684992.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306380548727236.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306380551817573.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306382504022771.glsl",
+      "Bytes": 16926,
+      "SHA256": "da3d8e7f5046f85e34f91113295b526fd46eda0cb53139bdb91c65fba4fd6b55"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306382790668132.glsl",
+      "Bytes": 16926,
+      "SHA256": "da3d8e7f5046f85e34f91113295b526fd46eda0cb53139bdb91c65fba4fd6b55"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306384583114717.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306384592930405.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306384596156476.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306384599717610.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306384602809909.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306386392370715.glsl",
+      "Bytes": 29872,
+      "SHA256": "65132ca9604a35fcb322d89231c662761648f32e7148123b288b440af8185fb7"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306386866605593.glsl",
+      "Bytes": 29872,
+      "SHA256": "65132ca9604a35fcb322d89231c662761648f32e7148123b288b440af8185fb7"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306388711276609.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306388721081401.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306388724679420.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306388727677698.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306388730654294.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306390500435229.glsl",
+      "Bytes": 1299,
+      "SHA256": "0275bfad7c387838da8d15610cbfae904f022bcf680510166fa092bc3e2a377f"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306390566333048.glsl",
+      "Bytes": 1299,
+      "SHA256": "0275bfad7c387838da8d15610cbfae904f022bcf680510166fa092bc3e2a377f"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306392396288502.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306392406662538.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306392410468791.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306392413707159.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306392416833920.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306393433744702.glsl",
+      "Bytes": 1317,
+      "SHA256": "1b350cde071dc373d012e03217f2553992a6ed1191ae1a71bdd327844e2d90de"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306393495960285.glsl",
+      "Bytes": 1317,
+      "SHA256": "1b350cde071dc373d012e03217f2553992a6ed1191ae1a71bdd327844e2d90de"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306395264014269.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306395273644998.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306395276737577.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306395279749716.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/compiled/shader-1793306395282716816.glsl",
+      "Bytes": 188,
+      "SHA256": "bdf63b134edf6f30c47172b438195ab01b06feae7fe12fd6a66b300762215048"
+    },
+    {
+      "Path": "ci-40956371150/release/native-manifest.txt",
+      "Bytes": 2228,
+      "SHA256": "523efea3fbdf3ed61d6f6f2acf7e6b7a818f13fe5097fcfd3fe9c7161cce781b"
+    },
+    {
+      "Path": "ci-40956371150/release/native-O0.json",
+      "Bytes": 1070,
+      "SHA256": "e76fa37fa716a1a7e18e482ce138f1d4b44fe111325715a7c1e40a4f218907f0"
+    },
+    {
+      "Path": "ci-40956371150/release/native-O2.json",
+      "Bytes": 1070,
+      "SHA256": "de270efdd86656fbd16eefd408b6c1c5e3f1898e75ad3d49b207a1e03e277e67"
+    },
+    {
+      "Path": "ci-40956371150/release/native-precise-manifest.txt",
+      "Bytes": 2280,
+      "SHA256": "7e41696021cd2d985c19053994f5ea5afd180ec543d12c2500bf126b15ed43ea"
+    },
+    {
+      "Path": "ci-40956371150/release/native-precise-O0.json",
+      "Bytes": 1085,
+      "SHA256": "42725bf10733a49a37382cdace93959e345ffe47f433cc3c4d3741e44bcd027d"
+    },
+    {
+      "Path": "ci-40956371150/release/native-precise-O2.json",
+      "Bytes": 1085,
+      "SHA256": "1410fa53a8a198cb0823df02be0a74e1c532a2d6fcba2f2d2421b5570c0c3a15"
+    },
+    {
+      "Path": "ci-40956371150/release/native-replay-O0",
+      "Bytes": 182656,
+      "SHA256": "c64ce441a05aa5c515810227f29ba5f36a57f0b0238a53f7c023f2e1cec56b2b"
+    },
+    {
+      "Path": "ci-40956371150/release/native-replay-O2",
+      "Bytes": 113912,
+      "SHA256": "ebe663f052c079597890c71c3a16085d5d7f584eea0817593c04cdcae6d08310"
+    },
+    {
+      "Path": "ci-40956371150/release/native-replay.log",
+      "Bytes": 116,
+      "SHA256": "9e152315febe256cc5f644996b08438f38594781bc987f8bc9aa8cee8478a7da"
+    },
+    {
+      "Path": "ci-40956371150/release/native-source-commit.txt",
+      "Bytes": 41,
+      "SHA256": "3632f4183a677eef193378fdd52e73aba086cd4b03fbf865b711d1b0b784aea7"
+    },
+    {
+      "Path": "ci-40956371150/release/native-validation-commit.txt",
+      "Bytes": 41,
+      "SHA256": "8a0f604f7b065a9777096375e64a67070fd97b94d8ff889ba88c933a036d90f3"
+    },
+    {
+      "Path": "ci-40956371150/release/native-version400-manifest.txt",
+      "Bytes": 2235,
+      "SHA256": "4e9a687790616ffe8b89363333a0612af24d0989086e9d587ad91d1b67a4f646"
+    },
+    {
+      "Path": "ci-40956371150/release/native-version400-O0.json",
+      "Bytes": 1081,
+      "SHA256": "c111591ea7da709803807464beb9c974aa80ee08629dc07fdf3e55c633c60ea4"
+    },
+    {
+      "Path": "ci-40956371150/release/native-version400-O2.json",
+      "Bytes": 1081,
+      "SHA256": "4bbeb4fbae7c9e0625e2c161966d9af1768e5035bd7babc1441835d9f854f21f"
+    },
+    {
+      "Path": "ci-40956371150/release/power-O0.json",
+      "Bytes": 625,
+      "SHA256": "2be7ccceac6968fc136361405371c0b6d9d2b913972f43e3f18441a30a1f11d7"
+    },
+    {
+      "Path": "ci-40956371150/release/power-O2.json",
+      "Bytes": 625,
+      "SHA256": "2be7ccceac6968fc136361405371c0b6d9d2b913972f43e3f18441a30a1f11d7"
+    },
+    {
+      "Path": "ci-40956371150/release/power-probe-O0",
+      "Bytes": 168576,
+      "SHA256": "9ae48a0ab2f82ec1ad829a7be1575d53ef9bf27313e967da2ca230266a8a1e51"
+    },
+    {
+      "Path": "ci-40956371150/release/power-probe-O2",
+      "Bytes": 114136,
+      "SHA256": "43c53819b0b96f59ddb2449fd7290b839145768d123ec1c588a3fe2d589711e1"
+    },
+    {
+      "Path": "ci-40956371150/release/precision-variant-metadata.json",
+      "Bytes": 2158,
+      "SHA256": "fa1982534548405d1dd735f1fe807b075336cee7f37e2f7bb0cc82dc32cca407"
+    },
+    {
+      "Path": "ci-40956371150/release/source-commit.txt",
+      "Bytes": 41,
+      "SHA256": "8fcde2e288a12cef2f0c8892f115b5af83648d5c71227f1255ed807255e26fa5"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "97ee11998e9b368f45f0a6d6ac1f1afde39d9c08fdd76099fb6fd8c87ff201e1"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "97ee11998e9b368f45f0a6d6ac1f1afde39d9c08fdd76099fb6fd8c87ff201e1"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "d73699813315a358eacaf35610741cc2e01f545d0146ca36058fbf5c57632a0f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "d73699813315a358eacaf35610741cc2e01f545d0146ca36058fbf5c57632a0f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "97ee11998e9b368f45f0a6d6ac1f1afde39d9c08fdd76099fb6fd8c87ff201e1"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "97ee11998e9b368f45f0a6d6ac1f1afde39d9c08fdd76099fb6fd8c87ff201e1"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/cpu.bin",
+      "Bytes": 81920,
+      "SHA256": "035ac1db28b74f92fa164ffca2a73c0d56e0eb3d602b61ad1ad251ea494cd6fb"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6edbf632520e68acb32ae6726a20c5613a3afc9b34e727609b68669d0187a87"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6edbf632520e68acb32ae6726a20c5613a3afc9b34e727609b68669d0187a87"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/observations.json",
+      "Bytes": 6016,
+      "SHA256": "768a19d7d10333f8e11d9bdcf1af7f2e90a5ac017dd7fd30c2ce3088de9ae0d1"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/ocio.glsl",
+      "Bytes": 31406,
+      "SHA256": "b1e592cf615453b73434aa33747ede35235b82e68c9a633859433d3be2a5670a"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "9041766ae854f42ce91eeb0816f6500ced005c36ca14347b93bf3c9eaaba1c6c"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "5798a8d3e5d6be9409ef95a018b15e716fae04cf5214fdd8221dad0e817d3020"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "7a66190aefc344cb6f19e0710ed57bf160d79f67cbdfc7c43592ff723b56c353"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/precision-qualified.glsl",
+      "Bytes": 33288,
+      "SHA256": "451d7463471fb991dd068c30def13ba0c9f3de40272892027ddbaf5faf90f3c9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/texture-0.bin",
+      "Bytes": 278528,
+      "SHA256": "bcf4f9e3547d4b23a7d89e2af2324a4d91b38a53a59ab0abb14dc5ba5d2a3a78"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/texture-1.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/texture-2.bin",
+      "Bytes": 4356,
+      "SHA256": "1dc16f84321c04feafe588d8a52bf920e2105eef87c85839fcde4449506f38eb"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/texture-3.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/texture-4.bin",
+      "Bytes": 4356,
+      "SHA256": "1dc16f84321c04feafe588d8a52bf920e2105eef87c85839fcde4449506f38eb"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/texture-5.bin",
+      "Bytes": 278528,
+      "SHA256": "832985d4f1d32999bba1f414cef06d1929436dbb6ecbcf8bd218de022e70aa97"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/version400.glsl",
+      "Bytes": 31560,
+      "SHA256": "808d95b8982b0a1979bdf3a6690ebec778d4c3b020d525bcbda6679377bc3128"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_4000nit_p3_rndtrip/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "f161fc691afcb00179739a6ef7b40876d1deeb2ca8ce2c56beac27d80d52d03f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "f161fc691afcb00179739a6ef7b40876d1deeb2ca8ce2c56beac27d80d52d03f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "daf9c62ef79b4446453abfe812a62b4fe78e96de153188e60dcd6321034eeeec"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "daf9c62ef79b4446453abfe812a62b4fe78e96de153188e60dcd6321034eeeec"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "f161fc691afcb00179739a6ef7b40876d1deeb2ca8ce2c56beac27d80d52d03f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "f161fc691afcb00179739a6ef7b40876d1deeb2ca8ce2c56beac27d80d52d03f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/cpu.bin",
+      "Bytes": 16,
+      "SHA256": "edcbe56de18c06e7d9b39c442e848534e6e89ef2307189a8f87e46a668ab6a94"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "b04589158c71c748aabac981a96d68df981d0f1740c2cf8eeea0988a379f9198"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "4e62e5ee6a56b493955da07b5015dccb8b3a905a805415547ec994fe51b8fafa"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "4e62e5ee6a56b493955da07b5015dccb8b3a905a805415547ec994fe51b8fafa"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/observations.json",
+      "Bytes": 3873,
+      "SHA256": "8124bf840c71aefa0c5ff210de1719470af9dc2f1684228fbd97cf20645dbcbe"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/ocio.glsl",
+      "Bytes": 16786,
+      "SHA256": "d2e3e27da31ad58f9aa7032ea913e8e3f0a638f561bdcafb878f35edadb8293e"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "edcbe56de18c06e7d9b39c442e848534e6e89ef2307189a8f87e46a668ab6a94"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "25265e456d75c70c4270d27fba8a68abcb4f4aba5fbe9dd44c7ab3fa94d4b778"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "1ac18dd4ba2c975fe8d76b621da6091e1ff0aded4b2c75f07d5811f78f4a2d25"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/precision-qualified.glsl",
+      "Bytes": 17852,
+      "SHA256": "f2664c818efc0cf39fb803aa240f28c017c81521bbd298d151a6eb165d7717d0"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/texture-0.bin",
+      "Bytes": 278528,
+      "SHA256": "bcf4f9e3547d4b23a7d89e2af2324a4d91b38a53a59ab0abb14dc5ba5d2a3a78"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/texture-1.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/texture-2.bin",
+      "Bytes": 4356,
+      "SHA256": "7b7663536e1ba7f27f808ec71e74338d607ce8de35a5adeb879e3c45f03bbff6"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/version400.glsl",
+      "Bytes": 16940,
+      "SHA256": "6b7ee0904f49a012691dcf1d272814efa7182e2602194b92cd84eb200fc6b53f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_nan_bug/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b95d1a2a73286c31ef974b80363e8e0c7e5ee14a5380285aa1b84e4fccd9cbe0"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/cpu.bin",
+      "Bytes": 81920,
+      "SHA256": "659059ae9414491556c7cdadb6ed442918f00b9e144054fafc4c16188fb40e4e"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "f962ffeabbdaa8e167e599a94f937be88e0d5e9bcacf36120f6ecb758dfb7c81"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "36efaf08502bb21158f22c8d2a1aeb9c4b458f69dbefd8cef8ae1604cd0dc867"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "36efaf08502bb21158f22c8d2a1aeb9c4b458f69dbefd8cef8ae1604cd0dc867"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/observations.json",
+      "Bytes": 4639,
+      "SHA256": "64678ab583d0e2eee6ec8731e916dc1343ccd752b475618cbcdf5daaccc1c8a9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/ocio.glsl",
+      "Bytes": 29732,
+      "SHA256": "0b92e20de98f85ae5975a3f16bc602cecd8d8af3997907230a18f25965c196e7"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "77d057e6a210fc81bdae115ea4bdebc7fb8e45841573327e250c43f3762fc6cf"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "6855960ee428276148fc8745625c44bde7ae835a9e2fa181cc917af9bcad0d6a"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "8c65972254de73c6dc5b36cf092d8204669993f45eb6412fa9ea8f9fda687e8b"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/precision-qualified.glsl",
+      "Bytes": 31534,
+      "SHA256": "d9a1a3f268ff296160f249bdeab452e4a7cd61710157a260e7b5d2e19e4c29b4"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/texture-0.bin",
+      "Bytes": 1452,
+      "SHA256": "0b1df450119d7e1875bd72edb598769998cd19836d6bd34520078a33bb5cbd31"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/texture-1.bin",
+      "Bytes": 4356,
+      "SHA256": "9d0573559ce5e70ddc1af13bbcf4ebe8b869f18422f14c0cb6a437cdcccc96b1"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/texture-2.bin",
+      "Bytes": 1452,
+      "SHA256": "0b1df450119d7e1875bd72edb598769998cd19836d6bd34520078a33bb5cbd31"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/texture-3.bin",
+      "Bytes": 4356,
+      "SHA256": "9d0573559ce5e70ddc1af13bbcf4ebe8b869f18422f14c0cb6a437cdcccc96b1"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/version400.glsl",
+      "Bytes": 29886,
+      "SHA256": "58820253434ee6a66d0634f2c69a65efe69a7af975067020f5cfa8ffe7a81466"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rec709_rndtrip/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "b6ca4fc7058fe992b705f01486580d5dcce9b6ab34aa2a464169e20e1a8c9086"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/cpu.bin",
+      "Bytes": 432,
+      "SHA256": "00d58accf9b5787ddce23cf6238cc8ccd05a5da7f3c9fad2bf8fd6ee55eea7a7"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/observations.json",
+      "Bytes": 1601,
+      "SHA256": "80c8eca1e3ca235c56c019a14b25872e632547874bc8ffc7eecca16c0de95bdc"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/ocio.glsl",
+      "Bytes": 1159,
+      "SHA256": "143c0f8910cf93d63bd6d8d88d9beef12acdf61928f78d59dcd0a33306d2f3f0"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "054f59acc2a2da65fc2adecc97be84cb29ca514b41c4ff8d176dacfd57394115"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "34cf59aff6a349973918d71c4bd32a63a8792eebb0ee836b69870603a1efca6f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "4523357d4520cd0db8bc62fcdfd0f0191d1bf7de153e041882ac594aea3b5cef"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/precision-qualified.glsl",
+      "Bytes": 1393,
+      "SHA256": "04a4e48378eeb0a1b56fe2c22515005ef46ac4fa30e2774dc25bff055391206a"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/version400.glsl",
+      "Bytes": 1313,
+      "SHA256": "12ea3e0e384c68408cb51e119b8955d13b8b1bba80eefc48284df4a923665ba8"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces2_rgb_to_jmh_fwd/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/constant-native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/constant-native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/constant-native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/constant-native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/constant-native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/constant-native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "6914bf244adb49e672697d7698f8f07a4cb87afcd771e5a451237d49be5fafc6"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/cpu.bin",
+      "Bytes": 624,
+      "SHA256": "c7524fe7167c2bd0c390ca84f70502fd257df95721dc33bc8afd3e27e86c59d5"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "a1e10b53e849db3bf7c233cb4e5da58e826f66fd7f1189bf4c66e5540e2a21e6"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/minimal-power-substitution.glsl",
+      "Bytes": 440,
+      "SHA256": "3ea65905652022ede7a2c18fbc21a2d6d6aa31b6843f132954ae56a4d14cb0dc"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/minimal-power.glsl",
+      "Bytes": 444,
+      "SHA256": "78247538e42d69194add12abf2790c4b7969fda6928342a2598deb4a452b3b54"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/native-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/native-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/native-precise-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/native-precise-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/native-version400-O0.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/native-version400-O2.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/observations.json",
+      "Bytes": 1607,
+      "SHA256": "2bb73b294402a00a87180c2c6c1b479f00447e11db133c3ac144b1fae3545384"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/ocio.glsl",
+      "Bytes": 1177,
+      "SHA256": "04062fb0019dbe64c767f86714575564a150d6b6cbfc189c6cb1877bdacfafbe"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/point-cpu.bin",
+      "Bytes": 16,
+      "SHA256": "aae704cd09b425222e0a1e6480ed0c0c75b8a9158652e425c5493ece5312d9b9"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/point-input.bin",
+      "Bytes": 16,
+      "SHA256": "a2a0f8ebe0550c5e73bfe0dafd59760f19fd8cf60d4035835746ee69bf0b0248"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/point-port.bin",
+      "Bytes": 16,
+      "SHA256": "26228437bff0682f8627b4f927ff81f53b9a05156719aa167ad01892da598c5f"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/power-platform-substitution-O0.bin",
+      "Bytes": 16,
+      "SHA256": "902be28684cff09417ae1a6dd40f13be98e2bacd18f691179769d8c4690f5a5a"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/power-platform-substitution-O2.bin",
+      "Bytes": 16,
+      "SHA256": "902be28684cff09417ae1a6dd40f13be98e2bacd18f691179769d8c4690f5a5a"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/power-stages-O0.bin",
+      "Bytes": 16,
+      "SHA256": "1568325d581a85d78440054f1345c89b68e21db65d1fc09c6a89a4a7292d0750"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/power-stages-O2.bin",
+      "Bytes": 16,
+      "SHA256": "1568325d581a85d78440054f1345c89b68e21db65d1fc09c6a89a4a7292d0750"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/precision-qualified.glsl",
+      "Bytes": 1419,
+      "SHA256": "79762ce6f85b621ae501b585afef671abb06d39aca48ba093473e8fc850692ed"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/version400.glsl",
+      "Bytes": 1331,
+      "SHA256": "458a8f8d801f247ece712d734a4eb5abd847d8895a405603af758874e5d2850d"
+    },
+    {
+      "Path": "ci-40956371150/release/style_aces_gamutcomp13_inv/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "ci-40956371150/release/tests.log",
+      "Bytes": 14582,
+      "SHA256": "f0a39b407138183a4a548b8a9ad467543d6f9f2fa666fdc0bd5b2512f3cc11aa"
+    },
+    {
+      "Path": "ci-40956371150/release/validation-commit.txt",
+      "Bytes": 41,
+      "SHA256": "85e9d93ef72f62197c7daf390e30842419d1a5e80bcb986f95b0377ae64788fe"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/input-plan.json",
+      "Bytes": 6323,
+      "SHA256": "3faa4ec81b8469b3b76c2113a2cc9df7d04dc6974a2e76896248a1dbe1ea7920"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/results.json",
+      "Bytes": 11942,
+      "SHA256": "0f1e59622bb170866eb9aa4805352642f17d7c4ed49e7e3a327e4288fd216664"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/source-commit.txt",
+      "Bytes": 41,
+      "SHA256": "62eb174807f880336ae7e8af15947d470cf2d8b26ad06da91c579aaf7f455382"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/upstream-commit.txt",
+      "Bytes": 73,
+      "SHA256": "58dddbdbe1fa6b0684410640476260be3c35d150e5072d0f695f4a67a33984ba"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/upstream-comparator-O0",
+      "Bytes": 46712,
+      "SHA256": "2429fbe3a01104b8d2e98d23ec6c0cfa2be5de3a6f14ee0ad43402a6c783417f"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/upstream-comparator-O2",
+      "Bytes": 30296,
+      "SHA256": "e5246838c7ffccfc70cc71d3838209a40e6068c017d6bdd0735b7bbf9d41f1f3"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/upstream-comparator.cpp",
+      "Bytes": 6661,
+      "SHA256": "97c6c31137a5b8825a97ee3f359c40a5b2326f5eb13a08280cf53bef517dc8dd"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/validation-commit.txt",
+      "Bytes": 41,
+      "SHA256": "70c532998cb104ba789194c6c2b0a85f42159d2217ad95bd3c35dcc2b54b998d"
+    },
+    {
+      "Path": "ci-41017434341/native-upstream-comparator/validation.log",
+      "Bytes": 400,
+      "SHA256": "25c367ce099c2520d854c633309fb805bd397940a7b4833b8b368b54f4b2e60b"
+    },
+    {
+      "Path": "ci-41017434341/verified-summary.json",
+      "Bytes": 1486,
+      "SHA256": "aa11f8abc6be767f4c2faabc6b8c81bc1121e240175e822ea04112d158c69cb9"
+    },
+    {
+      "Path": "GAMUT-ROOT-CAUSE-STATUS.md",
+      "Bytes": 4947,
+      "SHA256": "2e9c0f14c1ca26a204eae7b429e597be2cb39551a1ed263a4f1da72f1ddd75c9"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/cpu.bin",
+      "Bytes": 81920,
+      "SHA256": "035ac1db28b74f92fa164ffca2a73c0d56e0eb3d602b61ad1ad251ea494cd6fb"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/observations.json",
+      "Bytes": 6016,
+      "SHA256": "768a19d7d10333f8e11d9bdcf1af7f2e90a5ac017dd7fd30c2ce3088de9ae0d1"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/ocio.glsl",
+      "Bytes": 31406,
+      "SHA256": "b1e592cf615453b73434aa33747ede35235b82e68c9a633859433d3be2a5670a"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/texture-0.bin",
+      "Bytes": 278528,
+      "SHA256": "bcf4f9e3547d4b23a7d89e2af2324a4d91b38a53a59ab0abb14dc5ba5d2a3a78"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/texture-1.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/texture-2.bin",
+      "Bytes": 4356,
+      "SHA256": "1dc16f84321c04feafe588d8a52bf920e2105eef87c85839fcde4449506f38eb"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/texture-3.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/texture-4.bin",
+      "Bytes": 4356,
+      "SHA256": "1dc16f84321c04feafe588d8a52bf920e2105eef87c85839fcde4449506f38eb"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/texture-5.bin",
+      "Bytes": 278528,
+      "SHA256": "832985d4f1d32999bba1f414cef06d1929436dbb6ecbcf8bd218de022e70aa97"
+    },
+    {
+      "Path": "original-captures/style_aces2_4000nit_p3_rndtrip/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c3e32473646c71181254144add2c5db1509e7304f89b4b769a243ae7435a3f9"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/cpu.bin",
+      "Bytes": 16,
+      "SHA256": "edcbe56de18c06e7d9b39c442e848534e6e89ef2307189a8f87e46a668ab6a94"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "b04589158c71c748aabac981a96d68df981d0f1740c2cf8eeea0988a379f9198"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/observations.json",
+      "Bytes": 3873,
+      "SHA256": "8124bf840c71aefa0c5ff210de1719470af9dc2f1684228fbd97cf20645dbcbe"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/ocio.glsl",
+      "Bytes": 16786,
+      "SHA256": "d2e3e27da31ad58f9aa7032ea913e8e3f0a638f561bdcafb878f35edadb8293e"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/texture-0.bin",
+      "Bytes": 278528,
+      "SHA256": "bcf4f9e3547d4b23a7d89e2af2324a4d91b38a53a59ab0abb14dc5ba5d2a3a78"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/texture-1.bin",
+      "Bytes": 1452,
+      "SHA256": "9b3179ce522cf0ef30a95409e8afeb422bc0908333dbe934ddcf9ab31fbe530a"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/texture-2.bin",
+      "Bytes": 4356,
+      "SHA256": "7b7663536e1ba7f27f808ec71e74338d607ce8de35a5adeb879e3c45f03bbff6"
+    },
+    {
+      "Path": "original-captures/style_aces2_nan_bug/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "75ce2acfa9e58cfb27abd6ec2b568a3fd182ffa7be85f93fc31ed7edea52df6f"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/cpu.bin",
+      "Bytes": 81920,
+      "SHA256": "659059ae9414491556c7cdadb6ed442918f00b9e144054fafc4c16188fb40e4e"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "f962ffeabbdaa8e167e599a94f937be88e0d5e9bcacf36120f6ecb758dfb7c81"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/observations.json",
+      "Bytes": 4639,
+      "SHA256": "64678ab583d0e2eee6ec8731e916dc1343ccd752b475618cbcdf5daaccc1c8a9"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/ocio.glsl",
+      "Bytes": 29732,
+      "SHA256": "0b92e20de98f85ae5975a3f16bc602cecd8d8af3997907230a18f25965c196e7"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/texture-0.bin",
+      "Bytes": 1452,
+      "SHA256": "0b1df450119d7e1875bd72edb598769998cd19836d6bd34520078a33bb5cbd31"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/texture-1.bin",
+      "Bytes": 4356,
+      "SHA256": "9d0573559ce5e70ddc1af13bbcf4ebe8b869f18422f14c0cb6a437cdcccc96b1"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/texture-2.bin",
+      "Bytes": 1452,
+      "SHA256": "0b1df450119d7e1875bd72edb598769998cd19836d6bd34520078a33bb5cbd31"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/texture-3.bin",
+      "Bytes": 4356,
+      "SHA256": "9d0573559ce5e70ddc1af13bbcf4ebe8b869f18422f14c0cb6a437cdcccc96b1"
+    },
+    {
+      "Path": "original-captures/style_aces2_rec709_rndtrip/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "1c8c8258d4467a0bf9f85c729206fb627d2faed4bd83b458579ca185ff7875cf"
+    },
+    {
+      "Path": "original-captures/style_aces2_rgb_to_jmh_fwd/cpu.bin",
+      "Bytes": 432,
+      "SHA256": "00d58accf9b5787ddce23cf6238cc8ccd05a5da7f3c9fad2bf8fd6ee55eea7a7"
+    },
+    {
+      "Path": "original-captures/style_aces2_rgb_to_jmh_fwd/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319"
+    },
+    {
+      "Path": "original-captures/style_aces2_rgb_to_jmh_fwd/observations.json",
+      "Bytes": 1601,
+      "SHA256": "80c8eca1e3ca235c56c019a14b25872e632547874bc8ffc7eecca16c0de95bdc"
+    },
+    {
+      "Path": "original-captures/style_aces2_rgb_to_jmh_fwd/ocio.glsl",
+      "Bytes": 1159,
+      "SHA256": "143c0f8910cf93d63bd6d8d88d9beef12acdf61928f78d59dcd0a33306d2f3f0"
+    },
+    {
+      "Path": "original-captures/style_aces2_rgb_to_jmh_fwd/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "original-captures/style_aces2_rgb_to_jmh_fwd/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "8278884b979e226bc0d5f237f85426f15050d252da8eb0baaa260ab3c087a882"
+    },
+    {
+      "Path": "original-captures/style_aces_gamutcomp13_inv/cpu.bin",
+      "Bytes": 624,
+      "SHA256": "c7524fe7167c2bd0c390ca84f70502fd257df95721dc33bc8afd3e27e86c59d5"
+    },
+    {
+      "Path": "original-captures/style_aces_gamutcomp13_inv/input.bin",
+      "Bytes": 1048576,
+      "SHA256": "a1e10b53e849db3bf7c233cb4e5da58e826f66fd7f1189bf4c66e5540e2a21e6"
+    },
+    {
+      "Path": "original-captures/style_aces_gamutcomp13_inv/observations.json",
+      "Bytes": 1607,
+      "SHA256": "2bb73b294402a00a87180c2c6c1b479f00447e11db133c3ac144b1fae3545384"
+    },
+    {
+      "Path": "original-captures/style_aces_gamutcomp13_inv/ocio.glsl",
+      "Bytes": 1177,
+      "SHA256": "04062fb0019dbe64c767f86714575564a150d6b6cbfc189c6cb1877bdacfafbe"
+    },
+    {
+      "Path": "original-captures/style_aces_gamutcomp13_inv/port.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    },
+    {
+      "Path": "original-captures/style_aces_gamutcomp13_inv/wheel.bin",
+      "Bytes": 1048576,
+      "SHA256": "31e2665ad2c78a91e687e4b77316bfecfc34be47218614ea024f481c54ea5775"
+    }
+  ]
+}

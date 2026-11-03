@@ -1,0 +1,12 @@
+acc_pow        ULP vs glibc-double-rounded: max 0, mean 0.000, exact 100.0%
+llvmpipe pow   ULP vs glibc-double-rounded: max 23, mean 2.158, exact 20.7%
+acc_atan       ULP vs glibc-double-rounded: max 0, mean 0.000, exact 100.0%
+llvmpipe atan  ULP vs glibc-double-rounded: max 336, mean 20.483, exact 2.4%
+acc_log        ULP vs glibc-double-rounded: max 0, mean 0.000, exact 100.0%
+llvmpipe log   ULP vs glibc-double-rounded: max 296, mean 0.464, exact 69.2%
+acc_sin        ULP vs glibc-double-rounded: max 0, mean 0.000, exact 100.0%
+llvmpipe sin   ULP vs glibc-double-rounded: max 1, mean 0.139, exact 86.1%
+acc_cos        ULP vs glibc-double-rounded: max 0, mean 0.000, exact 100.0%
+llvmpipe cos   ULP vs glibc-double-rounded: max 1, mean 0.181, exact 81.9%
+llvmpipe pow(x,0.42f)  x in [0.01,100]: ULP max 4, mean 0.888, exact 33.7%
+acc_pow(x,0.42f)       x in [0.01,100]: ULP max 0, mean 0.000, exact 100.0%
