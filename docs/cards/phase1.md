@@ -133,6 +133,10 @@ NaN and ±Inf parameters. Every numeric profile the family has is covered throug
 | 1.5c | `AVX.h`, `AVX2.h`, `AVX512.h` helpers used by the ported renderers | `avx.rs`, `avx2.rs`, `avx512.rs` | `AVX_tests.cpp`, `AVX2_tests.cpp`, `AVX512_tests.cpp` |
 
 - `cpu_info_oracle` already runs on all five emulated CPUs in CI. It compares the port's `CPUInfo` with the wheel's `ociocpuinfo`, including the slow-gather rules for Haswell and AMD Zen 3 and older. Keep every dispatch-dependent test in `cargo cpu-tests`.
+- **Review evidence for `CpuInfo::from_cpuid` (2026-11-02, one-off; the CI tests don't repeat it).**
+  - Upstream's `CPUInfo.cpp`, compiled unmodified with a mocked CPUID, matched `CpuInfo::from_cpuid` on 18,582,912 cases: every family and model encoding of both vendors across 6 feature sets, plus 6 million biased random cases. 20 of 20 mutants were killed.
+  - The Windows wheel's `ociocpuinfo.exe`, run under SDE with `-cpuid_in`, agreed with the port on 26 CPUID tables, AMD ones included.
+  - SDE refused the K8 and K10 tables, so those have only the differential check against upstream's source.
 
 ## WP 1.6: optimizer (`ocio-ops`)
 
