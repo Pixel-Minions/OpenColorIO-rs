@@ -85,7 +85,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** non-F32 images through a matrix that offsets alpha, with the default
   optimization.
 - **A fix:** keep alpha's offset through the bake.
-- **Status:** to be matched in Phase 2 (WP 2.5, the Lut1D bake).
+- **Status:** matched in `p1-optimizer` (the bake, `OptimizeSeparablePrefix`);
+  `tests/lut1d_bake_oracle.rs` (`alpha_offset_bakes_match_the_wheel`,
+  `alpha_offsets_render_every_code_as_the_wheel`) compares a Matrix that offsets alpha, before
+  and after a Log, with the wheel at UINT8, UINT10, UINT12, UINT16, F16 and F32 input.
 
 ### I-18. Very large strides wrap around in the checks
 

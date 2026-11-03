@@ -48,6 +48,9 @@ pub(crate) enum T {
     Range,
     /// A `MatrixTransform` scaling RGB by 2 with an offset of 0.1.
     Matrix,
+    /// A `MatrixTransform` scaling RGB by 2 with an offset of 0.1, and alpha by 1 with an
+    /// offset of 0.25.
+    AlphaMatrix,
     /// A `MatrixTransform` that mixes channels (red takes a tenth of green).
     CrossMatrix,
     /// A clamping `RangeTransform` from 0 to 1 on both sides: an identity clamp at integer bit
@@ -78,6 +81,8 @@ const SCALE: [f64; 16] = [
 ];
 /// The offsets of [`T::Matrix`].
 const OFFSET: [f64; 4] = [0.1, 0.1, 0.1, 0.];
+/// The offsets of [`T::AlphaMatrix`].
+const ALPHA_OFFSET: [f64; 4] = [0.1, 0.1, 0.1, 0.25];
 /// The matrix of [`T::CrossMatrix`].
 const CROSS: [f64; 16] = [
     1., 0.1, 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
@@ -144,6 +149,10 @@ pub(crate) fn transform(t: &T) -> Value {
         T::Matrix => {
             return json!({"class": "MatrixTransform",
                 "args": {"matrix": SCALE.to_vec(), "offset": OFFSET.to_vec()}});
+        }
+        T::AlphaMatrix => {
+            return json!({"class": "MatrixTransform",
+                "args": {"matrix": SCALE.to_vec(), "offset": ALPHA_OFFSET.to_vec()}});
         }
         T::CrossMatrix => {
             return json!({"class": "MatrixTransform", "args": {"matrix": CROSS.to_vec()}});
@@ -235,10 +244,14 @@ pub(crate) fn port_raw_ops(chain: &[T]) -> Result<OpVec> {
                 let data = RangeOpData::with_values(RANGE[0], RANGE[1], RANGE[2], RANGE[3])?;
                 create_range_op(&mut raw, data, F)?;
             }
-            T::Matrix => {
+            T::Matrix | T::AlphaMatrix => {
                 let mut data = MatrixOpData::new();
                 data.set_rgba(&SCALE);
-                data.set_rgba_offsets(&OFFSET);
+                data.set_rgba_offsets(if matches!(t, T::Matrix) {
+                    &OFFSET
+                } else {
+                    &ALPHA_OFFSET
+                });
                 data.validate()?;
                 create_matrix_op(&mut raw, data, F);
             }

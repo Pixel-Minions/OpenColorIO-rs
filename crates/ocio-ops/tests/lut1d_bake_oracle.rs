@@ -24,7 +24,9 @@
 //! ExponentWithLinearTransform in a version 2 config), CDL ops, and Exponent ops (a version 1
 //! config's ExponentTransform), with Matrix and Range transforms before and after them; a
 //! matrix that mixes channels, or a CDL with a saturation, ends the prefix; a prefix of Matrix
-//! and Range transforms alone isn't baked, and neither is a single forward 1D LUT.
+//! and Range transforms alone isn't baked, and neither is a single forward 1D LUT. A matrix
+//! that offsets alpha loses the offset in the bake, and keeps it from F32 input
+//! (docs/improvements.md, I-4).
 
 mod common;
 
@@ -432,7 +434,8 @@ fn a_single_lut_isnt_baked_again() {
 }
 
 /// Every code of `depth` on each channel: red `i`, green the codes backwards, blue a
-/// permutation, alpha `i`, in rows of 256 pixels.
+/// permutation, alpha `i`, in rows of 256 pixels. At F32, which has no codes, the 65536
+/// values `i / 65535` in the same arrangement.
 fn ramp(depth: Depth) -> (Vec<u8>, i64) {
     let n = Lut1DOpData::get_lut_ideal_size(port_depth(depth)).unwrap() as usize;
     let mut bytes = Vec::new();
@@ -440,6 +443,8 @@ fn ramp(depth: Depth) -> (Vec<u8>, i64) {
         for code in [i, n - 1 - i, (i * 97) % n, i] {
             if depth == Depth::Uint8 {
                 bytes.push(code as u8);
+            } else if depth == Depth::F32 {
+                bytes.extend_from_slice(&(code as f32 / (n - 1) as f32).to_ne_bytes());
             } else {
                 bytes.extend_from_slice(&(code as u16).to_ne_bytes());
             }
@@ -464,10 +469,24 @@ fn every_code_matches_the_wheel() {
 /// The CPU processors of `sources`, with the default flags, from every code of each input bit
 /// depth, to F32 and to 16-bit output, against the wheel.
 fn every_code_of(sources: &[Source]) {
+    every_code_at(sources, &INPUTS, FLAGS[0]);
+}
+
+/// The output depths of [`every_code_at`].
+const OUTPUTS: [Depth; 2] = [Depth::F32, Depth::Uint16];
+
+/// The CPU processors of `sources`, with `flags`, from every code of each of `inputs`, to each
+/// of [`OUTPUTS`], against the wheel. Returns the wheel's output images, source by source,
+/// then input by input, then output by output.
+fn every_code_at(
+    sources: &[Source],
+    inputs: &[Depth],
+    (name, flags): (&str, OptimizationFlags),
+) -> Vec<Vec<u8>> {
     let mut cases = Vec::new();
     for source in sources {
-        for input in INPUTS {
-            for output in [Depth::F32, Depth::Uint16] {
+        for &input in inputs {
+            for output in OUTPUTS {
                 cases.push((source.clone(), input, output));
             }
         }
@@ -477,7 +496,7 @@ fn every_code_of(sources: &[Source]) {
         .map(|(source, input, output)| {
             let (bytes, height) = ramp(*input);
             let out_size = if *output == Depth::F32 { 4 } else { 2 };
-            let mut request = Request::new(source.args(FLAGS[0].0, *input, *output));
+            let mut request = Request::new(source.args(name, *input, *output));
             let src = request.buffer(Buffer::Bytes(bytes));
             let dst = request.buffer(Buffer::Bytes(vec![0; 4 * 256 * height as usize * out_size]));
             request.image(packed(src, height, *input));
@@ -490,6 +509,7 @@ fn every_code_of(sources: &[Source]) {
     let responses = Oracle::get().batch(&calls, true);
 
     let mut failures = Vec::new();
+    let mut wheel_outputs = Vec::new();
     for (((source, input, output), request), response) in cases.iter().zip(&requests).zip(responses)
     {
         let what = format!("{source:?} {input:?}->{output:?}");
@@ -501,7 +521,7 @@ fn every_code_of(sources: &[Source]) {
                 &source.raw_ops()?,
                 port_depth(*input),
                 port_depth(*output),
-                FLAGS[0].1,
+                flags,
             )?;
             let (src_buffers, dst_buffers) = buffers.split_at_mut(1);
             let src = port_image(&request.images[0], |_| Bytes(&src_buffers[0][..]))?;
@@ -518,6 +538,7 @@ fn every_code_of(sources: &[Source]) {
             }
             Ok(()) => {}
         }
+        wheel_outputs.push(reply.buffers[1].clone());
     }
     assert!(
         failures.is_empty(),
@@ -526,4 +547,85 @@ fn every_code_of(sources: &[Source]) {
         cases.len(),
         failures.join("\n")
     );
+    wheel_outputs
+}
+
+/// A Matrix that offsets alpha, before and after a Log. With integer and half input, the
+/// default flags bake the two into one Lut1D (`OptimizeSeparablePrefix`,
+/// src/OpenColorIO/OpOptimizers.cpp:553-595 @ v2.5.2), which scales alpha and drops the
+/// matrix's alpha offset (docs/improvements.md, I-4); F32 input isn't baked
+/// (OpOptimizers.cpp:562-565) and keeps it.
+fn alpha_offset_chains() -> Vec<Source> {
+    vec![
+        vec![T::AlphaMatrix, T::Log(2.0, F)],
+        vec![T::Log(2.0, F), T::AlphaMatrix],
+    ]
+    .into_iter()
+    .map(Source::Chain)
+    .collect()
+}
+
+/// The optimized processors of [`alpha_offset_chains`] against the wheel: baked at every
+/// integer and half input, with each level that bakes, and not baked at F32 input.
+#[test]
+fn alpha_offset_bakes_match_the_wheel() {
+    let sources = alpha_offset_chains();
+    let mut cases = bake_cases(&sources);
+    let baking = cases.len();
+    for source in &sources {
+        for output in OUTPUTS {
+            for (name, flags) in FLAGS {
+                cases.push((source.clone(), Depth::F32, output, name, flags));
+            }
+        }
+    }
+    let baked = check_bakes(&cases);
+    assert_eq!(baked, baking);
+}
+
+/// The CPU processors of [`alpha_offset_chains`], from every code of each integer and half
+/// input and from F32 input, with the default flags and with `OPTIMIZATION_NONE`, against the
+/// wheel. The wheel's own outputs show the case is I-4's: from integer and half input, the
+/// default flags change some alpha values against `OPTIMIZATION_NONE`, which keeps the offset;
+/// from F32 input they change none.
+#[test]
+fn alpha_offsets_render_every_code_as_the_wheel() {
+    let sources = alpha_offset_chains();
+    let mut inputs = INPUTS.to_vec();
+    inputs.push(Depth::F32);
+    let default = every_code_at(&sources, &inputs, FLAGS[0]);
+    let none = every_code_at(
+        &sources,
+        &inputs,
+        ("OPTIMIZATION_NONE", OptimizationFlags::NONE),
+    );
+    assert_eq!(default.len(), sources.len() * inputs.len() * OUTPUTS.len());
+    assert_eq!(none.len(), default.len());
+
+    let mut cases = default.iter().zip(&none);
+    for source in &sources {
+        for &input in &inputs {
+            for output in OUTPUTS {
+                let (default, none) = cases.next().unwrap();
+                let size = if output == Depth::F32 { 4 } else { 2 };
+                let alphas = |image: &[u8]| -> Vec<Vec<u8>> {
+                    image
+                        .chunks_exact(size)
+                        .skip(3)
+                        .step_by(4)
+                        .map(<[u8]>::to_vec)
+                        .collect()
+                };
+                let (a, b) = (alphas(default), alphas(none));
+                assert!(!a.is_empty() && a.len() == b.len(), "{source:?} {input:?}");
+                let changed = a.iter().zip(&b).filter(|(x, y)| x != y).count();
+                let what = format!("{source:?} {input:?}->{output:?}");
+                if input == Depth::F32 {
+                    assert_eq!(changed, 0, "{what}: the default flags change alpha");
+                } else {
+                    assert!(changed > 0, "{what}: the default flags keep alpha's offset");
+                }
+            }
+        }
+    }
 }
