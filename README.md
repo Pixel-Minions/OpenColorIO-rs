@@ -8,18 +8,18 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and Python.
 
-> **Status: preparing the first release, 1.0.0; 913 of 913 upstream source files accounted for.**
-> Nothing is published yet. The release will be `opencolorio-rs`, on crates.io and on PyPI.
-> Milestones M0 (the op engine and the analytic
+> **Status: 1.0.0 (`1.0.0+ocio.2.5.2`) is the release; 913 of 913 upstream source files
+> accounted for.** It is on crates.io as `opencolorio-rs` (with `opencolorio-rs-ops`,
+> `opencolorio-rs-formats` and `opencolorio-rs-gpu`) and on PyPI as `opencolorio-rs`
+> ([changelog](CHANGELOG.md)). Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker), M3 (dynamic properties,
-> grading and app helpers), and M4 (the `PyOpenColorIO` Python module) are complete.
+> grading and app helpers), M4 (the `PyOpenColorIO` Python module) and M5 (full OCIO 2.5.2
+> parity and the release) are complete.
 > CPU results and generated GPU shaders match the official library. All 384 upstream
 > Python tests pass unmodified; SystemMonitors and complete module metadata are checked
 > on Windows and Rocky Linux 9, within the approved [D-16 scope](docs/deviations.md).
-> The Python wheel builds and passes those tests installed, on both platforms. Full
-> emulated-CPU qualification on the release commit and the last release steps (M5) remain
-> open. See [Progress](#progress).
+> The Python wheel passes those tests installed, on both platforms. See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -149,7 +149,7 @@ validated earlier passes and selects only the cancelled shard's unproven cases;
 its recovered evidence qualifies the original source, not the release commit.
 The final full matrix waits for clean snb results and explicit owner confirmation,
 and must run on the exact commit that gets tagged. Its opt-level 0 depth tests
-are part of that final run. Release-audit findings and packaging also remain open.
+are part of that final run.
 SDE is advisory for merging; it remains part of the definition of a finished port. Phases 1 (the op engine and
 the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
 formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
@@ -295,21 +295,20 @@ shader text are compared with the official library.
 
 Each milestone completes a section of OCIO with exact oracle checks:
 
-| Milestone | Section | Status (2026-11-02) | Version |
+| Milestone | Section | Status (2026-11-03) | Version |
 |---|---|---|---|
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | **Done** | `0.4.0` |
 | **M4** | The `PyOpenColorIO`-compatible Python module | **Done:** all 384 upstream Python tests, SystemMonitors and complete module metadata checks pass on both reference platforms, within the approved [D-16 scope](docs/deviations.md) | `0.5.0` |
-| **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. The release is prepared under the name `opencolorio-rs`: four crates package for crates.io, and the Python wheel builds, with all 384 upstream Python tests passing on the installed wheel on both platforms. Nothing is published yet. All 46 public real-world configs match the wheel on both platforms. Every shader of the 264 upstream GPU tests compiles on real compilers except 36 in GLSL ES 1.0; those and the family tests' shaders that fail are upstream's own text (open item P7-9). Legacy shader/texture snapshots and post-extraction dynamic updates are checked; all upstream source files are accounted for. Remaining: complete SDE qualification and release checks | `1.0.0` |
+| **M5** | Full OCIO 2.5.2 parity | **Done:** released as 1.0.0. GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in; the few paths still slower than the target are accepted for 1.0.0 ([changelog](CHANGELOG.md)). The release is `opencolorio-rs`: four crates on crates.io, and the Python wheel on PyPI, with all 384 upstream Python tests passing on the installed wheel on both platforms. All 46 public real-world configs match the wheel on both platforms. Every shader of the 264 upstream GPU tests compiles on real compilers except 36 in GLSL ES 1.0; those and the family tests' shaders that fail are upstream's own text (open item P7-9). Legacy shader/texture snapshots and post-extraction dynamic updates are checked; all upstream source files are accounted for | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
 
 ## Installing
 
-Nothing is published yet. From 1.0.0, the Rust crates come from crates.io and the Python module
-from PyPI, both as `opencolorio-rs`:
+The Rust crates come from crates.io and the Python module from PyPI, both as `opencolorio-rs`:
 
 ```sh
 cargo add opencolorio-rs      # in code, the library is `ocio`
@@ -353,6 +352,6 @@ BSD-3-Clause, the same license as OpenColorIO. This project is a derivative work
 OpenColorIO (Copyright Contributors to the OpenColorIO Project); [`NOTICE`](NOTICE) is its
 notice. [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) lists the third-party code it ports,
 with each notice: Imath, yaml-cpp, pystring, expat, minizip-ng, the Microsoft C++ Standard
-Library, Little CMS, SampleICC, pybind11, and the OpenColorIO files that carry their own
+Library, Little CMS, SampleICC, pybind11, CPython, and the OpenColorIO files that carry their own
 notices. It also lists the Rust crates a built wheel or tool contains. OpenColorIO-rs is not
 affiliated with the Academy Software Foundation.
