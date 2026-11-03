@@ -28,7 +28,7 @@ default-members = [
 # 0.0.x is Phase 0; M0 is 0.1.0.
 version = "0.0.0+ocio.2.5.2"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.98.1"
 license = "BSD-3-Clause"
 authors = ["Contributors to the OpenColorIO Project", "Pixel Minions"]
 repository = "https://github.com/Pixel-Minions/OpenColorIO-rs"

@@ -1,6 +1,11 @@
 # OpenColorIO-rs — Porting Plan
 
-**Status:** v0.9, 2026-10-04. Phases 0, 0b and 1 are complete (M0, §15); Phase 2 comes next.
+**Status:** v1.0, 2026-11-02. Phases 0 to 9 are in (M0 to M4), and all 913 upstream source files are accounted for. Phase 10, the release, is what remains: complete SDE qualification and the steps of `docs/release-checklist.md`. Nothing is published yet. §15 keeps the phase-by-phase record as it stood at the time.
+- **Changes in v1.0:**
+  - distribution on crates.io and PyPI under the name `opencolorio-rs` (§2, D6, D14);
+  - D1 and D8 recorded as they stand;
+  - what §8 and §9 said would exist now matches what does: SDE runs only by hand, the exhaustive tier isn't in CI, and Miri, `cargo-mutants` and a minimum-version job were not built;
+  - `xtask upstream-diff` and the `ocio-2.5` branch rule follow 1.0.0.
 - **Changes in v0.9:**
   - Phase 1 results and its measured duration (§1, §11, §15);
   - owner decisions: the optimizer's generic core moved to 1.2d (Option A); Lut1D E–J move to Phase 2 (WP 2.1, 2.5); upstream `Processor` and `CPUProcessor` tests that need `Config::Create()` move to Phase 3;
@@ -125,15 +130,18 @@ Consumers adopt each section as it lands, through OCIO's API, and they align wit
 | Matched OCIO version | Build metadata on every version, so `cargo tree` and `Cargo.lock` show it | `1.0.0+ocio.2.5.2` |
 | Git tags | Our version. Each release note starts with the OCIO version it matches | `v1.0.0`: "matches OCIO 2.5.2" |
 | Version bumps | A new OCIO minor is a major bump; a new OCIO patch is a minor bump; port-only fixes are a patch bump; Rust-only additions are a minor bump | OCIO 2.6.0 → `2.0.0+ocio.2.6.0`; a fix → `1.0.1+ocio.2.5.2` |
-| Maintenance branches | One per matched OCIO minor | `ocio-2.5` carries 1.x; `main` moves on to 2.6 |
+| Maintenance branches | One per matched OCIO minor, from the first port of a later minor. CI already triggers on `ocio-*`; the branch and its rules follow 1.0.0 | `ocio-2.5` carries 1.x; `main` moves on to 2.6 |
 | Upstream pin | Submodule at the matched tag; oracle wheel of the same version | `upstream/OpenColorIO` @ `v2.5.2`; `opencolorio==2.5.2` |
 | Runtime version | `ocio::version()` and Python's `__version__` report OCIO's version, as OCIO does; `ocio::PORT_VERSION` reports ours | `"2.5.2"` and `"1.0.0"` |
 | Accepted configs | Exactly the matched release's | `ocio_profile_version` ≤ 2.5; a 2.6 config fails with 2.5.2's error |
 | Distribution | Rust crates on crates.io as `opencolorio-rs` (D6); the library's name in code stays `ocio` | `opencolorio-rs = "1"`, then `use ocio::Config;` |
+| Python distribution | A wheel on PyPI as `opencolorio-rs` (D14), with the plain version `1.0.0`; the import name stays `PyOpenColorIO` | `pip install opencolorio-rs`, then `import PyOpenColorIO` |
 
 This scheme works unchanged on crates.io:
 - every release has its own number;
 - a new OCIO minor is always a major bump, so Cargo's default `^` requirement never crosses one.
+
+A git dependency isn't a distribution path, so there's no git consumer to test (G17 of the release gap audit). The published path is what's checked: `cargo package` with its verify build, in CI on both platforms, and `cargo xtask wheel-check` on the installed wheel. Only the four crates of D6 are published. `ocio-py`, which holds the embedding API (D13), isn't, so embedding needs the repository as a path dependency.
 
 ---
 
@@ -230,14 +238,14 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 
 | # | Decision | Choice | Status |
 |---|---|---|---|
-| **D1** | Porting strategy | A clean port from source, checked against the oracle. Swapping Rust in piece by piece inside the C++ library (as the fish shell did) doesn't fit: OCIO's internals aren't exposed through its API, `autocxx` is archived, and `c2rust` only handles C | Proposed |
+| **D1** | Porting strategy | A clean port from source, checked against the oracle. Swapping Rust in piece by piece inside the C++ library (as the fish shell did) doesn't fit: OCIO's internals aren't exposed through its API, `autocxx` is archived, and `c2rust` only handles C | In force: every phase was built this way |
 | **D2** | API surface | A Rust API plus a Python module compatible with PyOpenColorIO 2.5.2. The C ABI is deferred | Decided |
 | **D3** | Target | OCIO 2.5.2 exactly; later OCIO versions become new major versions | Decided |
 | **D4** | Equivalence | Byte-exact as defined in §3; waivers only with your sign-off | Decided |
 | **D5** | Existing port (`doubleailes/ocio-rs`) | Skip the audit for now and port independently. Note that it is MIT-licensed although derived from BSD-3 code | Decided (skipped for now) |
 | **D6** | Distribution | The Rust crates are published on crates.io under the name `opencolorio-rs` (`ocio` and `opencolorio` are taken there), with `opencolorio-rs-ops`, `opencolorio-rs-formats` and `opencolorio-rs-gpu` beside it. `use ocio::...` doesn't change. Nothing has been published or reserved yet. The GitHub repository is public, which is fine for now | Decided; crates.io and the name 2026-11-02 |
-| **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`; edition 2024; `rust-version = "1.98"` | Decided (Phase 0) |
-| **D8** | `unsafe` policy | `#![forbid(unsafe_code)]` everywhere except the SIMD and Python-binding modules; P9-3 permits the single Windows monitor FFI file `crates/ocio/src/system_monitor_windows_ffi.rs`, as the existing minizip Windows FFI exception | Proposed; monitor exception approved 2026-10-23 (P9-3) |
+| **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`; edition 2024; `rust-version = "1.98.1"` | Decided (Phase 0) |
+| **D8** | `unsafe` policy | `unsafe_code` is denied across the workspace, and `cargo xtask guards` allows it only in the SIMD modules and the files of its allowlist: the `ocio-py` files it names, the test-only `ocio-gpu-exec` files (P7-2 to P7-5), and the FFI files `crates/ocio/src/minizip/os_windows_ffi.rs`, `crates/ocio/src/system_monitor_windows_ffi.rs` (P9-3) and `crates/ocio-tools/src/sigpipe.rs` | In force; the exceptions were approved by the owner as each came (2026-10-17 to 2026-10-31) |
 | **D9** | License | BSD-3-Clause, keeping upstream's notice ("Copyright Contributors to the OpenColorIO Project") | Required (the port is a derivative work) |
 | **D10** | Versioning | Our own semver; the matched OCIO version goes in build metadata (`1.0.0+ocio.2.5.2`) and in the release notes; tags `v1.0.0` (§2) | Decided |
 | **D11** | Platforms | Windows x86-64 and Linux x86-64 (Rocky Linux 9, glibc 2.34), both bit-exact reference platforms from Phase 0. ARM and macOS come later | Decided |
@@ -313,8 +321,8 @@ These exist so that no one can pass by weakening a check.
 - **Exact by default.** Comparisons are exact unless a waiver in `waivers.toml` says otherwise, and every waiver needs your approval.
 - **No hidden gaps.** The main branch may not contain `#[ignore]`, `todo!()` or `unimplemented!()` without a tracked waiver.
 - **Coverage only goes up.** The count of ported upstream tests can only increase. Every upstream test and source file is either mapped or marked not-applicable with a reason.
-- **Tests must catch changes.** `cargo-mutants` runs on the core modules to show that tests fail when the code is deliberately broken.
-- **Standard checks:** clippy, fmt, `cargo-deny`, and `forbid(unsafe_code)` outside the SIMD and binding modules.
+- **Tests must catch changes.** Independent verifier rounds break the code on purpose, by hand, and check that tests fail. `cargo-mutants` was not built: see §8, "Not built".
+- **Standard checks:** clippy, fmt, `cargo-deny`, and `unsafe_code` denied outside the modules and files of D8.
 
 ### Team shape: 2–3 agents at a time
 
@@ -406,7 +414,7 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
 - OpenColorIO-Config-ACES releases v1.0.0 to v4.0.0.
 - Legacy v1 configs: spi-vfx, spi-anim, nuke-default and aces_1.x.
 - Upstream's `tests/data/files` (261 files).
-- Transform chains and configs generated with `proptest`, run against the oracle.
+- Generated parameters: the test battery makes extreme, NaN and ±Inf cases for each op family. `proptest` was not adopted.
 - Your studio configs, run locally only.
 
 ### GPU
@@ -425,8 +433,7 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
 ### Robustness and performance
 
 - **Fuzzing, after 1.0.0 (owner decision 2026-11-01, G6).** Not required for 1.0.0. Planned for after it: `cargo-fuzz` targets for every parser, plus differential fuzzing that checks we accept and reject the same inputs as the oracle. Upstream's size limits apply: 1D LUTs up to 300,000 entries, 3D LUTs up to 129³.
-- **Benchmarks.** criterion benchmarks, compared against:
-  - the wheel's `ocioperf` on the same machine.
+- **Benchmarks.** `tools/perf-compare` compares the port with the wheel on the same machine, by hand and not in CI. `criterion` was not adopted.
 
 ### CI
 
@@ -439,13 +446,14 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
 - **Forced numeric profiles.** Every profile (scalar, SSE2, AVX, AVX2, AVX-512) is exercised, just as upstream reruns its tests for each SIMD mode.
   - The port can run any profile on any CPU, but the wheel only runs the kernel its CPU selects.
   - So the CPU-dependent tests (`cargo cpu-tests`) also run under Intel SDE, on emulated Nehalem (SSE2 kernels), Sandy Bridge (AVX), Haswell (AVX2 with slow gather), Skylake (AVX2) and Skylake server (AVX-512), on both platforms (`scripts/sde.sh`, `.github/workflows/sde.yml`).
-  - They run nightly and on PRs that touch the kernels, the test kit or the oracle.
+  - Every production SDE job runs only on `workflow_dispatch`. `sde.yml` still names a schedule and PR paths, but they start nothing, so there is no nightly run. SDE is advisory for merging.
   - **Final qualification (owner decision 2026-11-01, G4).** One full SDE run on the release commit, then a rerun of only the affected CPU profiles if needed. `docs/release-checklist.md` holds the dispatch until the release commit exists.
-- **Also in CI:**
-  - the minimum Rust version;
-  - Miri (Rust's undefined-behavior checker) on `unsafe` modules;
-  - nightly sweeps, and quick fuzz runs after 1.0.0;
-  - the Python wheel build and upstream's Python suite.
+- **Test tiers.** `quick` per chunk and `full` in CI and at landing. The `exhaustive` tier exists in the battery (`crates/ocio-testkit/src/battery/tier.rs`), but nothing in CI sets it. One exhaustive run is made by hand before the release.
+- **Also in CI:** the Python wheel build, and upstream's Python suite on the installed wheel.
+- **Not built, after 1.0.0 (owner decision 2026-10-25: no more tooling projects).**
+  - **Miri** (Rust's undefined-behavior checker) on `unsafe` modules. It can't run inline assembly either, so it could only ever cover part of them.
+  - **`cargo-mutants`.** Mutation testing stays by hand, in the verifier rounds.
+  - **A minimum-version job.** `rust-version` is 1.98.1, the pinned toolchain, so CI's own build is the check.
 
 ---
 
@@ -470,7 +478,8 @@ OpenColorIO-rs/
 ├── fixtures/               generated by the oracle; hash manifest; read-only for agents
 ├── corpus/               real-world configs (ACES releases, legacy v1), checked against the oracle
 ├── upstream/OpenColorIO/   git submodule @ v2.5.2 (also supplies tests/python)
-├── xtask/                  oracle regen, parity dashboard, upstream diff → porting cards
+├── py-wheel/               the `opencolorio-rs` wheel: maturin's project (`cargo xtask wheel-build`)
+├── xtask/                  oracle regen, parity dashboard, gate, landing, wheel build and check
 ├── upstream-map.toml       each upstream file → its Rust module (or not-applicable)
 └── docs/                   parity dashboard, waivers, deviations, porting cards
 ```
@@ -496,24 +505,27 @@ OpenColorIO-rs/
 
 ### API sketches
 
-Rust (the same calls as OCIO's C++ API):
+Rust (the same calls as OCIO's C++ API; the crate documentation's example compiles and runs the same calls):
 
 ```rust
-let config = ocio::Config::from_builtin("cg-config-v4.0.0_aces-v2.0_ocio-v2.5")?; // or from_file / from_env / from_uri
+let config = ocio::Config::create_from_builtin_config("cg-config-v4.0.0_aces-v2.0_ocio-v2.5")?; // or create_from_file / create_from_env
 config.validate()?;
-let view = ocio::DisplayViewTransform::new("ACEScg", "sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)");
+let mut view = ocio::DisplayViewTransform::new();
+view.set_src("ACEScg");
+view.set_display("sRGB - Display");
+view.set_view("ACES 2.0 - SDR 100 nits (Rec.709)");
 let proc = config.processor(&view.into())?;                 // Arc<Processor>
 
 let cpu = proc.default_cpu_processor()?;
-cpu.apply_rgba(&mut strip)?;                                 // &mut [[f32; 4]]; bit-identical to applyRGBA; an error where OCIO reads past a LUT (U-1)
+cpu.apply_rgba(&mut pixel)?;                                 // &mut [f32; 4]; bit-identical to applyRGBA. Images: cpu.apply(&mut image_desc)
 
-let mut desc = ocio::GpuShaderDesc::new(ocio::GpuLanguage::GlslVk4_6);
+let mut desc = ocio_gpu::GpuShaderDesc::new(ocio_gpu::GpuLanguage::GlslVk4_6); // from opencolorio-rs-gpu
 desc.set_allow_texture_1d(false);
-desc.set_descriptor_set_index(1, 1);
+desc.set_descriptor_set_index(1, 1)?;
 desc.set_function_name("ocio_display");
 desc.set_resource_prefix("ocio_");
 proc.default_gpu_processor()?.extract_gpu_shader_info(&mut desc)?;
-let text = desc.shader_text();                               // byte-identical to OCIO's
+let text = desc.shader_text();                               // &[u8], byte-identical to OCIO's
 ```
 
 Python (the same API as PyOpenColorIO):
@@ -536,12 +548,12 @@ print(OCIO.__version__)                       # "2.5.2"
 | Half floats | `half` 2.7 | F16C and software conversions; spike S4 checks that they are equal |
 | SIMD | `core::arch` plus runtime detection | Each SIMD kernel must equal its scalar numeric profile |
 | Cache IDs | `xxhash-rust` (xxh3) | XXH3-128, printed low 64 bits then high 64 bits |
-| `.ocioz` archives | `zip` 8.x (deflate only), version pinned | Archives compared entry by entry; the deflate bytes are deviation D-6 (P4-3, decided 2026-10-07) |
-| Regex | `regex`, `fancy-regex` | — |
+| `.ocioz` archives | A port of minizip-ng 4.0.10, with `flate2` for deflate | Archives compared entry by entry; the deflate bytes are deviation D-6 (P4-3, decided 2026-10-07) |
+| Regex | Hand-written, as each wheel's C++ library implements `std::regex` | Phase 3 D2 (`docs/cards/phase3.md`): no regex crate |
 | ICC | The subset of SampleICC 1.2.6 OCIO uses, translated, with its notice | OCIO reads only matrix/TRC profiles (P4-4, decided 2026-10-07) |
-| Python | `pyo3` 0.29 and `numpy` 0.29, pinned exactly; `maturin` 1.15 for the release wheel (Phase 10) | Embedded via `append_to_inittab`; a standalone module for CPython 3.13 only (`cp313`, not `abi3`), built by `cargo xtask py-build` until the release (P6-1 to P6-5, decided 2026-10-17, `docs/cards/phase6.md`) |
+| Python | `pyo3` 0.29 and `numpy` 0.29, pinned exactly; `maturin` 1.15 for the wheel | Embedded via `append_to_inittab`; a standalone module for CPython 3.13 only (`cp313`, not `abi3`). The wheel is built by maturin through `uv build` (`cargo xtask wheel-build`, D14). `cargo xtask py-build` lays out the development module the tests use (P6-1 to P6-5, decided 2026-10-17, `docs/cards/phase6.md`) |
 | GPU checks | glow 0.17 + khronos-egl 6.0 (dynamic libloading 0.8.9), Mesa llvmpipe; glslang, Windows SDK fxc/dxc | Test-only `ocio-gpu-exec`; owner decisions P7-2 through P7-5, 2026-10-25 |
-| Tests, benchmarks, CLI | `proptest`, `cargo-fuzz` (after 1.0.0), `cargo-mutants`, `criterion`, `clap` | No tolerance crates: comparisons are exact |
+| Tests, benchmarks, CLI | `cargo-fuzz` after 1.0.0; no test, benchmark or CLI crate otherwise | No tolerance crates: comparisons are exact |
 
 ---
 
@@ -726,7 +738,7 @@ The assumption: the team delivers 3–5 conventional person-weeks of *verified* 
 
 Here is the process for moving from one OCIO release to the next (for example, 2.5.2 → 2.6.0):
 1. Branch `ocio-2.5` off for 1.x maintenance. On `main`, bump the submodule to `v2.6.0` and the oracle to `opencolorio==2.6.0`.
-2. `xtask upstream-diff v2.5.2 v2.6.0` lists the changed upstream files. `upstream-map.toml` maps them to Rust modules, and one porting card is generated per change.
+2. `xtask upstream-diff v2.5.2 v2.6.0`, to be built after 1.0.0, lists the changed upstream files. `upstream-map.toml` maps them to Rust modules, and one porting card is generated per change.
 3. Port the new and changed upstream tests first (C++, GPU and Python), then regenerate the fixtures. Everything that fails is the work list.
 4. Agents port until §3 holds for 2.6.0. Then tag `v2.0.0`, with release notes saying "matches OCIO 2.6.0". The crate version is `2.0.0+ocio.2.6.0`, and Python's `__version__` becomes `2.6.0`.
 
@@ -812,7 +824,7 @@ None right now. Answered on 2026-09-29:
   - the Lut3D SSE2/AVX kernels quieted signaling-NaN alphas in release builds. LLVM had turned a copy into arithmetic, which led to the "Channels that pass through" rule;
   - an oracle pipe failure under load: large requests are now written in pieces, and writer errors are reported;
   - the oracle cache mixing up emulated CPUs.
-- **Still open from T5b:** the nightly exhaustive tier and `cargo-mutants` on changed modules. They are built during Phase 1, not before it.
+- **Still open from T5b at the time:** the nightly exhaustive tier and `cargo-mutants` on changed modules. Neither was built: see §8.
 
 **Phase 1: complete (2026-10-04).** Card file `docs/cards/phase1.md`. Milestone M0: the analytic transforms through `Config::CreateRaw()` processors, byte-exact on CPU and GPU.
 - **Cards landed:** `p1-oracle-image`, `p1-math`, `p1-foundations` (and `p1-foundations-fix`), `p1-oracle-2`, `p1-bitdepth-2`, `p1-gpu-infra-3`, `p1-engine-3`, `tooling-1`, `p1-gpu-ops`, `p1-matrix-4` (Range and Matrix), `p1-gamma-2`, `p1-cdl-2`, `p1-exponent-4`, `p1-log-2`, `p1-gpu-gamma-2`, `p1-optimizer-2`, `p1-gpu-ops4`, `p1-transforms-fam4` (every transform, with Allocation and Lut1DTransform), `tooling-2`, `p1-processor-4`, `p1-tests-catchup-3`, `p1-api-parity-2`.

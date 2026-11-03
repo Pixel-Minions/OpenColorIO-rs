@@ -1,0 +1,23 @@
+{
+  "CompletedUTC": "2026-10-30T23:31:13.698723+00:00",
+  "PR": {
+    "headRefOid": "be369c75000cefebfc8faf992b553add930ff6ae",
+    "mergedAt": "2026-10-30T23:30:47Z",
+    "state": "MERGED",
+    "url": "https://github.com/Pixel-Minions/OpenColorIO-rs/pull/88"
+  },
+  "Main": "be369c75000cefebfc8faf992b553add930ff6ae",
+  "NormalAll17Passed": true,
+  "BothFocusedGPUProfilesVerified": true,
+  "GPUCases": 264,
+  "NewFixedFunctionCases": 59,
+  "ApprovedExactPins": [
+    "W0014",
+    "W0015",
+    "W0016",
+    "W0017",
+    "W0018"
+  ],
+  "PrimaryClean": true,
+  "RawEvidenceKeptLocal": true
+}

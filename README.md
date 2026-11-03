@@ -8,15 +8,18 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and Python.
 
-> **Status: under development; all 913 upstream source files accounted for.** Milestones M0 (the op engine and the analytic
+> **Status: preparing the first release, 1.0.0; 913 of 913 upstream source files accounted for.**
+> Nothing is published yet. The release will be `opencolorio-rs`, on crates.io and on PyPI.
+> Milestones M0 (the op engine and the analytic
 > transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs), M2 (every file
 > format, file-based configs, `.ocioz` archives and the baker), M3 (dynamic properties,
 > grading and app helpers), and M4 (the `PyOpenColorIO` Python module) are complete.
 > CPU results and generated GPU shaders match the official library. All 384 upstream
 > Python tests pass unmodified; SystemMonitors and complete module metadata are checked
 > on Windows and Rocky Linux 9, within the approved [D-16 scope](docs/deviations.md).
-> Source accounting is complete; full emulated-CPU qualification and release work
-> (M5) remain open. See [Progress](#progress).
+> The Python wheel builds and passes those tests installed, on both platforms. Full
+> emulated-CPU qualification on the release commit and the last release steps (M5) remain
+> open. See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -80,11 +83,13 @@ one.
 - **Safe with untrusted files.** Config and LUT parsers are written without `unsafe` code, and
   fuzzing them against the official library is planned for after 1.0.0. Known data races in
   upstream get fixed without changing any output.
-- **Room to be faster without changing results.** Planned: multithreaded processing, caching
-  of expensive setup (such as the ACES 2.0 tables), and more SIMD. Each is only allowed if it
-  is bit-identical to the exact version, and the tests enforce that.
-- **One engine for Rust and Python.** A module compatible with `PyOpenColorIO` (planned)
-  runs on the same Rust code, so scripts and applications give identical results.
+- **Room to be faster without changing results.** `CpuProcessor::apply_threaded`, which upstream
+  doesn't have, renders rows on several threads, and tests compare it with the official library.
+  Planned: caching of expensive setup, such as the ACES 2.0 tables. Each is only allowed if it is
+  bit-identical to the exact version, and the tests enforce that.
+- **One engine for Rust and Python.** The `opencolorio-rs` wheel installs a module compatible with
+  `PyOpenColorIO` that runs on the same Rust code, so scripts and applications give identical
+  results. Moving over: [`docs/python-migration.md`](docs/python-migration.md).
 - **Tracks new OCIO releases.** Each upstream release is ported as a diff and proven again
   against that release's official package. Versions say what they match:
   `1.0.0+ocio.2.5.2` is the complete port of OCIO 2.5.2, and a later major version will match
@@ -295,6 +300,21 @@ Each milestone completes a section of OCIO with exact oracle checks:
 | **M5** | Full OCIO 2.5.2 parity | GPU execution: 264/264 upstream cases on llvmpipe. The tools `ociocheck`, `ociochecklut`, `ociowrite` and `ociobakelut` are ported, ICC output included, within deviations D-17 and D-18 on Windows. SIMD speed is in, with a few paths still slower than the target. The release is prepared under the name `opencolorio-rs`: four crates package for crates.io, and the Python wheel builds, with all 384 upstream Python tests passing on the installed wheel on both platforms. Nothing is published yet. All 46 public real-world configs match the wheel on both platforms. Every shader of the 264 upstream GPU tests compiles on real compilers except 36 in GLSL ES 1.0; those and the family tests' shaders that fail are upstream's own text (open item P7-9). Legacy shader/texture snapshots and post-extraction dynamic updates are checked; all upstream source files are accounted for. Remaining: complete SDE qualification and release checks | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
+
+## Installing
+
+Nothing is published yet. From 1.0.0, the Rust crates come from crates.io and the Python module
+from PyPI, both as `opencolorio-rs`:
+
+```sh
+cargo add opencolorio-rs      # in code, the library is `ocio`
+pip install opencolorio-rs    # Python 3.13; `import PyOpenColorIO`
+```
+
+The wheel can't share an environment with the official `opencolorio`, and needs glibc 2.34 or
+newer on Linux. [`docs/python-migration.md`](docs/python-migration.md) covers the move from
+`opencolorio`. The crate documentation (`cargo doc -p opencolorio-rs --open`) starts with an
+example.
 
 ## Building and testing
 

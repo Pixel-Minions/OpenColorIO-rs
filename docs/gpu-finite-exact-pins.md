@@ -5,7 +5,7 @@ covered the four ACES2 failures and the existing minimal pow proof covered Gamut
 inverse. There is no port/harness defect. W0013 remains unchanged; no new class rule
 or threshold is introduced. All59 original fixed-function cases run unchanged.
 
-The [report](../kept/gpu-exact-pins/2026-10-30/aces2-debug/ACES2-GPU-FINDINGS.md)
+The [report](evidence/gpu-exact-pins/aces2-debug/ACES2-GPU-FINDINGS.md)
 records standalone replay, wheel stage matching, CPU-layout equivalence, builtin
 accuracy checks and knockout experiments. The key causal controls are:
 
@@ -21,7 +21,7 @@ accuracy checks and knockout experiments. The key causal controls are:
   Aab cancellation amplifies small builtin errors.
 - GamutComp13 inverse: minimal pow reproduces the original GPU output; replacing
   only pow word3f7a4c78 with platform3f7a4c75 brings error below3e-6. See the
-  [existing proof](../kept/gpu-exact-pins/2026-10-30/GAMUT-ROOT-CAUSE-STATUS.md).
+  [existing proof](evidence/gpu-exact-pins/GAMUT-ROOT-CAUSE-STATUS.md).
 
 `waivers.toml` contains W0014-W0018 separately. The existing unpublished lookup keeps
 its signature; its parser accepts only these five id/test pairs, exact recorded
@@ -39,8 +39,9 @@ one-bit changes anywhere in input/CPU/GPU data, wrong nan_bug RGB pins, missing 
 proof, wrong language/run and broken whole-image identity. Live pin records are saved
 beside native GPU controls for independent CI verification.
 
-Canonical full evidence is kept at `kept/gpu-exact-pins/2026-10-30/` in the primary
-checkout. Raw debugger/CI evidence, source and hash provenance remain kept locally;
-the approved code, waiver register and causal documentation are published.
-No old protected evidence or debugger source is moved, edited or deleted. Full focused
-GPU validation and final-head normal CI are still required before landing.
+The reports, their causal sources and raw text results, the hash manifest and the
+validation summaries are committed under
+[`evidence/gpu-exact-pins/`](evidence/gpu-exact-pins/README.md), unchanged. The rest, raw
+pixel buffers and CI captures included, is kept at `kept/gpu-exact-pins/2026-10-30/` in the
+primary checkout, which the manifest lists with hashes. Focused GPU validation passed in
+run 41125187384 and normal CI on the landing, PR 88.

@@ -5,13 +5,14 @@ machine-readable authority. W0001 (Windows PQ exact-math bounds) and W0002
 (NaN transform-parameter payload/sign and their baked-LUT scope) retain their
 existing approval and exact text there; this proposal changes neither.
 
-## P7-6 renderer exceptions — owner approved; runtime validation pending
+## P7-6 renderer exceptions — owner approved; validated and retired 2026-10-29
 
 The project owner explicitly approved W0003 through W0012 and the single
 unpublished test-helper lookup on 2026-10-27. Each entry records approved=true,
 approved_by="Project owner, explicit chat approval on 2026-10-27" and that date.
-No test is skipped. Only source application has been authorized so far: the
-enforcement implementation, policy units, mutations and full gates remain pending.
+No test is skipped. The runtime validation is recorded in `gpu-nonfinite-validation.json`
+and `gpu-nonfinite.md`: CI run 40926626678 passed debug and release with every rule
+enforced, and W0003-W0012 were then retired in favour of W0013.
 Approval record SHA256:
 8d88137448154e0b7135a01fbccd93248d49a87ecfca4ef36d3e1aca98dfe59b.
 
@@ -475,7 +476,9 @@ Both profiles passed all69 cases, full finite companions, independent readback
 regressions and rejection controls in CI40926626678 before W0003-W0012 were
 retired. All519 original exceptions across46 cases match the reviewed audit.
 The old entries are archived and cannot grant active exceptions; all new class
-checks remain enforced. Normal CI must still pass on the final merge candidate.
+checks remain enforced. CI artifacts expire after 30 days: what stays of these runs is
+`gpu-nonfinite-validation.json` for CI40926626678 and the measured counts in
+`gpu-nonfinite.md` for the root-cause run CI40892696031.
 
 ## W0014-W0018 - Five individual finite GPU failure pins (owner approved 2026-10-30)
 
@@ -508,13 +511,17 @@ atan knockout passes, and both reduce error to about3.05e-5. W0018's minimal pow
 substitution reduces its error below3e-6. These identify renderer builtin precision
 and nan_bug's unstable input, with no port or harness defect.
 
-The [debugger report](../kept/gpu-exact-pins/2026-10-30/aces2-debug/ACES2-GPU-FINDINGS.md),
+The [debugger report](evidence/gpu-exact-pins/aces2-debug/ACES2-GPU-FINDINGS.md),
 its knockout/injection sources and raw results, the
-[GamutComp13 report](../kept/gpu-exact-pins/2026-10-30/GAMUT-ROOT-CAUSE-STATUS.md) and
-hash manifest are preserved outside target. The debugger's local source commit is
-370cd592; its branch/worktree is not modified or pushed. See
-[implementation and evidence](gpu-finite-exact-pins.md). Full normal CI on the final
-landing remains required; source approval is not a runtime pass.
+[GamutComp13 report](evidence/gpu-exact-pins/GAMUT-ROOT-CAUSE-STATUS.md) and the
+[hash manifest](evidence/gpu-exact-pins/PRESERVATION.json) are committed under
+[`evidence/gpu-exact-pins/`](evidence/gpu-exact-pins/README.md), whose README says what
+each CI run's result is kept as, since CI artifacts expire after 30 days. The debugger's
+local source commit is 370cd592; its branch/worktree is not modified or pushed. See
+[implementation and evidence](gpu-finite-exact-pins.md). Runtime validation is recorded:
+run 41125187384 passed debug and release on Windows and Linux, and normal CI passed on the
+landing, PR 88 (`evidence/gpu-exact-pins/ci-41125187384/verified-summary.json`,
+`evidence/gpu-exact-pins/P40-COMPLETION.json`).
 
 ## W0019 - Non-ASCII command-line arguments of the tools on Windows (owner approved 2026-10-31)
 

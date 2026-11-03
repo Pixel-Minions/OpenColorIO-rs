@@ -1,0 +1,51 @@
+{
+  "Run": 41125187384,
+  "Source": "f627535145e78760c5e8769743a86bfb6c3f66f9",
+  "ValidationHead": "6b0916eaca06b1d8621c76db9d03bf82970b496e",
+  "AllFourJobsPassed": true,
+  "BothGPUProfilesPassed": true,
+  "GeneratedFilesIdentical": true,
+  "Profiles": [
+    {
+      "System": "Windows",
+      "Profile": "debug",
+      "SchemaControlsPassed": true,
+      "MainModeAndGeneratedCountsPassed": true
+    },
+    {
+      "System": "Windows",
+      "Profile": "release",
+      "SchemaControlsPassed": true,
+      "MainModeAndGeneratedCountsPassed": true
+    },
+    {
+      "System": "Linux",
+      "Profile": "debug",
+      "SchemaControlsPassed": true,
+      "MainModeAndGeneratedCountsPassed": true,
+      "OriginalGPUCases": 264,
+      "FixedFunctionCases": 59,
+      "ExactObservedPins": 5,
+      "NativeReadbackProcesses": 14,
+      "FullNativeRustReadbacks": 70,
+      "OriginalThresholds": true,
+      "RejectionControlsPassed": true,
+      "ExistingNonfiniteClassPassed": true
+    },
+    {
+      "System": "Linux",
+      "Profile": "release",
+      "SchemaControlsPassed": true,
+      "MainModeAndGeneratedCountsPassed": true,
+      "OriginalGPUCases": 264,
+      "FixedFunctionCases": 59,
+      "ExactObservedPins": 5,
+      "NativeReadbackProcesses": 14,
+      "FullNativeRustReadbacks": 70,
+      "OriginalThresholds": true,
+      "RejectionControlsPassed": true,
+      "ExistingNonfiniteClassPassed": true
+    }
+  ],
+  "VerifiedUTC": "2026-10-30T21:07:15.220250+00:00"
+}

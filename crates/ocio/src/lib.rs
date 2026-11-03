@@ -3,6 +3,63 @@
 
 //! OpenColorIO, ported to Rust. This release line matches OpenColorIO 2.5.2 exactly
 //! (PLAN.md §2): results, text output, errors and accepted configs.
+//!
+//! The package is `opencolorio-rs`; in code the library is `ocio`. Its calls are OCIO's C++ API
+//! in Rust's spelling: `Config::CreateFromBuiltinConfig` is [`Config::create_from_builtin_config`],
+//! `getProcessor` is [`Config::processor_between`] and its siblings, and
+//! `getDefaultCPUProcessor` is [`Processor::default_cpu_processor`]. Names and strings are bytes,
+//! as they are in OCIO, so they take `impl AsRef<[u8]>`.
+//!
+//! # Example
+//!
+//! Load a built-in config, convert a pixel on the CPU, and generate the matching GPU shader:
+//!
+//! ```
+//! # fn main() -> ocio::Result<()> {
+//! let config = ocio::Config::create_from_builtin_config("cg-config-v4.0.0_aces-v2.0_ocio-v2.5")?;
+//! config.validate()?;
+//!
+//! // From a color space to a display and view: OCIO's getProcessor(src, display, view, dir).
+//! let mut view = ocio::DisplayViewTransform::new();
+//! view.set_src("ACEScg");
+//! view.set_display("sRGB - Display");
+//! view.set_view("ACES 2.0 - SDR 100 nits (Rec.709)");
+//! let processor = config.processor(&view.into())?;
+//!
+//! // On the CPU, the same bits as the official library on the same machine.
+//! let cpu = processor.default_cpu_processor()?;
+//! let mut pixel = [0.18_f32, 0.18, 0.18, 1.0];
+//! cpu.apply_rgba(&mut pixel)?;
+//!
+//! // On the GPU, the same shader text. The shader classes come from `opencolorio-rs-gpu`,
+//! // whose library is `ocio_gpu`.
+//! let mut desc = ocio_gpu::GpuShaderDesc::new(ocio_gpu::GpuLanguage::GlslVk4_6);
+//! desc.set_function_name("ocio_display");
+//! desc.set_resource_prefix("ocio_");
+//! desc.set_descriptor_set_index(1, 1)?;
+//! processor.default_gpu_processor()?.extract_gpu_shader_info(&mut desc)?;
+//! let text: &[u8] = desc.shader_text();
+//! # let _ = text;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Whole images go through [`CpuProcessor::apply`](ocio_ops::cpu_processor::CpuProcessor::apply)
+//! with an image description, as `apply(ImageDesc &)` does in C++, or
+//! [`apply_threaded`](ocio_ops::cpu_processor::CpuProcessor::apply_threaded), which renders rows
+//! on several threads with the same results.
+//!
+//! # Versions
+//!
+//! [`version`] is the OpenColorIO version this release matches, `"2.5.2"`, as
+//! `OCIO::GetVersion()` reports it. [`PORT_VERSION`] is this crate's own version. A later
+//! OpenColorIO minor version is a new major version of this crate.
+//!
+//! # Exceptions
+//!
+//! Where the port behaves differently from OpenColorIO, the repository lists it:
+//! `docs/deviations.md` for intended differences, `waivers.toml` for the approved exceptions to
+//! byte-exact output, and `docs/improvements.md` for upstream bugs the port reproduces.
 #![deny(unsafe_code)]
 
 pub mod apphelpers;
