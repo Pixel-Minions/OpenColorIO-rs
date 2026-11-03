@@ -14,9 +14,9 @@ matrix until step 3 is done.
    every release item the owner hasn't moved past 1.0.0 has landed, packaging included. The
    packages carry the license files of the crates in `THIRD-PARTY-NOTICES.md`, and
    `cargo xtask wheel-check` holds the wheel to that.
-2. **Close the decisions.** The owner has decided the final state of `docs/improvements.md`, and
-   every exception has its row in `docs/deviations.md` or `waivers.toml`. The name and hosting are
-   decided (PLAN.md D6 and D14).
+2. **Close the decisions.** The owner has decided the final state of `docs/improvements.md`
+   (2026-11-03: every entry stays as it is for 1.0.0), and every exception has its row in
+   `docs/deviations.md` or `waivers.toml`. The name and hosting are decided (PLAN.md D6 and D14).
 3. **Make the release commit.** Bump the version to `1.0.0+ocio.2.5.2`, the four crates'
    `version = "=..."` requirements in `[workspace.dependencies]` to `=1.0.0` with it, and the
    wheel's to `1.0.0` in `py-wheel/pyproject.toml`: a test of xtask holds the two together. This

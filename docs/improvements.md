@@ -5,6 +5,9 @@ Upstream bugs and limitations that the port copies, so that its results match Op
 end, the owner decides on each one: keep it, or fix it as a deviation (`docs/deviations.md`),
 which changes the port's results for the inputs the entry names.
 
+**The decision for 1.0.0** (owner, 2026-11-03): every entry stays as its status says. 1.0.0
+fixes none of them; fixes are considered after 1.0.0, each as a deviation.
+
 The last section lists places where upstream's behaviour is undefined because it reads or
 writes memory it doesn't own. The port can't copy those. The owner's general rule
 (2026-09-30): the port returns an error there instead, unless an entry says otherwise. Other
@@ -832,9 +835,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** the bake is matched in `p1-optimizer` (D, `OptimizeSeparablePrefix`): it renders the
   prefix with each op's renderer and the platform's math library, and
   `tests/lut1d_bake_oracle.rs` compares the baked LUTs with each platform's wheel, entry for
-  entry. The ACES 2 tables are to be matched in Phase 2 (D12: the port calls the platform's
-  functions, as OCIO does). The values may also depend on the CPU (SIMD renderers, glibc's
-  ifunc variants), so their checks belong in `cpu-tests` (the bake's are there).
+  entry. The ACES 2 tables are matched in `p2-aces2-cpu` (D12: the port calls the platform's
+  functions, as OCIO does); `tests/aces2_tables_oracle.rs` compares them with the wheel. The
+  values may also depend on the CPU (SIMD renderers, glibc's ifunc variants), so both checks
+  are in `cpu-tests`.
 
 ## Ops
 
