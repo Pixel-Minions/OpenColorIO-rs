@@ -285,15 +285,15 @@ fn hash_inputs_are_pinned() {
 /// See [`hash_inputs_are_pinned`].
 const PINNED_TEXTS: (usize, u64) = (1304, 1_295_993_977_883_512_475);
 
-/// libstdc++'s `std::_Hash_bytes`, the Linux wheel's `std::hash<std::string>`, against the
-/// library itself, with the seed `std::hash` passes and others.
+/// [`murmur_hash64a`] against libstdc++'s `std::_Hash_bytes` (the Linux wheel's
+/// `std::hash<std::string>`) in the library itself, with the seed `std::hash` passes and others.
 #[cfg(target_os = "linux")]
 #[test]
 fn libstdcxx_hash_matches_the_library() {
     for text in texts() {
         for seed in [0xc70f_6907, 0, 1, u64::MAX] {
             assert_eq!(
-                libstdcxx_hash_bytes(&text, seed),
+                murmur_hash64a(&text, seed),
                 ocio_testkit::crt::libstdcxx_hash_bytes(&text, seed),
                 "{text:?}, seed {seed:#x}"
             );

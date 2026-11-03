@@ -40,14 +40,14 @@ pub fn clear_all_caches() {
 }
 
 /// `std::hash<std::string>{}(text)`, as each wheel's C++ library computes it: MSVC's FNV-1a
-/// (64 bits) on Windows, libstdc++'s `_Hash_bytes` with the seed `0xc70f6907` on Linux. The
-/// caches key their entries with it, so two texts with the same hash share an entry, on one
-/// platform and not the other.
+/// (64 bits) on Windows; on Linux, libstdc++'s, whose values are MurmurHash64A's from the seed
+/// `0xc70f6907` ([`murmur_hash64a`]). The caches key their entries with it, so two texts with
+/// the same hash share an entry, on one platform and not the other.
 pub fn std_hash_string(text: &[u8]) -> u64 {
     if cfg!(windows) {
         msvc_fnv1a(text)
     } else {
-        libstdcxx_hash_bytes(text, 0xc70f_6907)
+        murmur_hash64a(text, 0xc70f_6907)
     }
 }
 
@@ -64,32 +64,34 @@ pub fn msvc_fnv1a(bytes: &[u8]) -> u64 {
     value
 }
 
-/// libstdc++'s `std::_Hash_bytes` for an 8-byte `size_t` (libstdc++-v3/libsupc++/
-/// hash_bytes.cc), which `std::hash<std::string>` calls with the seed `0xc70f6907`.
-pub fn libstdcxx_hash_bytes(bytes: &[u8], seed: u64) -> u64 {
-    const MUL: u64 = (0xc6a4_a793u64 << 32) + 0x5bd1_e995;
-    let shift_mix = |v: u64| v ^ (v >> 47);
-
-    let len = bytes.len();
-    let len_aligned = len & !0x7;
-    let mut hash = seed ^ (len as u64).wrapping_mul(MUL);
-    for chunk in bytes[..len_aligned].chunks(8) {
-        let load = u64::from_le_bytes(chunk.try_into().expect("8 bytes"));
-        let data = shift_mix(load.wrapping_mul(MUL)).wrapping_mul(MUL);
-        hash ^= data;
-        hash = hash.wrapping_mul(MUL);
+/// MurmurHash64A, Austin Appleby's public-domain 64-bit hash (SMHasher, `MurmurHash2.cpp`), of
+/// `bytes` from `seed`: written from that algorithm. With the seed `0xc70f6907` it gives the
+/// values of the Linux wheel's `std::hash<std::string>`, which `caching_tests.rs` checks against
+/// the C++ library itself.
+pub fn murmur_hash64a(bytes: &[u8], seed: u64) -> u64 {
+    const M: u64 = 0xc6a4_a793_5bd1_e995;
+    const R: u32 = 47;
+    let mut h = seed ^ (bytes.len() as u64).wrapping_mul(M);
+    let (blocks, tail) = bytes.as_chunks::<8>();
+    for block in blocks {
+        let mut k = u64::from_le_bytes(*block);
+        k = k.wrapping_mul(M);
+        k ^= k >> R;
+        k = k.wrapping_mul(M);
+        h ^= k;
+        h = h.wrapping_mul(M);
     }
-    if len & 0x7 != 0 {
-        // `load_bytes`: the remaining bytes, the last one most significant.
-        let data = bytes[len_aligned..]
-            .iter()
-            .rev()
-            .fold(0u64, |acc, &b| (acc << 8) + u64::from(b));
-        hash ^= data;
-        hash = hash.wrapping_mul(MUL);
+    // The last 1 to 7 bytes, as a little-endian number.
+    if !tail.is_empty() {
+        let mut last = [0u8; 8];
+        last[..tail.len()].copy_from_slice(tail);
+        h ^= u64::from_le_bytes(last);
+        h = h.wrapping_mul(M);
     }
-    hash = shift_mix(hash).wrapping_mul(MUL);
-    shift_mix(hash)
+    h ^= h >> R;
+    h = h.wrapping_mul(M);
+    h ^= h >> R;
+    h
 }
 
 thread_local! {
