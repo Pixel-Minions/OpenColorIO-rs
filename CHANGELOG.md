@@ -13,7 +13,9 @@ official `opencolorio==2.5.2` wheel on the same OS and CPU ([PLAN.md](https://gi
 - **What it is.** The library, with its file formats and GPU shader generation; the
   `PyOpenColorIO` Python module; and four tools.
 - **Packages.** Four crates on crates.io: `opencolorio-rs` (the library `ocio`),
-  `opencolorio-rs-ops`, `opencolorio-rs-formats` and `opencolorio-rs-gpu`. One wheel on PyPI,
+  `opencolorio-rs-ops`, `opencolorio-rs-formats` and `opencolorio-rs-gpu`. `ocio` names every
+  type of the API, `CpuProcessor` and the image descriptions included, so a user depends on
+  `opencolorio-rs` alone; the other three are its parts. One wheel on PyPI,
   `opencolorio-rs`, version `1.0.0`, with `PyOpenColorIO.__version__` `2.5.2`.
 - **Platforms.** Windows x86-64, and Linux x86-64 with glibc 2.34 or newer. Rocky Linux 9 is the
   Linux reference. Where the official library gives different bytes on Windows and on Linux, the

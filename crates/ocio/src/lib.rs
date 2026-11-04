@@ -43,10 +43,21 @@
 //! # }
 //! ```
 //!
-//! Whole images go through [`CpuProcessor::apply`](ocio_ops::cpu_processor::CpuProcessor::apply)
-//! with an image description, as `apply(ImageDesc &)` does in C++, or
-//! [`apply_threaded`](ocio_ops::cpu_processor::CpuProcessor::apply_threaded), which renders rows
-//! on several threads with the same results.
+//! Whole images go through [`CpuProcessor::apply`] with an image description, as
+//! `apply(ImageDesc &)` does in C++, or [`CpuProcessor::apply_threaded`], which renders rows on
+//! several threads with the same results:
+//!
+//! ```
+//! # fn main() -> ocio::Result<()> {
+//! # let config = ocio::Config::create_raw()?;
+//! # let processor = config.processor_between("raw", "raw")?;
+//! let cpu: std::sync::Arc<ocio::CpuProcessor> = processor.default_cpu_processor()?;
+//! let mut pixels = vec![0.18_f32; 4 * 2 * 2];
+//! let mut image = ocio::PackedImageDesc::new(&mut pixels, 2, 2, 4)?;
+//! cpu.apply(&mut image)?;
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! # Versions
 //!
@@ -128,13 +139,29 @@ pub use display::OCIO_VIEW_USE_DISPLAY_NAME;
 pub use file_rules::FileRules;
 pub use look::Look;
 pub use named_transform::NamedTransform;
+// The CPU processor, its image descriptions and the dynamic properties: OCIO declares these in
+// the same namespace as the rest of its API; `opencolorio-rs-ops` holds them.
+pub use ocio_ops::cpu_processor::CpuProcessor;
+pub use ocio_ops::dynamic_property::{
+    DynamicPropertyDoubleImpl, DynamicPropertyDoubleImplRcPtr, DynamicPropertyGradingHueCurveImpl,
+    DynamicPropertyGradingHueCurveImplRcPtr, DynamicPropertyGradingPrimaryImpl,
+    DynamicPropertyGradingPrimaryImplRcPtr, DynamicPropertyGradingRgbCurveImpl,
+    DynamicPropertyGradingRgbCurveImplRcPtr, DynamicPropertyGradingToneImpl,
+    DynamicPropertyGradingToneImplRcPtr, DynamicPropertyImpl, DynamicPropertyRcPtr, HueCurveState,
+    PrimaryState, RgbCurveState, ToneState,
+};
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
+pub use ocio_ops::image_desc::{
+    At, Bytes, ChannelPos, ImageDesc, ImageDescMut, ImageLayout, PackedImageDesc, PixelData,
+    PixelParts, PlanarImageDesc,
+};
 pub use ocio_ops::open_color_types::{
-    Allocation, BSplineType, BitDepth, CdlStyle, ColorSpaceDirection, ColorSpaceVisibility,
-    DynamicPropertyType, EnvironmentMode, ExposureContrastStyle, FixedFunctionStyle, GradingStyle,
-    Lut1DHueAdjust, NamedTransformVisibility, NegativeStyle, OptimizationFlags, ReferenceSpaceType,
-    RgbCurveType, SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
+    Allocation, BSplineType, BitDepth, CdlStyle, ChannelOrdering, ColorSpaceDirection,
+    ColorSpaceVisibility, DynamicPropertyType, EnvironmentMode, ExposureContrastStyle,
+    FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NamedTransformVisibility, NegativeStyle,
+    OptimizationFlags, ReferenceSpaceType, RgbCurveType, SearchReferenceSpaceType,
+    TransformDirection, ViewTransformDirection, ViewType,
 };
 pub use ocio_ops::open_color_types::{HsyTransformStyle, HueCurveType};
 pub use ocio_ops::ops::gradinghuecurve::grading_hue_curve::GradingHueCurve;
