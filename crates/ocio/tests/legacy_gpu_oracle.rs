@@ -730,9 +730,55 @@ fn small_legacy_parts_cover_original_requests_once() {
     println!("P32 input audit: all 1680 original requests exactly once in four ordered parts");
 }
 
-#[test]
-fn legacy_allocation_cuts_and_file_boundaries_match_native_wheel() {
-    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+// Partition execution only, as for P32: the complete original plan is generated first, and
+// each part is a contiguous run of it in the original order. Under SDE on Windows the whole
+// P33 and P34 plans took the per-test two hours (run 41658641028).
+fn contiguous_part(jobs: Vec<Job>, total: usize, parts: usize, part: usize) -> Vec<Job> {
+    assert!(part < parts, "one of the complete execution parts");
+    assert_eq!(jobs.len(), total, "retain the original complete plan");
+    assert_eq!(total % parts, 0, "parts of equal size");
+    let size = total / parts;
+    let selected = jobs
+        .into_iter()
+        .skip(part * size)
+        .take(size)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        selected.len(),
+        size,
+        "each original request belongs to one part"
+    );
+    selected
+}
+
+// Every part, in order, is the original plan: each input once, in its original order.
+fn assert_parts_cover_plan(plan: fn() -> (Vec<Chain>, Vec<Job>), total: usize, parts: usize) {
+    let key = |j: &Job| (j.chain, j.level, j.edge, j.before, j.language);
+    let (_, jobs) = plan();
+    let original = jobs.iter().map(key).collect::<Vec<_>>();
+    let mut observed = Vec::new();
+    for part in 0..parts {
+        let (_, full) = plan();
+        observed.extend(contiguous_part(full, total, parts, part).iter().map(key));
+    }
+    assert_eq!(
+        observed, original,
+        "the parts preserve every original input and its order"
+    );
+    assert_eq!(
+        observed
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        total
+    );
+}
+
+const ALLOCATION_PARTS: usize = 4;
+
+// The original complete P33 generator is retained before selecting any execution part.
+fn allocation_legacy_plan() -> (Vec<Chain>, Vec<Job>) {
     let chains = allocation_file_chains();
     let mut jobs = Vec::new();
     for chain in 0..chains.len() {
@@ -751,12 +797,46 @@ fn legacy_allocation_cuts_and_file_boundaries_match_native_wheel() {
         }
     }
     assert_eq!(jobs.len(), 980, "the complete P33 input plan");
-    compare_jobs("P33", &chains, &jobs);
+    (chains, jobs)
+}
+
+fn compare_allocation_legacy_part(part: usize) {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let (chains, jobs) = allocation_legacy_plan();
+    let selected = contiguous_part(jobs, 980, ALLOCATION_PARTS, part);
+    println!("P33 execution part {part}/{ALLOCATION_PARTS}; complete original plan 980 requests");
+    compare_jobs("P33", &chains, &selected);
 }
 
 #[test]
-fn legacy_dynamic_positions_and_snapshot_values_match_native_wheel() {
-    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+fn legacy_allocation_cuts_and_file_boundaries_match_native_wheel_part0() {
+    compare_allocation_legacy_part(0);
+}
+
+#[test]
+fn legacy_allocation_cuts_and_file_boundaries_match_native_wheel_part1() {
+    compare_allocation_legacy_part(1);
+}
+
+#[test]
+fn legacy_allocation_cuts_and_file_boundaries_match_native_wheel_part2() {
+    compare_allocation_legacy_part(2);
+}
+
+#[test]
+fn legacy_allocation_cuts_and_file_boundaries_match_native_wheel_part3() {
+    compare_allocation_legacy_part(3);
+}
+
+#[test]
+fn allocation_legacy_parts_cover_original_requests_once() {
+    assert_parts_cover_plan(allocation_legacy_plan, 980, ALLOCATION_PARTS);
+}
+
+const DYNAMIC_PARTS: usize = 3;
+
+// The original complete P34 generator is retained before selecting any execution part.
+fn dynamic_legacy_plan() -> (Vec<Chain>, Vec<Job>) {
     let chains = dynamic_chains();
     let mut jobs = Vec::new();
     for chain in 0..chains.len() {
@@ -775,12 +855,40 @@ fn legacy_dynamic_positions_and_snapshot_values_match_native_wheel() {
         }
     }
     assert_eq!(jobs.len(), 1680, "the complete P34 input plan");
-    let measured = compare_jobs("P34", &chains, &jobs);
+    (chains, jobs)
+}
+
+fn compare_dynamic_legacy_part(part: usize) {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let (chains, jobs) = dynamic_legacy_plan();
+    let selected = contiguous_part(jobs, 1680, DYNAMIC_PARTS, part);
+    println!("P34 execution part {part}/{DYNAMIC_PARTS}; complete original plan 1680 requests");
+    let measured = compare_jobs("P34", &chains, &selected);
     assert!(
         measured > 0,
         "the native sweep must expose dynamic snapshot values"
     );
     println!("P34: {measured} exact uniform/property snapshot rows");
+}
+
+#[test]
+fn legacy_dynamic_positions_and_snapshot_values_match_native_wheel_part0() {
+    compare_dynamic_legacy_part(0);
+}
+
+#[test]
+fn legacy_dynamic_positions_and_snapshot_values_match_native_wheel_part1() {
+    compare_dynamic_legacy_part(1);
+}
+
+#[test]
+fn legacy_dynamic_positions_and_snapshot_values_match_native_wheel_part2() {
+    compare_dynamic_legacy_part(2);
+}
+
+#[test]
+fn dynamic_legacy_parts_cover_original_requests_once() {
+    assert_parts_cover_plan(dynamic_legacy_plan, 1680, DYNAMIC_PARTS);
 }
 
 #[test]
