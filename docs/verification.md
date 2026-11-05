@@ -64,6 +64,25 @@ CPU's kernels, so every kernel is compared, whatever CPU the tests run on.
   in the legacy GPU tests, each time on a different test. It is in the
   [changelog's known issues](../CHANGELOG.md); it is not a difference in the port.
 
+### The 1.0.0 qualification
+
+Every CPU-dependent test passed on all five emulated CPUs, on Windows and on Rocky Linux 9,
+with no difference from the official library:
+
+- **CI:** SDE run 41658641028 on the release commit `ec1f768d`, run twice. Every Rocky
+  job passed the first time. Every Windows job that failed did so for one of two reasons. Either
+  the job ran out of its four-hour budget, or the official library's process crashed under the
+  emulator (above), on a different test each time. A test counts as passed if it passed in
+  either run.
+- **Locally, under SDE on Windows,** on the release commit plus PR 111's changes (`2f31255f`),
+  against the official wheel with no oracle cache: the tests that neither CI run reached or
+  completed. That is the split parts of the P33 allocation sweep (skl) and the P34 dynamic
+  sweep (nhm, skl, skx); the P34 sweep was split because it ran past the two-hour limit
+  unsplit. It is also 26 tests the budget cut off or the crash interrupted: 7 on hsw, 5 on skl,
+  3 on nhm and 11 on skx.
+
+PR 111 adds no computation: it adds re-exports and splits two GPU sweeps into parts.
+
 ## Upstream tests
 
 | Suite | Ported | Reviewed not applicable | Total |
