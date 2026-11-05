@@ -3,7 +3,7 @@
 Each release names the OpenColorIO version it matches. A version's build metadata says it too:
 `1.0.0+ocio.2.5.2`.
 
-## 1.0.0
+## 1.0.0 (2026-11-05)
 
 Matches **OpenColorIO 2.5.2**.
 
