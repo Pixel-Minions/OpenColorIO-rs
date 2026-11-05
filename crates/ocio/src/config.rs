@@ -879,7 +879,7 @@ impl Config {
 
     /// The built-in config that `config_name` names, with or without the `ocio://` prefix:
     /// a name of the registry, ignoring case, or `default`, `cg-config-latest` or
-    /// `studio-config-latest` ([`resolve_config_path`]). Otherwise "Could not find '<name>' in
+    /// `studio-config-latest` ([`resolve_config_path`]). Otherwise "Could not find '\<name>' in
     /// the built-in configurations.". The name ends at its first NUL.
     ///
     /// Port of `Config::CreateFromBuiltinConfig` (src/OpenColorIO/Config.cpp:1233-1262 @
@@ -936,7 +936,7 @@ impl Config {
     /// The config in the file `filename` (up to its first NUL), or the built-in config of the
     /// `ocio://` URI in it ([`Config::create_from_builtin_config`], docs/improvements.md I-149).
     /// The errors: "The config filepath is missing." (a missing-file exception) for an
-    /// empty name, "Error could not read '<filename>' OCIO profile." for a file that can't be
+    /// empty name, "Error could not read '\<filename>' OCIO profile." for a file that can't be
     /// opened, and the reader's, which names the file.
     ///
     /// A file that starts with `PK` is an OCIOZ archive: the config is read from its
@@ -1250,7 +1250,7 @@ impl Config {
     }
 
     /// Sets the major version, and the minor version to the last one this release supports for
-    /// it: "The version is <v> where supported versions start at 1 and end at 2." outside them.
+    /// it: "The version is \<v> where supported versions start at 1 and end at 2." outside them.
     /// Then it resets the config's cache IDs, which empties its cache of processors.
     ///
     /// Port of `Config::setMajorVersion` (src/OpenColorIO/Config.cpp:1285-1304 @ v2.5.2).

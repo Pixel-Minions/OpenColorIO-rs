@@ -21,6 +21,10 @@ OpenColorIO version it matches.
 Status, how the port is checked and the rest of the project (the `PyOpenColorIO`-compatible
 Python module, the tools): <https://github.com/Pixel-Minions/OpenColorIO-rs>.
 
-BSD-3-Clause, as OpenColorIO. See `LICENSE`, `NOTICE` and `THIRD-PARTY-NOTICES.md`.
+BSD-3-Clause, as OpenColorIO, for this project's own code, with the code it ports under its own
+licenses: yaml-cpp (MIT), minizip-ng (Zlib) and SampleICC, which is under the ICC Software
+License, Version 0.2. That license has no SPDX identifier, so the crate's `license` field,
+`BSD-3-Clause AND MIT AND Zlib`, can't name it. See `LICENSE`, `NOTICE` and
+`THIRD-PARTY-NOTICES.md`, which has every notice in full.
 
 This is an independent project. It isn't the official OpenColorIO package, and it isn't affiliated with or endorsed by the OpenColorIO project or the Academy Software Foundation.

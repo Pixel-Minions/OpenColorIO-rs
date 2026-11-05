@@ -219,7 +219,7 @@ impl BuiltinConfigRegistry {
     }
 
     /// The YAML text of the config named `config_name` (ignoring case, up to its first NUL),
-    /// or "Could not find '<name>' in the built-in configurations.".
+    /// or "Could not find '\<name>' in the built-in configurations.".
     ///
     /// Port of `BuiltinConfigRegistryImpl::getBuiltinConfigByName`
     /// (BuiltinConfigRegistry.cpp:138-152 @ v2.5.2).

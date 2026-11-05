@@ -1146,8 +1146,8 @@ impl CpuOp for RendererRec2100Surround {
 }
 
 /// RGB to HSV, for extended range values: if RGB are non-negative or all negative, S is on
-/// [0,1]; if RGB are a mix of positive and negative, S is on [1,2]. H is [0,1] for all inputs,
-/// with 1 meaning 360 degrees. For RGB on [0,1], the classic HSV formula.
+/// \[0,1]; if RGB are a mix of positive and negative, S is on \[1,2]. H is \[0,1] for all inputs,
+/// with 1 meaning 360 degrees. For RGB on \[0,1], the classic HSV formula.
 ///
 /// Port of `Renderer_RGB_TO_HSV` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:
 /// 223-230, 1456-1534 @ v2.5.2).
@@ -1215,8 +1215,8 @@ impl CpuOp for RendererRgbToHsv {
     }
 }
 
-/// HSV to RGB, for extended range values: H is nominally on [0,1], but values outside are
-/// wrapped back into range; S is nominally on [0,1] for non-negative RGB but may extend up to
+/// HSV to RGB, for extended range values: H is nominally on \[0,1], but values outside are
+/// wrapped back into range; S is nominally on \[0,1] for non-negative RGB but may extend up to
 /// 2, and values outside [0, 1.999] are clamped.
 ///
 /// Port of `Renderer_HSV_TO_RGB` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:

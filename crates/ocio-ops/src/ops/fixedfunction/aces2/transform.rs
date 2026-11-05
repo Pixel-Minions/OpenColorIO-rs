@@ -741,8 +741,8 @@ pub fn generate_unit_cube_cusp_corners(corner: u32) -> F3 {
     [lit(1), lit(5), lit(3)]
 }
 
-/// The limiting gamut's cusp corners in RGB and JMh, in a cycle with the lowest hue at [1],
-/// and the wrapped copies of the last and first at [0] and [7].
+/// The limiting gamut's cusp corners in RGB and JMh, in a cycle with the lowest hue at \[1],
+/// and the wrapped copies of the last and first at \[0] and \[7].
 ///
 /// Port of `build_limiting_cusp_corners_tables` (Transform.cpp:556-588 @ v2.5.2).
 pub fn build_limiting_cusp_corners_tables(

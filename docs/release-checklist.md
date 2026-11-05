@@ -37,6 +37,12 @@ matrix until step 3 is done.
 7. **Publish.** The owner publishes the four crates on crates.io (PLAN.md D6), from the tag, each
    after what it depends on: `opencolorio-rs-ops`, then `opencolorio-rs-formats` and
    `opencolorio-rs-gpu`, then `opencolorio-rs`. A published version can't be replaced.
+8. **Upload the wheels.** After the crates, the owner uploads the two wheels to PyPI as
+   `opencolorio-rs`: Windows `cp313-cp313-win_amd64` and Linux
+   `cp313-cp313-manylinux_2_34_x86_64`, both from the artifacts of the tagged commit's CI run
+   (see "The wheel" below). The artifacts expire 30 days after the run. The first upload needs
+   an account-wide PyPI token: a token scoped to the project can only be made once the project
+   exists.
 
 ## The wheel
 

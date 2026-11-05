@@ -104,7 +104,7 @@ impl BuiltinTransform {
 
     /// Selects the registry's first built-in transform whose style matches `style` (up to its
     /// first NUL), ignoring case; or "BuiltinTransform: invalid built-in transform style
-    /// '<style>'.", and the transform is unchanged.
+    /// '\<style>'.", and the transform is unchanged.
     ///
     /// Port of `BuiltinTransformImpl::setStyle` (BuiltinTransform.cpp:63-78 @ v2.5.2).
     #[doc(alias = "setStyle")]

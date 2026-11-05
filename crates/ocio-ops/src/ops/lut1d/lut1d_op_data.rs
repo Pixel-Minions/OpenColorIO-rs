@@ -115,9 +115,9 @@ pub fn is_input_half_domain_flags(half_flags: HalfFlags) -> bool {
 pub struct ComponentProperties {
     /// Represents the overall increasing state.
     pub is_increasing: bool,
-    /// Is the lowest index such that LUT[start] != LUT[start+1].
+    /// Is the lowest index such that `LUT[start] != LUT[start+1]`.
     pub start_domain: c_ulong,
-    /// Is the highest index such that LUT[end-1] != LUT[end].
+    /// Is the highest index such that `LUT[end-1] != LUT[end]`.
     pub end_domain: c_ulong,
     /// StartDomain for half-domain negative values.
     pub neg_start_domain: c_ulong,
@@ -200,7 +200,7 @@ impl Lut3by1DArray {
     }
 
     /// Sets the dimensions: "LUT 1D length needs to be at least 2." under 2, "LUT 1D: Length
-    /// '<length>' must not be greater than 1024x1024 (1048576)." over it. The values are
+    /// '\<length>' must not be greater than 1024x1024 (1048576)." over it. The values are
     /// `length * 3`, new ones 0.
     ///
     /// Port of `Lut3by1DArray::resize` (Lut1DOpData.cpp:87-101 @ v2.5.2).
@@ -574,7 +574,7 @@ impl Lut1DOpData {
     }
 
     /// The number of entries a lookup needs for the bit depth: one per code for integer
-    /// depths, 65536 for 16f and 32f; "Bit-depth is not supported: <depth>" for the others.
+    /// depths, 65536 for 16f and 32f; "Bit-depth is not supported: \<depth>" for the others.
     ///
     /// Port of `Lut1DOpData::GetLutIdealSize(BitDepth)` (Lut1DOpData.cpp:437-469 @ v2.5.2).
     pub fn get_lut_ideal_size(incoming_bit_depth: BitDepth) -> Result<c_ulong> {

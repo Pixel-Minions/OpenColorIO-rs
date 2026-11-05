@@ -11,7 +11,9 @@ The port is checked byte by byte against the official `opencolorio==2.5.2` wheel
 `PyOpenColorIO.__version__` is `2.5.2`. Exceptions are listed in the repository's
 `docs/deviations.md` and `waivers.toml`. Python 3.13 on Windows x86-64 and Linux x86-64.
 
-License: BSD-3-Clause. The wheel's `licenses` directory holds this project's notices and those
-of the Rust crates it links.
+License: BSD-3-Clause for this project's own code, with the code it ports and links under their
+own licenses, as `License-Expression` lists them; SampleICC's ICC Software License 0.2 has no SPDX
+identifier and appears as `LicenseRef-ICC-0.2`. The wheel's `licenses` directory holds this
+project's notices, every third-party notice in full, and those of the Rust crates it links.
 
 This is an independent project. It isn't the official OpenColorIO package, and it isn't affiliated with or endorsed by the OpenColorIO project or the Academy Software Foundation.

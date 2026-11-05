@@ -188,8 +188,8 @@ impl MatrixTransform {
     }
 
     /// The matrix and offsets that map `[old_min4, old_max4]` to `[new_min4, new_max4]`,
-    /// channel by channel: "Cannot create Fit operator. Max value equals min value '<max>' in
-    /// channel index <i>." where a channel's old range is 0.
+    /// channel by channel: "Cannot create Fit operator. Max value equals min value '\<max>' in
+    /// channel index \<i>." where a channel's old range is 0.
     ///
     /// Port of `MatrixTransform::Fit` (MatrixTransform.cpp:152-188 @ v2.5.2), with both outputs
     /// asked for ([`matrix_transform_fit`]).

@@ -1172,8 +1172,8 @@ fn strerror(e: &std::io::Error) -> String {
 impl ConfigMerger {
     /// The merger an OCIOM file describes (`filepath` up to its first NUL). The errors: "The
     /// merge options filepath is missing." (a missing-file exception) for an empty path, "Error
-    /// could not read '<filepath>' merge options." for a file that can't be opened, and the
-    /// reader's, "Error: Loading the OCIOM Merge parameters '<filepath>' failed. ..."
+    /// could not read '\<filepath>' merge options." for a file that can't be opened, and the
+    /// reader's, "Error: Loading the OCIOM Merge parameters '\<filepath>' failed. ..."
     /// (`ociom_yaml::read`). The file's bytes are read as the `std::ifstream` gives them to
     /// yaml-cpp ([`IStream::file`]), as [`Config::create_from_file`] reads a config.
     ///

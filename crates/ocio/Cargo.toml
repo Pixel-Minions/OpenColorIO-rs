@@ -4,7 +4,9 @@ description = "OpenColorIO 2.5.2, ported to Rust: configs, transforms, processor
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# The ports of yaml-cpp (MIT) and minizip-ng (Zlib), THIRD-PARTY-NOTICES.md. The SampleICC part is
+# under the ICC Software License 0.2, which has no SPDX identifier; README.md names it.
+license = "BSD-3-Clause AND MIT AND Zlib"
 authors.workspace = true
 repository.workspace = true
 publish = true

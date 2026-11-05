@@ -201,7 +201,7 @@ pub mod whitepoint {
 }
 
 /// The matrix that converts RGB tristimulus values of `primaries` to CIE XYZ, scaled to take
-/// RGB on [0,1] to XYZ on [0,1] (the white's Y is 1), as the 4x4 matrix of a `MatrixArray`.
+/// RGB on \[0,1] to XYZ on \[0,1] (the white's Y is 1), as the 4x4 matrix of a `MatrixArray`.
 /// The matrix of the primaries' chromaticities is inverted, and its inverse applied to the
 /// white's XYZ gives each primary's gain. A singular matrix (degenerate primaries) is refused
 /// with `MatrixArray::inverse`'s exception.
@@ -335,7 +335,7 @@ pub fn build_vonkries_adapt(
     Ok(rgb2xyz.inner(&scale_mat.inner(&xyz2rgb)))
 }
 
-/// A matrix from the primaries `src_prims` to `dst_prims`, which maps RGB [1,1,1] to [1,1,1].
+/// A matrix from the primaries `src_prims` to `dst_prims`, which maps RGB \[1,1,1] to \[1,1,1].
 /// Zero offsets for `src_wht_xyz` or `dst_wht_xyz` take that white from the primaries; the
 /// whites are adapted with `method` unless they are equal or `method` is
 /// [`AdaptationMethod::None`].

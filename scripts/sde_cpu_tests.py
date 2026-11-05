@@ -40,7 +40,8 @@ def source_head(root):
         raise RuntimeError('Expected the actual checked-out source commit')
     return head
 
-# Original quick-tier input plans (P55 divides only P32 into four420-request executions) in crates/ocio/tests/legacy_gpu_oracle.rs:
+# Original quick-tier input plans (P55 divides P32 into four 420-request executions; the 1.0.0
+# release divides P33 into four and P34 into three, by the same rule) in crates/ocio/tests/legacy_gpu_oracle.rs:
 # 1680 / 2000 / 1680 / 1680 requests, rather than hash-only 0 / 980 / 2000 / 4060.
 # Leave the previously heaviest observed bucket (2) the boundary/refusal-heavy cases.
 LEGACY_FOUR_WAY = {
@@ -49,13 +50,15 @@ LEGACY_FOUR_WAY = {
     'small_legacy_lattices_and_cache_order_match_native_wheel_part2': 0,
     'small_legacy_lattices_and_cache_order_match_native_wheel_part3': 0,
     'small_legacy_parts_cover_original_requests_once': 0,
-    'legacy_allocation_cuts_and_file_boundaries_match_native_wheel': 1,
+    **{f'legacy_allocation_cuts_and_file_boundaries_match_native_wheel_part{i}': 1 for i in range(4)},
+    'allocation_legacy_parts_cover_original_requests_once': 1,
     'legacy_mixed_lut_range_and_alpha_lattices_match_native_wheel': 1,
     'legacy_large_lattice_values_match_native_wheel': 1,
     **{f'legacy_boundary_edges_match_native_wheel_part{i}': 2 for i in range(7)},
     'boundary_legacy_parts_cover_original_requests_once': 2,
     'ordinary_after_legacy_keeps_native_cached_shader_and_texture_values': 2,
-    'legacy_dynamic_positions_and_snapshot_values_match_native_wheel': 3,
+    **{f'legacy_dynamic_positions_and_snapshot_values_match_native_wheel_part{i}': 3 for i in range(3)},
+    'dynamic_legacy_parts_cover_original_requests_once': 3,
 }
 
 

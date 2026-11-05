@@ -111,7 +111,7 @@ fn is_flexible_case(s: &[u8]) -> bool {
 
 impl Convert for bool {
     /// `convert<bool>::decode` (convert.cpp:40-73): y/n, yes/no, true/false and on/off, in
-    /// lowercase, UPPERCASE or Capitalized (http://yaml.org/type/bool.html).
+    /// lowercase, UPPERCASE or Capitalized (<http://yaml.org/type/bool.html>).
     fn decode(node: &Node) -> Result<Option<Self>> {
         if !node.is_scalar()? {
             return Ok(None);

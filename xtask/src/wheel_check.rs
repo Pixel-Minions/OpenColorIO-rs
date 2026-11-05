@@ -48,6 +48,9 @@ const FILE_NAME: &str = "opencolorio_rs";
 const REQUIRES_PYTHON: &str = "==3.13.*";
 const PYTHON_TAGS: &str = "cp313-cp313";
 
+/// `License-Expression`: `py-wheel/pyproject.toml`'s `license` (owner decision 2026-11-03).
+pub(crate) const LICENSE_EXPRESSION: &str = "BSD-3-Clause AND Apache-2.0 WITH LLVM-exception AND MIT AND Zlib AND BSL-1.0 AND PSF-2.0 AND Unicode-3.0 AND LicenseRef-ICC-0.2 AND (MIT OR Apache-2.0) AND (BSD-2-Clause OR Apache-2.0 OR MIT)";
+
 /// The `.pth` file a new `uv venv` holds. Anything else could put a directory on the path.
 const VENV_PTH: &str = "_virtualenv.pth";
 
@@ -282,7 +285,7 @@ fn metadata_problems(contents: &Contents, expected: &Expected, out: &mut Vec<Str
         ("Name", NAME),
         ("Version", expected.version.as_str()),
         ("Requires-Python", REQUIRES_PYTHON),
-        ("License-Expression", "BSD-3-Clause"),
+        ("License-Expression", LICENSE_EXPRESSION),
     ] {
         if one(key) != Some(value) {
             out.push(format!("METADATA {key}: {:?}, not {value}", one(key)));
@@ -822,7 +825,10 @@ mod tests {
                  License-File: LICENSE\nLicense-File: crate-licenses/half-2.7.1/LICENSE-MIT\n\
                  Summary: A Rust port matching OpenColorIO 2.5.2, with its PyOpenColorIO \
                  module. Not the official OpenColorIO package.\n\
-                 License-Expression: BSD-3-Clause\nRequires-Python: ==3.13.*\n\n# readme\n\
+                 License-Expression: BSD-3-Clause AND Apache-2.0 WITH LLVM-exception AND MIT AND \
+                 Zlib AND BSL-1.0 AND PSF-2.0 AND Unicode-3.0 AND LicenseRef-ICC-0.2 AND (MIT OR \
+                 Apache-2.0) AND (BSD-2-Clause OR Apache-2.0 OR MIT)\n\
+                 Requires-Python: ==3.13.*\n\n# readme\n\
                  Version: not a field\n",
             ),
             (
@@ -1023,8 +1029,8 @@ mod tests {
                 "METADATA Requires-Python",
             ),
             (
-                "License-Expression: BSD-3-Clause",
-                "License-Expression: MIT",
+                "License-Expression: BSD-3-Clause AND ",
+                "License-Expression: ",
                 "METADATA License-Expression",
             ),
             ("License-File: LICENSE\n", "", "License-File lists"),

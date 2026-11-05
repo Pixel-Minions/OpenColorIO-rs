@@ -5,6 +5,9 @@
 //! `Op.cpp`, `OpOptimizers.cpp`, `CPUInfo.cpp`, `BitDepthUtils` and `ImagePacking`
 //! from OpenColorIO 2.5.2.
 //!
+//! This crate is a building block of [`opencolorio-rs`](https://crates.io/crates/opencolorio-rs):
+//! use that crate. Its API follows OpenColorIO's internals and may change in minor releases.
+//!
 //! `unsafe` is denied here and allowed only in the SIMD modules (PLAN.md D8).
 //!
 //! The crate builds only for the targets whose wheels it has been verified against:

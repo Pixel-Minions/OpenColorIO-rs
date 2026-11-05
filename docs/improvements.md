@@ -688,17 +688,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   of up to three bytes of the bytes that matter and 256 of four
   (`crates/ocio/tests/config_files_oracle.rs`).
 
-### I-158. Until Phase 4, an OCIOZ archive given to `CreateFromFile` is an error
+### I-158. Until Phase 4, an OCIOZ archive given to `CreateFromFile` was an error (retired)
 
 - **Upstream:** `Config::CreateFromFile` reads a file that starts with `PK` as an OCIOZ archive,
   through `CIOPOciozArchive` and `CreateFromConfigIOProxy` (`Config.cpp:1188-1200`).
-- **Who notices:** a caller that loads an `.ocioz` file, or any file starting with `PK`, before
-  the archive reader is ported.
-- **A fix:** none: this is the port's interim state, not upstream's. Until the archive reader
-  lands (Phase 4, the archive card), the port returns "Config::CreateFromFile: reading an OCIOZ
-  archive is not ported yet." (`crates/ocio/src/config.rs`, `Config::create_from_file`); that card
-  replaces the error with the reader and removes this entry.
-- **Status:** interim, in `p3-loading` (3.10b).
+- **Who notices:** no one since `p4-baker`. Before it, a caller that loaded an `.ocioz` file, or
+  any file starting with `PK`.
+- **A fix:** none: this was the port's interim state, not upstream's. From `p3-loading` (3.10b)
+  until the archive reader landed, the port returned "Config::CreateFromFile: reading an OCIOZ
+  archive is not ported yet." (`crates/ocio/src/config.rs`, `Config::create_from_file`).
+- **Status:** retired in `p4-baker` (4.9a1), which replaced the error with the archive reader
+  (`crates/ocio/src/ocioz_archive.rs`), as upstream reads archives. The ported
+  `OCIO_ADD_TEST(OCIOZArchive, context_test_for_search_paths_and_filetransform_source_path)`
+  (`crates/ocio/src/ocioz_archive_tests.rs`) reads archives, and
+  `crates/ocio/tests/ocioz_read_oracle.rs` compares them with the wheel. The number stays, as
+  every number does.
 
 ### I-376. A data color space converted to a display and view in the inverse direction isn't a no-op
 

@@ -35,8 +35,12 @@ class ScheduleControls(unittest.TestCase):
             **{f'small_legacy_lattices_and_cache_order_match_native_wheel_part{i}':
                counters['P32']['Requests'] // 4 for i in range(4)},
             'small_legacy_parts_cover_original_requests_once': 0,
-            'legacy_allocation_cuts_and_file_boundaries_match_native_wheel': counters['P33']['Requests'],
-            'legacy_dynamic_positions_and_snapshot_values_match_native_wheel': counters['P34']['Requests'],
+            **{f'legacy_allocation_cuts_and_file_boundaries_match_native_wheel_part{i}':
+               counters['P33']['Requests'] // 4 for i in range(4)},
+            'allocation_legacy_parts_cover_original_requests_once': 0,
+            **{f'legacy_dynamic_positions_and_snapshot_values_match_native_wheel_part{i}':
+               counters['P34']['Requests'] // 3 for i in range(3)},
+            'dynamic_legacy_parts_cover_original_requests_once': 0,
             **{f'legacy_boundary_edges_match_native_wheel_part{i}':
                counters['P35 boundary']['Requests'] // 7 for i in range(7)},
             'boundary_legacy_parts_cover_original_requests_once': 0,
@@ -46,6 +50,8 @@ class ScheduleControls(unittest.TestCase):
         }
         self.assertEqual(counters['P32']['Requests'], 4 * 420)
         self.assertEqual(counters['P35 boundary']['Requests'], 7 * 200)
+        self.assertEqual(counters['P33']['Requests'], 4 * 245)
+        self.assertEqual(counters['P34']['Requests'], 3 * 560)
         self.assertEqual(set(weights), set(NAMES))
         parts = [selected_shard(META, NAMES, dict(Index=i, Count=4)) for i in range(4)]
         loads = [sum(weights[name] for name in part) for part in parts]

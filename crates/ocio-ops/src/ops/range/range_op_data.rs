@@ -381,7 +381,7 @@ impl RangeOpData {
         false
     }
 
-    /// An identity Range does not modify pixel values between [0,1] but may clamp values
+    /// An identity Range does not modify pixel values between \[0,1] but may clamp values
     /// outside that domain.
     ///
     /// Port of `RangeOpData::isIdentity` (RangeOpData.cpp:270-291 @ v2.5.2).

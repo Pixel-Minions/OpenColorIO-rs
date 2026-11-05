@@ -154,7 +154,7 @@ impl Look {
     }
 
     /// The value of the interchange attribute `attr_name` (`amf_transform_ids`, ignoring
-    /// case), or empty; "Unknown attribute name '<name>'." for any other name.
+    /// case), or empty; "Unknown attribute name '\<name>'." for any other name.
     ///
     /// Port of `Look::getInterchangeAttribute` (Look.cpp:141-162 @ v2.5.2).
     #[doc(alias = "getInterchangeAttribute")]
