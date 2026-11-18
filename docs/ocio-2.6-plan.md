@@ -50,6 +50,51 @@ to be confirmed in the wheel itself in phase 0): yaml-cpp 0.8.0 → **0.9.0**, e
 pystring 1.1.4, lcms2 2.17 and pybind11 unchanged. The PyPI wheels for 2.6.0 have the same
 platform tags as 2.5.2 (`win_amd64`, `manylinux_2_28_x86_64`, cp313).
 
+## Wheel facts (phase 0, 2026-11-18)
+
+Read from the pinned wheels with `tools/wheel-inspect` (`--wheel 2.5.2` for the previous ones):
+the MSVC Rich header, the ELF `.comment` and symbol versions, the libraries' own version strings
+and symbols, and a per-function comparison of both releases' machine code.
+
+| | 2.5.2 | 2.6.0 |
+|---|---|---|
+| Windows library | `OpenColorIO_2_5.dll`, sha256 `f75646b4...` | `OpenColorIO_2_6.dll`, sha256 `fdab9f21...` |
+| Windows compiler (C and C++ objects) | cl 19.44.**35226** | cl 19.44.**35229** |
+| Windows linker; static CRT objects (SVML) | 14.44; 14.44.35207 | 14.44; 14.44.35207 |
+| Linux library | `libOpenColorIO.so`, sha256 `18c4d7ad...` | `libOpenColorIO.so`, sha256 `b9289e30...` |
+| Linux compiler | GCC 14.2.1 20250110 (Red Hat 14.2.1-**7**) | GCC 14.2.1 20250110 (Red Hat 14.2.1-**11**) |
+| zlib | 1.3.1 (both, version strings) | **1.3.2** (both) |
+| expat | 2.7.2 (`expat_2.7.2`, Linux) | **2.8.4** (`expat_2.8.4`, Linux; the Windows DLL's expat debug strings changed the same way) |
+| yaml-cpp | 0.8.0 | **0.9.0**: new `YAML::FpToString` with dragonbox (`YAML::jkj::dragonbox`), `Utils` writers taking `(const char *, size_t)` |
+| minizip-ng | 4.0.10 | newer: adds `mz_path_is_symlink_target_safe`, `mz_dir_has_unsafe_symlink`, `mz_os_get_temp_path`, `mz_zip_writer_get_follow_links` (upstream's install script fetches 4.2.2) |
+| Imath | 3.2.x (namespace `Imath_3_2`) | 3.2.x (same namespace; the patch level is not visible in the binary; upstream's install script fetches 3.2.3) |
+| pystring, lcms2 (apps only), pybind11 | no version marker in the binaries | unchanged markers (pybind11 internals `v11`) |
+| OpenEXR (apps only) | `Imf_3_4` | `Imf_3_4` |
+
+What this means for the port:
+
+- **Compiler change: patch builds only.** MSVC moved from build 35226 to 35229 of the same
+  14.44 toolset (Visual Studio 17.14) and GCC from the Red Hat 14.2.1-7 to the 14.2.1-11
+  rebuild of the same 14.2.1 snapshot. Of the functions named in both builds, 8,980 of 10,387
+  (Linux) and 2,188 of 2,330 (Windows, RTTI and exports) compiled to identical instructions,
+  addresses aside. Every function whose floating-point instruction sequence changed is one
+  whose upstream source (or a bundled library) changed: the hue curve renderers
+  (`GradingHueCurveOpCPU.cpp`), the op data `equals`/`validate`/`isInverse`/`compose`
+  functions (`Op.h`), `MatrixOpData::getAsForward`, `combineWith`, the YAML, CTF and CDL
+  writers, and expat. (On Windows a few more matches were jump-table data decoded as
+  instructions.) No renderer with unchanged source moved, so the operand
+  orders the 2.5.2 port pinned still hold where the source did not change; changed code is
+  re-read with `wheel-inspect` when it is ported.
+- **FMA, F16C, libm and SVML unchanged.** Each library still has 108 FMA and 24 F16C
+  instructions; the math library imports are the same functions with the same glibc symbol
+  versions (only call-site counts grew, from new code: `fmodf` +2 on Linux, +1 on Windows).
+  The Windows PQ kernel still calls MSVC's SVML `__vdecl_powf4` (now at `0x180358e60`), whose
+  `__sse2_powf4` kernel has the same 594 instructions as in 2.5.2: waiver W0001 is unchanged.
+- **yaml-cpp 0.9.0 formats floats differently** (dragonbox): the regenerated fixtures show
+  `1.401298e-45` written as `1e-45`, `3.402823e+38` as `3.402824e+38`, `1.13` as
+  `1.13000000000000`. This is card `ocio26-deps` (phase 2); until then every test comparing
+  config YAML with such numbers is on the red list.
+
 ## Phases
 
 Each item is a card that lands as reviewable chunks under the usual rules (`CLAUDE.md`).
