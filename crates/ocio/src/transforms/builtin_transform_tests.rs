@@ -208,7 +208,7 @@ fn validate_builtin_transform(style: &str, in_: &[f32], out: &[f32], error_thres
     }
 }
 
-/// `UnitTestValues` (BuiltinTransform_tests.cpp:369-724 @ v2.5.2): each built-in's name, error
+/// `UnitTestValues` (BuiltinTransform_tests.cpp:369-727 @ v2.6.0): each built-in's name, error
 /// threshold, input values and expected output values.
 #[rustfmt::skip]
 const UNIT_TEST_VALUES: &[(&str, f32, &[f32], &[f32])] = &[
@@ -582,6 +582,12 @@ const UNIT_TEST_VALUES: &[(&str, f32, &[f32], &[f32])] = &[
         &[0.153334766, 0.083515430, 0.032948254],
     ),
     (
+        "APPLE_LOG-APPLEWG_to_ACES2065-1",
+        1.0e-6,
+        &[0.5, 0.4, 0.3],
+        &[0.160302015, 0.091223177, 0.026405713],
+    ),
+    (
         "CURVE - APPLE_LOG_to_LINEAR",
         1.0e-6,
         &[0.5, 0.4, 0.3],
@@ -805,7 +811,7 @@ const UNIT_TEST_VALUES: &[(&str, f32, &[f32], &[f32])] = &[
     ),
 ];
 
-/// Port of `OCIO_ADD_TEST(Builtins, validate)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Builtins, validate)` @ v2.6.0.
 #[test]
 fn validate() {
     use crate::transforms::builtins::builtin_transform_registry::BuiltinTransformRegistry;
@@ -837,13 +843,14 @@ fn validate() {
     assert_eq!(UNIT_TEST_VALUES.len(), reg.num_builtins());
 }
 
-/// Port of `ValidateDisplayViewRoundTrip` (BuiltinTransform_tests.cpp:775-866 @ v2.5.2).
+/// Port of `ValidateDisplayViewRoundTrip` (BuiltinTransform_tests.cpp:775-881 @ v2.6.0).
 #[track_caller]
 fn validate_display_view_round_trip(
     display_style: &str,
     view_style: &str,
     scale: f32,
     error_threshold: f32,
+    apply_lmt: bool,
     difficult_items: &[usize],
     difficult_threshold: f32,
 ) {
@@ -866,11 +873,25 @@ fn validate_display_view_round_trip(
     let mut view_builtin_inv = view_builtin.clone();
     view_builtin_inv.set_direction(TransformDirection::Inverse);
 
+    // Built-in transform for the (optional) look. (Upstream leaves "ACES-LMT - ACES 2.0 DCC
+    // Look 1" commented out.)
+    let mut look_builtin = BuiltinTransform::new();
+    look_builtin
+        .set_style("ACES-LMT - BLUE_LIGHT_ARTIFACT_FIX")
+        .unwrap();
+    look_builtin.validate().unwrap();
+    let mut look_builtin_inv = look_builtin.clone();
+    look_builtin_inv.set_direction(TransformDirection::Inverse);
+
     // Assemble inverse and forward transform into a group transform that goes from
     // display code values to ACES and back to code values.
     let mut group = GroupTransform::new();
     group.append_transform(Transform::from(display_builtin_inv));
     group.append_transform(Transform::from(view_builtin_inv));
+    if apply_lmt {
+        group.append_transform(Transform::from(look_builtin_inv));
+        group.append_transform(Transform::from(look_builtin));
+    }
     group.append_transform(Transform::from(view_builtin));
     group.append_transform(Transform::from(display_builtin));
 
@@ -939,7 +960,7 @@ fn validate_display_view_round_trip(
     }
 }
 
-/// Port of `OCIO_ADD_TEST(Builtins, aces2_displayview_roundtrip)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Builtins, aces2_displayview_roundtrip)` @ v2.6.0.
 #[test]
 fn aces2_displayview_roundtrip() {
     // Perform a round-trip test from display code-values to ACES and back to code values.
@@ -950,6 +971,7 @@ fn aces2_displayview_roundtrip() {
         "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709_2.0",
         1.0,   // scale factor
         0.004, // tolerance
+        false, // apply LMT
         &[],
         0.,
     );
@@ -959,6 +981,7 @@ fn aces2_displayview_roundtrip() {
         "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D65_2.0",
         1.0,   // scale factor
         0.001, // tolerance
+        false, // apply LMT
         &[],
         0.,
     );
@@ -969,6 +992,7 @@ fn aces2_displayview_roundtrip() {
         // Need to lower the max value from 1000 to 990 nits.
         0.7507,                      // scale factor = 990 nits
         0.005,                       // main tolerance
+        false,                       // apply LMT
         &[168, 196, 364, 392, 1344], // difficult values
         0.03,                        // tolerance for difficult values
     );
@@ -979,6 +1003,7 @@ fn aces2_displayview_roundtrip() {
         // Need to lower the max value from 4000 to 3860 nits.
         0.8987, // scale factor = 3860 nits
         0.007,  // main tolerance
+        false,  // apply LMT
         &[
             168, 196, 392, 396, 588, 592, 952, 1148, 1196, 1200, 1260, 1288,
         ],
@@ -988,6 +1013,31 @@ fn aces2_displayview_roundtrip() {
     // TODO: The Rec.2100 transforms have too many values that don't invert to easily validate.
     // (Upstream leaves two more round trips, through "DISPLAY - CIE-XYZ-D65_to_REC.2100-PQ",
     // commented out.)
+
+    // Test the SDR transforms with an LMT in place.
+
+    validate_display_view_round_trip(
+        "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709",
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709_2.0",
+        1.0,   // scale factor
+        0.004, // tolerance
+        true,  // apply LMT
+        &[
+            192,  // {1, 1, 0} leaves 0.0053 in blue
+            1344, // {0, 1, 1} leaves 0.0044 in red
+        ],
+        0.006, // tolerance for difficult values
+    );
+
+    validate_display_view_round_trip(
+        "DISPLAY - CIE-XYZ-D65_to_DisplayP3",
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D65_2.0",
+        1.0,   // scale factor
+        0.001, // tolerance
+        true,  // apply LMT
+        &[],
+        0.,
+    );
 }
 
 /// Port of `OCIO_ADD_TEST(Builtins, aces2_Aab_to_RGB_nan)` @ v2.5.2.

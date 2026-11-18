@@ -17,7 +17,7 @@ fn validate_values(act: f64, aim: f64) {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(Builtins, interpolate)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Builtins, interpolate)` @ v2.6.0.
 #[test]
 fn interpolate() {
     // Test the non-uniform 1D linear interpolation helper function.

@@ -2553,8 +2553,8 @@ note = "p3-after-p2: RegisterAll"
 path = "src/OpenColorIO/transforms/builtins/AppleCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/apple_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (96-122); p3-after-p2: GenerateAppleLogToLinearOps (30-86, the OCIO_LUT_SUPPORT branch the file defines), the op creators, through the API sweeps (api_cases::BUILTINS_WITH_OPS). 2.6.0: changed at v2.6.0 lines 27-37, 123-138; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (96-122); p3-after-p2: GenerateAppleLogToLinearOps (30-86, the OCIO_LUT_SUPPORT branch the file defines), the op creators, through the API sweeps (api_cases::BUILTINS_WITH_OPS). ocio26-ops: APPLE_WIDE_GAMUT (27-36) and APPLE_LOG-APPLEWG_to_ACES2065-1 (123-138) at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/AppleCameras.h"
@@ -4749,8 +4749,8 @@ note = "p1-transforms-fam1"
 path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtin_transform_tests.rs", "crates/ocio-ops/src/transforms/builtins/color_matrix_helpers_tests.rs", "crates/ocio/src/transforms/builtins/op_helpers_tests.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); p2-api-parity: forward_inverse; p3-after-p2: interpolate (op_helpers_tests.rs, next to Interpolate1D), validate, aces2_displayview_roundtrip, aces2_Aab_to_RGB_nan. 2.6.0: changed at v2.6.0 lines 594-596, 776, 794-801, 807-811, 894, 902, 911, 921, 931, 938, 940-959; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); p2-api-parity: forward_inverse; p3-after-p2: interpolate (op_helpers_tests.rs, next to Interpolate1D), validate, aces2_displayview_roundtrip, aces2_Aab_to_RGB_nan. ocio26-ops: interpolate (its following UnitTestValues gained APPLE_LOG-APPLEWG_to_ACES2065-1), validate, aces2_displayview_roundtrip (the LMT round trips) re-ported at v2.6.0."
 
 [[file]]
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
