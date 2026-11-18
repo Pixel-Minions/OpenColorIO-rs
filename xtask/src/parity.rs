@@ -6,7 +6,7 @@
 //! A Rust test counts as a port of an upstream test when its doc comment, directly above
 //! `#[test]` (other doc lines and attributes may come between), has a marker line: `/// Port
 //! of`, the upstream test in backquotes exactly as upstream's macro names it, then
-//! ` @ v2.5.2.`, which anything may follow on that line. For example:
+//! ` @ v2.5.2.` or ` @ v2.6.0.`, which anything may follow on that line. For example:
 //!
 //! ```text
 //! /// Port of `OCIO_ADD_TEST(Lut1DOpCPU, apply_half)` @ v2.5.2.
@@ -16,6 +16,10 @@
 //!
 //! Any other mention of an upstream test, such as a partial port or a stand-in that names
 //! the test it stands in for, doesn't count.
+//!
+//! A marker names the upstream version whose test it ports. The port moved from 2.5.2 to
+//! 2.6.0 (docs/ocio-2.6-plan.md): a test re-ported from 2.6.0 says ` @ v2.6.0.`, and one whose
+//! upstream body did not change keeps ` @ v2.5.2.`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -205,15 +209,20 @@ pub(crate) fn upstream_python_tests() -> Vec<String> {
     tests
 }
 
-/// The upstream version port markers name.
-const MARKER_VERSION: &str = "v2.5.2";
+/// The upstream versions port markers may name: the release the port matched before
+/// (tests whose upstream body did not change since) and the pinned one.
+const MARKER_VERSIONS: &[&str] = &["v2.5.2", "v2.6.0"];
 
 /// The upstream test a port marker line names: `/// Port of `, one upstream test macro in
-/// backquotes, then ` @ v2.5.2.`, with anything after that. Any other line names none.
+/// backquotes, then ` @ v2.5.2.` or ` @ v2.6.0.`, with anything after that. Any other line
+/// names none.
 fn marker_id(line: &str) -> Option<(&'static str, String)> {
     let rest = line.trim_start().strip_prefix("/// Port of `")?;
     let (invocation, after) = rest.split_once('`')?;
-    if !after.starts_with(&format!(" @ {MARKER_VERSION}.")) {
+    if !MARKER_VERSIONS
+        .iter()
+        .any(|v| after.starts_with(&format!(" @ {v}.")))
+    {
         return None;
     }
     // The backquotes hold exactly one macro, and nothing else.
@@ -704,6 +713,11 @@ mod tests {
             marker("/// Port of `OCIO_ADD_TEST_AVX2(packed_all_test)` @ v2.5.2.").as_deref(),
             Some("cpu AVX2/packed_all_test")
         );
+        // A test re-ported from 2.6.0.
+        assert_eq!(
+            marker("/// Port of `OCIO_ADD_TEST(OpOptimizers, a)` @ v2.6.0.").as_deref(),
+            Some("cpu OpOptimizers/a")
+        );
     }
 
     #[test]
@@ -718,7 +732,10 @@ mod tests {
             "/// Part of `OCIO_ADD_TEST(A, b)` @ v2.5.2.",
             // A port of something else, another version, or no version.
             "/// Port of `CreateLogOp` (src/OpenColorIO/ops/log/LogOp.cpp:1-9 @ v2.5.2).",
-            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.6.0.",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.4.0.",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.6.1.",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.6.0",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ 2.6.0.",
             "/// Port of `OCIO_ADD_TEST(A, b)` (tests/cpu/A_tests.cpp:1-9 @ v2.5.2).",
             "/// Port of `OCIO_ADD_TEST(A, b)`.",
             // Two tests, or more than the macro, in the backquotes.
