@@ -503,7 +503,12 @@ copy that `cargo xtask guards` checks:
 6. **M1/M2** (Linux, and Windows where links can be made): archives with symlink entries
    inside and outside the destination, destinations with an escaping link, and the extracted
    files' modes for entries with an unconvertible made-by system.
-7. **Z1:** as described above.
+7. **Z1:** settled on 2026-11-18 (chunk 8): one generated set, a config of 155 KB and LUT
+   files of LUT text, random bytes and repetitive bytes at 1, 4, 8, 64 and 512 KiB and 2 MiB
+   (19 entries, `.cube`, `.spi1d`, `.csp`), archived with `Config::archive` by the 2.5.2
+   wheel (unpacked from the uv cache) and the 2.6.0 wheel. Every entry's raw deflate stream,
+   compressed size and CRC are the same in both releases, on Windows and on Rocky Linux 9 (and
+   the same on both platforms). D-6's measurement and `zlib-rs` 0.6.8 stay as they are.
 
 ## Proposed chunks
 

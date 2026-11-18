@@ -6480,7 +6480,7 @@ fn save_invlut_1d_3components() {
     assert!(result.contains(expected2));
 }
 
-/// Whether the half of `bits` is a NaN (`half::isNan`, Imath half.h @ v3.2.1).
+/// Whether the half of `bits` is a NaN (`half::isNan`, Imath half.h @ v3.2.3).
 fn half_is_nan(bits: u16) -> bool {
     (bits & 0x7c00) == 0x7c00 && (bits & 0x03ff) != 0
 }
@@ -6529,7 +6529,7 @@ fn save_lut1d_halfdomain() {
 }
 
 /// Port of `OCIO_ADD_TEST(CTFTransform, save_lut1d_f16_raw)` @ v2.5.2. `HALF_MAX` and
-/// `HALF_NRM_MIN` are Imath's (half.h @ v3.2.1), the halfs of bits 0x7bff and 0x0400.
+/// `HALF_NRM_MIN` are Imath's (half.h @ v3.2.3), the halfs of bits 0x7bff and 0x0400.
 #[test]
 fn save_lut1d_f16_raw() {
     let mut lut_t = Lut1DTransform::new();

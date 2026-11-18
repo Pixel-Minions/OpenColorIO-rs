@@ -44,8 +44,9 @@
 //!
 //! **What isn't minizip-ng's.** zlib's `inflate` and `deflate` are `flate2`'s on its `zlib-rs`
 //! backend, a port of zlib ([`inflate`], owner decision 2026-10-17), whose deflate streams
-//! differ from zlib 1.3.1's past a few KiB (deviation D-6); the system file streams read the
-//! file whole; a DOS date is broken down in UTC (D-6).
+//! differ from zlib's past a few KiB (deviation D-6; zlib 1.3.1 in OpenColorIO 2.5.2's
+//! wheels and 1.3.2 in 2.6.0's, which deflate to the same bytes); the system file streams
+//! read the file whole; a DOS date is broken down in UTC (D-6).
 
 pub(crate) mod inflate;
 pub(crate) mod mz_crypt;

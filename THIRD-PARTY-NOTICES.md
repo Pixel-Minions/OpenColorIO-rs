@@ -15,10 +15,10 @@ against [`deny.toml`](deny.toml). In source form each ships with its own license
 tool doesn't carry those files, so [the last section](#rust-crates-in-built-artifacts) lists the
 crates, and a binary release has to include their license files.
 
-## Imath 3.2.1
+## Imath 3.2.3
 
 <https://github.com/AcademySoftwareFoundation/Imath>. The half-float conversions OpenColorIO
-2.5.2 uses (`half.h`, `half.cpp`), ported in `crates/ocio-ops/src/imath_half.rs`.
+2.6.0 uses (`half.h`, `half.cpp`), ported in `crates/ocio-ops/src/imath_half.rs`.
 
 ```text
 Copyright Contributors to the OpenEXR Project.

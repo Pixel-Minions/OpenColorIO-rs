@@ -577,7 +577,7 @@ pub fn floats_differ(expected: f32, actual: f32, tolerance: i32, compress_denorm
 /// Imath's `half::isNan()`: the exponent is 31 and the mantissa is not 0.
 ///
 /// Port of `half::isNan` (src/Imath/half.h:837-841, with `half::mantissa` and
-/// `half::exponent` at :801-811 @ Imath v3.2.1).
+/// `half::exponent` at :801-811 @ Imath v3.2.3).
 #[inline]
 fn half_is_nan(h: u16) -> bool {
     (h >> 10) & 0x001F == 31 && h & 0x03FF != 0
@@ -586,7 +586,7 @@ fn half_is_nan(h: u16) -> bool {
 /// Imath's `half::isInfinity()`: the exponent is 31 and the mantissa is 0.
 ///
 /// Port of `half::isInfinity` (src/Imath/half.h:843-847, with `half::mantissa` and
-/// `half::exponent` at :801-811 @ Imath v3.2.1).
+/// `half::exponent` at :801-811 @ Imath v3.2.3).
 #[inline]
 fn half_is_infinity(h: u16) -> bool {
     (h >> 10) & 0x001F == 31 && h & 0x03FF == 0
