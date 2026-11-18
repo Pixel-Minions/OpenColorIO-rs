@@ -476,15 +476,15 @@ note = "p4-baker 4.9a: CIOPOciozArchive (77-107) and the reading functions; 4.9b
 path = "src/OpenColorIO/Op.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs", "crates/ocio/src/processor.rs"]
-status = "partial"
-note = "P71 complete source mapping after Phase8: CpuOp defaults, every op-family CPU dispatch, op/data/vector behavior, identity/combination/finalization/cache and transform metadata hand-off have existing Rust implementations. No renderer or numerical changes; CPU-profile qualification is tracked separately. 2.6.0: changed at v2.6.0 lines 4-6, 8, after 29 (deleted), after 34 (deleted), after 43 (deleted), 120-121, 141, 148, after 154 (deleted), 157-160, after 162 (deleted), after 163 (deleted), 166, 185, 189, 198, 200-201, after 219 (deleted), 223, 283, 324, 326-327, 329-331; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P71 complete source mapping after Phase8: CpuOp defaults, every op-family CPU dispatch, op/data/vector behavior, identity/combination/finalization/cache and transform metadata hand-off have existing Rust implementations. No renderer or numerical changes; CPU-profile qualification is tracked separately. ocio26-base: 2.6.0 moves most bodies into Op.h (same behaviour); operator+= at v2.6.0 (self-append not expressible in Rust, no caller does it)."
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/processor.rs"]
-status = "partial"
-note = "P71 complete declaration mapping after Phase8: CpuOp float/typed/in-place/dynamic interfaces, OpData/OpVec and CPU/GPU extraction/metadata dispatch are implemented in the listed modules. Existing Rust ownership/typing boundaries remain. Full CPU-profile qualification is separate release work. 2.6.0: changed at v2.6.0 lines 8, 10, 22-25, 49-51, 55-58, 61-62, 121-122, 124, 128-129, 131-132, 157, 173-176, 189, 193, 195, 201, 203, 205, 222, 233, 251, 256-258, 289, 291, 313, 318-319, 321-322, 324-325, 327-328, 330-331, 333-336, 340-342, 345-346, 348-349, 352-353, 355-356, 361-362, 372-376, 379, 381-384, 386-396, 400-401, 403-404, 406-408, 411, 414, 416, 418; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P71 complete declaration mapping after Phase8: CpuOp float/typed/in-place/dynamic interfaces, OpData/OpVec and CPU/GPU extraction/metadata dispatch are implemented in the listed modules. Existing Rust ownership/typing boundaries remain. Full CPU-profile qualification is separate release work. ocio26-base: 2.6.0 inlines the bodies of Op.cpp and adds [[nodiscard]]; same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -497,8 +497,8 @@ note = "P58: all29 builder declarations (25distinctnames) map to the existing pe
 path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
-status = "partial"
-note = "P67 complete source audit: optimizer passes, inverse1D/3D replacement and separable-prefix baking are implemented in op_optimizers.rs. The formerly future gamma/multi-op/dynamic prefix checks already exist in op_optimizers_tests.rs (multi_op_prefix and dyn_properties_prefix). No optimization or numerical behavior changes. 2.6.0: changed at v2.6.0 lines 7-9, 77, 79-85, 90, 92-94, 96-99, 105-106, 108-109, 112, 114-115, 117, 119-127, 131, 133, 142, 144-150, 153-154, 156, 159, 163-175, 177-181, 184-196, 202, 204, 211, 213-222, 224-228, 234, 236-238, 240, 242, 244, 246-249, 251-256, 258-264, 266-267, 269-290, 292, 294, after 295 (deleted), 297-309, after 310 (deleted), 312-314, 316, 318-324, 330, 332-336, 338, 340-351, 353-354, 356, 358, 360-361, 363-384, 387, 398, 400-405, 407-409, 411, 419, 422, 432, 435, after 440 (deleted), 443, 445-451, 453, 458, 460-467, 469, 484, after 485 (deleted), 490, 492-493, 495, 502, 516, 523-526, 528-531, 561, 568-569, 571, after 580 (deleted), 583, 587-604, 606-622, 645-646, 648-649, 653-659, 662, 666, 668, 671-673, 682, 686-690, 692-693, 697-698, 701-702, 705-706, 710-711, 713, 718-719, 721, 727-729, 731-738, 742, 745-749, 753, 755, 758-769, after 795 (deleted); not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P67 complete source audit: optimizer passes, inverse1D/3D replacement and separable-prefix baking are implemented in op_optimizers.rs. The formerly future gamma/multi-op/dynamic prefix checks already exist in op_optimizers_tests.rs (multi_op_prefix and dyn_properties_prefix). No optimization or numerical behavior changes. ocio26-base: the optimizer at v2.6.0 (PR #2244): size_t counts, the flags each step reads, PerformOptimisation debug lines, passes from 1, replaced ops count as progress, RemoveInverseOps as a stack, ReplaceOps rebuilding the list, CombineOps by adjacent_find; the other edits keep the outputs."
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
@@ -4074,15 +4074,15 @@ note = "p3-loading 3.10c: is_config_archivable (Config::isArchivable) in config_
 path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs", "crates/ocio/src/file_tests/op_optimizers_tests.rs"]
-status = "partial"
-note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. p5-ec 5.1b: dynamic_ops. p5-dynamic 5.6a: dyn_properties_prefix. p5-dynamic-2 5.6b: opt_prefix_test1 (its file has an ExposureContrast op, read with 4.5i), in crates/ocio/src/file_tests/op_optimizers_tests.rs 2.6.0: changed at v2.6.0 lines 314, 316-319, 331-333, 363, 365, 367, 385, 741, 760, 1064, 1112, 1327-1361, 1601; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. p5-ec 5.1b: dynamic_ops. p5-dynamic 5.6a: dyn_properties_prefix. p5-dynamic-2 5.6b: opt_prefix_test1 (its file has an ExposureContrast op, read with 4.5i), in crates/ocio/src/file_tests/op_optimizers_tests.rs ocio26-base: combine_ops, dynamic_ops, gamma_comp, gamma_comp_test2, lut1d_identity_replacement_order, opt_prefix_test1 at v2.6.0."
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_tests.rs"]
-status = "partial"
-note = "all but OpRcPtrVec/is_noop; p5-ec 5.1b: OpRcPtrVec/dynamic_property; p5-dynamic 5.6a: OpRcPtrVec/is_noop 2.6.0: changed at v2.6.0 lines 4, 14-16, 274, 438, 521-544; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "all but OpRcPtrVec/is_noop; p5-ec 5.1b: OpRcPtrVec/dynamic_property; p5-dynamic 5.6a: OpRcPtrVec/is_noop ocio26-base: non_dynamic_ops and dynamic_property re-marked at v2.6.0 ([[maybe_unused]] only), move_semantics new."
 
 [[file]]
 path = "tests/cpu/ParseUtils_tests.cpp"

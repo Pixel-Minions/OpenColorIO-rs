@@ -394,6 +394,31 @@ fn serialize() {
     serialize_op_vec(&ops, 0).unwrap();
 }
 
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, move_semantics)` @ v2.6.0. A C++ move leaves the vector
+/// it moves from empty; `std::mem::take` does the same.
+#[test]
+fn move_semantics() {
+    let mut ops = OpVec::new();
+    let mut mat = MatrixOpData::create_diagonal_matrix(1.1);
+    mat.set_id(b"First");
+    create_matrix_op(&mut ops, mat, TransformDirection::Forward);
+    assert_eq!(ops.len(), 1);
+
+    // Test move constructor
+    let mut ops2 = std::mem::take(&mut ops);
+    assert_eq!(ops.len(), 0);
+    assert_eq!(ops2.len(), 1);
+    assert_eq!(ops2[0].get_info(), "<MatrixOffsetOp>");
+
+    // Test move assignment
+    let mut ops3 = OpVec::new();
+    assert_eq!(ops3.len(), 0);
+    ops3 = std::mem::take(&mut ops2);
+    assert_eq!(ops2.len(), 0);
+    assert_eq!(ops3.len(), 1);
+    assert_eq!(ops3[0].get_info(), "<MatrixOffsetOp>");
+}
+
 /// Port of `Apply` (tests/cpu/Op_tests.cpp:14-20 @ v2.5.2).
 fn apply(ops: &OpVec, source: &mut [f32]) {
     for op in ops.iter() {
@@ -632,7 +657,7 @@ fn optimize_combine() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(Op, non_dynamic_ops)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Op, non_dynamic_ops)` @ v2.6.0.
 #[test]
 fn non_dynamic_ops() {
     let scale = [2.0, 2.0, 2.0, 1.0];
@@ -837,7 +862,7 @@ fn clone_invert() {
     assert_eq!(ops[2].get_info(), inverted[0].get_info());
 }
 
-/// Port of `OCIO_ADD_TEST(OpRcPtrVec, dynamic_property)` @ v2.5.2. Upstream's two ops share
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, dynamic_property)` @ v2.6.0. Upstream's two ops share
 /// the op data; here each op holds a copy, the second taken after the exposure is made dynamic.
 #[test]
 fn op_vec_dynamic_property() {
