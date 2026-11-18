@@ -755,6 +755,43 @@ fn aces_2_rgb_to_jmh_shaders_match_the_wheel() {
     check(&cases);
 }
 
+/// RGB to and from ACES 2.0's JMh repacked as HMJ (2.6.0, `Add_RGB_to_HMJ_Shader` and
+/// `Add_HMJ_to_RGB_Shader`) for AP0, AP1 and the outputs' primaries, at every level, in every
+/// language; the shader's settings.
+#[test]
+fn aces_2_rgb_to_hmj_shaders_match_the_wheel() {
+    let style = |p: &[f64; 8], dir| {
+        T::Fixed(
+            "FIXED_FUNCTION_ACES_RGB_TO_HMJ_20",
+            FixedFunctionOpStyle::AcesRgbToHmj20,
+            p.to_vec(),
+            dir,
+        )
+    };
+    let mut cases = Vec::new();
+    for (i, p) in [AP0, AP1].iter().chain(&ACES2_PRIMARIES).enumerate() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("RGB to HMJ {i} {dir:?}"),
+                vec![style(p, dir)],
+                &levels()[if i == 0 { 0..5 } else { 1..2 }],
+                Names::default(),
+            ));
+        }
+    }
+    for names in aces2_settings() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                "RGB to HMJ settings",
+                vec![style(&AP0, dir)],
+                &levels()[1..2],
+                names,
+            ));
+        }
+    }
+    check(&cases);
+}
+
 /// ACES 2.0's tone scale and chroma compression (chunk 2.4f2) for six peak luminances, both
 /// ways, at every level, in every language; two in one shader (each with its own resources);
 /// the shader's settings.

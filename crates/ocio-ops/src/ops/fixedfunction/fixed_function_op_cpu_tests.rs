@@ -565,7 +565,7 @@ fn aces_ot_20_p3d65_1000n_rt() {
     aces_ot_20_round_trip(params, norm_peak_luminance, 1e-3);
 }
 
-/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_rgb_to_jmh_20)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_rgb_to_jmh_20)` @ v2.6.0.
 #[test]
 fn aces_rgb_to_jmh_20() {
     // The following input values are processed and carried over to the next FixedFunctionOp
@@ -648,9 +648,31 @@ fn aces_rgb_to_jmh_20() {
 
     apply_fixed_function(&mut input2_32f, &expected_32f, &func_data, 1e-5, false);
 
-    let func_data2 = FixedFunctionOpData::with_params(AcesJmhToRgb20, params).unwrap();
+    let func_data2 = FixedFunctionOpData::with_params(AcesJmhToRgb20, params.clone()).unwrap();
 
     apply_fixed_function(&mut input2_32f, &input_32f, &func_data2, 1e-4, false);
+
+    // FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 repacks the same JMh values as [ h/360, M/200, J/100 ].
+    let mut expected_hmj_32f = [0.0f32; 27 * 4];
+    for idx in 0..27 {
+        let j = expected_32f[idx * 4];
+        let m = expected_32f[idx * 4 + 1];
+        let h = expected_32f[idx * 4 + 2];
+        expected_hmj_32f[idx * 4] = h / 360.0;
+        expected_hmj_32f[idx * 4 + 1] = m / 200.0;
+        expected_hmj_32f[idx * 4 + 2] = j / 100.0;
+        expected_hmj_32f[idx * 4 + 3] = expected_32f[idx * 4 + 3];
+    }
+
+    input2_32f = input_32f;
+
+    let func_data3 = FixedFunctionOpData::with_params(AcesRgbToHmj20, params.clone()).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &expected_hmj_32f, &func_data3, 1e-5, false);
+
+    let func_data4 = FixedFunctionOpData::with_params(AcesHmjToRgb20, params).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &input_32f, &func_data4, 1e-4, false);
 }
 
 /// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_tonescale_compress_20)` @ v2.5.2.
@@ -1368,6 +1390,8 @@ fn short_params_are_refused() {
         (AcesTonescaleCompress20Fwd, vec![1000.0]),
         (AcesTonescaleCompress20Inv, vec![1000.0]),
         (AcesRgbToJmh20, ap0.clone()),
+        (AcesRgbToHmj20, ap0.clone()),
+        (AcesHmjToRgb20, ap0.clone()),
         (AcesJmhToRgb20, ap0),
     ] {
         let mut data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();

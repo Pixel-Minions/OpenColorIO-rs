@@ -134,6 +134,7 @@ const NAMES: &[&str] = &[
     "ACES_GamutComp13",
     "ACES2_OutputTransform",
     "ACES2_RGB_TO_JMh",
+    "ACES2_RGB_TO_HMJ",
     "ACES2_TonescaleCompress",
     "ACES2_GamutCompress",
     "REC2100_Surround",

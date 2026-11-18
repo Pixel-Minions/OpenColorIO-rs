@@ -911,7 +911,7 @@ fn a_style_outside_the_enumerators_raises_the_wheels_error() {
             sc.eval(r(obj), &["getNegativeStyle", "getDirection", "__repr__"]);
         }
     }
-    for v in with_platforms(&[23, 99, 100, 255, 1000000, INT_MAX], 4) {
+    for v in with_platforms(&[24, 99, 100, 255, 1000000, INT_MAX], 4) {
         let style = sc.call(n("OCIO.FixedFunctionStyle"), vec![i(v)]);
         sc.raises(n("OCIO.FixedFunctionTransform"), vec![r(style)]);
         sc.call_kw(

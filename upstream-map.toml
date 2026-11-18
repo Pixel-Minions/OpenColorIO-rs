@@ -40,7 +40,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524); p2-rgbcurve 2.6a: GradingStyle (560-566), RGBCurveType (580-588) and BSplineType (611-620), in open_color_types.rs, re-exported by ocio as GradingStyle, RgbCurveType and BSplineType; p5-values 5.0d: HueCurveType (590-602), in open_color_types.rs; p5-ec 5.1a: ExposureContrastStyle (526-532), in open_color_types.rs; p3-config-1 3.4f: SearchReferenceSpaceType (316-321), ColorSpaceVisibility (323-328), and the ROLE_* constants (870-913, defined in ParseUtils.cpp); p3-config-2 3.4h-j: NamedTransformVisibility (330-335), ViewType (337-341); p5-huecurve 5.4a: HSYTransformStyle (604-609) as HsyTransformStyle; P66 completes the public GpuLanguageFromString in ocio-gpu/open_color_types.rs (ParseUtils.cpp:277-296), shared with the Python binding, using the existing nullable C-string byte API. All declared constants/enums/conversions are mapped within the approved Rust API and enum policy. 2.6.0: changed at v2.6.0 lines 521, 746-752, 988-994; not yet re-ported (ocio26 cards). ocio26-config: ConfigCompatibility (746-751) in open_color_types.rs."
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524); p2-rgbcurve 2.6a: GradingStyle (560-566), RGBCurveType (580-588) and BSplineType (611-620), in open_color_types.rs, re-exported by ocio as GradingStyle, RgbCurveType and BSplineType; p5-values 5.0d: HueCurveType (590-602), in open_color_types.rs; p5-ec 5.1a: ExposureContrastStyle (526-532), in open_color_types.rs; p3-config-1 3.4f: SearchReferenceSpaceType (316-321), ColorSpaceVisibility (323-328), and the ROLE_* constants (870-913, defined in ParseUtils.cpp); p3-config-2 3.4h-j: NamedTransformVisibility (330-335), ViewType (337-341); p5-huecurve 5.4a: HSYTransformStyle (604-609) as HsyTransformStyle; P66 completes the public GpuLanguageFromString in ocio-gpu/open_color_types.rs (ParseUtils.cpp:277-296), shared with the Python binding, using the existing nullable C-string byte API. All declared constants/enums/conversions are mapped within the approved Rust API and enum policy. 2.6.0: changed at v2.6.0 lines 521, 746-752, 988-994; not yet re-ported (ocio26 cards). ocio26-config: ConfigCompatibility (746-751) in open_color_types.rs. ocio26-ops: FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 (521) at v2.6.0."
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -504,8 +504,8 @@ note = "P67 complete source audit: optimizer passes, inverse1D/3D replacement an
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/parse_utils.rs"]
-status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle; p3-context 3.5c: BoolToString/FromString, TransformDirectionFromString, BitDepthFromString, BitDepthIsFloat, BitDepthToInt, AllocationFromString, InterpolationFromString, EnvironmentModeToString/FromString, CDLStyleFromString, NegativeStyleFromString, StrEqualsCaseIgnore, SplitStringEnvStyle, JoinStringEnvStyle, IntersectStringVecsCaseIgnore, FindInStringVecCaseIgnore in parse_utils.rs; RangeStyleFromString next to RangeStyle; p2-ff-cpu 2.3a1: FixedFunctionStyleToString, next to FixedFunctionStyle; p2-rgbcurve 2.6a: GradingStyleToString, next to GradingStyle; p5-ec 5.1a: ExposureContrastStyleToString (458-476), next to ExposureContrastStyle; p3-config-1 3.4f: the ROLE_* constants (530-542) in parse_utils.rs; p3-yaml-load-1 3.3i2: FixedFunctionStyleFromString (390-421), next to FixedFunctionStyle; p5-transforms 5.5a: ExposureContrastStyleFromString (478-491) in parse_utils.rs; 5.5b: GradingStyleFromString (443-456) in parse_utils.rs. p4-parse 4.0a: ConvertSpecialCharToXmlToken, ConvertXmlTokenToSpecialChar, FloatToString, FloatVecToString, DoubleToString, DoubleVecToString, StringToFloat, StringToInt (num_get), StringVecToFloatVec, StringVecToIntVec in parse_utils.rs. p4-readers 4.2c: nextline (674-691), in crates/ocio/src/parse_utils.rs next to the input stream; P66 completes the public GpuLanguageFromString in ocio-gpu/open_color_types.rs (ParseUtils.cpp:277-296), shared with the Python binding, using the existing nullable C-string byte API. All declared constants/enums/conversions are mapped within the approved Rust API and enum policy. 2.6.0: changed at v2.6.0 lines 366, 404, 776, 781, 789; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle; p3-context 3.5c: BoolToString/FromString, TransformDirectionFromString, BitDepthFromString, BitDepthIsFloat, BitDepthToInt, AllocationFromString, InterpolationFromString, EnvironmentModeToString/FromString, CDLStyleFromString, NegativeStyleFromString, StrEqualsCaseIgnore, SplitStringEnvStyle, JoinStringEnvStyle, IntersectStringVecsCaseIgnore, FindInStringVecCaseIgnore in parse_utils.rs; RangeStyleFromString next to RangeStyle; p2-ff-cpu 2.3a1: FixedFunctionStyleToString, next to FixedFunctionStyle; p2-rgbcurve 2.6a: GradingStyleToString, next to GradingStyle; p5-ec 5.1a: ExposureContrastStyleToString (458-476), next to ExposureContrastStyle; p3-config-1 3.4f: the ROLE_* constants (530-542) in parse_utils.rs; p3-yaml-load-1 3.3i2: FixedFunctionStyleFromString (390-421), next to FixedFunctionStyle; p5-transforms 5.5a: ExposureContrastStyleFromString (478-491) in parse_utils.rs; 5.5b: GradingStyleFromString (443-456) in parse_utils.rs. p4-parse 4.0a: ConvertSpecialCharToXmlToken, ConvertXmlTokenToSpecialChar, FloatToString, FloatVecToString, DoubleToString, DoubleVecToString, StringToFloat, StringToInt (num_get), StringVecToFloatVec, StringVecToIntVec in parse_utils.rs. p4-readers 4.2c: nextline (674-691), in crates/ocio/src/parse_utils.rs next to the input stream; P66 completes the public GpuLanguageFromString in ocio-gpu/open_color_types.rs (ParseUtils.cpp:277-296), shared with the Python binding, using the existing nullable C-string byte API. All declared constants/enums/conversions are mapped within the approved Rust API and enum policy. ocio26-ops: FixedFunctionStyleToString and FixedFunctionStyleFromString name ACES2_RGB_TO_HMJ (366, 404) at v2.6.0; 776-789 only refactor SplitStringEnvStyle (emplace_back), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -1409,8 +1409,8 @@ status = "done"
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu.rs", "crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu_sse2.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), whose every arm has its renderer since 2.3d2; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823); 2.3d1: LIN_TO_GAMMA_LOG, GAMMA_LOG_TO_LIN, LIN_TO_DOUBLE_LOG, DOUBLE_LOG_TO_LIN (389-474, 2230-2423); p2-aces2-cpu 2.4e1: Renderer_ACES_RGB_TO_JMh_20 and Renderer_ACES_TONESCALE_COMPRESS_20 (153-187, 1168-1319); 2.4e2: Renderer_ACES_OutputTransform20 and Renderer_ACES_GAMUT_COMPRESS_20 (133-151, 189-205, 1057-1166, 1321-1404); p2-ff-cpu-2 2.3d2: LIN_TO_PQ and PQ_TO_LIN, scalar and SSE (349-386, 2030-2227). 2.6.0: changed at v2.6.0 lines 172-188, 1260-1336, 2594-2600; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), whose every arm has its renderer since 2.3d2; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823); 2.3d1: LIN_TO_GAMMA_LOG, GAMMA_LOG_TO_LIN, LIN_TO_DOUBLE_LOG, DOUBLE_LOG_TO_LIN (389-474, 2230-2423); p2-aces2-cpu 2.4e1: Renderer_ACES_RGB_TO_JMh_20 and Renderer_ACES_TONESCALE_COMPRESS_20 (153-187, 1168-1319); 2.4e2: Renderer_ACES_OutputTransform20 and Renderer_ACES_GAMUT_COMPRESS_20 (133-151, 189-205, 1057-1166, 1321-1404); p2-ff-cpu-2 2.3d2: LIN_TO_PQ and PQ_TO_LIN, scalar and SSE (349-386, 2030-2227). ocio26-ops: Renderer_ACES_RGB_TO_HMJ_20 (172-188, 1260-1336) and its arm of GetFixedFunctionCPURenderer (2594-2599) at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.h"
@@ -1422,22 +1422,22 @@ status = "done"
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3a1: the styles, their names, GetStyle and both ConvertStyles; 2.3a2: the constructors, validate, isInverse, invert, inverse, the direction, equals, the cache ID. 2.6.0: changed at v2.6.0 lines 59-60, 130-133, 263-270, 432-436, 550-553, 694-695, 966-975, 1144, 1168; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-ff-cpu 2.3a1: the styles, their names, GetStyle and both ConvertStyles; 2.3a2: the constructors, validate, isInverse, invert, inverse, the direction, equals, the cache ID. ocio26-ops: the HMJ styles (59-60, 130-133, 263-270, 432-436, 550-553, 694-695, 966-975, 1144, 1168) at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3a1: Style (FixedFunctionOpStyle); 2.3a2: the class. 2.6.0: changed at v2.6.0 lines 61-62; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-ff-cpu 2.3a1: Style (FixedFunctionOpStyle); 2.3a2: the class. ocio26-ops: ACES_RGB_TO_HMJ_20 and ACES_HMJ_TO_RGB_20 (61-62) at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/fixedfunction/fixed_function_op_gpu.rs"]
-status = "partial"
-note = "p2-ff-gpu 2.3f: the ACES 1.x shaders (1-351, and Add_Surround_10_Fwd_Shader 1636-1649) and the dispatch (GetFixedFunctionGPUShaderProgram, GetFixedFunctionGPUProcessingText, 2225-2491), its other arms not ported yet; 2.3g1: the Rec.2100 surround, RGB<->HSV, the HSYs, XYZ<->xyY, u'v'Y and LUV (1651-1948); 2.3g2: PQ, gamma-log and double-log (1950-2223); p2-aces2-gpu 2.4f1: hue wrap, sin/cos, RGB<->Aab<->JMh (352-503), the RGB_TO_JMh entry points (1442-1492); 2.4f2: the reach table, toe, tone scale and chroma compression (505-805), the TONESCALE_COMPRESS entry points (1494-1548); 2.4g: the cusp table, focus gain, J intersection, gamut boundary and compression (807-1285), the GAMUT_COMPRESS entry points (1550-1634); 2.4h: the output transform (1287-1440), and the dispatch's last arms ocio26-base: intCast in the hue weight and cusp table, gamut compress without _Add_SinCos_Shader at v2.6.0 (PR #2319); the HMJ shaders (1494-1518, 2376-2385) are card ocio26-ops."
+status = "done"
+note = "p2-ff-gpu 2.3f: the ACES 1.x shaders (1-351, and Add_Surround_10_Fwd_Shader 1636-1649) and the dispatch (GetFixedFunctionGPUShaderProgram, GetFixedFunctionGPUProcessingText, 2225-2491), its other arms not ported yet; 2.3g1: the Rec.2100 surround, RGB<->HSV, the HSYs, XYZ<->xyY, u'v'Y and LUV (1651-1948); 2.3g2: PQ, gamma-log and double-log (1950-2223); p2-aces2-gpu 2.4f1: hue wrap, sin/cos, RGB<->Aab<->JMh (352-503), the RGB_TO_JMh entry points (1442-1492); 2.4f2: the reach table, toe, tone scale and chroma compression (505-805), the TONESCALE_COMPRESS entry points (1494-1548); 2.4g: the cusp table, focus gain, J intersection, gamut boundary and compression (807-1285), the GAMUT_COMPRESS entry points (1550-1634); 2.4h: the output transform (1287-1440), and the dispatch's last arms ocio26-base: intCast in the hue weight and cusp table, gamut compress without _Add_SinCos_Shader at v2.6.0 (PR #2319); ocio26-ops: the HMJ shaders (Add_RGB_to_HMJ_Shader, Add_HMJ_to_RGB_Shader, 1494-1518) and their arms of GetFixedFunctionGPUProcessingText (2376-2385) at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.h"
@@ -3450,7 +3450,7 @@ path = "src/bindings/python/PyTypes.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_types.rs"]
 status = "partial"
-note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984; not yet re-ported (ocio26 cards). ocio26-config: 864-871 (ConfigCompatibility) ported; 618-619 (HMJ) is ocio26-ops', 984 (METADATA_ID_ELEMENT) ocio26-clf's."
+note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984; not yet re-ported (ocio26 cards). ocio26-config: 864-871 (ConfigCompatibility) ported; 618-619 (HMJ) is ocio26-ops', 984 (METADATA_ID_ELEMENT) ocio26-clf's. ocio26-ops: FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 (618-619) at v2.6.0."
 
 [[file]]
 path = "src/bindings/python/PyUtils.cpp"
@@ -4456,15 +4456,15 @@ note = "p5-ec 5.1b: create, inverse; p5-transforms 5.5a: create_transform (in ex
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu_tests.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID; 2.3d1: LIN_TO_GAMMA_LOG, LIN_TO_DOUBLE_LOG. 2.3d2: LIN_TO_PQ; p2-aces2-cpu 2.4e1: aces_rgb_to_jmh_20, aces_tonescale_compress_20; 2.4e2: aces_output_transform_20, aces_ot_20_edge_cases, aces_gamut_map_20; p2-api-parity: the round trips aces_ot_20_rec709_100n_rt, aces_ot_20_p3d65_100n_rt and aces_ot_20_p3d65_1000n_rt (GenerateIdentityLut3D came with p2-lut3d). 2.6.0: changed at v2.6.0 lines 791-823; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID; 2.3d1: LIN_TO_GAMMA_LOG, LIN_TO_DOUBLE_LOG. 2.3d2: LIN_TO_PQ; p2-aces2-cpu 2.4e1: aces_rgb_to_jmh_20, aces_tonescale_compress_20; 2.4e2: aces_output_transform_20, aces_ot_20_edge_cases, aces_gamut_map_20; p2-api-parity: the round trips aces_ot_20_rec709_100n_rt, aces_ot_20_p3d65_100n_rt and aces_ot_20_p3d65_1000n_rt (GenerateIdentityLut3D came with p2-lut3d). ocio26-ops: aces_rgb_to_jmh_20 re-ported at v2.6.0 (its HMJ part)."
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data_tests.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3a2: all 7. 2.6.0: changed at v2.6.0 lines 375-386; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-ff-cpu 2.3a2: all 7. ocio26-ops: is_inverse re-ported at v2.6.0."
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp"
@@ -4805,8 +4805,8 @@ note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, fo
 path = "tests/cpu/transforms/FixedFunctionTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/fixed_function_transform_tests.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3e: basic, createEditableCopy. 2.6.0: changed at v2.6.0 lines 81-99; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-ff-cpu 2.3e: basic, createEditableCopy. ocio26-ops: basic re-ported at v2.6.0."
 
 [[file]]
 path = "tests/cpu/transforms/GradingHueCurveTransform_tests.cpp"

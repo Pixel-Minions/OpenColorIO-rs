@@ -210,8 +210,8 @@ const ENUMS: &[EnumDef] = &[
     EnumDef { name: "EnvironmentMode", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("ENV_ENVIRONMENT_UNKNOWN", 0), ("ENV_ENVIRONMENT_LOAD_PREDEFINED", 1), ("ENV_ENVIRONMENT_LOAD_ALL", 2)] },
     // py::enum_<RangeStyle> (PyTypes.cpp:568-576 @ v2.5.2), no fixed type.
     EnumDef { name: "RangeStyle", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("RANGE_NO_CLAMP", 0), ("RANGE_CLAMP", 1)] },
-    // py::enum_<FixedFunctionStyle> (PyTypes.cpp:578-628 @ v2.5.2), no fixed type.
-    EnumDef { name: "FixedFunctionStyle", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("FIXED_FUNCTION_ACES_RED_MOD_03", 0), ("FIXED_FUNCTION_ACES_RED_MOD_10", 1), ("FIXED_FUNCTION_ACES_GLOW_03", 2), ("FIXED_FUNCTION_ACES_GLOW_10", 3), ("FIXED_FUNCTION_ACES_DARK_TO_DIM_10", 4), ("FIXED_FUNCTION_REC2100_SURROUND", 5), ("FIXED_FUNCTION_RGB_TO_HSV", 6), ("FIXED_FUNCTION_XYZ_TO_xyY", 7), ("FIXED_FUNCTION_XYZ_TO_uvY", 8), ("FIXED_FUNCTION_XYZ_TO_LUV", 9), ("FIXED_FUNCTION_ACES_GAMUTMAP_02", 10), ("FIXED_FUNCTION_ACES_GAMUTMAP_07", 11), ("FIXED_FUNCTION_ACES_GAMUT_COMP_13", 12), ("FIXED_FUNCTION_LIN_TO_PQ", 13), ("FIXED_FUNCTION_LIN_TO_GAMMA_LOG", 14), ("FIXED_FUNCTION_LIN_TO_DOUBLE_LOG", 15), ("FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20", 16), ("FIXED_FUNCTION_ACES_RGB_TO_JMH_20", 17), ("FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20", 18), ("FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20", 19), ("FIXED_FUNCTION_RGB_TO_HSY_LIN", 20), ("FIXED_FUNCTION_RGB_TO_HSY_LOG", 21), ("FIXED_FUNCTION_RGB_TO_HSY_VID", 22)] },
+    // py::enum_<FixedFunctionStyle> (PyTypes.cpp:578-630 @ v2.6.0), no fixed type.
+    EnumDef { name: "FixedFunctionStyle", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("FIXED_FUNCTION_ACES_RED_MOD_03", 0), ("FIXED_FUNCTION_ACES_RED_MOD_10", 1), ("FIXED_FUNCTION_ACES_GLOW_03", 2), ("FIXED_FUNCTION_ACES_GLOW_10", 3), ("FIXED_FUNCTION_ACES_DARK_TO_DIM_10", 4), ("FIXED_FUNCTION_REC2100_SURROUND", 5), ("FIXED_FUNCTION_RGB_TO_HSV", 6), ("FIXED_FUNCTION_XYZ_TO_xyY", 7), ("FIXED_FUNCTION_XYZ_TO_uvY", 8), ("FIXED_FUNCTION_XYZ_TO_LUV", 9), ("FIXED_FUNCTION_ACES_GAMUTMAP_02", 10), ("FIXED_FUNCTION_ACES_GAMUTMAP_07", 11), ("FIXED_FUNCTION_ACES_GAMUT_COMP_13", 12), ("FIXED_FUNCTION_LIN_TO_PQ", 13), ("FIXED_FUNCTION_LIN_TO_GAMMA_LOG", 14), ("FIXED_FUNCTION_LIN_TO_DOUBLE_LOG", 15), ("FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20", 16), ("FIXED_FUNCTION_ACES_RGB_TO_JMH_20", 17), ("FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20", 18), ("FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20", 19), ("FIXED_FUNCTION_ACES_RGB_TO_HMJ_20", 20), ("FIXED_FUNCTION_RGB_TO_HSY_LIN", 21), ("FIXED_FUNCTION_RGB_TO_HSY_LOG", 22), ("FIXED_FUNCTION_RGB_TO_HSY_VID", 23)] },
     // py::enum_<ExposureContrastStyle> (PyTypes.cpp:630-640 @ v2.5.2), no fixed type.
     EnumDef { name: "ExposureContrastStyle", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("EXPOSURE_CONTRAST_LINEAR", 0), ("EXPOSURE_CONTRAST_VIDEO", 1), ("EXPOSURE_CONTRAST_LOGARITHMIC", 2)] },
     // py::enum_<CDLStyle> (PyTypes.cpp:642-652 @ v2.5.2), no fixed type.
@@ -818,6 +818,7 @@ static CONVERSIONS: [Function; 32] = [
                 AcesRgbToJmh20,
                 AcesTonescaleCompress20,
                 AcesGamutCompress20,
+                AcesRgbToHmj20,
                 RgbToHsyLin,
                 RgbToHsyLog,
                 RgbToHsyVid,

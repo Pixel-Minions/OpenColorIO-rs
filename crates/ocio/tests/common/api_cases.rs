@@ -1306,6 +1306,7 @@ pub(crate) fn fixed_function() -> Cases {
             &p3_d65_1000[..1],
         ),
         ("FIXED_FUNCTION_ACES_RGB_TO_JMH_20", &ap0[..]),
+        ("FIXED_FUNCTION_ACES_RGB_TO_HMJ_20", &ap0[..]),
     ] {
         cases.push(Case::new(
             style.trim_start_matches("FIXED_FUNCTION_"),

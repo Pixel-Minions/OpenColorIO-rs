@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The FixedFunction op's CPU renderers: a port of
-//! `src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp` @ v2.5.2.
+//! `src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp` @ v2.6.0.
 //!
 //! Every style: the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3b); the
@@ -10,7 +10,7 @@
 //! RGB to and from the three HSYs (2.3c2); the gamma-log and double-log curves, both ways
 //! (2.3d1); PQ, both ways, scalar and SSE (2.3d2); ACES 2.0's RGB to and from JMh, and its
 //! tone scale and chroma compression (2.4e1), its output transform and gamut compression
-//! (2.4e2).
+//! (2.4e2); 2.6.0's RGB to and from HMJ (ocio26-ops).
 //!
 //! The renderers work in place and never write alpha, which upstream copies (`out[3] =
 //! in[3]`), nor a channel upstream leaves as it was.
@@ -935,6 +935,66 @@ impl CpuOp for RendererAcesRgbToJmh20 {
             } else {
                 let normalised_hue = from_degrees(pixel[2]);
                 let rgb = jmh_to_rgb(&[pixel[0], pixel[1], normalised_hue], &self.p);
+
+                pixel[0] = rgb[0];
+                pixel[1] = rgb[1];
+                pixel[2] = rgb[2];
+            }
+        }
+    }
+}
+
+/// RGB of the parameters' primaries to ACES 2.0's JMh repacked as HMJ, scaled for a
+/// [0, 1]-ish range: hue in degrees / 360, M / 200, J / 100; or back.
+///
+/// Both wheels call the same out-of-line `ACES2::RGB_to_JMh` and `ACES2::JMh_to_RGB` as
+/// [`RendererAcesRgbToJmh20`] (Windows `sub_180304770` and `sub_1803042e0` from
+/// `0x1801949e0`, Linux `0x366310` and `0x366750` from `0x370c80`), and scale with one
+/// `divss` or `mulss` per channel whose other operand is the constant, so no two NaNs meet
+/// here.
+///
+/// Port of `Renderer_ACES_RGB_TO_HMJ_20` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:172-188, 1260-1336 @ v2.6.0).
+#[derive(Debug)]
+pub struct RendererAcesRgbToHmj20 {
+    /// `m_fwd`.
+    fwd: bool,
+    /// `m_p`.
+    p: JMhParams,
+}
+
+impl RendererAcesRgbToHmj20 {
+    /// The model of the parameters' primaries. [`SHORT_PARAMS`] for fewer than eight
+    /// parameters (U-31); refused where a matrix is singular.
+    ///
+    /// Port of `Renderer_ACES_RGB_TO_HMJ_20::Renderer_ACES_RGB_TO_HMJ_20`
+    /// (FixedFunctionOpCPU.cpp:1260-1282 @ v2.6.0).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let fwd = FixedFunctionOpStyle::AcesRgbToHmj20 == data.style();
+        let primaries = primaries_from(data, 0)?;
+        Ok(RendererAcesRgbToHmj20 {
+            fwd,
+            p: init_jmh_params(&primaries)?,
+        })
+    }
+}
+
+impl CpuOp for RendererAcesRgbToHmj20 {
+    /// Port of `Renderer_ACES_RGB_TO_HMJ_20::apply`, `fwd` and `inv`
+    /// (FixedFunctionOpCPU.cpp:1284-1335 @ v2.6.0).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            if self.fwd {
+                let jmh = rgb_to_jmh(&[pixel[0], pixel[1], pixel[2]], &self.p);
+
+                pixel[0] = to_degrees(jmh[2]) / 360.0;
+                pixel[1] = jmh[1] / 200.0;
+                pixel[2] = jmh[0] / 100.0;
+            } else {
+                let normalised_hue = from_degrees(pixel[0] * 360.0);
+                let m = pixel[1] * 200.0;
+                let j = pixel[2] * 100.0;
+                let rgb = jmh_to_rgb(&[j, m, normalised_hue], &self.p);
 
                 pixel[0] = rgb[0];
                 pixel[1] = rgb[1];
@@ -2430,7 +2490,7 @@ impl CpuOp for RendererDoubleLogToLin {
 /// styles that have one (PQ).
 ///
 /// Port of `GetFixedFunctionCPURenderer` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:2429-2643 @ v2.5.2). Its "Unsupported FixedFunction style" for a
+/// FixedFunctionOpCPU.cpp:2523-2744 @ v2.6.0). Its "Unsupported FixedFunction style" for a
 /// value outside the enum can't happen.
 pub fn get_fixed_function_cpu_renderer(
     func: &FixedFunctionOpData,
@@ -2456,6 +2516,8 @@ pub fn get_fixed_function_cpu_renderer(
             Arc::new(RendererAcesOutputTransform20::new(func)?)
         }
         AcesRgbToJmh20 | AcesJmhToRgb20 => Arc::new(RendererAcesRgbToJmh20::new(func)?),
+        // Sharing same renderer (param will be inverted to handle direction).
+        AcesRgbToHmj20 | AcesHmjToRgb20 => Arc::new(RendererAcesRgbToHmj20::new(func)?),
         AcesTonescaleCompress20Fwd | AcesTonescaleCompress20Inv => {
             Arc::new(RendererAcesTonescaleCompress20::new(func)?)
         }

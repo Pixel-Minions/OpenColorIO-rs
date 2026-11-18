@@ -167,7 +167,7 @@ fn valid_params(style: FixedFunctionStyle) -> Vec<f64> {
         AcesOutputTransform20 | AcesGamutCompress20 => {
             vec![100.0, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]
         }
-        AcesRgbToJmh20 => vec![
+        AcesRgbToJmh20 | AcesRgbToHmj20 => vec![
             0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
         ],
         AcesTonescaleCompress20 => vec![1000.0],
@@ -443,6 +443,8 @@ fn op_styles() -> Vec<(FixedFunctionOpStyle, Vec<f64>)> {
         (AcesOutputTransform20Inv, output_20.clone()),
         (AcesRgbToJmh20, output_20[1..].to_vec()),
         (AcesJmhToRgb20, output_20[1..].to_vec()),
+        (AcesRgbToHmj20, output_20[1..].to_vec()),
+        (AcesHmjToRgb20, output_20[1..].to_vec()),
         (AcesTonescaleCompress20Fwd, vec![100.0]),
         (AcesTonescaleCompress20Inv, vec![100.0]),
         (AcesGamutCompress20Fwd, output_20.clone()),

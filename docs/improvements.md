@@ -5092,7 +5092,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   The GPU writer reads the ACES 1.3 gamut compression's parameters the same way in `p2-ff-gpu`
   (2.3f, `fixed_function_op_gpu.rs`), and the Rec.2100 surround's, the gamma-log's and the
   double-log's (2.3g1, 2.3g2), and ACES 2.0's (`p2-aces2-gpu`, 2.4f1-2.4h);
-  `fixed_function_op_gpu.rs` checks their errors.
+  `fixed_function_op_gpu.rs` checks their errors. 2.6.0's RGB to HMJ renderer and shaders
+  (`ocio26-ops`) read their eight primaries the same way (`FixedFunctionOpCPU.cpp:1260-1282`,
+  `FixedFunctionOpGPU.cpp:1494-1518` @ v2.6.0); both files' tests check their errors.
 
 ### U-32. ACES 2.0's hue table past its arrays
 
