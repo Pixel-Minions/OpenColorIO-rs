@@ -118,6 +118,17 @@ pub enum NamedTransformVisibility {
 
 /// Which views of a display: the shared views it uses, or its own.
 ///
+/// A compatibility requirement a config may be checked against
+/// (`ConfigCompatibilityHelpers::CheckCompatibility`).
+///
+/// Port of `ConfigCompatibility` (include/OpenColorIO/OpenColorTypes.h:746-751 @ v2.6.0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConfigCompatibility {
+    /// `CONFIG_HDR_DISPLAY_SUPPORT_26`: the config meets the HDR display requirements as of
+    /// OCIO 2.6.
+    HdrDisplaySupport26 = 0,
+}
+
 /// Port of `ViewType` (include/OpenColorIO/OpenColorTypes.h:337-341 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewType {
