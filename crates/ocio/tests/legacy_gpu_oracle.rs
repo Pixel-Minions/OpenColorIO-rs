@@ -1158,7 +1158,7 @@ fn ordinary_after_legacy_keeps_native_cached_shader_and_texture_values() {
             let reply = GpuShaderReply::from_response(response);
             assert_eq!(
                 reply.result["oracle_native"]["wheel_version"],
-                json!("2.5.2"),
+                json!("2.6.0"),
                 "{label}"
             );
             let expected = wheel(&reply);
@@ -1283,7 +1283,7 @@ fn compare_batches(
             );
             assert_eq!(
                 reply.result["oracle_native"]["wheel_version"],
-                json!("2.5.2"),
+                json!("2.6.0"),
                 "{label}: actual native wheel"
             );
             let expected = wheel(&reply);

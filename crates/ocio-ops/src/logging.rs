@@ -36,7 +36,7 @@ const OCIO_LOGGING_LEVEL_ENVVAR: &str = "OCIO_LOGGING_LEVEL";
 
 /// `GetVersion()` (src/OpenColorIO/Config.cpp:99-102 @ v2.5.2): `OCIO_VERSION_FULL_STR`, the
 /// version with no release type.
-const OCIO_VERSION_FULL_STR: &str = "2.5.2";
+const OCIO_VERSION_FULL_STR: &str = "2.6.0";
 
 /// The global logging state, under `g_logmutex`.
 ///

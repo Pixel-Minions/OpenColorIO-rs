@@ -470,7 +470,7 @@ impl Transform {
 /// The base class's check of the direction.
 ///
 /// Upstream throws `"<typeid name>: invalid direction."` for a direction other than forward and
-/// inverse; the name is the compiler's (MSVC's `class OpenColorIO_v2_5::MatrixTransformImpl`,
+/// inverse; the name is the compiler's (MSVC's `class OpenColorIO_v2_6::MatrixTransformImpl`,
 /// GCC's mangled one), so the text differs between the wheels. Neither a Rust
 /// [`TransformDirection`] nor Python's enum can hold such a direction, so the check always
 /// passes here (the owner's decision, 2026-10-01).

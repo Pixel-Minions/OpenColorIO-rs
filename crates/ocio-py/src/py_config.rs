@@ -88,7 +88,7 @@ const PROCESSOR_CACHE_FLAGS: &str = q!("ProcessorCacheFlags");
 const COLOR_SPACE_SET: &str = q!("ColorSpaceSet");
 /// The proxy's C++ type, as the signatures write it: `bindPyConfig` runs before
 /// `bindPyConfigIOProxy` registers the class.
-const CONFIG_IO_PROXY: &str = "OpenColorIO_v2_5::ConfigIOProxy";
+const CONFIG_IO_PROXY: &str = "OpenColorIO_v2_6::ConfigIOProxy";
 
 // ---------------------------------------------------------------------------------------------
 // The config as the binding holds it
