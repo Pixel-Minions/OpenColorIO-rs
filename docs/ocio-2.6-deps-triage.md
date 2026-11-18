@@ -344,7 +344,7 @@ builds minizip-ng with zlib only (`Installminizip-ng.cmake` @ v2.6.0 adds `-DMZ_
   outside it. For a symlink entry (both the `linkname` and the stored-target paths, lines
   729-735 and 752-760) it calls `mz_path_is_symlink_target_safe(path, target, destination)`,
   which refuses absolute targets and targets that resolve outside. Both are new in
-  `mz_os.c:280-421`. `mz_os_read_symlink` (`mz_os_posix.c:332-341` -> `357-371`) now returns
+  `mz_os.c:280-420`. `mz_os_read_symlink` (`mz_os_posix.c:332-341` -> `357-372`) now returns
   `MZ_BUF_ERROR` when the target fills the buffer. Commits bb282ac, 5a3c62c, 185667e, 9963dd3,
   32747dc, 0574b3b, 483f056 and 131d59b.
 - **OCIO-visible:** archives with symlink entries, which OCIO never writes but extracts, and
@@ -364,8 +364,10 @@ Both are masked by the umask. `mz_zip_reader_entry_save_file` then applies the e
 attributes when `mz_zip_attrib_convert` can convert them (MS-DOS/Windows and Unix made-by
 systems), so the mode differs from 2.5.2 only for entries whose made-by system it can't
 convert. Rust: `mz_strm.rs` `mz_stream_os_open` (create mode via `OpenOptionsExt::mode`).
-`O_NOFOLLOW` comes only with `MZ_OPEN_MODE_NOFOLLOW`, which only a link-storing writer sets.
-Windows is unchanged (`mz_strm_os_win32.c` didn't change).
+The writer opens the files it adds with `MZ_OPEN_MODE_NOFOLLOW` whenever it doesn't follow
+links (OCIO's case, `mz_zip_rw.c:1702-1709`), so on Linux with `O_NOFOLLOW`; OCIO skips links
+before it opens a file, so only a race could see it. Windows is unchanged
+(`mz_strm_os_win32.c` didn't change). Done in chunk 7b.
 
 **M3. The writer's link handling moved into `mz_zip_writer_add_file`** (port for exactness;
 no OCIO-visible effect). `mz_zip_rw.c:1570-1647` -> `1630-1721`: a symlink is skipped when
@@ -375,7 +377,11 @@ when storing links, and the new `mz_os_get_link_attribs` takes the `lstat` that
 Windows `301-318` -> `333-373` with the reparse-point query, `543-560`; commit 6b9defc).
 OCIO's `add_path` already returns before `add_file` for a link, whether to a file or a
 directory (`mz_zip_rw.c:1686-1689` @ 4.0.10 -> `1762-1765` @ 4.2.2, unchanged; I-211). For the regular
-files it does add, `stat` and `lstat` agree. So the written archives are unchanged.
+files it does add, `stat` and `lstat` agree. So the written archives are unchanged. Done in chunk 7b
+without new system calls: the reparse point branch of `mz_os_get_file_attribs` (`CreateFile2`
+and `GetFileInformationByHandle`, unreachable from OCIO) is `std::fs::metadata`'s, and
+`mz_os_get_link_attribs` isn't reached. M1's Windows `mz_os_read_symlink` (`DeviceIoControl`)
+is read in safe Rust: owner decision 2026-11-18, deviation D-22; I-952, U-730.
 
 ### No effect on the port
 

@@ -275,16 +275,16 @@ the License, but only in their entirety and only with respect to the Combined
 Software.
 ```
 
-## minizip-ng 4.0.10
+## minizip-ng 4.2.2
 
-<https://github.com/zlib-ng/minizip-ng>, the zip library OpenColorIO 2.5.2 reads and writes
+<https://github.com/zlib-ng/minizip-ng>, the zip library OpenColorIO 2.6.0 reads and writes
 `.ocioz` config archives with (`src/OpenColorIO/OCIOZArchive.cpp`; OpenColorIO's build
-recommends 4.0.10, `share/cmake/modules/FindExtPackages.cmake:114-116`). The parts
+recommends 4.2.2, `share/cmake/modules/FindExtPackages.cmake:113-116` @ v2.6.0). The parts
 OpenColorIO's archive code reaches are ported in `crates/ocio/src/minizip/`, each function
 citing its source; zlib's deflate and inflate, which minizip-ng calls, are the `flate2`
 crate's. Its source is pinned as
-the submodule `upstream/minizip-ng` (tag 4.0.10, commit
-f3ed731e27a97e30dffe076ed5e0537daae5c1bd), so that the citations can be checked. Its sources
+the submodule `upstream/minizip-ng` (tag 4.2.2, commit
+7b2387161c542fa9f427352dcdef76097d0d692b), so that the citations can be checked. Its sources
 carry "Copyright (C) Nathan Moinvaziri" and the copyrights of the minizip code it grew from
 (Gilles Vollant, 1998-2010; Mathias Svensson, 2009-2010; Even Rouault, 2007-2008), and its
 `LICENSE`:

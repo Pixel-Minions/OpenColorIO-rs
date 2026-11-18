@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 //
-// Ported from minizip-ng 4.0.10 (see `mod.rs` for its notice): an altered version.
+// Ported from minizip-ng 4.2.2 (see `mod.rs` for its notice): an altered version.
 
 //! minizip-ng's system functions that reading and writing an archive reach (`mz_os.c`,
 //! `mz_os_posix.c`, `mz_os_win32.c`).
@@ -20,7 +20,7 @@ use super::mz_strm::{MZ_EXIST_ERROR, MZ_INTERNAL_ERROR, MZ_OK, MZ_PARAM_ERROR};
 /// which Python sets at startup; the port folds `A`-`Z` only, whatever the locale (deviation
 /// D-4, as [`ocio_ops::platform::strcasecmp`]).
 ///
-/// Port of `mz_path_compare_wc` (mz_os.c:86-127 @ 4.0.10), which returns `MZ_OK` for a match
+/// Port of `mz_path_compare_wc` (mz_os.c:86-127 @ 4.2.2), which returns `MZ_OK` for a match
 /// and `MZ_EXIST_ERROR` otherwise.
 pub(crate) fn mz_path_compare_wc(path: &[u8], wildcard: &[u8], ignore_case: bool) -> bool {
     compare_wc(c_str(path), c_str(wildcard), ignore_case)
@@ -77,8 +77,8 @@ fn compare_wc(path: &[u8], wildcard: &[u8], ignore_case: bool) -> bool {
 /// `MZ_OK` when something exists at `path` (a C string), a directory included;
 /// `MZ_EXIST_ERROR` otherwise.
 ///
-/// Port of `mz_os_file_exists` (mz_os_posix.c:174-181, `stat`; mz_os_win32.c:176-193,
-/// `GetFileAttributesW` of the UTF-16 conversion @ 4.0.10).
+/// Port of `mz_os_file_exists` (mz_os_posix.c:184-191, `stat`; mz_os_win32.c:208-225,
+/// `GetFileAttributesW` of the UTF-16 conversion @ 4.2.2).
 pub(crate) fn mz_os_file_exists(path: &[u8]) -> i32 {
     let path = c_str(path);
     #[cfg(windows)]
@@ -129,7 +129,7 @@ const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 /// Whether `path` is a directory (following a link on Linux; a link to a directory is one on
 /// Windows, where `GetFileAttributesW` reports the link's own attributes).
 ///
-/// Port of `mz_os_is_dir` (mz_os_posix.c:304-313, mz_os_win32.c:441-460 @ 4.0.10).
+/// Port of `mz_os_is_dir` (mz_os_posix.c:314-323, mz_os_win32.c:501-520 @ 4.2.2).
 pub(crate) fn mz_os_is_dir(path: &[u8]) -> bool {
     #[cfg(windows)]
     {
@@ -144,7 +144,7 @@ pub(crate) fn mz_os_is_dir(path: &[u8]) -> bool {
 
 /// Whether `path` is a symbolic link (on Windows, any reparse point).
 ///
-/// Port of `mz_os_is_symlink` (mz_os_posix.c:315-324, mz_os_win32.c:462-481 @ 4.0.10).
+/// Port of `mz_os_is_symlink` (mz_os_posix.c:325-334, mz_os_win32.c:522-561 @ 4.2.2).
 pub(crate) fn mz_os_is_symlink(path: &[u8]) -> bool {
     #[cfg(windows)]
     {
@@ -160,7 +160,7 @@ pub(crate) fn mz_os_is_symlink(path: &[u8]) -> bool {
 /// The size of the file `path`: 0 for a directory or a file that can't be examined (on
 /// Windows, one that can't be opened without sharing it).
 ///
-/// Port of `mz_os_get_file_size` (mz_os_posix.c:183-196, mz_os_win32.c:195-219 @ 4.0.10).
+/// Port of `mz_os_get_file_size` (mz_os_posix.c:193-206, mz_os_win32.c:227-251 @ 4.2.2).
 pub(crate) fn mz_os_get_file_size(path: &[u8]) -> i64 {
     #[cfg(windows)]
     {
@@ -186,8 +186,8 @@ pub(crate) fn mz_os_get_file_size(path: &[u8]) -> i64 {
 /// The modification, access and creation dates of the file `path` (`time_t`), or `None`
 /// where they can't be read. Linux has no creation date (0).
 ///
-/// Port of `mz_os_get_file_date` (mz_os_posix.c:198-228, mz_os_win32.c:236-259 @ 4.0.10), with
-/// `mz_os_file_to_unix_time` (mz_os_win32.c:221-226): `GetFileAttributesExW`'s times.
+/// Port of `mz_os_get_file_date` (mz_os_posix.c:208-238, mz_os_win32.c:268-291 @ 4.2.2), with
+/// `mz_os_file_to_unix_time` (mz_os_win32.c:253-258): `GetFileAttributesExW`'s times.
 pub(crate) fn mz_os_get_file_date(path: &[u8]) -> Option<(i64, i64, i64)> {
     #[cfg(windows)]
     {
@@ -214,20 +214,35 @@ pub(crate) fn mz_os_get_file_date(path: &[u8]) -> Option<(i64, i64, i64)> {
     }
 }
 
-/// The attributes of the file `path`, as the system gives them: `GetFileAttributesW` on
-/// Windows (`INVALID_FILE_ATTRIBUTES` where it fails), `lstat`'s `st_mode` on Linux (0 where it
-/// fails).
+/// The attributes of the file `path`, following a link, as the system gives them: on Windows
+/// `GetFileAttributesW`'s (`INVALID_FILE_ATTRIBUTES` where it fails), and for a reparse point
+/// those of what it leads to, where it can be opened (`CreateFile2` with
+/// `FILE_FLAG_BACKUP_SEMANTICS` and `GetFileInformationByHandle`, which `std::fs::metadata`
+/// calls too); on Linux `stat`'s `st_mode` (0 where it fails).
 ///
-/// Port of `mz_os_get_file_attribs` (mz_os_posix.c:243-252, mz_os_win32.c:301-318 @ 4.0.10).
+/// Port of `mz_os_get_file_attribs` (mz_os_posix.c:253-262, mz_os_win32.c:333-378 @ 4.2.2).
+/// OpenColorIO's writer never reaches the reparse point branch: it skips links first
+/// ([`mz_os_is_symlink`], every reparse point on Windows). `mz_os_get_link_attribs`, the
+/// attributes of a link itself (mz_os_posix.c:336-345, mz_os_win32.c:543-561), is called only
+/// by a writer that stores links, which OpenColorIO's doesn't: it isn't ported.
 pub(crate) fn mz_os_get_file_attribs(path: &[u8]) -> u32 {
     #[cfg(windows)]
     {
-        file_attributes(path)
+        use std::os::windows::fs::MetadataExt;
+        let attributes = file_attributes(path);
+        // If target is a reparse point, open with default flags to get attributes
+        if attributes != u32::MAX
+            && attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            && let Ok(m) = std::fs::metadata(system_path(path))
+        {
+            return m.file_attributes();
+        }
+        attributes
     }
     #[cfg(not(windows))]
     {
         use std::os::unix::fs::MetadataExt;
-        std::fs::symlink_metadata(system_path(path)).map_or(0, |m| m.mode())
+        std::fs::metadata(system_path(path)).map_or(0, |m| m.mode())
     }
 }
 
@@ -235,8 +250,8 @@ pub(crate) fn mz_os_get_file_attribs(path: &[u8]) -> u32 {
 /// it can't be opened. The names are UTF-8 on Windows (`WideCharToMultiByte`), the bytes on
 /// Linux; `.` and `..`, which minizip-ng lists too, are left out (OpenColorIO skips them).
 ///
-/// Port of `mz_os_open_dir`, `mz_os_read_dir` and `mz_os_close_dir` (mz_os_posix.c:274-290,
-/// mz_os_win32.c:362-435 @ 4.0.10). On Windows it lists as minizip-ng does, through
+/// Port of `mz_os_open_dir`, `mz_os_read_dir` and `mz_os_close_dir` (mz_os_posix.c:284-300,
+/// mz_os_win32.c:422-495 @ 4.2.2). On Windows it lists as minizip-ng does, through
 /// `FindFirstFileW` and `FindNextFileW` (`os_windows_ffi`, owner decision 2026-10-17):
 /// - `mz_os_open_dir` builds the pattern in a buffer of 320 bytes: the path cut to 319 bytes
 ///   (`strncpy`), a separator where `mz_path_append_slash` has room (a path of 317 bytes or
@@ -347,14 +362,14 @@ pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Result<Vec<u8>, Vec<u8>>
     }
 }
 
-/// `MZ_PATH_SLASH_PLATFORM` (mz_os.h:42-48 @ 4.0.10).
+/// `MZ_PATH_SLASH_PLATFORM` (mz_os.h:38-44 @ 4.2.2).
 const MZ_PATH_SLASH_PLATFORM: u8 = if cfg!(windows) { b'\\' } else { b'/' };
 
 /// Whether `c` separates directories: `\` and `/` on Windows; on Linux only `/`, since
-/// `mz_os_posix.c` defaults `MZ_PRESERVE_NATIVE_STRUCTURE` to 1 (mz_os_posix.c:40-42) and a
+/// `mz_os_posix.c` defaults `MZ_PRESERVE_NATIVE_STRUCTURE` to 1 (mz_os_posix.c:41-43) and a
 /// backslash is then part of a name.
 ///
-/// Port of `mz_os_is_dir_separator` (mz_os_posix.c:292-302, mz_os_win32.c:437-439 @ 4.0.10).
+/// Port of `mz_os_is_dir_separator` (mz_os_posix.c:302-312, mz_os_win32.c:497-499 @ 4.2.2).
 pub(crate) fn mz_os_is_dir_separator(c: u8) -> bool {
     if cfg!(windows) {
         c == b'\\' || c == b'/'
@@ -366,7 +381,7 @@ pub(crate) fn mz_os_is_dir_separator(c: u8) -> bool {
 /// Appends the platform's slash to `path` (a buffer of `max_path` bytes, its C string's NUL
 /// included) unless it ends with a separator: `MZ_BUF_ERROR` where there's no room.
 ///
-/// Port of `mz_path_append_slash` (mz_os.c:45-54 @ 4.0.10). An empty `path` reads before its
+/// Port of `mz_path_append_slash` (mz_os.c:45-54 @ 4.2.2). An empty `path` reads before its
 /// start upstream (`path[path_len - 1]`); its callers never pass one.
 fn mz_path_append_slash(path: &mut Vec<u8>, max_path: usize) -> i32 {
     if path.len() + 2 >= max_path {
@@ -381,7 +396,7 @@ fn mz_path_append_slash(path: &mut Vec<u8>, max_path: usize) -> i32 {
 /// Joins `join` to `path` (a buffer of `max_path` bytes) with the platform's slash, cutting
 /// what doesn't fit.
 ///
-/// Port of `mz_path_combine` (mz_os.c:24-43 @ 4.0.10).
+/// Port of `mz_path_combine` (mz_os.c:24-43 @ 4.2.2).
 pub(crate) fn mz_path_combine(path: &mut Vec<u8>, join: &[u8], max_path: usize) {
     let join = c_str(join);
     if path.is_empty() {
@@ -399,7 +414,7 @@ pub(crate) fn mz_path_combine(path: &mut Vec<u8>, join: &[u8], max_path: usize) 
 /// holds it (`output`, which keeps what earlier calls left in it): `..` doesn't go above the
 /// start. An empty `path` is `MZ_INTERNAL_ERROR`.
 ///
-/// Port of `mz_path_resolve` (mz_os.c:129-200 @ 4.0.10). A `..` at the start makes it read the
+/// Port of `mz_path_resolve` (mz_os.c:129-200 @ 4.2.2). A `..` at the start makes it read the
 /// output's first byte, which neither this call nor an earlier one may have written (memory
 /// `malloc` left uninitialized). Its value decides whether the result of a name that is only
 /// `..`s is empty or a separator, which extracts the same way; the port takes it for one that
@@ -520,7 +535,7 @@ fn write_at(output: &mut Vec<u8>, index: usize, byte: u8) {
 
 /// `path` without its last component (and the separator before it).
 ///
-/// Port of `mz_path_remove_filename` (mz_os.c:202-221 @ 4.0.10).
+/// Port of `mz_path_remove_filename` (mz_os.c:202-221 @ 4.2.2).
 pub(crate) fn mz_path_remove_filename(path: &mut Vec<u8>) {
     let mut i = path.len();
     while i > 1 {
@@ -535,8 +550,8 @@ pub(crate) fn mz_path_remove_filename(path: &mut Vec<u8>) {
 
 /// Makes the directory `path` (an existing one is fine).
 ///
-/// Port of `mz_os_make_dir` (mz_os_posix.c:254-263, mode 0755; mz_os_win32.c:337-360, which
-/// doesn't try to make a drive letter @ 4.0.10).
+/// Port of `mz_os_make_dir` (mz_os_posix.c:264-273, mode 0755; mz_os_win32.c:397-420, which
+/// doesn't try to make a drive letter @ 4.2.2).
 pub(crate) fn mz_os_make_dir(path: &[u8]) -> i32 {
     let path = c_str(path);
     if cfg!(windows) && !path.is_empty() && path.len() <= 3 && path.get(1) == Some(&b':') {
@@ -561,9 +576,152 @@ pub(crate) fn mz_os_make_dir(path: &[u8]) -> i32 {
     }
 }
 
+/// Whether the link `link_path`'s target `target` stays inside `base_path`: `MZ_OK`, or
+/// `MZ_EXIST_ERROR` for a target that starts with a separator or resolves (lexically, with
+/// [`mz_path_resolve`]) to a path outside `base_path`. The check is on the text: on Windows a
+/// target with a drive letter (`C:\x`) is joined to the link's directory like a relative one
+/// and passes (docs/improvements.md, I-952); `base_path` is compared as it is spelled.
+///
+/// Port of `mz_path_is_symlink_target_safe` (mz_os.c:280-341 @ 4.2.2). Upstream copies the
+/// link's directory into a buffer of 1,024 bytes with `strncpy` and writes its NUL after it,
+/// past the buffer when the directory has 1,024 bytes or more: the port returns
+/// `MZ_EXIST_ERROR` there (docs/improvements.md, U-730).
+pub(crate) fn mz_path_is_symlink_target_safe(
+    link_path: &[u8],
+    target: &[u8],
+    base_path: &[u8],
+) -> i32 {
+    let (link_path, target, base_path) = (c_str(link_path), c_str(target), c_str(base_path));
+    let max_path = 1024usize;
+
+    // Absolute symlink targets are not allowed
+    if target.first().is_some_and(|&c| mz_os_is_dir_separator(c)) {
+        return MZ_EXIST_ERROR;
+    }
+
+    let mut base_len = base_path.len();
+
+    // Remove trailing slash from base_path for comparison
+    while base_len > 0 && mz_os_is_dir_separator(base_path[base_len - 1]) {
+        base_len -= 1;
+    }
+
+    // Find parent directory length by scanning backwards past filename and trailing slashes
+    let mut parent_len = link_path.len();
+    while parent_len > 0 && !mz_os_is_dir_separator(link_path[parent_len - 1]) {
+        parent_len -= 1;
+    }
+    while parent_len > 0 && mz_os_is_dir_separator(link_path[parent_len - 1]) {
+        parent_len -= 1;
+    }
+    // strncpy and the NUL after it would write past `combined` (U-730).
+    if parent_len >= max_path {
+        return MZ_EXIST_ERROR;
+    }
+
+    // Combine parent + target
+    let mut combined = Vec::new();
+    if parent_len > 0 {
+        combined.extend_from_slice(&link_path[..parent_len]);
+        let _ = mz_path_append_slash(&mut combined, max_path);
+    }
+    let room = max_path - combined.len() - 1;
+    combined.extend_from_slice(&target[..target.len().min(room)]);
+
+    // Resolve the combined path to eliminate .. (into a buffer calloc zeroed)
+    let mut resolved = Vec::new();
+    if mz_path_resolve(&combined, &mut resolved, max_path as i32) != MZ_OK {
+        return MZ_EXIST_ERROR;
+    }
+    let resolved = c_str(&resolved);
+
+    // Check that resolved path stays within base_path
+    if resolved.len() < base_len
+        || resolved[..base_len] != base_path[..base_len]
+        || (resolved.len() > base_len && !mz_os_is_dir_separator(resolved[base_len]))
+    {
+        return MZ_EXIST_ERROR;
+    }
+    MZ_OK
+}
+
+/// Whether a component of `path` below `base_path` is a link (on Windows, any reparse point)
+/// whose target leads outside `base_path`: `MZ_EXIST_ERROR` then, or where such a link's
+/// target can't be read; `MZ_OK` otherwise. Components that are `base_path` or one of its
+/// parents, as spelled, aren't checked.
+///
+/// Port of `mz_dir_has_unsafe_symlink` (mz_os.c:343-420 @ 4.2.2). The buffer the targets are
+/// read into is kept from one component to the next, as upstream's: where
+/// [`mz_os_read_symlink`] leaves it as it was (a Windows reparse point that isn't a symbolic
+/// link), the component is checked with the previous link's target, or an empty one.
+pub(crate) fn mz_dir_has_unsafe_symlink(path: &[u8], base_path: &[u8]) -> i32 {
+    let (path, base_path) = (c_str(path), c_str(base_path));
+    if path.is_empty() {
+        return MZ_PARAM_ERROR;
+    }
+    let max_path = 1024usize;
+    let path_len = path.len();
+    let mut base_len = base_path.len();
+
+    // Remove trailing slash from base_path for comparison
+    while base_len > 0 && mz_os_is_dir_separator(base_path[base_len - 1]) {
+        base_len -= 1;
+    }
+
+    let mut symlink_target: Option<Vec<u8>> = None;
+    let mut pos = 0usize;
+    let mut err = MZ_OK;
+
+    // Walk through each path component
+    while err == MZ_OK && pos < path_len {
+        // Copy separator if present
+        if mz_os_is_dir_separator(path[pos]) {
+            pos += 1;
+        }
+        // Copy next path component
+        while pos < path_len && !mz_os_is_dir_separator(path[pos]) {
+            pos += 1;
+        }
+        let check_path = &path[..pos];
+
+        // Check if this existing path component is a symlink
+        if !mz_os_is_symlink(check_path) {
+            continue;
+        }
+
+        // Skip components at or above the base dir.
+        let mut cmp_len = pos;
+        if check_path
+            .last()
+            .is_some_and(|&c| mz_os_is_dir_separator(c))
+        {
+            cmp_len -= 1;
+        }
+        if cmp_len <= base_len
+            && check_path[..cmp_len] == base_path[..cmp_len]
+            // Verify that the prefix match is on a directory boundary.
+            && (cmp_len == base_len || mz_os_is_dir_separator(base_path[cmp_len]))
+        {
+            continue;
+        }
+
+        // Allocate symlink target buffer on first use
+        let target = symlink_target.get_or_insert_with(Vec::new);
+
+        if mz_os_read_symlink(check_path, target, max_path) != MZ_OK {
+            err = MZ_EXIST_ERROR;
+            break;
+        }
+
+        // Reject the component if its symlink target escapes the base path
+        err = mz_path_is_symlink_target_safe(check_path, target, base_path);
+    }
+    err
+}
+
 /// Makes the directory `path` and its parents.
 ///
-/// Port of `mz_dir_make` (mz_os.c:280-315 @ 4.0.10).
+/// Port of `mz_dir_make` (mz_os.c:422-457 @ 4.2.2).
 pub(crate) fn mz_dir_make(path: &[u8]) -> i32 {
     let path = c_str(path);
     if path.is_empty() {
@@ -599,7 +757,7 @@ pub(crate) fn mz_dir_make(path: &[u8]) -> i32 {
     err
 }
 
-/// The `FILETIME` of `mz_os_unix_to_file_time` (mz_os_win32.c:229-234 @ 4.0.10):
+/// The `FILETIME` of `mz_os_unix_to_file_time` (mz_os_win32.c:261-266 @ 4.2.2):
 /// 100-nanosecond intervals since 1601, in `uint64_t` arithmetic that wraps, so every `time_t`
 /// gives one.
 #[cfg(windows)]
@@ -648,7 +806,7 @@ fn time_t_to_system_time(unix_time: i64) -> Option<std::time::SystemTime> {
 /// the year 30828 or before 1601 wraps to such a `FILETIME` (from an NTFS time of 0, say);
 /// the three special values aren't reachable from a `time_t`.
 ///
-/// Port of `mz_os_set_file_date` (mz_os_posix.c:230-241, mz_os_win32.c:261-299 @ 4.0.10).
+/// Port of `mz_os_set_file_date` (mz_os_posix.c:240-251, mz_os_win32.c:293-331 @ 4.2.2).
 pub(crate) fn mz_os_set_file_date(path: &[u8], modified: i64, accessed: i64, creation: i64) -> i32 {
     let Ok(file) = std::fs::OpenOptions::new()
         .write(true)
@@ -708,7 +866,7 @@ pub(crate) fn mz_os_set_file_date(path: &[u8], modified: i64, accessed: i64, cre
 /// Sets the file's attributes: its mode on Linux (`chmod`); on Windows, where the port has no
 /// `SetFileAttributesW`, only the read-only attribute (deviation D-6).
 ///
-/// Port of `mz_os_set_file_attribs` (mz_os_posix.c:254-262, mz_os_win32.c:320-335 @ 4.0.10).
+/// Port of `mz_os_set_file_attribs` (mz_os_posix.c:264-272, mz_os_win32.c:380-395 @ 4.2.2).
 pub(crate) fn mz_os_set_file_attribs(path: &[u8], attributes: u32) -> i32 {
     let path = system_path(path);
     #[cfg(unix)]
@@ -735,7 +893,7 @@ pub(crate) fn mz_os_set_file_attribs(path: &[u8], attributes: u32) -> i32 {
 /// Makes `path` a symbolic link to `target_path`: `MZ_INTERNAL_ERROR` (Linux) or
 /// `MZ_SYMLINK_ERROR` (Windows) where the system refuses.
 ///
-/// Port of `mz_os_make_symlink` (mz_os_posix.c:326-330, mz_os_win32.c:483-530 @ 4.0.10). On
+/// Port of `mz_os_make_symlink` (mz_os_posix.c:347-355, mz_os_win32.c:563-610 @ 4.2.2). On
 /// Windows it calls `CreateSymbolicLinkW` as upstream does (`os_windows_ffi`): a target that
 /// ends with a separator (`mz_path_has_slash`, mz_os.c:69-74; an empty one too) makes a
 /// directory link (`SYMBOLIC_LINK_FLAG_DIRECTORY`), and without
@@ -763,3 +921,76 @@ pub(crate) fn mz_os_make_symlink(path: &[u8], target_path: &[u8]) -> i32 {
         MZ_OK
     }
 }
+
+/// The target of the link `path` into `target_path`, a buffer of `max_target_path` bytes:
+/// `MZ_OK`, or an error where it can't be read or (Linux) fills the buffer.
+///
+/// Linux: port of `mz_os_read_symlink` (mz_os_posix.c:357-372 @ 4.2.2): `readlink`
+/// (`std::fs::read_link`, which calls it) of at most `max_target_path - 1` bytes; a target of
+/// that length or more is `MZ_BUF_ERROR`, where upstream has written its first bytes without
+/// a NUL (the callers then drop the buffer).
+///
+/// Windows: port of `mz_os_read_symlink` (mz_os_win32.c:612-714 @ 4.2.2), in safe Rust
+/// (owner decision 2026-11-18, deviation D-22). Upstream reads the reparse point
+/// (`FSCTL_GET_REPARSE_POINT`); for a symbolic link (`IO_REPARSE_TAG_SYMLINK`) it takes the
+/// print name, at most `max_target_path` UTF-16 units, in UTF-8 (`WideCharToMultiByte`, a
+/// lone surrogate as U+FFFD), cut to `max_target_path - 1` bytes, with a separator appended
+/// when the target is a directory (`mz_os_is_dir` of the target as written, relative to the
+/// process's directory); for any other reparse point (a junction, ...) it returns `MZ_OK`
+/// and leaves the buffer as it was. The port takes the tag from `FindFirstFileW`
+/// (`dwReserved0`) and the target from `std::fs::read_link`, which reads the substitute name
+/// (D-22: the same text for every link `CreateSymbolicLinkW` makes).
+pub(crate) fn mz_os_read_symlink(
+    path: &[u8],
+    target_path: &mut Vec<u8>,
+    max_target_path: usize,
+) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(target) = std::fs::read_link(system_path(path)) else {
+            return MZ_EXIST_ERROR;
+        };
+        let target = target.as_os_str().as_bytes();
+        if target.len() >= max_target_path - 1 {
+            return super::mz_strm::MZ_BUF_ERROR;
+        }
+        target_path.clear();
+        target_path.extend_from_slice(target);
+        MZ_OK
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let system = system_path(path);
+        let wide: Vec<u16> = system.as_os_str().encode_wide().collect();
+        // The file can't be opened, or isn't a reparse point (DeviceIoControl fails).
+        let Some(tag) = super::os_windows_ffi::reparse_tag(&wide) else {
+            return MZ_INTERNAL_ERROR;
+        };
+        if tag != IO_REPARSE_TAG_SYMLINK {
+            return MZ_OK;
+        }
+        let Ok(target) = std::fs::read_link(&system) else {
+            return MZ_INTERNAL_ERROR;
+        };
+        let mut target: Vec<u16> = target.as_os_str().encode_wide().collect();
+        target.truncate(max_target_path);
+        let utf8 = ocio_ops::platform::utf16_to_utf8_lossy(&target);
+        target_path.clear();
+        target_path.extend_from_slice(&utf8[..utf8.len().min(max_target_path - 1)]);
+        // Ensure directories have slash at the end so we can recreate them later
+        if mz_os_is_dir(&utf8) {
+            let _ = mz_path_append_slash(target_path, max_target_path);
+        }
+        MZ_OK
+    }
+}
+
+/// `IO_REPARSE_TAG_SYMLINK` (winnt.h).
+#[cfg(windows)]
+const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000_000C;
+
+#[cfg(test)]
+#[path = "mz_os_tests.rs"]
+mod tests;

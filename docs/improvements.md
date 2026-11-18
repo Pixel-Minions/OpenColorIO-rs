@@ -3458,9 +3458,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** where minizip-ng can't read an archive's central directory (a truncated
   `.ocioz`, say), OpenColorIO's reader rebuilds it from the local headers (`mz_zip_recover_cd`,
-  minizip-ng mz_zip.c:1236-1406 @ 4.0.10, recovery being the reader's default), and the
+  minizip-ng mz_zip.c:1239-1411 @ 4.2.2, recovery being the reader's default), and the
   archive still loads. The rebuilt headers are written by `mz_zip_entry_write_header`, which on
-  Windows only (`#if defined(_WIN32)`, mz_zip.c:792-805) writes each `\` of a name as `/`. The
+  Windows only (`#if defined(_WIN32)`, mz_zip.c:795-808) writes each `\` of a name as `/`. The
   names are compared ignoring the kind of slash, but the file hashes OpenColorIO builds from them
   (`getFastLutFileHash`: the name and the CRC) differ, and with them the config's cache ID. Once
   one entry's local header has a zip64 field, the data descriptors of all later entries are
@@ -3477,7 +3477,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `Config::archive` adds every file under the config's working directory whose
   extension a LUT format reads (`addSupportedFiles`, `src/OpenColorIO/OCIOZArchive.cpp:149-202`
   @ v2.5.2), whether the config uses it or not, following links to directories. It adds each
-  through minizip-ng's `mz_zip_writer_add_path` (mz_zip_rw.c:1649-1729 @ 4.0.10), which skips a
+  through minizip-ng's `mz_zip_writer_add_path` (mz_zip_rw.c:1723-1805 @ 4.2.2), which skips a
   symbolic link to a file (neither storing nor following links, as OpenColorIO sets it up)
   without an error: a config whose LUT is a link archives without it, and the archived config
   fails to find it.
@@ -3491,9 +3491,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-212. On Linux, extracting names with backslashes writes files whose names hold them
 
 - **Upstream:** `ExtractOCIOZArchive` saves each entry at its name joined to the destination
-  (`mz_zip_reader_save_all`, minizip-ng `mz_zip_rw.c:818-907` @ 4.0.10). On Linux minizip-ng
-  is built with `MZ_PRESERVE_NATIVE_STRUCTURE` (its default, `mz_os_posix.c:40-42`), so only
-  `/` separates directories (`mz_os_is_dir_separator`, `mz_os_posix.c:292-302`) and a
+  (`mz_zip_reader_save_all`, minizip-ng `mz_zip_rw.c:848-941` @ 4.2.2). On Linux minizip-ng
+  is built with `MZ_PRESERVE_NATIVE_STRUCTURE` (its default, `mz_os_posix.c:41-43`), so only
+  `/` separates directories (`mz_os_is_dir_separator`, `mz_os_posix.c:302-312`) and a
   backslash is part of a name: `shot1\lut1.clf` becomes a file of that name in the
   destination, and no `shot1` directory is made. On Windows both are separators, and the file
   is `lut1.clf` in the directory `shot1`. Archives written on Windows by older minizip
@@ -3507,10 +3507,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-213. A zip extra field shorter than 4 bytes wraps minizip-ng's search limit
 
-- **Upstream:** `mz_zip_extrafield_find` (minizip-ng `mz_zip.c:2583-2612` @ 4.0.10) counts its
+- **Upstream:** `mz_zip_extrafield_find` (minizip-ng `mz_zip.c:2603-2632` @ 4.2.2) counts its
   search limit down by each field's length less 4 (`max_seek -= field_length - 4`), so a field
   shorter than 4 bytes counts it up. Its callers that read a zipped central directory and an
-  entry's hashes pass `INT32_MAX` (`mz_zip_rw.c:272, 487, 527`), and a short field then
+  entry's hashes pass `INT32_MAX` (`mz_zip_rw.c:278, 505, 545`), and a short field then
   overflows the `int`: undefined behaviour, which both wheels resolve the same way, wrapping
   it to a negative limit and ending the search (`MZ_EXIST_ERROR`): Linux `sub ebx, eax; js`
   (`libOpenColorIO.so` 0x5f81f2), Windows `add edi, ecx; js` (`OpenColorIO_2_5.dll`
@@ -3524,7 +3524,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-214. A seek past the end of an archive leaves minizip-ng's buffered position behind
 
 - **Upstream:** minizip-ng reads an archive through a buffered stream that keeps its own idea
-  of the file position (`mz_strm_buf.c` @ 4.0.10). A seek forwards past what it has read adds
+  of the file position (`mz_strm_buf.c` @ 4.2.2). A seek forwards past what it has read adds
   the offset to that position (`buffered->position += offset`, `mz_strm_buf.c:301`) before it
   seeks the file; where the file's seek fails, the buffer is emptied and the next read reads
   on from where the file is, at the end of the last 32,767 bytes read, not where the seek
@@ -3547,16 +3547,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-215. Extracting a link, then a file of the same name, writes outside the destination
 
 - **Upstream:** `ExtractOCIOZArchive` makes a link entry's link as its target says
-  (`mz_zip_reader_entry_save_file`, minizip-ng `mz_zip_rw.c:696-724` @ 4.0.10), with no check
-  of the target: `../outside.txt` and absolute targets are taken. A later file entry of the
-  same name opens the link and writes through it (`mz_stream_os_open`, `fopen(path, "wb")` on
-  Linux, `CreateFile` on Windows): on Linux an archive with a link `l.txt` to
-  `../outside.txt` and then a file `l.txt` writes `outside.txt` next to the destination (both
-  wheels where they make links, probed 2026-10-17).
+  (`mz_zip_reader_entry_save_file`, minizip-ng `mz_zip_rw.c:720-751` @ 4.2.2). A later file
+  entry of the same name opens the link and writes through it (`mz_stream_os_open`). With
+  minizip-ng 4.0.10 (OCIO 2.5.2) the target wasn't checked: on Linux an archive with a link
+  `l.txt` to `../outside.txt` and then a file `l.txt` wrote `outside.txt` next to the
+  destination (both wheels where they make links, probed 2026-10-17). minizip-ng 4.2.2
+  (OCIO 2.6.0) refuses a target that starts with a separator or resolves outside the
+  destination, lexically from the link's directory (`mz_path_is_symlink_target_safe`,
+  `mz_os.c:280-341`), so that archive now fails. The check is on the text, so links that
+  go through links still can (not probed: the oracle refuses such archives): a link `y` to
+  `.`, then a link `y/l` to `../x`, which the check reads as inside (`y/../x`) and the system
+  makes as the link `l` to `../x`, outside. On Windows see also I-952.
 - **Who notices:** applications extracting archives from untrusted sources.
-- **A fix:** refuse link targets outside the destination, or don't write through links.
-- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`);
-  `crates/ocio/tests/ocioz_extract_oracle.rs`, `links` (Linux).
+- **A fix:** resolve targets through the links already made, or don't make links at all.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`), with 4.2.2's
+  checks in `ocio26-deps` (chunk 7b); `crates/ocio/tests/ocioz_extract_oracle.rs`, `links`
+  (Linux).
 
 ### I-216. Iterating a mixing manager's encodings raises a TypeError in Python
 
@@ -3649,7 +3655,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `Config::archive` lists the config's directory and its subdirectories with
   minizip-ng's `mz_os_open_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng
-  `mz_os_win32.c:362-399` @ 4.0.10), which builds `FindFirstFileW`'s pattern in a buffer of
+  `mz_os_win32.c:422-459` @ 4.2.2), which builds `FindFirstFileW`'s pattern in a buffer of
   320 bytes: the path cut to 319 bytes (`strncpy`), a separator only where
   `mz_path_append_slash` has room (a path of 317 bytes or fewer), and the `*` only where
   `mz_path_combine` has room. A path of 318 bytes gives `<path>*`, which lists the parent's
@@ -3672,8 +3678,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-222. Archiving reads a long name with the bytes earlier names left, on Windows
 
 - **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
-  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
-  4.0.10), which converts each name into the same 256 bytes of `d_name`. A name longer than
+  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:461-481` @
+  4.2.2), which converts each name into the same 256 bytes of `d_name`. A name longer than
   255 UTF-8 bytes doesn't fit with its NUL: `WideCharToMultiByte` writes the whole characters
   that fit and fails, and OpenColorIO reads `d_name` up to its first NUL, past the cut into
   what earlier names of the listing wrote, or to the `end` flag's 0 where the 256 bytes hold
@@ -3968,6 +3974,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   fileformats/ctf/ctf_reader_helper.rs` and `ctf_writer.rs`, `GradingPrimaryWriter`); checked
   against the wheel (`crates/ocio/tests/file_format_ctf_write_oracle.rs`,
   `processors_of_exposure_contrast_and_grading_files_write_as_in_the_wheel`, `gp.ctf`).
+
+### I-952. On Windows, extracting checks a link's target as text, and junctions not at all
+
+- **Upstream:** minizip-ng 4.2.2 (OCIO 2.6.0) refuses link entries whose target leaves the
+  destination, and entries whose directory goes through an existing link that leads out of
+  it (`mz_path_is_symlink_target_safe`, `mz_dir_has_unsafe_symlink`, `mz_os.c:280-420` @
+  4.2.2, called from `mz_zip_reader_entry_save_file`, `mz_zip_rw.c:700-704`, 732 and 755).
+  The check works on the text: a target is absolute only where it starts with a separator, so
+  on Windows a target with a drive letter (`C:\elsewhere`, `C:x`) is joined to the link's
+  directory as a relative one, resolves inside the destination and passes. And on Windows
+  every reparse point is a link (`mz_os_is_symlink`, `mz_os_win32.c:522-541`), but its target
+  is read only from a symbolic link (`mz_os_read_symlink`, `mz_os_win32.c:612-714`, the print
+  name of an `IO_REPARSE_TAG_SYMLINK`): for a junction it reads nothing and the check sees an
+  empty target (or the previous link's, in the same path), which passes. So an archive
+  extracted where the destination holds a junction to a directory outside it writes through
+  the junction, outside the destination (the 2.6.0 wheel, probed 2026-11-18).
+- **Who notices:** applications extracting archives from untrusted sources on Windows, into
+  directories that hold junctions, or where the process may make symbolic links.
+- **A fix:** take a drive letter (and `\\`) as absolute; read a junction's target too, or
+  refuse every reparse point below the destination.
+- **Status:** matched in `ocio26-deps` (chunk 7b, `crates/ocio/src/minizip/mz_os.rs`), with
+  the target read in safe Rust (deviation D-22); `crates/ocio/tests/ocioz_extract_oracle.rs`,
+  `prepared_links` (Windows).
 
 ## App helpers
 
@@ -5712,8 +5741,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-78. An archive entry named `..` reads uninitialized memory when extracted
 
 - **Upstream:** `ExtractOCIOZArchive` resolves each entry's name with minizip-ng's
-  `mz_path_resolve` (`mz_os.c:129-200` @ 4.0.10, called by `mz_zip_reader_save_all`,
-  `mz_zip_rw.c:818-907`) into a buffer it `realloc`s from entry to entry. A `..` at the start
+  `mz_path_resolve` (`mz_os.c:129-200` @ 4.2.2, called by `mz_zip_reader_save_all`,
+  `mz_zip_rw.c:848-941`) into a buffer it `realloc`s from entry to entry. A `..` at the start
   of a name makes it test the buffer's first byte (`mz_os_is_dir_separator(*target)`), which
   nothing may have written yet: on the first entry it is memory `malloc` left uninitialized.
   Where the name goes on after the `..` the byte's value doesn't matter. Where the name is
@@ -5735,10 +5764,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-79. A directory entry whose name is longer than 255 UTF-8 bytes, on Windows
 
 - **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
-  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
-  4.0.10), which converts each name of the listing (`.` and `..` first) from UTF-16 into the
+  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:461-481` @
+  4.2.2), which converts each name of the listing (`.` and `..` first) from UTF-16 into the
   same 256 bytes of `d_name` (`WideCharToMultiByte`); the byte after `d_name` is the listing's
-  `end` flag (0, and 1 once the last entry is read; `DIR_int`, `mz_os_win32.c:30-35`), then
+  `end` flag (0, and 1 once the last entry is read; `DIR_int`, `mz_os_win32.c:33-38`), then
   the structure's padding. `malloc` left all of it uninitialized. A name longer than 255
   bytes doesn't fit with its NUL: the conversion writes the whole characters that fit in the
   256 bytes and fails, and the bytes after them stay as they were. OpenColorIO reads
@@ -5761,8 +5790,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-80. Archiving a config next to a dangling link whose name holds `*` overflows the stack
 
 - **Upstream:** `Config::archive` adds each LUT file it lists with minizip-ng's
-  `mz_zip_writer_add_path` (`OCIOZArchive.cpp:183-187` @ v2.5.2; `mz_zip_rw.c:1649-1729` @
-  4.0.10). A path with a `*` anywhere (in a directory's name too) that doesn't exist is taken
+  `mz_zip_writer_add_path` (`OCIOZArchive.cpp:183-187` @ v2.5.2; `mz_zip_rw.c:1723-1805` @
+  4.2.2). A path with a `*` anywhere (in a directory's name too) that doesn't exist is taken
   for a wildcard: the function lists the path's directory and adds each entry whose name
   matches the path's last component. On Linux a dangling link with a LUT extension in a
   directory whose name holds a `*`, or whose own name holds one, is such a path, and it
@@ -7071,6 +7100,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **A fix:** use `floor`, as the three-input one does.
 - **Status:** the port prints what the wheel printed, then "ERROR: the display profile's table is
   read past its end: the ICC profile can't be written.", and exits with 1 (`Stop::OutOfBounds`).
+
+### U-730. A link entry whose directory is 1,024 bytes or longer writes past a buffer
+
+- **Upstream:** `mz_path_is_symlink_target_safe` (minizip-ng `mz_os.c:280-341` @ 4.2.2)
+  copies the link's directory into a buffer of 1,024 bytes with `strncpy(combined, link_path,
+  parent_len)` and writes a NUL at `combined[parent_len]`: a directory of 1,024 bytes or more
+  writes past the buffer (heap corruption). `ExtractOCIOZArchive` reaches it with a link
+  entry whose path in the destination is that long (Linux allows 4,096 bytes), or with a
+  file entry under an existing link of such a path.
+- **Who notices:** archives with very long link names, which no config needs.
+- **A fix:** size the buffer from the path, or refuse paths that don't fit.
+- **Status:** the port refuses such a link (`MZ_EXIST_ERROR`, so `ExtractOCIOZArchive` fails
+  as for an unsafe target) instead of writing past a buffer, in `ocio26-deps` (chunk 7b,
+  `crates/ocio/src/minizip/mz_os.rs`, `mz_path_is_symlink_target_safe`).
 
 ### U-750. `Config::CreateFromFile` with a path that isn't ASCII, on Windows
 
