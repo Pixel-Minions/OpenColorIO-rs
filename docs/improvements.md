@@ -7027,6 +7027,29 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** the port prints what the wheel printed, then "ERROR: the display profile's table is
   read past its end: the ICC profile can't be written.", and exits with 1 (`Stop::OutOfBounds`).
 
+### U-750. `Config::CreateFromFile` with a path that isn't ASCII, on Windows
+
+- **Upstream:** 2.6.0 checks the path with `std::filesystem::exists(filename)` before opening it
+  (src/OpenColorIO/Config.cpp:1296-1302 @ v2.6.0, PR #2310). MSVC builds that
+  `std::filesystem::path` from the narrow string in the process's ANSI code page, while OCIO opens
+  the file through its own UTF-8 conversion (`Platform::CreateInputFileStream`). So on Windows a
+  UTF-8 path that isn't ASCII names another file, or none, by the machine's settings: with code
+  page 1252, an existing `.../é.ocio` passed as a Python `str` gives ExceptionMissingFile
+  "'...' file does not exist." (2.5.2 read it), and a Latin-1 path passes the check and then
+  fails to open. On Linux the bytes are the path; `exists` there throws `filesystem_error`
+  ("filesystem error: status: File name too long [path]", RuntimeError in Python) for errors
+  other than ENOENT and ENOTDIR, which the port matches.
+- **Who notices:** Windows users with config files whose path isn't ASCII.
+- **A fix:** build the path from the UTF-16 of OCIO's own UTF-8 conversion
+  (`std::filesystem::path(Platform::Utf8ToUtf16(filename))`), as the reader opens it.
+- **Status:** on Windows the port refuses such a path with "The config file path isn't ASCII,
+  which the wheel checks through the ANSI code page (docs/improvements.md, U-750)." (waiver
+  W0028, owner, 2026-11-18); ASCII paths on Windows and every path on Linux answer as the
+  wheel, in `ocio26-config` (`Config::create_from_file`, crates/ocio/src/config.rs;
+  `config_files_oracle.rs`). On Windows the wheel reports a missing file, a name with `<`, `?` or
+  `:` and a 300-character name alike as missing; other errors of the check (access denied, a
+  sharing violation) were not probed, and the port reports them as the missing file too.
+
 ### I-542. CPU/GPU special-value differences in the llvmpipe harness
 
 - **Upstream:** OglApp::initImage selects GL_LINEAR (`oglapp.cpp:65-66 @ v2.5.2`).

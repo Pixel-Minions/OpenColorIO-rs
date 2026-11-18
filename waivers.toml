@@ -349,3 +349,11 @@ approved_by = "owner (P9-6, 2026-10-23)"
 test = "UnitTest/windows_debug"
 reason = "P9-6 (owner decision2026-10-23): the upstream Windows debug C++ test runner suppresses CRT dialogs and calls isspace(INT_MAX). This is native test-harness behavior, outside the OCIO color library and Rust libtest runner."
 approved_by = "owner (P9-6, 2026-10-23)"
+
+[[waiver]]
+id = "W0028"
+scope = "Windows only: Config.CreateFromFile / Config::create_from_file with a path that isn't ASCII (docs/improvements.md U-750; std::filesystem::exists at src/OpenColorIO/Config.cpp:1296-1302 @ v2.6.0). ASCII paths and Linux are not waived"
+check = "The result of such a call: the port raises its own error, where the wheel checks the path as the ANSI code page reads its bytes. crates/ocio/tests/config_files_oracle.rs (config_files_read_as_in_the_wheel) asserts the port's error on Windows without the wheel, and compares every other case with it, on Linux with paths that aren't ASCII too"
+reason = "MSVC's std::filesystem::exists reads the narrow name in the process's ANSI code page, while OCIO opens the file through its own UTF-8 conversion, so the wheel's result depends on the machine's settings, not on the OS and CPU. Matching would need Windows code page calls the port's crates don't make"
+approved_by = "Project owner, chat answer 'Port error + waiver' to the CreateFromFile non-ASCII path question, 2026-11-18"
+date = "2026-11-18"

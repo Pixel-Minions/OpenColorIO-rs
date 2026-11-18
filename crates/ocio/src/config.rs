@@ -710,6 +710,49 @@ fn strerror(e: &std::io::Error) -> String {
     }
 }
 
+/// `std::filesystem::exists(filename)`, as the wheels' C++ libraries answer it for a narrow
+/// name: whether the file (followed through symbolic links) exists.
+///
+/// - Linux (libstdc++): `stat` on the bytes; ENOENT and ENOTDIR are "doesn't exist", any other
+///   error throws `filesystem_error`, "filesystem error: status: <strerror> [<path>]"
+///   (RuntimeError in Python): the port's [`Exception::system_error`].
+/// - Windows (MSVC): the narrow name is read in the ANSI code page, which the port can't do: a
+///   name that isn't ASCII is the port's error (docs/improvements.md, U-750; waiver W0028). For
+///   ASCII names every failure of the check is "doesn't exist", as the wheel answers for a
+///   missing file, a name with `<`, `?` or `:` and a 300-character name.
+fn filesystem_exists(filename: &[u8]) -> Result<bool> {
+    #[cfg(windows)]
+    {
+        if !filename.is_ascii() {
+            return Err(Exception::new(
+                "The config file path isn't ASCII, which the wheel checks through the ANSI code \
+                 page (docs/improvements.md, U-750).",
+            ));
+        }
+        let path = String::from_utf8_lossy(filename).into_owned();
+        Ok(std::fs::metadata(path).is_ok())
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path = std::path::Path::new(std::ffi::OsStr::from_bytes(filename));
+        /// ENOENT and ENOTDIR (Linux's `errno` values).
+        const NOT_FOUND: [i32; 2] = [2, 20];
+        match std::fs::metadata(path) {
+            Ok(_) => Ok(true),
+            Err(e) if e.raw_os_error().is_some_and(|n| NOT_FOUND.contains(&n)) => Ok(false),
+            Err(e) => {
+                let mut os = b"filesystem error: status: ".to_vec();
+                os.extend_from_slice(strerror(&e).as_bytes());
+                os.extend_from_slice(b" [");
+                os.extend_from_slice(filename);
+                os.extend_from_slice(b"]");
+                Err(Exception::system_error(os))
+            }
+        }
+    }
+}
+
 /// `g_currentConfig`, under its lock `g_currentConfigLock` (Config.cpp:110-113 @ v2.5.2).
 static CURRENT_CONFIG: Mutex<Option<Arc<Config>>> = Mutex::new(None);
 
@@ -986,8 +1029,8 @@ impl Config {
 
     /// The config in the file `filename` (up to its first NUL), or the built-in config of the
     /// `ocio://` URI in it ([`Config::create_from_builtin_config`], docs/improvements.md I-149).
-    /// The errors: "The config filepath is missing." (a missing-file exception) for an
-    /// empty name, "Error could not read '\<filename>' OCIO profile." for a file that can't be
+    /// The errors: "The config filepath is missing." (an `Exception`, a missing-file one before
+    /// 2.6) for an empty name, "Error could not read '\<filename>' OCIO profile." for a file that can't be
     /// opened, and the reader's, which names the file.
     ///
     /// A file that starts with `PK` is an OCIOZ archive: the config is read from its
@@ -996,17 +1039,30 @@ impl Config {
     /// them to yaml-cpp ([`IStream::file`]): on Windows, a file of fewer than four bytes that
     /// makes yaml-cpp put back three of them reads as an empty document.
     ///
-    /// Port of `Config::CreateFromFile` (src/OpenColorIO/Config.cpp:1154-1207 @ v2.5.2).
+    /// A path that isn't a built-in config's URI must exist ([`filesystem_exists`]): else
+    /// ExceptionMissingFile "'<path>' file does not exist.". On Windows a path that isn't
+    /// ASCII is refused (docs/improvements.md, U-750).
+    ///
+    /// Port of `Config::CreateFromFile` (src/OpenColorIO/Config.cpp:1279-1341 @ v2.6.0).
     #[doc(alias = "CreateFromFile")]
     pub fn create_from_file(filename: impl AsRef<[u8]>) -> Result<Arc<Config>> {
         let filename = c_str(filename.as_ref());
+        // Specifically check if a config filepath is provided.
         if filename.is_empty() {
-            return Err(Exception::missing_file("The config filepath is missing."));
+            return Err(Exception::new("The config filepath is missing."));
         }
 
         // Check for URI Pattern: ocio://<config name>
         if search_builtin_uri(filename).is_some() {
             return Config::create_from_builtin_config(filename);
+        }
+
+        // Specifically check if the provided non-builtin config filepath exists.
+        if !filesystem_exists(filename)? {
+            let mut oss = b"'".to_vec();
+            oss.extend_from_slice(filename);
+            oss.extend_from_slice(b"' file does not exist.");
+            return Err(Exception::missing_file(oss));
         }
 
         let could_not_read = || {
