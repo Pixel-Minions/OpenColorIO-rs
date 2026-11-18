@@ -241,14 +241,14 @@ fn paths(result: &Value, key: &str) -> Vec<Vec<u8>> {
 
 /// Extracting reports directories, empty ones included, sorted by their paths' bytes; and
 /// each file's times and attributes as minizip-ng sets them: the entry's three NTFS times
-/// (mz_zip.c:344-372 @ 4.0.10, set by mz_zip_rw.c:756 through mz_os_set_file_date: on Windows
-/// all three, mz_os_win32.c:263-293; on Linux the modification and access times,
-/// mz_os_posix.c:230-241; 1,000,000,000, 1,100,000,000 and 1,200,000,000 seconds after 1970
+/// (mz_zip.c:346-374 @ 4.2.2, set by mz_zip_rw.c:786 through mz_os_set_file_date: on Windows
+/// all three, mz_os_win32.c:295-325; on Linux the modification and access times,
+/// mz_os_posix.c:240-251; 1,000,000,000, 1,100,000,000 and 1,200,000,000 seconds after 1970
 /// here), and its Windows attributes as they are on Windows (`SetFileAttributesW`,
-/// mz_os_win32.c:320-335) and as `mz_zip_attrib_win32_to_posix` gives them on Linux
+/// mz_os_win32.c:380-395) and as `mz_zip_attrib_win32_to_posix` gives them on Linux
 /// (mz_zip.c, read-only 0444, otherwise 0666). A hidden file is reported. A directory has the
 /// attributes (Windows) or the mode (Linux) of one this test makes as minizip-ng makes them
-/// (`mkdir(path, 0755)` on Linux, mz_os_posix.c:254-263).
+/// (`mkdir(path, 0755)` on Linux, mz_os_posix.c:264-273).
 #[test]
 fn extract_reports_directories_times_and_attributes() {
     let seconds = [1_000_000_000u64, 1_100_000_000, 1_200_000_000];
@@ -428,9 +428,9 @@ fn link<'a>(name: &'a [u8], target: &'a [u8]) -> Entry<'a> {
 
 /// A symbolic link is reported with its target, and isn't read through, even to a directory
 /// that exists: minizip-ng makes one from an entry of a Unix host whose mode is a link's, the
-/// entry's contents its target (mz_zip_rw.c:691-724 @ 4.0.10). On Windows a link also has its
+/// entry's contents its target (mz_zip_rw.c:715-751 @ 4.2.2). On Windows a link also has its
 /// attributes: a reparse point, and a directory where its target ends with a separator
-/// (`SYMBOLIC_LINK_FLAG_DIRECTORY`, mz_os_win32.c:516-517). On Windows a link needs a
+/// (`SYMBOLIC_LINK_FLAG_DIRECTORY`, mz_os_win32.c:596-597). On Windows a link needs a
 /// privilege the process may not have, and the extraction then fails: the links' assertions,
 /// their attributes among them, run only where the process can make links (elevated, as on
 /// GitHub's Windows runners).
@@ -588,7 +588,13 @@ fn extract_makes_what_prepare_lists() {
     assert_eq!(listed, expected, "{result}");
     if links {
         let l = &result["links"].as_array().unwrap()[expected.len() - 1];
-        assert_eq!(bytes(&l["target"]), b"../side/", "{result}");
+        // The target with the platform's separators.
+        let target: &[u8] = if cfg!(windows) {
+            br"..\side\"
+        } else {
+            b"../side/"
+        };
+        assert_eq!(bytes(&l["target"]), target, "{result}");
     }
     assert_eq!(
         paths(&result["outside"], "dirs"),
@@ -722,11 +728,93 @@ fn prepare_lists_that_could_leave_are_refused() {
                    "args": {"extract": {"archive": "$FILES/a.ocioz", "prepare": prepare}}}),
             &[archive],
         );
-        assert!(refused.is_err(), "{prepare}: {refused:?}");
+        let error = refused.expect_err(&prepare.to_string());
+        assert!(error.contains("ocioz: "), "{prepare}: {error}");
     }
-    // A link entry is fine where the list makes only directories.
-    let (result, _) = extract_prepared(linked, json!([{"path": "d", "kind": "dir"}]));
-    assert_eq!(result["prepared"], json!([true]), "{result}");
+    // A link entry is fine where the list makes only directories; an item that fails (the
+    // same directory twice) is reported as not made.
+    let (result, _) = extract_prepared(
+        linked,
+        json!([{"path": "d", "kind": "dir"}, {"path": "d", "kind": "dir"}]),
+    );
+    assert_eq!(result["prepared"], json!([true, false]), "{result}");
+}
+
+/// Lists whose links the system resolves otherwise than their text says are refused, with
+/// the reason: on Windows a component that ends with a dot or a space, or holds `~` (an 8.3
+/// name), which the system takes for another name (a junction `k` reached as `k.` or by its
+/// short name); and, after the items are made, any link that doesn't lead, as the system
+/// resolves it, to a path inside the request's directory: on Linux a link checked before a
+/// link it goes through was made (`l` to `a/b/x/../../../`,
+/// then `a/b/x` to `../../../`). A junction's target is normalized (`./side`) before it is
+/// made, and leads where it says.
+#[test]
+fn prepare_lists_the_system_resolves_otherwise_are_refused() {
+    let plain = zip(&[entry(b"a.txt", b"a")]);
+    let mut cases: Vec<(Value, &str)> = Vec::new();
+    let spelled = "has a component Windows spells another way";
+    let out = "leads out of the request's directory or nowhere";
+    if cfg!(windows) {
+        cases.push((
+            json!([{"path": "a/b/c", "kind": "dir"},
+                   {"path": "a/b/c/k", "kind": "junction", "target": "a"},
+                   {"path": "a/b/c/k./l", "kind": "symlink", "target": r"..\..\..\..\"},
+                   {"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/j", "kind": "junction", "target": "a/l"}]),
+            spelled,
+        ));
+        cases.push((
+            json!([{"path": "a/b/c/longjunctionname", "kind": "dir"},
+                   {"path": "a/b/c/LONGJU~1/l", "kind": "symlink", "target": r"..\..\..\..\"}]),
+            spelled,
+        ));
+        cases.push((json!([{"path": "d ", "kind": "dir"}]), spelled));
+        cases.push((
+            json!([{"path": "x", "kind": "dir"},
+                   {"path": "j", "kind": "junction", "target": "x"},
+                   {"path": r"j\d", "kind": "dir"}]),
+            "goes through a link",
+        ));
+    } else {
+        cases.push((
+            json!([{"path": "extracted/a/b", "kind": "dir"},
+                   {"path": "extracted/l", "kind": "symlink", "target": "a/b/x/../../../"},
+                   {"path": "extracted/a/b/x", "kind": "symlink", "target": "../../../"}]),
+            out,
+        ));
+    }
+    for (prepare, fragment) in cases {
+        let refused = Oracle::get().try_call(
+            "with_files",
+            json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+                   "args": {"extract": {"archive": "$FILES/a.ocioz", "prepare": prepare}}}),
+            &[&plain],
+        );
+        let error = refused.expect_err(&prepare.to_string());
+        assert!(error.contains(fragment), "{prepare}: {error}");
+    }
+    if cfg!(windows) {
+        let (result, _) = extract_prepared(
+            &plain,
+            json!([{"path": "side", "kind": "dir"},
+                   {"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/j", "kind": "junction", "target": "./side"}]),
+        );
+        assert_eq!(result["prepared"], json!([true, true, true]), "{result}");
+        assert_eq!(paths(&result, "files"), [b"a.txt"], "{result}");
+        // A junction to nothing isn't made (CreateJunction, or the check that it leads to a
+        // directory, fails), and nothing is left of it.
+        let (result, _) = extract_prepared(
+            &plain,
+            json!([{"path": "j", "kind": "junction", "target": "missing"}]),
+        );
+        assert_eq!(result["prepared"], json!([false]), "{result}");
+        assert_eq!(
+            paths(&result["outside"], "links"),
+            Vec::<Vec<u8>>::new(),
+            "{result}"
+        );
+    }
 }
 
 /// Archives whose links could make the extraction write outside the request's temporary

@@ -381,6 +381,13 @@ def _check_prepare(items):
             if os.path.isabs(value) or value.startswith(("/", "\\")) or (
                     os.name == "nt" and ":" in value):
                 raise RequestError(f"ocioz: prepare {key} {value!r} is absolute")
+            if os.name == "nt" and any(
+                    part.endswith((".", " ")) and part not in (".", "..") or "~" in part
+                    for part in value.replace("\\", "/").split("/")):
+                # Windows drops a trailing dot or space and takes 8.3 names (with '~'): other
+                # spellings of a name than the text check sees.
+                raise RequestError(f"ocioz: prepare {key} {value!r} has a component Windows "
+                                   "spells another way")
         path = os.path.join(probe, item["path"])
         if not _inside(probe, path) or os.path.normpath(path) == os.path.normpath(probe):
             raise RequestError(f"ocioz: prepare path {item['path']!r} leads out of the "
@@ -402,16 +409,27 @@ def _check_prepare(items):
     return bool(links)
 
 
+def _native(text):
+    """A path or target with the platform's separators (on Windows `/` becomes a backslash, so that a
+    link's target is one the system follows)."""
+    return text.replace("/", os.sep) if os.name == "nt" else text
+
+
 def _prepare(root, items):
     """Makes the "prepare" items under `root`, in their order (_check_prepare checked them), and
     reports for each whether it was made: a directory (os.makedirs), a junction (Windows only:
-    _winapi.CreateJunction, its target relative to `root`) and a symbolic link (os.symlink of
-    the target as given, relative to the link's directory; a directory link on Windows where
-    the target ends with a separator). _check_prepare made sure that no path or target goes
-    through a link, so each stays inside `root` as the system resolves it."""
-    made = []
+    _winapi.CreateJunction to the normalized path of its target under `root`, made only where
+    it then leads to a directory) and a symbolic link (os.symlink of the target, with the
+    platform's separators, relative to the link's directory; a directory link on Windows where
+    the target ends with a separator).
+
+    Then every link made must lead, as the system resolves it (os.path.realpath, strict),
+    to a path strictly under `root`: otherwise (a dangling link too) the links are removed,
+    without following them, and the request is refused (RequestError), so that nothing the
+    extraction writes outlives the request whatever spellings the system takes."""
+    made, links = [], []
     for item in items:
-        path = os.path.join(root, item["path"])
+        path = os.path.join(root, _native(item["path"]))
         try:
             if item["kind"] == "dir":
                 os.makedirs(path)
@@ -419,15 +437,45 @@ def _prepare(root, items):
                 if os.name != "nt":
                     raise OSError("junctions are Windows'")
                 import _winapi
-                _winapi.CreateJunction(os.path.join(root, item["target"]), path)
+                # CreateJunction pads a target that isn't normalized with NULs.
+                _winapi.CreateJunction(os.path.normpath(os.path.join(root, item["target"])),
+                                       path)
+                links.append(path)
+                if not os.path.isdir(path):
+                    raise OSError("the junction leads nowhere")
             else:
-                os.symlink(item["target"], path,
-                           target_is_directory=item["target"].endswith(("/", "\\")))
+                target = _native(item["target"])
+                os.symlink(target, path, target_is_directory=target.endswith(os.sep))
+                links.append(path)
         except OSError:
             made.append(False)
             continue
         made.append(True)
+    real_root = os.path.normcase(os.path.realpath(root))
+    for link in links:
+        # A dangling link: realpath(strict=True) doesn't always say so on Windows.
+        try:
+            real = (os.path.normcase(os.path.realpath(link, strict=True))
+                    if os.path.exists(link) else None)
+        except OSError:
+            real = None
+        if real is None or not real.startswith(real_root + os.sep):
+            for each in links:
+                _unlink(each)
+            raise RequestError(f"ocioz: a prepared link, {os.path.relpath(link, root)!r}, "
+                               "leads out of the request's directory or nowhere")
     return made
+
+
+def _unlink(path):
+    """Removes the link or junction `path` without following it (a directory link and a
+    junction with rmdir on Windows); a path that isn't one is left."""
+    if not (os.path.islink(path) or os.path.isjunction(path)):
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        os.rmdir(path)
 
 
 def _name_bytes(info):
