@@ -773,6 +773,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p9-config-utils` (9.1c, `config_utils.rs`, `invert_transform`); the
   wheel shows it only through merges, checked with the merge sweep (9.2j).
 
+### I-950. Written numbers keep the zeros of a cut, and are rounded on their shortest digits
+
+- **Upstream:** since yaml-cpp 0.9.0 (OCIO 2.6.0's wheels), the emitter writes a `float` or
+  `double` with `FpToString(value, precision)` (`include/yaml-cpp/emitter.h:161-197`,
+  `src/fptostring.cpp:76-228` @ yaml-cpp-0.9.0), at the precisions OCIO sets: 15 for doubles,
+  7 for floats (`OCIOYaml.cpp`, `SetDoublePrecision`/`SetFloatPrecision`). It takes the
+  value's shortest round-trip digits (dragonbox), cuts them to the precision, and rounds up
+  when the next of those digits is `'5'` or more. It never removes the zeros the cut leaves,
+  and it rounds the shortest decimal rather than the value itself. So `0.30000000000000004`
+  is written `0.300000000000000` (`%.15g`, 2.5.2's output, gives `0.3`),
+  `1.0000000000000002` is written `1.00000000000000`, the float `1.0000001` is written
+  `1.000000`, and a value whose shortest digits end in `...5` at the cut rounds up even when
+  it lies below the halfway point. Subnormals print their short form (`5e-324`, where
+  `%.15g` gives `4.94065645841247e-324`). Seen in the 2.6.0 wheel's fixtures: `1.13` written
+  `1.13000000000000`, `3.402823e+38` written `3.402824e+38`, `1.401298e-45` written `1e-45`.
+- **Who notices:** every config serialized from computed values (matrices, inverses, values
+  read with 16 or 17 significant digits): its text, its cache ID and the config inside an
+  `.ocioz` archive.
+- **A fix:** strip the trailing zeros after the cut, and round on the exact value (`%.*g`).
+- **Status:** matched in `ocio26-deps` (chunk 2, `crates/ocio/src/yaml_cpp/fptostring.rs`), with
+  yaml-cpp 0.9.0's `fptostring_test.cpp` ported, and checked through the wheel by the YAML
+  save tests.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision

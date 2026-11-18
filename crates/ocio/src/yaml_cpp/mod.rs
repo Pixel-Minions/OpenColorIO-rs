@@ -50,6 +50,7 @@ pub mod emitter_utils;
 pub mod event_handler;
 pub mod exceptions;
 pub mod exp;
+pub mod fptostring;
 pub mod mark;
 pub mod node;
 pub mod node_builder;
