@@ -1548,8 +1548,8 @@ note = "p5-huecurve 5.4a: CreateGradingHueCurveOp; CreateGradingHueCurveTransfor
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradinghuecurve/grading_hue_curve_op_cpu.rs"]
-status = "partial"
-note = "p5-huecurve 5.4b: the draw, forward and reverse renderers, LinLog/LogLin, in each wheel's operand order where two NaNs meet; checked bit for bit against the wheel by the battery (tests/grading_hue_curve_oracle.rs), with dynamic sets and decoupling 2.6.0: changed at v2.6.0 lines 69, after 95 (deleted), 100, 266-267, 334-335; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p5-huecurve 5.4b: the draw, forward and reverse renderers, LinLog/LogLin, in each wheel's operand order where two NaNs meet; checked bit for bit against the wheel by the battery (tests/grading_hue_curve_oracle.rs), with dynamic sets and decoupling ocio26-base: m_isLog at v2.6.0 (the video style grades luma by a gain, as the linear one); the operand orders re-read in both 2.6.0 wheels (Linux forward orders moved)."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOpCPU.h"
