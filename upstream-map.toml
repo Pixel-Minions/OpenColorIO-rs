@@ -4936,8 +4936,8 @@ note = "p7-suite4: upstream cases and dynamic retests in the Linux execution har
 path = "tests/gpu/FixedFunctionOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu-exec/tests/fixed_function_op_test.rs", "crates/ocio-gpu-exec/tests/support/fixed_function_aces2_test.rs", "crates/ocio-gpu-exec/tests/support/fixed_function_cases.rs"]
-status = "partial"
-note = "ocio26-base: the 2.6.0 thresholds (gamutcomp13_inv, aces2 1000nit/4000nit p3 and 4000nit rec2020 round trips) and the shared JMh values; the HMJ tests are card ocio26-ops."
+status = "done"
+note = "ocio26-base: the 2.6.0 thresholds (gamutcomp13_inv, aces2 1000nit/4000nit p3 and 4000nit rec2020 round trips) and the shared JMh values; ocio26-ops: style_aces2_rgb_to_hmj_fwd and style_aces2_rgb_to_hmj_inv (JMhToHMJ, 848-864; 902-939), the shared tables as constants, and style_aces2_rgb_to_jmh_inv's 2e-5 at v2.6.0."
 
 [[file]]
 path = "tests/gpu/GPUUnitTest.cpp"
