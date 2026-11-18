@@ -1,0 +1,17 @@
+# The opencolorio 2.5.2 entry of oracle/uv.lock as it was when the oracle pinned 2.5.2
+# (commit c27d6049, the 1.0.0 release), so `wheel-inspect --wheel 2.5.2` can read the 2.5.2
+# libraries beside the pinned ones. `selftest` reproduces the 2.5.2 spikes from these.
+
+[[package]]
+name = "opencolorio"
+version = "2.5.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/ea/9d930df6740f9b09b0b342f40a5ef165da5050141e496081ef80b302e566/opencolorio-2.5.2.tar.gz", hash = "sha256:fecebd0914089b0c8238c55648f8eb2ccd2702ab4b2eea53856a0e368ded8262", size = 13946157, upload-time = "2026-05-13T18:49:47.351Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/20/0c1fef5372e7184bd37eccb240f2ce80347cb8feb15373d721722c082786/opencolorio-2.5.2-cp313-cp313-macosx_10_15_x86_64.whl", hash = "sha256:d1a5ca15950a56bfaa6e061865e5550659522a86c31b4459fe29c6cc4f11eec4", size = 6358789, upload-time = "2026-05-13T18:49:19.21Z" },
+    { url = "https://files.pythonhosted.org/packages/70/c4/5f0aef0fc6e89cf518eea6fbc0942542d54a80ce0a46a02abdae911bb2bf/opencolorio-2.5.2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:bdc60c73e35e9fa25ecb777906b68d098fc7845b9ffbeaf6bc67b73e42bee79b", size = 5720294, upload-time = "2026-05-13T18:49:20.903Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/98/ce372b2eb35079dea3b1f088b514082bf92d9642d425e29227d5efa869c1/opencolorio-2.5.2-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:0a690efa269a5310b5e70c930380be02d56ffdb287a33b13f81bcdbcbfe27566", size = 6251862, upload-time = "2026-05-13T18:49:22.282Z" },
+    { url = "https://files.pythonhosted.org/packages/14/cd/64994fa3d24bf4f76fbd8517249fd3e5b0983f552a5c784b3a1f42cdf4dc/opencolorio-2.5.2-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:36265c9539ef8317e6b4a7750c155286b6376626f7af67f98c536a5a20273871", size = 6825599, upload-time = "2026-05-13T18:49:23.654Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/6c/bca59902d1cf151dab890ca75312b85f3a86724230348de2447a1cc93475/opencolorio-2.5.2-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b7d7494a311bf38bd3311d2bcb37c1409c5a0961559bcb802c90656edf96e379", size = 6941010, upload-time = "2026-05-13T18:49:25.267Z" },
+    { url = "https://files.pythonhosted.org/packages/46/3b/4ba827c2d740a904cc93376694c5ac735d3e90bb7128783970f8c3807856/opencolorio-2.5.2-cp313-cp313-win_amd64.whl", hash = "sha256:47a68600bb159c2a4a824752c25554ca4f3847089cbc226d05478e284cec17c3", size = 3865124, upload-time = "2026-05-13T18:49:26.825Z" },
+]
