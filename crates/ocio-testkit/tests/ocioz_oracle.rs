@@ -8,7 +8,8 @@
 //! archive (through `with_files`) writes the same files, in the directories they need;
 //! extracting reports directories, links (and their attributes on Windows), the three times
 //! and the attributes minizip-ng sets, hidden files, unreadable files, alternate data streams
-//! (Windows), what was written outside the destination through a link, and what was written
+//! (Windows), what was written outside the destination through a link (and through a junction
+//! or link the request prepares first, with what it made), and what was written
 //! before a failure, sorted by the paths' bytes, request by request; archives whose links could
 //! leave the request's directory are refused; refusals report their stage; the requests it
 //! can't read are refused.
@@ -512,6 +513,220 @@ fn extract_reports_what_is_written_outside() {
         );
     }
     assert!(blobs.is_empty(), "{result}");
+}
+
+/// The wheel extracting `archive` after making `prepare` in the request's directory: its
+/// result and blobs.
+fn extract_prepared(archive: &[u8], prepare: Value) -> (Value, Vec<Vec<u8>>) {
+    let response = Oracle::get().call(
+        "with_files",
+        json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+               "args": {"extract": {"archive": "$FILES/a.ocioz", "prepare": prepare}}}),
+        &[archive],
+    );
+    (response.result, response.blobs)
+}
+
+/// Whether this process can make a directory link as the oracle's `os.symlink` makes one
+/// (Rust's `symlink_dir`, as `os.symlink`, asks for an unprivileged link where Windows'
+/// Developer Mode allows it, and otherwise needs the privilege). On Linux, always.
+fn can_make_links() -> bool {
+    let dir = std::env::temp_dir().join(format!("ocioz_oracle_probe_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("t")).unwrap();
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir("t", dir.join("l")).is_ok();
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink("t", dir.join("l")).is_ok();
+    let _ = std::fs::remove_dir(dir.join("l"));
+    let _ = std::fs::remove_file(dir.join("l"));
+    std::fs::remove_dir_all(&dir).unwrap();
+    made
+}
+
+/// `prepare` makes its items in order before the extraction, and reports for each whether it
+/// was made: directories, a junction (Windows only; elsewhere not made) and a directory link
+/// (made where this process can make one, which the test probes itself and reports). What
+/// they made is reported with the rest: a junction as a link with `"junction": true`, which
+/// isn't walked into; a link with its target.
+#[test]
+fn extract_makes_what_prepare_lists() {
+    let archive = zip(&[entry(b"a.txt", b"a")]);
+    let (result, _) = extract_prepared(
+        &archive,
+        json!([
+            {"path": "side", "kind": "dir"},
+            {"path": "side/inner.txt.d", "kind": "dir"},
+            {"path": "extracted", "kind": "dir"},
+            {"path": "extracted/j", "kind": "junction", "target": "side"},
+            {"path": "extracted/l", "kind": "symlink", "target": "../side/"},
+        ]),
+    );
+    let links = can_make_links();
+    eprintln!("this process can make directory links: {links}");
+    assert_eq!(
+        result["prepared"],
+        json!([true, true, true, cfg!(windows), links]),
+        "{result}"
+    );
+    assert!(result.get("exception").is_none(), "{result}");
+    assert_eq!(paths(&result, "files"), [b"a.txt"], "{result}");
+    assert_eq!(paths(&result, "dirs"), Vec::<Vec<u8>>::new(), "{result}");
+    let listed: Vec<(Vec<u8>, bool)> = result["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| (bytes(&l["path"]), l.get("junction") == Some(&json!(true))))
+        .collect();
+    let mut expected = Vec::new();
+    if cfg!(windows) {
+        expected.push((b"j".to_vec(), true));
+    }
+    if links {
+        expected.push((b"l".to_vec(), false));
+    }
+    assert_eq!(listed, expected, "{result}");
+    if links {
+        let l = &result["links"].as_array().unwrap()[expected.len() - 1];
+        assert_eq!(bytes(&l["target"]), b"../side/", "{result}");
+    }
+    assert_eq!(
+        paths(&result["outside"], "dirs"),
+        [&b"side"[..], b"side/inner.txt.d"]
+    );
+}
+
+/// Through a junction: on Windows minizip-ng 4.2.2 takes a junction in the destination for a
+/// link (`mz_os_is_symlink`, any reparse point) but reads no target from it (`mz_os_read_symlink`
+/// reads only `IO_REPARSE_TAG_SYMLINK`'s), so its check lets the entry through and the file is
+/// written outside the destination, which the request reports as "outside". On Linux the same
+/// layout through a symbolic link is refused (its target leaves the destination), and nothing
+/// is written.
+#[test]
+fn extract_reports_what_is_written_outside_through_a_prepared_link() {
+    let archive = zip(&[entry(b"j/x.txt", b"out")]);
+    let kind = if cfg!(windows) { "junction" } else { "symlink" };
+    let target = if cfg!(windows) { "side" } else { "../side" };
+    let (result, blobs) = extract_prepared(
+        &archive,
+        json!([
+            {"path": "side", "kind": "dir"},
+            {"path": "extracted", "kind": "dir"},
+            {"path": "extracted/j", "kind": kind, "target": target},
+        ]),
+    );
+    assert_eq!(result["prepared"], json!([true, true, true]), "{result}");
+    if cfg!(windows) {
+        assert!(result.get("exception").is_none(), "{result}");
+        assert_eq!(
+            paths(&result["outside"], "files"),
+            [b"side/x.txt"],
+            "{result}"
+        );
+        let file = &result["outside"]["files"][0];
+        let contents = file["contents"].as_u64().unwrap() as usize;
+        assert_eq!(blobs[contents], b"out", "{result}");
+        assert_eq!(paths(&result, "files"), Vec::<Vec<u8>>::new(), "{result}");
+    } else {
+        assert_eq!(result["stage"], "extract", "{result}");
+        assert_eq!(
+            result["exception"]["message"], "Could not extract: $FILES/a.ocioz",
+            "{result}"
+        );
+        assert_eq!(paths(&result["outside"], "files"), Vec::<Vec<u8>>::new());
+    }
+}
+
+/// `prepare` lists it can't take are refused: not a list; an unknown kind or key; a path or
+/// target that isn't text, is absolute or leads out of the request's directory; a path or a
+/// target through an earlier item's link; and an archive with link entries where the list
+/// makes a link.
+#[test]
+fn prepare_lists_that_could_leave_are_refused() {
+    let plain = zip(&[entry(b"a.txt", b"a")]);
+    let linked = zip(&[link(b"l", b"a.txt")]);
+    let (plain, linked) = (plain.as_slice(), linked.as_slice());
+    let mut cases: Vec<(Value, &[u8])> = vec![
+        (json!({"path": "d", "kind": "dir"}), plain),
+        (json!([{"path": "d", "kind": "file"}]), plain),
+        (json!([{"path": "d", "kind": "dir", "target": "x"}]), plain),
+        (json!([{"path": "d", "kind": "dir", "extra": 1}]), plain),
+        (json!([{"path": 1, "kind": "dir"}]), plain),
+        (json!([{"path": "", "kind": "dir"}]), plain),
+        (json!([{"path": ".", "kind": "dir"}]), plain),
+        (json!([{"path": "/tmp/d", "kind": "dir"}]), plain),
+        (json!([{"path": "../d", "kind": "dir"}]), plain),
+        (json!([{"path": "a/../../d", "kind": "dir"}]), plain),
+        (json!([{"path": "l", "kind": "symlink"}]), plain),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": "/tmp"}]),
+            plain,
+        ),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": ".."}]),
+            plain,
+        ),
+        (
+            json!([{"path": "a/l", "kind": "symlink", "target": "../.."}]),
+            plain,
+        ),
+        (
+            json!([{"path": "j", "kind": "junction", "target": ".."}]),
+            plain,
+        ),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": "x"},
+                   {"path": "l/m", "kind": "symlink", "target": "y"}]),
+            plain,
+        ),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": "x"},
+                   {"path": "m", "kind": "symlink", "target": "l/.."}]),
+            plain,
+        ),
+        (
+            json!([{"path": "j", "kind": "junction", "target": "x"},
+                   {"path": "k", "kind": "junction", "target": "j/y"}]),
+            plain,
+        ),
+        (
+            json!([{"path": "j", "kind": "junction", "target": "x"},
+                   {"path": "j/d", "kind": "dir"}]),
+            plain,
+        ),
+        (
+            json!([{"path": "j", "kind": "junction", "target": "x"}]),
+            linked,
+        ),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": "x"}]),
+            linked,
+        ),
+    ];
+    if cfg!(windows) {
+        cases.push((json!([{"path": "C:d", "kind": "dir"}]), plain));
+        cases.push((
+            json!([{"path": "j", "kind": "junction", "target": "C:x"}]),
+            plain,
+        ));
+        cases.push((
+            json!([{"path": "j", "kind": "junction", "target": "x"},
+                   {"path": "J/d", "kind": "dir"}]),
+            plain,
+        ));
+    }
+    for (prepare, archive) in cases {
+        let refused = Oracle::get().try_call(
+            "with_files",
+            json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+                   "args": {"extract": {"archive": "$FILES/a.ocioz", "prepare": prepare}}}),
+            &[archive],
+        );
+        assert!(refused.is_err(), "{prepare}: {refused:?}");
+    }
+    // A link entry is fine where the list makes only directories.
+    let (result, _) = extract_prepared(linked, json!([{"path": "d", "kind": "dir"}]));
+    assert_eq!(result["prepared"], json!([true]), "{result}");
 }
 
 /// Archives whose links could make the extraction write outside the request's temporary
