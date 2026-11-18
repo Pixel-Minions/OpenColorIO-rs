@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from expat 2.7.2 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
-// Ltd and Clark Cooper, Copyright (c) 2001-2025 Expat maintainers); see mod.rs.
+// Ported from expat 2.8.4 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
+// Ltd and Clark Cooper, Copyright (c) 2001-2026 Expat maintainers); see mod.rs.
 
-//! The parser: a port of the parts of `lib/xmlparse.c` and `expat.h` (expat 2.7.2) that a
+//! The parser: a port of the parts of `lib/xmlparse.c` and `expat.h` (expat 2.8.4) that a
 //! parser created without namespace processing reaches with the handlers OCIO sets.
 //!
 //! **What is ported.** `XML_ParserCreate`, `XML_ParserReset`, `XML_Parse`, `XML_GetBuffer`,
 //! `XML_ParseBuffer`, `XML_GetErrorCode`, `XML_ErrorString`, `XML_GetCurrentLineNumber`,
 //! `XML_GetCurrentColumnNumber`, `XML_GetCurrentByteIndex`, `XML_GetSpecifiedAttributeCount`,
-//! `XML_GetIdAttributeIndex`, `XML_SetReparseDeferralEnabled`, and the element and character
-//! data handlers; with them the whole of document parsing: the encodings and the XML
-//! declaration, the prolog and its internal DTD subset (entity, attribute list, element and
-//! notation declarations, attribute defaults), the content (tags, attributes and their
-//! normalization, references to the predefined, character and internal general entities,
-//! CDATA sections, comments and processing instructions), the epilog, the reparse deferral
-//! heuristic and the amplification accounting (`XML_GE`: the billion laughs protection).
+//! `XML_GetIdAttributeIndex`, `XML_SetReparseDeferralEnabled`, `XML_StopParser` without
+//! suspending and the `parsing` field of `XML_GetParsingStatus` (both for handlers, through a
+//! [`ParserHandle`]), and the element and character data handlers; with them the whole of
+//! document parsing: the encodings and the XML declaration, the prolog and its internal DTD
+//! subset (entity, attribute list, element and notation declarations, attribute defaults), the
+//! content (tags, attributes and their normalization, references to the predefined, character
+//! and internal general entities, CDATA sections, comments and processing instructions), the
+//! epilog, the reparse deferral heuristic and the amplification accounting (`XML_GE`: the
+//! billion laughs protection).
 //!
 //! **What is not.** OCIO creates its parsers with `XML_ParserCreate(nullptr)` and sets only
 //! the start element, end element and character data handlers (`FileFormatCTF.cpp:179-184`,
@@ -27,9 +29,16 @@
 //! the port takes the path without it), external entity parsers and parameter entity
 //! parsing (`XML_SetParamEntityParsing` stays `NEVER`, so a parameter entity reference only
 //! resets `keepProcessing`), the content model scaffold (built only for an element
-//! declaration handler), `XML_StopParser` (so the parser is never suspended or finished by a
-//! handler), and the debug reports to `stderr` (`EXPAT_*_DEBUG`). The prolog's text
-//! declaration and ignore sections belong to external entities, and are not reached either.
+//! declaration handler), suspending the parser (`XML_StopParser` with `resumable`,
+//! `XML_ResumeParser`), the handler-depth guard of 2.8.2 (`beforeHandler`, `afterHandler`: a
+//! handler can't reach the functions it guards), and the debug reports to `stderr`
+//! (`EXPAT_*_DEBUG`). The prolog's text declaration and ignore sections belong to external
+//! entities, and are not reached either.
+//!
+//! **Citations.** The port moved from expat 2.7.2 to 2.8.4 with OpenColorIO 2.6.0 (card
+//! `ocio26-deps`, `docs/ocio-2.6-deps-triage.md`, X1-X13): the code 2.8.4 changed, and the code
+//! ported for 2.8.4, cites its lines `@ R_2_8_4`; the other citations give 2.7.2's lines (tag
+//! `R_2_7_2`, still in the submodule's history), of code 2.8.4 left as it was.
 //!
 //! **The allocation tracker** (`MALLOC_TRACKER`, new in 2.7.2) fails an allocation with
 //! `XML_ERROR_NO_MEMORY` once expat's own heap use reaches 64 MiB at more than 100 times the
@@ -47,12 +56,15 @@
 //! An allocation fails only where the tracker refuses it (the port's own allocations don't
 //! fail); the `XML_ERROR_NO_MEMORY` returns of size checks are ported too.
 //!
-//! **Handlers and errors.** A handler returns `Result<(), E>`. OCIO's handlers throw C++
+//! **Handlers and errors.** A handler returns `Result<(), E>`. OCIO 2.5.2's handlers throw C++
 //! exceptions, which unwind through expat and end the parse; a handler's `Err` likewise ends
 //! the call that reached it, and [`Parser::parse`] returns it ([`ParseError::Handler`]).
 //! OCIO never uses a parser again after one of its handlers threw, and neither should a
-//! caller of the port.
+//! caller of the port. OCIO 2.6.0's handlers catch their exceptions and stop the parser
+//! instead ([`ParserHandle::stop_parser`]): expat then makes the rest of the current token's
+//! handler calls, and checks the parsing status after each token (`XML_ERROR_ABORTED`).
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -190,7 +202,7 @@ pub fn xml_error_string(code: XmlError) -> Option<&'static str> {
 /// The status of a parse call.
 ///
 /// Port of `enum XML_Status` (expat.h:74-81), without `XML_STATUS_SUSPENDED`, which needs
-/// `XML_StopParser`.
+/// a resumable `XML_StopParser`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XmlStatus {
     /// `XML_STATUS_ERROR`: the error code says why.
@@ -207,13 +219,83 @@ pub enum ParseError<E> {
     Handler(E),
 }
 
-/// `enum XML_Parsing` (expat.h:845), without `XML_SUSPENDED`, which needs
-/// `XML_StopParser`.
+/// The parsing status: `enum XML_Parsing` (expat.h:849 @ R_2_8_4), without
+/// `XML_SUSPENDED`, which needs a resumable `XML_StopParser`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ParsingStatus {
+pub enum ParsingStatus {
+    /// `XML_INITIALIZED`: no parse call yet.
     Initialized,
+    /// `XML_PARSING`.
     Parsing,
+    /// `XML_FINISHED`: after the final buffer, or stopped by [`ParserHandle::stop_parser`].
     Finished,
+}
+
+/// The parser's state that its handlers can read or change through a [`ParserHandle`]:
+/// `m_parsingStatus.parsing`, `m_errorCode`, `m_nSpecifiedAtts` and `m_idAttIndex` of
+/// `struct XML_ParserStruct`.
+#[derive(Debug)]
+struct Shared {
+    parsing: Cell<ParsingStatus>,
+    error_code: Cell<XmlError>,
+    n_specified_atts: Cell<i32>,
+    id_att_index: Cell<i32>,
+}
+
+/// The parser as its handlers reach it: expat passes them the parser (OCIO's handlers keep
+/// it in their user data), and they may call these functions of its API. A handler of the
+/// port can't borrow the parser it is called from, so it captures a handle
+/// ([`Parser::handle`]) instead. All handles of a parser share its state, across
+/// [`Parser::reset`] too, as the `XML_Parser` pointer stays the same.
+#[derive(Debug, Clone)]
+pub struct ParserHandle(Rc<Shared>);
+
+impl ParserHandle {
+    /// Stops the parser for good: the parse call that is running makes the rest of the current
+    /// token's handler calls, then fails with `XML_ERROR_ABORTED`. Refused
+    /// (`XmlStatus::Error`, with the error code set) before the first parse call
+    /// (`XML_ERROR_NOT_STARTED`) and once the parser is finished (`XML_ERROR_FINISHED`).
+    ///
+    /// Port of `XML_StopParser(parser, XML_FALSE)` (xmlparse.c:2639-2673 @ R_2_8_4): suspending
+    /// (`resumable` true) is not ported. OCIO 2.6.0's XML readers call it from their handlers
+    /// (`FileFormatCTF.cpp`, `FileFormatIridasLook.cpp`, `CDLParser.cpp`).
+    pub fn stop_parser(&self) -> XmlStatus {
+        let shared = &self.0;
+        match shared.parsing.get() {
+            ParsingStatus::Initialized => {
+                shared.error_code.set(XmlError::NotStarted);
+                XmlStatus::Error
+            }
+            ParsingStatus::Finished => {
+                shared.error_code.set(XmlError::Finished);
+                XmlStatus::Error
+            }
+            ParsingStatus::Parsing => {
+                shared.parsing.set(ParsingStatus::Finished);
+                XmlStatus::Ok
+            }
+        }
+    }
+
+    /// The `parsing` field of `XML_GetParsingStatus` (xmlparse.c:2716-2722 @ R_2_8_4).
+    pub fn parsing(&self) -> ParsingStatus {
+        self.0.parsing.get()
+    }
+
+    /// Port of `XML_GetErrorCode` (xmlparse.c:2724-2729 @ R_2_8_4).
+    pub fn error_code(&self) -> XmlError {
+        self.0.error_code.get()
+    }
+
+    /// Port of `XML_GetSpecifiedAttributeCount` (xmlparse.c:2028-2033 @ R_2_8_4).
+    pub fn specified_attribute_count(&self) -> i32 {
+        self.0.n_specified_atts.get()
+    }
+
+    /// Port of `XML_GetIdAttributeIndex` (xmlparse.c:2035-2040 @ R_2_8_4).
+    pub fn id_attribute_index(&self) -> i32 {
+        self.0.id_att_index.get()
+    }
 }
 
 /// `enum XML_Account` (xmlparse.c:438-443).
@@ -310,13 +392,18 @@ struct DefaultAttribute {
 
 /// An element type.
 ///
-/// Port of `ELEMENT_TYPE` (xmlparse.c:384-391), without the namespace prefix.
+/// Port of `ELEMENT_TYPE` (xmlparse.c:409-417 @ R_2_8_4), without the namespace prefix.
 #[derive(Debug, Clone, Default)]
 struct ElementType {
     /// `idAtt`.
     id_att: Option<usize>,
     /// `defaultAtts`, `nDefaultAtts`.
     default_atts: Vec<DefaultAttribute>,
+    /// `defaultAttForName`: for each attribute declared for the type, the index in
+    /// `default_atts` of its first declaration, the binding one
+    /// (`NAME_AND_DEFAULT_ATTRIBUTE`, xmlparse.c:386-400 @ R_2_8_4). Keyed by the attribute's
+    /// index in the DTD's attribute names, which are unique like the names upstream keys by.
+    default_att_for_name: HashMap<usize, usize>,
 }
 
 /// The DTD.
@@ -541,8 +628,6 @@ pub struct Parser<'a, E> {
     prolog_state: PrologState,
     /// `m_processor`.
     processor: Processor,
-    /// `m_errorCode`.
-    error_code: XmlError,
     /// `m_eventPtr`, `m_eventEndPtr`, `m_positionPtr`: positions in the parse buffer.
     event_ptr: Option<usize>,
     event_end_ptr: Option<usize>,
@@ -571,16 +656,13 @@ pub struct Parser<'a, E> {
     tag_stack: Vec<Tag>,
     /// `m_atts`, `m_attsSize`.
     atts: Vec<Attribute>,
-    /// `m_nSpecifiedAtts`.
-    n_specified_atts: i32,
-    /// `m_idAttIndex`.
-    id_att_index: i32,
     /// `m_position`.
     position: Position,
     /// `m_groupConnector`, `m_groupSize`.
     group_connector: Vec<u8>,
-    /// `m_parsingStatus.parsing`.
-    parsing: ParsingStatus,
+    /// `m_parsingStatus.parsing`, `m_errorCode`, `m_nSpecifiedAtts` and `m_idAttIndex`, which
+    /// the handlers' [`ParserHandle`]s share.
+    shared: Rc<Shared>,
     /// `m_parsingStatus.finalBuffer`.
     final_buffer: bool,
     /// `m_accounting`.
@@ -624,7 +706,6 @@ impl<'a, E> Parser<'a, E> {
             internal_encoding: xml_get_utf8_internal_encoding(),
             prolog_state: PrologState::new(),
             processor: Processor::PrologInit,
-            error_code: XmlError::None,
             event_ptr: None,
             event_end_ptr: None,
             position_ptr: None,
@@ -640,11 +721,14 @@ impl<'a, E> Parser<'a, E> {
             dtd: Dtd::new(),
             tag_stack: Vec::new(),
             atts: vec![Attribute::default(); INIT_ATTS_SIZE],
-            n_specified_atts: 0,
-            id_att_index: 0,
             position: Position::default(),
             group_connector: Vec::new(),
-            parsing: ParsingStatus::Initialized,
+            shared: Rc::new(Shared {
+                parsing: Cell::new(ParsingStatus::Initialized),
+                error_code: Cell::new(XmlError::None),
+                n_specified_atts: Cell::new(0),
+                id_att_index: Cell::new(0),
+            }),
             final_buffer: false,
             accounting: Accounting {
                 count_bytes_direct: 0,
@@ -674,9 +758,15 @@ impl<'a, E> Parser<'a, E> {
         fresh.buffer = self.buffer.take();
         fresh.atts = std::mem::take(&mut self.atts);
         fresh.group_connector = std::mem::take(&mut self.group_connector);
-        fresh.id_att_index = self.id_att_index;
         fresh.final_buffer = self.final_buffer;
         fresh.bytes_scanned = self.bytes_scanned;
+        // The parser's handles stay valid. parserInit sets the parsing status, the error code
+        // and m_nSpecifiedAtts, and leaves m_idAttIndex alone.
+        let shared = &self.shared;
+        shared.parsing.set(ParsingStatus::Initialized);
+        shared.error_code.set(XmlError::None);
+        shared.n_specified_atts.set(0);
+        fresh.shared = Rc::clone(shared);
         // parserInit leaves m_alloc_tracker alone; the free lists keep their memory, and
         // dtdReset frees the DTD's entries and default attributes.
         std::mem::swap(&mut fresh.heap, &mut self.heap);
@@ -820,19 +910,39 @@ impl<'a, E> Parser<'a, E> {
         Ok(id)
     }
 
+    /// A handle on the parser for its handlers to capture: [`ParserHandle`].
+    pub fn handle(&self) -> ParserHandle {
+        ParserHandle(Rc::clone(&self.shared))
+    }
+
     /// Port of `XML_GetErrorCode` (xmlparse.c:2729-2734).
     pub fn error_code(&self) -> XmlError {
-        self.error_code
+        self.shared.error_code.get()
+    }
+
+    /// `parser->m_errorCode = code`.
+    fn set_error_code(&self, code: XmlError) {
+        self.shared.error_code.set(code);
+    }
+
+    /// `parser->m_parsingStatus.parsing`.
+    fn parsing(&self) -> ParsingStatus {
+        self.shared.parsing.get()
+    }
+
+    /// `parser->m_parsingStatus.parsing = status`.
+    fn set_parsing(&self, status: ParsingStatus) {
+        self.shared.parsing.set(status);
     }
 
     /// Port of `XML_GetSpecifiedAttributeCount` (xmlparse.c:2066-2071).
     pub fn specified_attribute_count(&self) -> i32 {
-        self.n_specified_atts
+        self.shared.n_specified_atts.get()
     }
 
     /// Port of `XML_GetIdAttributeIndex` (xmlparse.c:2073-2079).
     pub fn id_attribute_index(&self) -> i32 {
-        self.id_att_index
+        self.shared.id_att_index.get()
     }
 
     /// Port of `XML_GetCurrentByteIndex` (xmlparse.c:2736-2744).
@@ -922,19 +1032,19 @@ impl<'a, E> Parser<'a, E> {
         is_final: bool,
     ) -> Result<XmlStatus, ParseError<E>> {
         if len < 0 {
-            self.error_code = XmlError::InvalidArgument;
+            self.set_error_code(XmlError::InvalidArgument);
             return Ok(XmlStatus::Error);
         }
         assert!(len as usize <= s.len(), "len is past the bytes");
         let s = &s[..len as usize];
-        match self.parsing {
+        match self.parsing() {
             ParsingStatus::Finished => {
-                self.error_code = XmlError::Finished;
+                self.set_error_code(XmlError::Finished);
                 return Ok(XmlStatus::Error);
             }
             // startParsing: the hash salt only.
             ParsingStatus::Initialized | ParsingStatus::Parsing => {
-                self.parsing = ParsingStatus::Parsing
+                self.set_parsing(ParsingStatus::Parsing)
             }
         }
         let Some(at) = self.get_buffer(len) else {
@@ -953,11 +1063,11 @@ impl<'a, E> Parser<'a, E> {
     /// Port of `XML_GetBuffer` (xmlparse.c:2506-2638) with `XML_CONTEXT_BYTES` 1024.
     pub fn get_buffer(&mut self, len: i32) -> Option<usize> {
         if len < 0 {
-            self.error_code = XmlError::NoMemory;
+            self.set_error_code(XmlError::NoMemory);
             return None;
         }
-        if self.parsing == ParsingStatus::Finished {
-            self.error_code = XmlError::Finished;
+        if self.parsing() == ParsingStatus::Finished {
+            self.set_error_code(XmlError::Finished);
             return None;
         }
 
@@ -970,13 +1080,13 @@ impl<'a, E> Parser<'a, E> {
             let needed_size =
                 (len as u32).wrapping_add((self.buffer_end - self.buffer_ptr) as u32) as i32;
             if needed_size < 0 {
-                self.error_code = XmlError::NoMemory;
+                self.set_error_code(XmlError::NoMemory);
                 return None;
             }
             let keep = (self.buffer_ptr as i32).min(XML_CONTEXT_BYTES);
             // Detect and prevent integer overflow
             if keep > i32::MAX - needed_size {
-                self.error_code = XmlError::NoMemory;
+                self.set_error_code(XmlError::NoMemory);
                 return None;
             }
             let needed_size = needed_size + keep;
@@ -1004,7 +1114,7 @@ impl<'a, E> Parser<'a, E> {
                     }
                 }
                 if buffer_size <= 0 {
-                    self.error_code = XmlError::NoMemory;
+                    self.set_error_code(XmlError::NoMemory);
                     return None;
                 }
                 let mut new_buf = vec![0u8; buffer_size as usize];
@@ -1033,24 +1143,26 @@ impl<'a, E> Parser<'a, E> {
 
     /// Parses the `len` bytes put in the buffer at [`Parser::get_buffer`]'s position.
     ///
-    /// Port of `XML_ParseBuffer` (xmlparse.c:2435-2504).
+    /// Port of `XML_ParseBuffer` (xmlparse.c:2436-2514 @ R_2_8_4), without the handler-depth
+    /// guard (a handler can't reach its parser to call it) and the check that the byte count
+    /// fits 64 bits.
     pub fn parse_buffer(&mut self, len: i32, is_final: bool) -> Result<XmlStatus, ParseError<E>> {
         if len < 0 {
-            self.error_code = XmlError::InvalidArgument;
+            self.set_error_code(XmlError::InvalidArgument);
             return Ok(XmlStatus::Error);
         }
-        match self.parsing {
+        match self.parsing() {
             ParsingStatus::Finished => {
-                self.error_code = XmlError::Finished;
+                self.set_error_code(XmlError::Finished);
                 return Ok(XmlStatus::Error);
             }
             ParsingStatus::Initialized => {
                 // Has someone called XML_GetBuffer successfully before?
                 if self.buffer.is_none() {
-                    self.error_code = XmlError::NoBuffer;
+                    self.set_error_code(XmlError::NoBuffer);
                     return Ok(XmlStatus::Error);
                 }
-                self.parsing = ParsingStatus::Parsing;
+                self.set_parsing(ParsingStatus::Parsing);
             }
             ParsingStatus::Parsing => {}
         }
@@ -1067,15 +1179,20 @@ impl<'a, E> Parser<'a, E> {
         let result = self.call_processor(&buffer, start, self.parse_end_ptr, &mut end_ptr);
         self.buffer = Some(buffer);
         self.buffer_ptr = end_ptr;
-        self.error_code = result.map_err(ParseError::Handler)?;
+        let result = result.map_err(ParseError::Handler)?;
+        self.set_error_code(result);
 
-        if self.error_code != XmlError::None {
+        if result != XmlError::None {
             self.event_end_ptr = self.event_ptr;
             self.processor = Processor::Error;
             return Ok(XmlStatus::Error);
         }
-        if is_final {
-            self.parsing = ParsingStatus::Finished;
+        // XML_STATUS_SUSPENDED needs XML_SUSPENDED. A parser stopped without an error (a
+        // handler's stop before a token that returns without checking the status, such as a
+        // trailing CR) is XML_FINISHED, the "should not happen" case: its position is updated
+        // and the call succeeds (xmlparse.c:2494-2513 @ R_2_8_4).
+        if is_final && self.parsing() != ParsingStatus::Finished {
+            self.set_parsing(ParsingStatus::Finished);
             return Ok(XmlStatus::Ok);
         }
 
@@ -1130,7 +1247,7 @@ impl<'a, E> Parser<'a, E> {
 
             // Make parsing status (and in particular XML_SUSPENDED) take precedence over
             // re-enter flag when they disagree
-            if self.parsing != ParsingStatus::Parsing {
+            if self.parsing() != ParsingStatus::Parsing {
                 self.reenter = false;
             }
 
@@ -1171,7 +1288,7 @@ impl<'a, E> Parser<'a, E> {
             Processor::Epilog => self.epilog_processor(b, s, end, next_ptr),
             Processor::InternalEntity => self.internal_entity_processor(),
             // errorProcessor (xmlparse.c:6467-6474)
-            Processor::Error => Ok(self.error_code),
+            Processor::Error => Ok(self.error_code()),
         }
     }
 
@@ -1629,8 +1746,9 @@ impl<'a, E> Parser<'a, E> {
                 _ => {}
             }
 
-            // The parser is never suspended or finished, and internal entities are opened
-            // only in content: the loop goes on.
+            // XML_PARSING: no handler is called in the prolog, and internal entities are opened
+            // only in content, so the parser is neither finished nor re-entered here; the loop
+            // goes on.
             s = next;
             tok = enc.prolog_tok(b, s, end, &mut next);
         }
@@ -1761,7 +1879,7 @@ impl<'a, E> Parser<'a, E> {
     /// Declares the current attribute of the current element type.
     ///
     /// Port of `defineAttribute(m_declElementType, m_declAttributeId, ...)`
-    /// (xmlparse.c:7140-7199).
+    /// (xmlparse.c:7289-7353 @ R_2_8_4).
     fn define_attribute(
         &mut self,
         is_cdata: bool,
@@ -1778,7 +1896,7 @@ impl<'a, E> Parser<'a, E> {
         if value.is_some() || is_id {
             // The handling of default attributes gets messed up if we have a default which
             // duplicates a non-default.
-            if element.default_atts.iter().any(|da| da.id == att_id) {
+            if element.default_att_for_name.contains_key(&att_id) {
                 return Ok(());
             }
             if is_id && element.id_att.is_none() {
@@ -1797,6 +1915,11 @@ impl<'a, E> Parser<'a, E> {
         if !is_cdata {
             self.dtd.att_ids[att_id].maybe_tokenized = true;
         }
+        // NOTE: The XML 1.0r4 spec says: "When more than one definition is provided for the
+        // same attribute of a given element type, the first declaration is binding and later
+        // declarations are ignored."
+        let index = element.default_atts.len() - 1;
+        element.default_att_for_name.entry(att_id).or_insert(index);
         Ok(())
     }
 
@@ -1940,7 +2063,7 @@ impl<'a, E> Parser<'a, E> {
         Ok(result)
     }
 
-    /// Port of `doContent` (xmlparse.c:3295-3778) without namespace processing.
+    /// Port of `doContent` (xmlparse.c:3306-3824 @ R_2_8_4) without namespace processing.
     #[allow(clippy::too_many_arguments)]
     fn do_content(
         &mut self,
@@ -2129,7 +2252,8 @@ impl<'a, E> Parser<'a, E> {
                         }
                     }
                     self.heap.temp_pool.clear();
-                    if self.tag_level == 0 {
+                    if self.tag_level == 0 && self.parsing() != ParsingStatus::Finished {
+                        // XML_SUSPENDED needs a resumable XML_StopParser.
                         if self.reenter {
                             self.processor = Processor::Epilog;
                         } else {
@@ -2155,7 +2279,8 @@ impl<'a, E> Parser<'a, E> {
                     if let Some(handler) = self.end_element_handler.as_mut() {
                         handler(&tag.name)?;
                     }
-                    if self.tag_level == 0 {
+                    if self.tag_level == 0 && self.parsing() != ParsingStatus::Finished {
+                        // XML_SUSPENDED needs a resumable XML_StopParser.
                         if self.reenter {
                             self.processor = Processor::Epilog;
                         } else {
@@ -2253,20 +2378,28 @@ impl<'a, E> Parser<'a, E> {
                 // Processing instructions and comments: reported only to their handlers.
                 _ => {}
             }
-            // XML_PARSING: the parser is never suspended or finished.
-            if self.reenter {
-                *next_ptr = next;
-                return Ok(XmlError::None);
+            match self.parsing() {
+                // XML_SUSPENDED needs a resumable XML_StopParser.
+                ParsingStatus::Finished => {
+                    self.set_event_ptr(src, next);
+                    return Ok(XmlError::Aborted);
+                }
+                _ => {
+                    if self.reenter {
+                        *next_ptr = next;
+                        return Ok(XmlError::None);
+                    }
+                    s = next;
+                    self.set_event_ptr(src, s);
+                }
             }
-            s = next;
-            self.set_event_ptr(src, s);
         }
     }
 
     /// The attributes of the start tag at `b[att_str..]` for the application, names and
     /// values alternately, the specified ones first, then the defaulted ones.
     ///
-    /// Port of `storeAtts` (xmlparse.c:3809-4275) without namespace processing. `main` is
+    /// Port of `storeAtts` (xmlparse.c:3861-4315 @ R_2_8_4) without namespace processing. `main` is
     /// `enc == parser->m_encoding`.
     fn store_atts(
         &mut self,
@@ -2328,13 +2461,11 @@ impl<'a, E> Parser<'a, E> {
                 let mut is_cdata = true;
 
                 // figure out whether declared as other than CDATA
-                if self.dtd.att_ids[att_id].maybe_tokenized
-                    && let Some(da) = self.dtd.elements[element_type]
-                        .default_atts
-                        .iter()
-                        .find(|da| da.id == att_id)
-                {
-                    is_cdata = da.is_cdata;
+                if self.dtd.att_ids[att_id].maybe_tokenized {
+                    let element = &self.dtd.elements[element_type];
+                    if let Some(&index) = element.default_att_for_name.get(&att_id) {
+                        is_cdata = element.default_atts[index].is_cdata;
+                    }
                 }
 
                 // normalize the attribute value
@@ -2362,14 +2493,14 @@ impl<'a, E> Parser<'a, E> {
         }
 
         // set-up for XML_GetSpecifiedAttributeCount and XML_GetIdAttributeIndex
-        self.n_specified_atts = app_atts.len() as i32;
+        self.shared.n_specified_atts.set(app_atts.len() as i32);
         match self.dtd.elements[element_type].id_att {
             Some(id_att) if self.dtd.att_ids[id_att].specified => {
                 if let Some(i) = app_ids.iter().position(|&id| id == id_att) {
-                    self.id_att_index = 2 * i as i32;
+                    self.shared.id_att_index.set(2 * i as i32);
                 }
             }
-            _ => self.id_att_index = -1,
+            _ => self.shared.id_att_index.set(-1),
         }
 
         // do attribute defaulting
@@ -2701,8 +2832,8 @@ impl<'a, E> Parser<'a, E> {
         Ok(XmlError::None)
     }
 
-    /// Port of `doCdataSection` (xmlparse.c:4580-4704): `*start_ptr` becomes `Some` if the
-    /// section is closed, and `None` if it is not yet.
+    /// Port of `doCdataSection` (xmlparse.c:4614-4750 @ R_2_8_4): `*start_ptr` becomes `Some`
+    /// if the section is closed, and `None` if it is not yet.
     #[allow(clippy::too_many_arguments)]
     fn do_cdata_section(
         &mut self,
@@ -2731,6 +2862,9 @@ impl<'a, E> Parser<'a, E> {
                 XML_TOK_CDATA_SECT_CLOSE => {
                     *start_ptr = Some(next);
                     *next_ptr = next;
+                    if self.parsing() == ParsingStatus::Finished {
+                        return Ok(XmlError::Aborted);
+                    }
                     return Ok(XmlError::None);
                 }
                 XML_TOK_DATA_NEWLINE => self.report_char_data(b"\n")?,
@@ -2787,16 +2921,24 @@ impl<'a, E> Parser<'a, E> {
                 }
             }
 
-            // XML_PARSING: the parser is never suspended or finished.
-            if self.reenter {
-                return Ok(XmlError::UnexpectedState);
+            match self.parsing() {
+                // XML_SUSPENDED needs a resumable XML_StopParser.
+                ParsingStatus::Finished => {
+                    self.set_event_ptr(src, next);
+                    return Ok(XmlError::Aborted);
+                }
+                _ => {
+                    if self.reenter {
+                        return Ok(XmlError::UnexpectedState);
+                    }
+                    s = next;
+                    self.set_event_ptr(src, s);
+                }
             }
-            s = next;
-            self.set_event_ptr(src, s);
         }
     }
 
-    /// Port of `epilogProcessor` (xmlparse.c:6250-6326) without handlers.
+    /// Port of `epilogProcessor` (xmlparse.c:6373-6449 @ R_2_8_4) without handlers.
     fn epilog_processor(
         &mut self,
         b: &[u8],
@@ -2845,7 +2987,8 @@ impl<'a, E> Parser<'a, E> {
                 }
                 _ => return Ok(XmlError::JunkAfterDocElement),
             }
-            // XML_PARSING: the parser is never suspended or finished.
+            // XML_PARSING: no handler is called here, and doContent enters the epilog only
+            // while the parser isn't finished; suspending needs a resumable XML_StopParser.
             if self.reenter {
                 return Ok(XmlError::UnexpectedState);
             }
@@ -2888,7 +3031,7 @@ impl<'a, E> Parser<'a, E> {
         XmlError::None
     }
 
-    /// Port of `internalEntityProcessor` (xmlparse.c:6389-6465) for general entities.
+    /// Port of `internalEntityProcessor` (xmlparse.c:6510-6590 @ R_2_8_4) for general entities.
     fn internal_entity_processor(&mut self) -> HResult<E> {
         let Some(open_entity) = self.open_internal_entities.last() else {
             return Ok(XmlError::UnexpectedState);
@@ -2922,7 +3065,8 @@ impl<'a, E> Parser<'a, E> {
                 return Ok(result);
             }
             // Check if entity is complete, if not, mark down how much of it is processed
-            if text_end != next && self.reenter {
+            // XML_SUSPENDED needs a resumable XML_StopParser.
+            if text_end != next && self.parsing() == ParsingStatus::Parsing && self.reenter {
                 self.dtd.entities[id].processed = next;
                 return Ok(result);
             }
@@ -2930,6 +3074,10 @@ impl<'a, E> Parser<'a, E> {
             // Entity is complete. We cannot close it here since we need to first process its
             // possible inner entities.
             self.dtd.entities[id].has_more = false;
+            // A general entity must close the elements it opens (2.7.3).
+            if start_tag_level != self.tag_level {
+                return Ok(XmlError::AsyncEntity);
+            }
             self.reenter = true;
             return Ok(result);
         } // End of entity processing, "if" block will return here
@@ -2952,7 +3100,7 @@ impl<E> std::fmt::Debug for Parser<'_, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Parser")
             .field("processor", &self.processor)
-            .field("error_code", &self.error_code)
+            .field("error_code", &self.error_code())
             .field("position", &self.position)
             .finish_non_exhaustive()
     }

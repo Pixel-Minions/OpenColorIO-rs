@@ -333,17 +333,17 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-## expat 2.7.2
+## expat 2.8.4
 
-<https://github.com/libexpat/libexpat>, the XML parser OpenColorIO 2.5.2 is built with (both
+<https://github.com/libexpat/libexpat>, the XML parser OpenColorIO 2.6.0 is built with (both
 wheels bundle it). The parts OpenColorIO's readers reach are ported in
 `crates/ocio-formats/src/expat/`, together with its own tests. Its source is pinned as the
-submodule `upstream/expat` (tag R_2_7_2, commit 7643f96bd5b9f5d3b26ea112519e05e17ef91cfb), so
-that the citations can be checked. Its `COPYING`:
+submodule `upstream/expat` (tag R_2_8_4, commit 12cf0b1f25f026a022fe728ad8f7e3d017285b80), so
+that the citations can be checked. Its top-level `COPYING`:
 
 ```text
 Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and Clark Cooper
-Copyright (c) 2001-2025 Expat maintainers
+Copyright (c) 2001-2026 Expat maintainers
 
 Permission is hereby granted, free of charge, to any person obtaining
 a copy of this software and associated documentation files (the

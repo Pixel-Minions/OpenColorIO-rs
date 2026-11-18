@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from expat 2.7.2 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
-// Ltd and Clark Cooper, Copyright (c) 2001-2025 Expat maintainers); see mod.rs.
+// Ported from expat 2.8.4 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
+// Ltd and Clark Cooper, Copyright (c) 2001-2026 Expat maintainers); see mod.rs.
 
 //! expat's character tables, generated from its headers (`lib/nametab.h`, `asciitab.h`,
-//! `iasciitab.h`, `latin1tab.h`, `utf8tab.h`, expat 2.7.2) by a script, unchanged: the
-//! naming bitmap of the XML 1.0 name characters, and the byte types of the built-in
-//! encodings. The encodings without namespace processing map `:` to `BT_NMSTRT`
+//! `iasciitab.h`, `latin1tab.h`, `utf8tab.h`, expat 2.7.2, the same in 2.8.4) by a script,
+//! unchanged: the naming bitmap of the XML 1.0 name characters, and the byte types of the
+//! built-in encodings. The encodings without namespace processing map `:` to `BT_NMSTRT`
 //! (`#define BT_COLON BT_NMSTRT` around each `#include "asciitab.h"`, xmltok.c).
 
 #![allow(clippy::unreadable_literal)]

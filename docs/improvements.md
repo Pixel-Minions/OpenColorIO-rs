@@ -2774,12 +2774,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-170. expat counts a start tag's attribute values twice
 
-- **Upstream:** expat 2.7.2's billion laughs protection counts the bytes of each token it
-  reads, once. A start tag (`<e a='x&amp;y'>`, not an empty element) is counted as one token
-  in `doContent`, then `storeAtts` passes the same accounting class (`XML_ACCOUNT_DIRECT` in
+- **Upstream:** expat's billion laughs protection (2.7.2, and 2.8.4 with OCIO 2.6.0) counts the
+  bytes of each token it reads, once. A start tag (`<e a='x&amp;y'>`, not an empty element) is
+  counted as one token in `doContent`, then `storeAtts` passes the same accounting class (`XML_ACCOUNT_DIRECT` in
   the document) to `storeAttributeValue`, which counts the tokens of each value that needs
   normalizing (a reference, or white space other than single spaces) again
-  (`expat/lib/xmlparse.c:3321-3326, 3508-3509, 3956-3958, 6567-6571` @ R_2_7_2). An empty
+  (`expat/lib/xmlparse.c:3332-3337, 3529-3530, 4009-4011, 6693-6697` @ R_2_8_4). An empty
   element's tag passes `XML_ACCOUNT_NONE` there ("token spans whole start tag"). The direct
   count, the denominator of the amplification factor, grows by those values' bytes once more.
 - **Who notices:** documents over the protection's 8 MiB activation threshold whose

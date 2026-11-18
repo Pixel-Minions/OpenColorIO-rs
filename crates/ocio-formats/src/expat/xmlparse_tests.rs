@@ -1,21 +1,24 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from expat 2.7.2 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
-// Ltd and Clark Cooper, Copyright (c) 2001-2025 Expat maintainers); see mod.rs.
+// Ported from expat 2.8.4 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
+// Ltd and Clark Cooper, Copyright (c) 2001-2026 Expat maintainers); see mod.rs.
 
-//! The tests of expat 2.7.2's own suite (`expat/tests/`) that reach only the ported parser:
-//! those of `basic_tests.c` that set no handler but the element and character data ones, and
-//! call no function the port leaves out, and of `acc_tests.c` the accounting of documents
-//! without parameter or external entities.
+//! The tests of expat's own suite (`expat/tests/`) that reach only the ported parser: those of
+//! `basic_tests.c` and `misc_tests.c` that set no handler but the element and character data
+//! ones, and call no function the port leaves out, and of `acc_tests.c` the accounting of
+//! documents without parameter or external entities. Those 2.8.4 added, or that need what the
+//! port added for it (X1, X2 and X4 of `docs/ocio-2.6-deps-triage.md`), cite 2.8.4's lines;
+//! the others cite 2.7.2's, and are the same in 2.8.4 (but for declarations and casts).
 //!
 //! expat's runner runs the whole suite for each chunk size of `_XML_Parse_SINGLE_BYTES` from 0
 //! to 5, with reparse deferral off and on (`runtests.c:101-110`); so does each test here
 //! ([`each_run`]).
 //!
-//! Not ported, beyond those that need what the port leaves out: the tests that query the
-//! parser from inside a handler (`test_line_and_column_numbers_inside_handlers`,
-//! `test_attributes`, `test_deep_nested_attribute_entity`, `test_misc_expected_event_ptr_issue_980`):
-//! the port's handlers can't reach their parser, and OCIO's don't;
+//! Not ported, beyond those that need what the port leaves out (the 2.8.4 ones are listed in
+//! `docs/ocio-2.6-deps-triage.md`, "expat 2.8.4 tests to port"): the tests that query the
+//! parser's position from inside a handler (`test_line_and_column_numbers_inside_handlers`,
+//! `test_deep_nested_attribute_entity`, `test_misc_expected_event_ptr_issue_980`): a handler
+//! reaches only what a [`ParserHandle`] gives, and OCIO's don't ask for more;
 //! `test_buffer_can_grow_to_max`: it switches off the allocation tracker, which is not
 //! ported, and grows buffers to 1 GiB; `test_misc_error_string`: a Rust enum has no
 //! out-of-range values; `test_siphash_*`, `test_hash_collision`: the port's maps don't hash
@@ -2830,7 +2833,7 @@ fn documents_past_the_memory_limit_are_refused() {
     });
 }
 
-/// Every error code's number and message are expat 2.7.2's: the order of `enum XML_Error`
+/// Every error code's number and message are expat 2.8.4's: the order of `enum XML_Error`
 /// (expat.h) and the strings `XML_ErrorString` returns (xmlparse.c), read from the pinned
 /// sources.
 #[test]
@@ -2939,4 +2942,590 @@ fn the_error_strings_are_expat_s() {
             "{name}"
         );
     }
+}
+
+// ---- expat 2.8.4: the XML declaration, attribute declarations, entities, XML_StopParser ----
+
+/// Port of expat 2.8.4 `START_TEST(test_xmldecl_empty_version)` (tests/basic_tests.c:993-999).
+#[test]
+fn test_xmldecl_empty_version() {
+    each_run(|run| {
+        run.expect_failure(
+            &mut run.parser(),
+            b"<?xml version=''?>\n<doc/>",
+            XmlError::XmlDecl,
+            "Failed to report empty version in XML declaration",
+        );
+    });
+}
+
+/// `ElementInfo` (tests/handlers.h:92-98 @ R_2_8_4), its attributes' `AttrInfo` as pairs.
+struct ElementInfo {
+    name: &'static [u8],
+    attr_count: usize,
+    default_attr_count: usize,
+    id_name: Option<&'static [u8]>,
+    attributes: &'static [(&'static [u8], &'static [u8])],
+}
+
+/// `counting_start_element_handler` (tests/handlers.c:109-166 @ R_2_8_4), with
+/// `ParserAndElementInfo`'s parser as a handle.
+fn counting_start_element_handler(
+    parser: ParserHandle,
+    info: &'static [ElementInfo],
+) -> StartElementHandler<'static, Infallible> {
+    Box::new(move |name, mut atts| {
+        let Some(info) = info.iter().find(|info| info.name == name) else {
+            panic!("Element not recognised");
+        };
+        // The attribute count is twice what you might expect. It is a count of items in atts,
+        // an array which contains alternating attribute names and attribute values.
+        let count = parser.specified_attribute_count();
+        assert_eq!(
+            info.attr_count as i32 * 2,
+            count,
+            "Not got expected attribute count"
+        );
+        let id = parser.id_attribute_index();
+        if id == -1 && info.id_name.is_some() {
+            panic!("ID not present");
+        }
+        if id != -1 && Some(atts[id as usize]) != info.id_name {
+            panic!("ID does not have the correct name");
+        }
+        for _ in 0..info.attr_count + info.default_attr_count {
+            let Some(attr) = info.attributes.iter().find(|attr| attr.0 == atts[0]) else {
+                panic!("Attribute not recognised");
+            };
+            assert_eq!(atts[1], attr.1, "Attribute has wrong value");
+            // Remember, two entries in atts per attribute (see above)
+            atts = &atts[2..];
+        }
+        // Self-test that the test case's list of expected attributes is complete
+        assert!(atts.is_empty());
+        Ok(())
+    })
+}
+
+/// The body the attribute tests share: `text` through `counting_start_element_handler` with
+/// `info`, which must succeed.
+fn run_counting_check(run: Run, text: &[u8], info: &'static [ElementInfo]) {
+    let mut parser = run.parser();
+    parser.set_start_element_handler(Some(counting_start_element_handler(parser.handle(), info)));
+    if run.parse(&mut parser, text, true) != XmlStatus::Ok {
+        xml_failure(run, &mut parser);
+    }
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_attributes)` (tests/basic_tests.c:2506-2538).
+#[test]
+fn test_attributes() {
+    static INFO: [ElementInfo; 2] = [
+        ElementInfo {
+            name: b"doc",
+            attr_count: 3,
+            default_attr_count: 0,
+            id_name: Some(b"id"),
+            attributes: &[(b"a", b"1"), (b"b", b"2"), (b"id", b"one")],
+        },
+        ElementInfo {
+            name: b"tag",
+            attr_count: 1,
+            default_attr_count: 0,
+            id_name: None,
+            attributes: &[(b"c", b"3")],
+        },
+    ];
+    each_run(|run| {
+        let text = b"<!DOCTYPE doc [\n\
+                     <!ELEMENT doc (tag)>\n\
+                     <!ATTLIST doc id ID #REQUIRED>\n\
+                     ]>\
+                     <doc a='1' id='one' b='2'>\
+                     <tag c='3'/>\
+                     </doc>";
+        run_counting_check(run, text, &INFO);
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_duplicate_cdata_attribute)`
+/// (tests/basic_tests.c:2540-2576).
+#[test]
+fn test_duplicate_cdata_attribute() {
+    // https://www.w3.org/TR/xml/#attdecls
+    //
+    // Test the following statement from the linked specification:
+    //   When more than one definition is provided for the same attribute of a given element
+    //   type, the first declaration is binding and later declarations are ignored.
+    static INFO: [ElementInfo; 1] = [ElementInfo {
+        name: b"doc",
+        attr_count: 0,
+        default_attr_count: 1,
+        id_name: None,
+        attributes: &[(b"attribute", b"expected")],
+    }];
+    each_run(|run| {
+        let text = b"<!DOCTYPE doc [\n  \
+            <!ATTLIST doc attribute CDATA 'expected' attribute CDATA 'ignored'>\n\
+            ]>\n\
+            <doc/>\n";
+        run_counting_check(run, text, &INFO);
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_duplicate_id_attribute_1)`
+/// (tests/basic_tests.c:2578-2614).
+#[test]
+fn test_duplicate_id_attribute_1() {
+    // https://www.w3.org/TR/xml/#attdecls
+    //
+    // Test the following statement from the linked specification:
+    //   When more than one definition is provided for the same attribute of a given element
+    //   type, the first declaration is binding and later declarations are ignored.
+    static INFO: [ElementInfo; 1] = [ElementInfo {
+        name: b"doc",
+        attr_count: 0,
+        default_attr_count: 1,
+        id_name: None,
+        attributes: &[(b"identifier", b"expected")],
+    }];
+    each_run(|run| {
+        let text = b"<!DOCTYPE doc [\n  \
+            <!ATTLIST doc identifier CDATA 'expected' identifier ID #REQUIRED>\n\
+            ]>\n\
+            <doc/>\n";
+        run_counting_check(run, text, &INFO);
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_duplicate_id_attribute_2)`
+/// (tests/basic_tests.c:2616-2653).
+#[test]
+fn test_duplicate_id_attribute_2() {
+    // https://www.w3.org/TR/xml/#attdecls
+    //
+    // Test the following statement from the linked specification:
+    //   When more than one definition is provided for the same attribute of a given element
+    //   type, the first declaration is binding and later declarations are ignored.
+    static INFO: [ElementInfo; 1] = [ElementInfo {
+        name: b"doc",
+        attr_count: 0,
+        default_attr_count: 0,
+        id_name: None,
+        attributes: &[],
+    }];
+    each_run(|run| {
+        let text = b"<!DOCTYPE doc [\n  \
+            <!ATTLIST doc identifier ID #REQUIRED identifier CDATA 'unexpected'>\n\
+            ]>\n\
+            <doc/>\n";
+        run_counting_check(run, text, &INFO);
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_duplicate_cdata_attribute_multiple_attlistdecl)`
+/// (tests/basic_tests.c:2655-2689).
+#[test]
+fn test_duplicate_cdata_attribute_multiple_attlistdecl() {
+    // https://www.w3.org/TR/xml/#attdecls
+    //
+    // Test the following statement from the linked specification:
+    //   When more than one AttlistDecl is provided for a given element type, the contents of
+    //   all those provided are merged.
+    static INFO: [ElementInfo; 1] = [ElementInfo {
+        name: b"doc",
+        attr_count: 0,
+        default_attr_count: 1,
+        id_name: None,
+        attributes: &[(b"attribute", b"expected")],
+    }];
+    each_run(|run| {
+        let text = b"<!DOCTYPE doc [\n  \
+            <!ATTLIST doc attribute CDATA 'expected'>\n  \
+            <!ATTLIST doc attribute CDATA 'ignored'>\n\
+            ]>\n\
+            <doc/>\n";
+        run_counting_check(run, text, &INFO);
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_duplicate_cdata_attribute_multiple_attlistdecl_2)`
+/// (tests/basic_tests.c:2691-2728).
+#[test]
+fn test_duplicate_cdata_attribute_multiple_attlistdecl_2() {
+    // https://www.w3.org/TR/xml/#attdecls
+    //
+    // Test the following statement from the linked specification:
+    //   When more than one AttlistDecl is provided for a given element type, the contents of
+    //   all those provided are merged.
+    static INFO: [ElementInfo; 2] = [
+        ElementInfo {
+            name: b"doc",
+            attr_count: 0,
+            default_attr_count: 1,
+            id_name: None,
+            attributes: &[(b"attribute", b"expected_doc")],
+        },
+        ElementInfo {
+            name: b"tag",
+            attr_count: 0,
+            default_attr_count: 1,
+            id_name: None,
+            attributes: &[(b"attribute", b"expected_tag")],
+        },
+    ];
+    each_run(|run| {
+        let text = b"<!DOCTYPE doc [\n  \
+            <!ATTLIST doc attribute CDATA 'expected_doc'>\n  \
+            <!ATTLIST tag attribute CDATA 'expected_tag'>\n  \
+            <!ATTLIST doc attribute CDATA 'ignored_doc'>\n\
+            ]>\n\
+            <doc><tag></tag></doc>\n";
+        run_counting_check(run, text, &INFO);
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_duplicate_cdata_attribute_multiple_attlistdecl_3)`
+/// (tests/basic_tests.c:2730-2770).
+#[test]
+fn test_duplicate_cdata_attribute_multiple_attlistdecl_3() {
+    // https://www.w3.org/TR/xml/#attdecls
+    //
+    // Test the following statement from the linked specification:
+    //   When more than one AttlistDecl is provided for a given element type, the contents of
+    //   all those provided are merged.
+    static INFO: [ElementInfo; 2] = [
+        ElementInfo {
+            name: b"doc",
+            attr_count: 0,
+            default_attr_count: 2,
+            id_name: None,
+            attributes: &[
+                (b"attribute", b"expected_doc"),
+                (b"second_attribute", b"second_expected_doc"),
+            ],
+        },
+        ElementInfo {
+            name: b"tag",
+            attr_count: 0,
+            default_attr_count: 1,
+            id_name: None,
+            attributes: &[(b"attribute", b"expected_tag")],
+        },
+    ];
+    each_run(|run| {
+        let text = b"<!DOCTYPE doc [\n  \
+            <!ATTLIST doc attribute CDATA 'expected_doc'>\n  \
+            <!ATTLIST tag attribute CDATA 'expected_tag'>\n  \
+            <!ATTLIST doc second_attribute CDATA 'second_expected_doc' \
+            attribute CDATA 'ignored_doc'>\n\
+            ]>\n\
+            <doc><tag></tag></doc>\n";
+        run_counting_check(run, text, &INFO);
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_duplicate_id_attribute_multiple_attlistdecl)`
+/// (tests/basic_tests.c:2772-2811).
+#[test]
+fn test_duplicate_id_attribute_multiple_attlistdecl() {
+    // https://www.w3.org/TR/xml/#attdecls
+    //
+    // Test the following statement from the linked specification:
+    //   When more than one AttlistDecl is provided for a given element type, the contents of
+    //   all those provided are merged.
+    static INFO: [ElementInfo; 2] = [
+        ElementInfo {
+            name: b"doc",
+            attr_count: 1,
+            default_attr_count: 0,
+            id_name: Some(b"identifier"),
+            attributes: &[(b"identifier", b"doc_identity")],
+        },
+        ElementInfo {
+            name: b"tag",
+            attr_count: 0,
+            default_attr_count: 1,
+            id_name: None,
+            attributes: &[(b"identifier", b"identifier_tag")],
+        },
+    ];
+    each_run(|run| {
+        let text = b"<!DOCTYPE doc [\n  \
+            <!ATTLIST doc identifier ID #REQUIRED>\n  \
+            <!ATTLIST tag identifier CDATA 'identifier_tag'>\n  \
+            <!ATTLIST doc identifier CDATA 'ignored'>\n\
+            ]>\n\
+            <doc identifier='doc_identity'><tag></tag></doc>\n";
+        run_counting_check(run, text, &INFO);
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_misc_sync_entity_tolerated)`
+/// (tests/misc_tests.c:689-705).
+#[test]
+fn test_misc_sync_entity_tolerated() {
+    each_run(|run| {
+        let doc = b"<!DOCTYPE t0 [\n   \
+            <!ENTITY a '<t1></t1>'>\n   \
+            <!ENTITY b '<t2>two</t2>'>\n   \
+            <!ENTITY c '<t3>three<t4>four</t4>three</t3>'>\n   \
+            <!ENTITY d '<t5>&b;</t5>'>\n\
+            ]>\n\
+            <t0>&a;&b;&c;&d;</t0>\n";
+        let mut parser = run.parser();
+        if run.parse(&mut parser, doc, true) != XmlStatus::Ok {
+            xml_failure(run, &mut parser);
+        }
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_misc_async_entity_rejected)`
+/// (tests/misc_tests.c:707-779), as built with `XML_GE`.
+#[test]
+fn test_misc_async_entity_rejected() {
+    // The document, then the error's line and column.
+    let cases: [(&[u8], u64, u64); 5] = [
+        // Opened by one entity, closed by another
+        (
+            b"<!DOCTYPE t0 [\n   \
+              <!ENTITY open '<t1>'>\n   \
+              <!ENTITY close '</t1>'>\n\
+              ]>\n\
+              <t0>&open;&close;</t0>\n",
+            5,
+            4,
+        ),
+        // Opened by tag, closed by entity (non-root case)
+        (
+            b"<!DOCTYPE t0 [\n  \
+              <!ENTITY g0 ''>\n  \
+              <!ENTITY g1 '&g0;</t1>'>\n\
+              ]>\n\
+              <t0><t1>&g1;</t0>\n",
+            5,
+            8,
+        ),
+        // Opened by tag, closed by entity (root case)
+        (
+            b"<!DOCTYPE t0 [\n  \
+              <!ENTITY g0 ''>\n  \
+              <!ENTITY g1 '&g0;</t0>'>\n\
+              ]>\n\
+              <t0>&g1;\n",
+            5,
+            4,
+        ),
+        // Opened by entity, closed by tag <-- regression from 2.7.0
+        (
+            b"<!DOCTYPE t0 [\n  \
+              <!ENTITY g0 ''>\n  \
+              <!ENTITY g1 '<t1>&g0;'>\n\
+              ]>\n\
+              <t0>&g1;</t1></t0>\n",
+            5,
+            4,
+        ),
+        // Opened by tag, closed by entity; then the other way around
+        (
+            b"<!DOCTYPE t0 [\n  \
+              <!ENTITY open '<t1>'>\n  \
+              <!ENTITY close '</t1>'>\n\
+              ]>\n\
+              <t0><t1>&close;&open;</t1></t0>\n",
+            5,
+            8,
+        ),
+    ];
+    each_run(|run| {
+        for (i, &(doc, line, column)) in cases.iter().enumerate() {
+            let mut parser = run.parser();
+            assert_eq!(
+                run.parse(&mut parser, doc, true),
+                XmlStatus::Error,
+                "{run:?}: cases[{i}]"
+            );
+            assert_eq!(
+                parser.error_code(),
+                XmlError::AsyncEntity,
+                "{run:?}: cases[{i}]"
+            );
+            assert_eq!(parser.current_line_number(), line, "{run:?}: cases[{i}]");
+            assert_eq!(
+                parser.current_column_number(),
+                column,
+                "{run:?}: cases[{i}]"
+            );
+        }
+    });
+}
+
+/// `long_character_data_text` (tests/common.c:64-86 @ R_2_8_4).
+fn long_character_data_text() -> Vec<u8> {
+    let mut text = b"<?xml version='1.0' encoding='iso-8859-1'?><s>".to_vec();
+    for _ in 0..20 {
+        text.extend_from_slice(b"012345678901234567890123456789012345678901234567890123456789");
+    }
+    text.extend_from_slice(b"</s>");
+    text
+}
+
+/// `long_cdata_text` (tests/common.c:88-110 @ R_2_8_4).
+fn long_cdata_text() -> Vec<u8> {
+    let mut text = b"<s><![CDATA[".to_vec();
+    for _ in 0..20 {
+        text.extend_from_slice(b"012345678901234567890123456789012345678901234567890123456789");
+    }
+    text.extend_from_slice(b"]]></s>");
+    text
+}
+
+/// `clearing_aborting_character_handler` (tests/handlers.c:1589-1597 @ R_2_8_4) with
+/// `g_resumable` false. Its `XML_SetCharacterDataHandler(g_parser, NULL)` is left out: a
+/// handler of the port can't reach it, and it changes nothing here. The parser is finished at
+/// the end of the token, and doContent's conversion loop keeps calling the handler it read
+/// before the loop.
+fn clearing_aborting_character_handler(
+    parser: ParserHandle,
+) -> CharacterDataHandler<'static, Infallible> {
+    Box::new(move |_s| {
+        parser.stop_parser();
+        Ok(())
+    })
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_stop_parser_between_char_data_calls)`
+/// (tests/basic_tests.c:1542-1559).
+#[test]
+fn test_stop_parser_between_char_data_calls() {
+    // The sample data must be big enough that there are two calls to the character data
+    // handler from within the inner "for" loop of the XML_TOK_DATA_CHARS case in doContent(),
+    // and the character handler must stop the parser and clear the character data handler.
+    let text = long_character_data_text();
+    each_run(|run| {
+        let mut parser = run.parser();
+        parser
+            .set_character_data_handler(Some(clearing_aborting_character_handler(parser.handle())));
+        if run.parse(&mut parser, &text, true) != XmlStatus::Error {
+            xml_failure(run, &mut parser);
+        }
+        if parser.error_code() != XmlError::Aborted {
+            xml_failure(run, &mut parser);
+        }
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_repeated_stop_parser_between_char_data_calls)`
+/// (tests/basic_tests.c:1591-1619): its first part, with `parser_stop_character_handler`
+/// (tests/handlers.c:1599-1628 @ R_2_8_4) and `g_resumable` false. The other two parts
+/// suspend the parser, which is not ported.
+#[test]
+fn test_repeated_stop_parser_between_char_data_calls() {
+    let text = long_character_data_text();
+    each_run(|run| {
+        let mut parser = run.parser();
+        let handle = parser.handle();
+        parser.set_character_data_handler(Some(Box::new(move |_s| {
+            if handle.parsing() == ParsingStatus::Finished {
+                return Ok(()); // the parser was stopped by a previous call to this handler.
+            }
+            handle.stop_parser();
+            // Check that aborting an aborted parser is faulted
+            if handle.stop_parser() != XmlStatus::Error {
+                panic!("Aborting aborted parser not faulted");
+            }
+            assert_eq!(handle.error_code(), XmlError::Finished);
+            Ok(())
+        })));
+        if run.parse(&mut parser, &text, true) != XmlStatus::Error {
+            panic!("{run:?}: Failed to double-stop parser");
+        }
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_stop_parser_between_cdata_calls)`
+/// (tests/basic_tests.c:1980-1987).
+#[test]
+fn test_stop_parser_between_cdata_calls() {
+    let text = long_cdata_text();
+    each_run(|run| {
+        let mut parser = run.parser();
+        parser
+            .set_character_data_handler(Some(clearing_aborting_character_handler(parser.handle())));
+        run.expect_failure(
+            &mut parser,
+            &text,
+            XmlError::Aborted,
+            "Parse not aborted in CDATA handler",
+        );
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_empty_element_abort)` (tests/basic_tests.c:5853-5861),
+/// with `start_element_suspender` (tests/handlers.c:174-183 @ R_2_8_4) for `<abort>`.
+#[test]
+fn test_empty_element_abort() {
+    each_run(|run| {
+        let mut parser = run.parser();
+        let handle = parser.handle();
+        parser.set_start_element_handler(Some(Box::new(move |name, _atts| {
+            if name == b"abort" {
+                handle.stop_parser();
+            }
+            Ok(())
+        })));
+        if run.parse(&mut parser, b"<abort/>", true) != XmlStatus::Error {
+            panic!("{run:?}: Expected to error on abort");
+        }
+    });
+}
+
+/// `start_element_issue_240` and `end_element_issue_240` (tests/handlers.c:268-286 @
+/// R_2_8_4): the depth, and the parser stopped when the root element ends.
+fn set_issue_240_handlers(parser: &mut P<'_>) {
+    let deep = Rc::new(RefCell::new(0i32));
+    let handle = parser.handle();
+    let start_deep = Rc::clone(&deep);
+    parser.set_element_handler(
+        Some(Box::new(move |_name, _atts| {
+            *start_deep.borrow_mut() += 1;
+            Ok(())
+        })),
+        Some(Box::new(move |_name| {
+            let mut deep = deep.borrow_mut();
+            *deep -= 1;
+            if *deep == 0 {
+                handle.stop_parser();
+            }
+            Ok(())
+        })),
+    );
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_misc_stop_during_end_handler_issue_240_1)`
+/// (tests/misc_tests.c:299-319).
+#[test]
+fn test_misc_stop_during_end_handler_issue_240_1() {
+    each_run(|run| {
+        let mut parser = run.parser();
+        set_issue_240_handlers(&mut parser);
+        let result = run.parse(&mut parser, b"<doc><e1/><e><foo/></e></doc>", true);
+        if result != XmlStatus::Error {
+            panic!("{run:?}: Stopping the parser did not work as expected");
+        }
+    });
+}
+
+/// Port of expat 2.8.4 `START_TEST(test_misc_stop_during_end_handler_issue_240_2)`
+/// (tests/misc_tests.c:321-341).
+#[test]
+fn test_misc_stop_during_end_handler_issue_240_2() {
+    each_run(|run| {
+        let mut parser = run.parser();
+        set_issue_240_handlers(&mut parser);
+        let result = run.parse(&mut parser, b"<doc><elem/></doc>", true);
+        if result != XmlStatus::Error {
+            panic!("{run:?}: Stopping the parser did not work as expected");
+        }
+    });
 }

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from expat 2.7.2 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
-// Ltd and Clark Cooper, Copyright (c) 2001-2025 Expat maintainers); see mod.rs.
+// Ported from expat 2.8.4 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
+// Ltd and Clark Cooper, Copyright (c) 2001-2026 Expat maintainers); see mod.rs.
 
-//! The tests of expat 2.7.2's own suite (`expat/tests/`) that reach the tokenizer directly.
+//! The tests of expat's own suite (`expat/tests/`, 2.7.2's, unchanged in 2.8.4) that reach the
+//! tokenizer directly.
 //! Its other tests go through `XML_Parse`, and come with the parser.
 
 use super::*;
