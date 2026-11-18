@@ -10074,3 +10074,131 @@ fn the_changes_that_lock_the_processor_cache() {
 
     assert!(!config.processor_cache_is_held_by_this_thread());
 }
+
+/// Port of `OCIO_ADD_TEST(Config, cyclic_color_space_transform)` @ v2.6.0.
+#[test]
+fn cyclic_color_space_transform() {
+    // Regression test for a stack overflow triggered by a self-referential
+    // ColorSpaceTransform (a ColorSpace whose from_reference is a ColorSpaceTransform
+    // that points back to itself). getProcessor() must throw a clean exception
+    // rather than recursing until the stack guard page is hit.
+    let _env = EnvGuard::new();
+    const CYCLIC_PROFILE: &str = "ocio_profile_version: 2\n\
+        roles:\n\
+        \x20 default: cs0\n\
+        colorspaces:\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs0\n\
+        \x20   isdata: true\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs1\n\
+        \x20   from_scene_reference: !<ColorSpaceTransform> {src: cs0, dst: cs1}\n";
+
+    let config = Config::create_from_stream(CYCLIC_PROFILE.as_bytes()).unwrap();
+
+    check_throw_what(config.processor_between("cs0", "cs1"), "Cycle detected");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, cyclic_color_space_two_step)` @ v2.6.0.
+#[test]
+fn cyclic_color_space_two_step() {
+    // Two-step cycle: cs1 -> cs2 -> cs1. Verify the depth guard catches indirect cycles too.
+    let _env = EnvGuard::new();
+    const CYCLIC_PROFILE: &str = "ocio_profile_version: 2\n\
+        roles:\n\
+        \x20 default: cs0\n\
+        colorspaces:\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs0\n\
+        \x20   isdata: true\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs1\n\
+        \x20   from_scene_reference: !<ColorSpaceTransform> {src: cs0, dst: cs2}\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs2\n\
+        \x20   from_scene_reference: !<ColorSpaceTransform> {src: cs0, dst: cs1}\n";
+
+    let config = Config::create_from_stream(CYCLIC_PROFILE.as_bytes()).unwrap();
+
+    check_throw_what(config.processor_between("cs0", "cs1"), "Cycle detected");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, cyclic_look_transform)` @ v2.6.0.
+#[test]
+fn cyclic_look_transform() {
+    // Regression test: a Look whose transform is a LookTransform that references the
+    // same look must not crash via stack overflow on getProcessor(). Triggered here
+    // by a ColorSpace whose from_scene_reference is a LookTransform invoking lookA,
+    // whose own transform is another LookTransform invoking lookA.
+    let _env = EnvGuard::new();
+    const CYCLIC_PROFILE: &str = "ocio_profile_version: 2\n\
+        roles:\n\
+        \x20 default: cs0\n\
+        looks:\n\
+        \x20 - !<Look>\n\
+        \x20   name: lookA\n\
+        \x20   process_space: cs0\n\
+        \x20   transform: !<LookTransform> {src: cs0, dst: cs0, looks: lookA}\n\
+        colorspaces:\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs0\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs1\n\
+        \x20   from_scene_reference: !<LookTransform> {src: cs0, dst: cs0, looks: lookA}\n";
+
+    let config = Config::create_from_stream(CYCLIC_PROFILE.as_bytes()).unwrap();
+
+    check_throw_what(config.processor_between("cs0", "cs1"), "Cycle detected");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, cyclic_color_space_linearity_check)` @ v2.6.0.
+#[test]
+fn cyclic_color_space_linearity_check() {
+    // Regression test for the BuildOps depth guard. Config::isColorSpaceLinear() reaches
+    // the op-builder via Config::Impl::getProcessorWithoutCaching(), which does NOT call
+    // CollectContextVariables() first. So even with the CollectContextVariables guard,
+    // this path will still infinite-recurse on a cyclic color space unless BuildOps
+    // independently guards against it.
+    let _env = EnvGuard::new();
+    const CYCLIC_PROFILE: &str = "ocio_profile_version: 2\n\
+        roles:\n\
+        \x20 default: cs0\n\
+        colorspaces:\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs0\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs1\n\
+        \x20   from_scene_reference: !<ColorSpaceTransform> {src: cs0, dst: cs1}\n";
+
+    let config = Config::create_from_stream(CYCLIC_PROFILE.as_bytes()).unwrap();
+
+    check_throw_what(
+        config.is_color_space_linear("cs1", ReferenceSpaceType::Scene),
+        "Cycle detected",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, cyclic_display_view_transform)` @ v2.6.0.
+#[test]
+fn cyclic_display_view_transform() {
+    // Regression test: a ColorSpace whose from_scene_reference is a DisplayViewTransform
+    // that ultimately points back to the same ColorSpace (via the view's color space)
+    // must not crash via stack overflow on getProcessor().
+    let _env = EnvGuard::new();
+    const CYCLIC_PROFILE: &str = "ocio_profile_version: 2\n\
+        roles:\n\
+        \x20 default: cs0\n\
+        displays:\n\
+        \x20 D1:\n\
+        \x20   - !<View> {name: V1, colorspace: cs_loop}\n\
+        colorspaces:\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs0\n\
+        \x20 - !<ColorSpace>\n\
+        \x20   name: cs_loop\n\
+        \x20   from_scene_reference: !<DisplayViewTransform> {src: cs0, display: D1, view: V1}\n";
+
+    let config = Config::create_from_stream(CYCLIC_PROFILE.as_bytes()).unwrap();
+
+    check_throw_what(config.processor_between("cs0", "cs_loop"), "Cycle detected");
+}

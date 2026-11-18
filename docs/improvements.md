@@ -5422,6 +5422,27 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   alone and through the processor with its cache on and off, on a 1 MiB thread. A nightly job of `.github/workflows/sde.yml` runs them, with
   `chains_of_references_stop_at_the_limit` (U-76) and `deep_groups_fit_a_small_stack` (U-60),
   at opt-level 0 on Windows and Rocky Linux 9.
+- **2.6.0** (`ocio26-base`): upstream now guards both recursions itself (PR #2318:
+  `Transform.cpp:52-71`, `ContextVariableUtils.cpp:187-204` @ v2.6.0): each keeps a
+  thread-local depth and throws "Cycle detected while building ops from transform." or "Cycle
+  detected while collecting context variables." once 33 calls nest, groups included, cycle or
+  not. The port matches that (`DepthGuard` in `crates/ocio/src/transform.rs`), so a color
+  space that refers to itself, directly or through a look or a view, is now upstream's own
+  error, and the wheel refuses the chains above (hundreds of links) too. The port's
+  256-transform limit and its weights (`MAX_TRANSFORM_NESTING`, `MAX_NESTING_WEIGHT`) could no
+  longer be reached and are removed; the tables above describe 2.5.2. The chain of CTF
+  references keeps its own limit (U-76): references recurse in `BuildFileTransformOps`, outside
+  the guards, after the 33 levels they let through. Tests: `transforms_that_refer_to_themselves_are_refused_as_in_the_wheel`
+  and `the_deepest_chains_match_the_wheel` (`crates/ocio/tests/config_processors_oracle.rs`:
+  the longest chain of each kind the port accepts, alone and then 256 CTF files, is the wheel's
+  processor both ways, and one link more the wheel's error at the same stage),
+  `the_deepest_chains_build_on_a_1_mib_thread` (the same chains on a 1 MiB thread, the
+  processor cache on and off), `chains_past_the_limit_throw_as_the_wheel_does`
+  (`crates/ocio/tests/transform_cycles_oracle.rs`: chains of 12 to 38 links of four kinds,
+  `getProcessor` with the cache on and off and `isColorSpaceLinear`, which builds ops without
+  collecting context variables first), `the_deepest_nesting_builds_on_a_1_mib_thread`
+  (`crates/ocio/src/transform_tests.rs`: the most groups the guard lets through around a file
+  transform of 256 CTF files), and upstream's five `Config/cyclic_*` tests.
 
 ### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
 
