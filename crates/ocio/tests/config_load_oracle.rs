@@ -535,7 +535,12 @@ fn configs_load_as_in_the_wheel() {
             "version 2.5",
             b"ocio_profile_version: 2.5\nroles: {default: raw}\n".to_vec(),
         ),
-        ("no version", b"roles: {default: raw}\n".to_vec()),
+        (
+            "version 2.6",
+            b"ocio_profile_version: 2.6\nroles: {default: raw}\n".to_vec(),
+        ),
+        ("version 2.7", b"ocio_profile_version: 2.7\n".to_vec()),
+        ("no version",b"roles: {default: raw}\n".to_vec()),
         ("version x", b"ocio_profile_version: x\n".to_vec()),
         ("version 2.x", b"ocio_profile_version: 2.x\n".to_vec()),
         ("version 1.2.3", b"ocio_profile_version: 1.2.3\n".to_vec()),
@@ -1186,6 +1191,12 @@ fn configs_their_versions_cant_have_are_refused() {
         ),
         ("DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR", 4),
         ("display - cie-xyz-d65_to_displayp3-hdr", 4),
+        // The MIRROR NEGS styles of 2.5, whose check 2.6.0 added.
+        ("DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS", 5),
+        ("DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS", 5),
+        ("DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS", 5),
+        ("display - cie-xyz-d65_to_srgb - mirror negs", 5),
+        ("DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS", 5),
     ] {
         for minor in [first - 1, first] {
             cases.push((

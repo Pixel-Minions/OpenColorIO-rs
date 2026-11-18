@@ -117,8 +117,8 @@ const LAST_SUPPORTED_MAJOR_VERSION: u32 = 2;
 /// `LastSupportedMinorVersion`: for each major version, the most recent minor.
 ///
 /// Port of `FirstSupportedMajorVersion`, `LastSupportedMajorVersion` and
-/// `LastSupportedMinorVersion` (src/OpenColorIO/Config.cpp:245-251 @ v2.5.2).
-const LAST_SUPPORTED_MINOR_VERSION: [u32; 2] = [0, 5];
+/// `LastSupportedMinorVersion` (src/OpenColorIO/Config.cpp:246-252 @ v2.6.0).
+const LAST_SUPPORTED_MINOR_VERSION: [u32; 2] = [0, 6];
 
 /// Port of `Config::Impl::DefaultFamilySeparator` (src/OpenColorIO/Config.cpp:270 @ v2.5.2).
 const DEFAULT_FAMILY_SEPARATOR: u8 = b'/';
@@ -196,6 +196,16 @@ const BUILTIN_STYLES_2_4: [&str; 38] = [
     "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-REC2020-D60-in-REC2020-D65_2.0",
     "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-REC2020-D60-in-REC2020-D65_2.0",
     "DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
+];
+
+/// The built-in transform styles a config needs version 2.5 for (src/OpenColorIO/Config.cpp:
+/// 6306-6318 @ v2.6.0): the styles 2.5 added, whose check 2.6.0 added.
+const BUILTIN_STYLES_2_5: [&str; 5] = [
+    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_sRGB - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS",
 ];
 
 /// The default value of the environment variable `name`, `""` when the config has none.
@@ -4798,9 +4808,12 @@ impl Config {
     /// styles of later minor versions. A group's children are checked the same way.
     ///
     /// Port of `Config::Impl::checkVersionConsistency(ConstTransformRcPtr&)`
-    /// (src/OpenColorIO/Config.cpp:5586-5832 @ v2.5.2). Two messages keep upstream's
-    /// misspellings (docs/improvements.md, I-146); the GradingHueCurveTransform's check leaves
-    /// version 1 out (I-291).
+    /// (src/OpenColorIO/Config.cpp:5586-5832 @ v2.5.2), with the 2.5 check of the MIRROR NEGS
+    /// built-in styles 2.6.0 added (Config.cpp:6306-6318 @ v2.6.0); the 2.6 checks of
+    /// `APPLE_LOG-APPLEWG_to_ACES2065-1` and `ACES2_RGB_TO_HMJ` (Config.cpp:6319-6326,
+    /// 6429-6438 @ v2.6.0) come with those styles (card ocio26-ops). Two messages keep
+    /// upstream's misspellings (docs/improvements.md, I-146); the GradingHueCurveTransform's
+    /// check leaves version 1 out (I-291).
     fn check_transform_version_consistency(&self, transform: &Transform) -> Result<()> {
         let major = self.major_version;
         let minor = self.minor_version;
@@ -4837,6 +4850,14 @@ impl Config {
                 }
                 if major == 2 && minor < 4 && BUILTIN_STYLES_2_4.iter().any(|s| is(s)) {
                     let mut os = b"Only config version 2.4 (or higher) can have BuiltinTransform \
+                                   style '"
+                        .to_vec();
+                    os.extend_from_slice(style);
+                    os.extend_from_slice(b"'.");
+                    return Err(Exception::new(os));
+                }
+                if major == 2 && minor < 5 && BUILTIN_STYLES_2_5.iter().any(|s| is(s)) {
+                    let mut os = b"Only config version 2.5 (or higher) can have BuiltinTransform \
                                    style '"
                         .to_vec();
                     os.extend_from_slice(style);

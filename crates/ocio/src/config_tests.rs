@@ -2177,7 +2177,7 @@ fn validation() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(Config, version)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Config, version)` @ v2.6.0.
 #[test]
 fn version() {
     let _env = EnvGuard::new();
@@ -2233,13 +2233,13 @@ fn version() {
     {
         check_throw_what(
             config.set_version(2, 9),
-            "The minor version 9 is not supported for major version 2. Maximum minor version is 5",
+            "The minor version 9 is not supported for major version 2. Maximum minor version is 6",
         );
 
         config.set_major_version(2).unwrap();
         check_throw_what(
             config.set_minor_version(9),
-            "The minor version 9 is not supported for major version 2. Maximum minor version is 5",
+            "The minor version 9 is not supported for major version 2. Maximum minor version is 6",
         );
     }
 
