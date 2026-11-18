@@ -20,7 +20,9 @@ use ocio_ops::parse_utils::{ROLE_INTERCHANGE_DISPLAY, ROLE_INTERCHANGE_SCENE};
 use ocio_ops::utils::pystring::os_path;
 use ocio_ops::utils::string_utils::{c_str, find, lower};
 
+use crate::builtinconfigs::builtin_config_registry::is_reserved_config_name;
 use crate::color_space::ColorSpace;
+use crate::color_space_set::ColorSpaceSet;
 use crate::config::Config;
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
@@ -1497,6 +1499,240 @@ pub(crate) fn find_equivalent_colorspace<'f>(
     }
 
     Ok(b"")
+}
+
+// Color Interop IDs ///////////////////////////////////////////////////////////////////////////
+
+/// The characters a token keeps as they are (Annex C of the ASWF Color Interop Forum
+/// ColorInteropID recommendation).
+const ALLOWED_ID_CHARACTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789.-_~/*#%^+()[]|";
+
+/// `token` sanitized for a Color Interop ID, per Annex C of the ASWF Color Interop Forum
+/// ColorInteropID recommendation: white space becomes `_`, `{<` `(`, `}>` `)`, `,` `.`, `;:`
+/// `|`, quotes `#`, `\` `/`; the allowed characters stay; upper-case ASCII letters become lower
+/// case; any other ASCII byte becomes `*`; each UTF-8 sequence becomes one `^` (a lead byte
+/// takes only the continuation bytes that follow it, up to its length; any other byte past
+/// ASCII is one `^` of its own).
+///
+/// Port of `ConfigUtils::SanitizeIDToken` (src/OpenColorIO/ConfigUtils.cpp:1548-1616 @
+/// v2.6.0).
+pub(crate) fn sanitize_id_token(token: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(token.len());
+
+    let n = token.len();
+    let mut i = 0;
+    while i < n {
+        let c = token[i];
+
+        if c > 127 {
+            // Determine how many bytes the UTF-8 sequence starting here should occupy, then only
+            // consume as many of them as actually look like continuation bytes (0x80-0xBF).
+            let seq_len = if (c & 0xE0) == 0xC0 {
+                2
+            } else if (c & 0xF0) == 0xE0 {
+                3
+            } else if (c & 0xF8) == 0xF0 {
+                4
+            } else {
+                1
+            };
+
+            let mut consumed = 1;
+            while consumed < seq_len && i + consumed < n && (token[i + consumed] & 0xC0) == 0x80 {
+                consumed += 1;
+            }
+
+            result.push(b'^');
+            i += consumed;
+            continue;
+        }
+
+        let mapped = match c {
+            b' ' | b'\t' | b'\n' | b'\r' => Some(b'_'),
+            b'{' | b'<' => Some(b'('),
+            b'}' | b'>' => Some(b')'),
+            b',' => Some(b'.'),
+            b';' | b':' => Some(b'|'),
+            b'\'' | b'"' => Some(b'#'),
+            b'\\' => Some(b'/'),
+            _ => None,
+        };
+
+        if let Some(mapped) = mapped {
+            result.push(mapped);
+        } else if ALLOWED_ID_CHARACTERS.contains(&c) {
+            // std::string::find of the character: a NUL is not found, the string holds none.
+            result.push(c);
+        } else if c.is_ascii_uppercase() {
+            // std::isupper and std::tolower on ASCII: the same in every locale.
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(b'*');
+        }
+
+        i += 1;
+    }
+
+    result
+}
+
+/// The local Color Interop ID of the color space `src_color_space_name` (a name, role or
+/// alias) of `config`: `<CONFIG-NAME>:local:<BASE>`, the config's name sanitized
+/// ([`sanitize_id_token`]), and the color space's name, or the first of its aliases that
+/// sanitizing leaves unchanged when the name changes, sanitized. Refused for an empty name or
+/// config name, a config named as an ASWF config that has interop IDs
+/// ([`is_reserved_config_name`]), and a color space the config doesn't have.
+///
+/// Port of `ConfigUtils::GenerateLocalIDForColorSpace` (src/OpenColorIO/ConfigUtils.cpp:
+/// 1618-1682 @ v2.6.0).
+pub(crate) fn generate_local_id_for_color_space(
+    config: &Config,
+    src_color_space_name: &[u8],
+) -> Result<Vec<u8>> {
+    // Note: this intentionally ignores any interop ID already on the color space, in case it is
+    // necessary to calculate what the local ID would be, independent of that. Applications are
+    // expected to have already called getInteropID on the color space.
+
+    let src_color_space_name = c_str(src_color_space_name);
+    if src_color_space_name.is_empty() {
+        return Err(Exception::new(
+            "generateLocalIDForColorSpace: srcColorSpaceName must not be null or empty.",
+        ));
+    }
+
+    let config_name = c_str(config.name());
+    if config_name.is_empty() {
+        return Err(Exception::new(
+            "May not generate a local interop ID if the config name is empty.",
+        ));
+    }
+
+    let sanitized_config_name = sanitize_id_token(config_name);
+
+    // Disallow usage of config names for one of the OCIO configs for ACES that already contains
+    // interop IDs for all color spaces. Trying to avoid the situation where someone edits one of
+    // these configs but forgets to change the config name. This would result in a meaningless
+    // interop ID.
+    if is_reserved_config_name(&sanitized_config_name) {
+        let mut os = b"May not generate a local interop ID if the name matches an ACES config \
+                       that already has interop IDs: "
+            .to_vec();
+        os.extend_from_slice(config_name);
+        os.extend_from_slice(b".");
+        return Err(Exception::new(os));
+    }
+
+    // Note that this resolves roles and aliases and finds inactive color spaces.
+    let Some(cs) = config.color_space(src_color_space_name) else {
+        let mut os =
+            b"generateLocalIDForColorSpace: This config does not contain the requested color \
+              space: "
+                .to_vec();
+        os.extend_from_slice(src_color_space_name);
+        os.extend_from_slice(b".");
+        return Err(Exception::new(os));
+    };
+
+    // Use the color space's own canonical name (rather than the possibly aliased/role-based
+    // srcColorSpaceName argument) so that the generated ID is stable and may be resolved back by
+    // Config::findColorSpaceForID.
+    let mut base = c_str(cs.name());
+
+    // But if the name would require sanitization, prefer the first alias (in order) that does
+    // not require any sanitization, so the ID stays as readable as possible.
+    if sanitize_id_token(base) != base {
+        for i in 0..cs.num_aliases() {
+            let alias = c_str(cs.alias(i));
+            if sanitize_id_token(alias) == alias {
+                base = alias;
+                break;
+            }
+        }
+    }
+
+    let mut id = sanitized_config_name;
+    id.extend_from_slice(b":local:");
+    id.extend_from_slice(&sanitize_id_token(base));
+    Ok(id)
+}
+
+/// The color space of `config` the Color Interop ID `id_string` identifies, trying in order:
+/// `id_string` itself (a name, role or alias); `id_string` with its first namespace stripped
+/// (up to its first `:`), unless that namespace is `local`; and, for `NAMESPACE:local:BASE`
+/// (one colon after `local`) where `NAMESPACE` and the config's name sanitize alike, the first
+/// color space of `all_color_spaces` (the config's, in order) whose name, or else one of whose
+/// aliases, sanitizes to `BASE` sanitized. `None` for none, and for an empty ID.
+///
+/// Port of `ConfigUtils::FindColorSpaceForID` (src/OpenColorIO/ConfigUtils.cpp:1684-1768 @
+/// v2.6.0).
+pub(crate) fn find_color_space_for_id<'c>(
+    config: &'c Config,
+    all_color_spaces: &'c ColorSpaceSet,
+    id_string: &[u8],
+) -> Option<&'c ColorSpace> {
+    let id = c_str(id_string);
+    if id.is_empty() {
+        return None;
+    }
+
+    // Step 1: the full ID string.
+    if let Some(cs) = config.color_space(id) {
+        return Some(cs);
+    }
+
+    // Step 2: strip the leftmost namespace and one separator (only one level, regardless of how
+    // many colons remain in the result), and look up the remainder.
+    let first_colon = id.iter().position(|&b| b == b':')?;
+
+    let outer_namespace = &id[..first_colon];
+    let stripped = &id[first_colon + 1..];
+
+    // "local" is a reserved keyword that may only appear as the inner namespace of the mode 3
+    // form ("NAMESPACE:local:BASE"). It must not be treated as an ordinary outer namespace to
+    // strip off, so skip the plain lookup in that case.
+    if outer_namespace != b"local"
+        && let Some(cs) = config.color_space(stripped)
+    {
+        return Some(cs);
+    }
+
+    // Step 3: local mode. The stripped remainder must be exactly "local:BASE" (i.e. exactly one
+    // colon left), and the namespace removed in step 2 must match this config's own (sanitized)
+    // name.
+    let inner_colon = stripped.iter().position(|&b| b == b':')?;
+    if &stripped[..inner_colon] == b"local" && !stripped[inner_colon + 1..].contains(&b':') {
+        let config_name = c_str(config.name());
+        if !config_name.is_empty()
+            && sanitize_id_token(config_name) == sanitize_id_token(outer_namespace)
+        {
+            // Note that because the base name in the interop ID is sanitized, the comparison
+            // must sanitize the color space names and aliases in the config as well.
+
+            // The base should already be sanitized, but enforce that it must be in order to
+            // match.
+            let base = sanitize_id_token(&stripped[inner_colon + 1..]);
+
+            // This emulates getIndex in ColorSpaceSet.cpp, so it matches what getColorSpace
+            // does. If two names sanitize to the same string, the first one in the config wins.
+            for idx in 0..all_color_spaces.num_color_spaces() {
+                let Some(candidate) = all_color_spaces.color_space_by_index(idx) else {
+                    continue;
+                };
+
+                if sanitize_id_token(c_str(candidate.name())) == base {
+                    return Some(candidate);
+                }
+
+                for aidx in 0..candidate.num_aliases() {
+                    if sanitize_id_token(c_str(candidate.alias(aidx))) == base {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

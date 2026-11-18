@@ -7875,6 +7875,38 @@ impl Config {
         )
     }
 
+    /// The local Color Interop ID of the color space `src_color_space_name` (a name, role or
+    /// alias): `<CONFIG-NAME>:local:<BASE>`, per the ASWF Color Interop Forum ColorInteropID
+    /// recommendation (see `ConfigUtils::GenerateLocalIDForColorSpace`). The color space's own
+    /// interop ID, if any, is ignored. An error for an empty name, a config whose name is
+    /// empty or names an ASWF config that has interop IDs, or a color space the config doesn't
+    /// have.
+    ///
+    /// Port of `Config::generateLocalIDForColorSpace` (src/OpenColorIO/Config.cpp:3152-3155 @
+    /// v2.6.0).
+    #[doc(alias = "generateLocalIDForColorSpace")]
+    pub fn generate_local_id_for_color_space(
+        &self,
+        src_color_space_name: impl AsRef<[u8]>,
+    ) -> Result<Vec<u8>> {
+        crate::config_utils::generate_local_id_for_color_space(self, src_color_space_name.as_ref())
+    }
+
+    /// The color space a Color Interop ID identifies: the ID itself (a name, role or alias),
+    /// else the ID without its first namespace, else, for `NAMESPACE:local:BASE` where
+    /// `NAMESPACE` is this config's name (both sanitized), the first color space whose name or
+    /// alias sanitizes to `BASE`. `None` for none, and for an empty ID.
+    ///
+    /// Port of `Config::findColorSpaceForID` (src/OpenColorIO/Config.cpp:3157-3160 @ v2.6.0).
+    #[doc(alias = "findColorSpaceForID")]
+    pub fn find_color_space_for_id(&self, id_string: impl AsRef<[u8]>) -> Option<&ColorSpace> {
+        crate::config_utils::find_color_space_for_id(
+            self,
+            &self.all_color_spaces,
+            id_string.as_ref(),
+        )
+    }
+
     /// The processor from the color space `src_color_space_name` of `src_config` to the color
     /// space `builtin_color_space_name` of the default built-in config.
     ///

@@ -303,6 +303,31 @@ fn getters(c: &Config) -> Vec<Getter> {
             names.extend((0..cs.num_aliases()).map(|a| cs.alias(a).to_vec()));
         }
         for n in names {
+            // 2.6 Color Interop IDs: the local ID of the name or alias, and the color space of
+            // that ID, of the name and of the name under a namespace and under `local:`.
+            let mut ids = vec![n.clone(), [b"ns:".as_slice(), &n].concat()];
+            ids.push([b"local:".as_slice(), &n].concat());
+            out.push(g(
+                "generateLocalIDForColorSpace",
+                vec![s(&n)],
+                match c.generate_local_id_for_color_space(&n) {
+                    Ok(id) => {
+                        ids.push(id.clone());
+                        s(&id)
+                    }
+                    Err(e) => json!({"exception": s(e.what())}),
+                },
+            ));
+            for id in ids {
+                out.push(g(
+                    "findColorSpaceForID",
+                    vec![s(&id)],
+                    match c.find_color_space_for_id(&id) {
+                        Some(cs) => s(&cs.to_bytes()),
+                        None => Value::Null,
+                    },
+                ));
+            }
             out.push(g(
                 "isColorSpaceUsed",
                 vec![s(&n)],
@@ -1791,5 +1816,82 @@ fn display_aliases_resolve_as_in_the_wheel() {
             ),
         ),
     ];
+    // Every config loads, so that the getters, not the reader's error, are compared.
+    for (label, text) in &cases {
+        assert!(Config::create_from_stream(text).is_ok(), "{label}");
+    }
+    check(&cases);
+}
+
+/// Color Interop IDs as in the wheel (2.6): the local ID of every color space name and alias
+/// and the color space each ID finds, in configs named for the sanitizing (upper case, spaces,
+/// punctuation, bytes past ASCII), the reserved ASWF config names (and names that only look
+/// like them), and a config named `local`.
+#[test]
+fn color_interop_ids_as_in_the_wheel() {
+    let spaces = "colorspaces:\n  - !<ColorSpace> {name: raw}\n  - !<ColorSpace> {name: ACES cg, \
+                  aliases: [lin_ap1, ACES CG alias]}\n  - !<ColorSpace> {name: \"Odd: name, \
+                  {x}\", aliases: [\"Also odd!\", clean_alias]}\n  - !<ColorSpace> {name: \"caf\
+                  \u{e9} \u{4e2d}\", aliases: [\"\t tab\"]}\n  - !<ColorSpace> {name: \"ns:raw\"}\
+                  \n  - !<ColorSpace> {name: \"My Color Space?\"}\n  - !<ColorSpace> {name: \
+                  \"My Color Space!\"}\n";
+    let named = |name: &str| {
+        format!(
+            "ocio_profile_version: 2.6\nname: {name}\nenvironment: {{}}\nroles: {{default: raw, \
+             r: ACES cg}}\n{spaces}"
+        )
+        .into_bytes()
+    };
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("no name", named("\"\"")),
+        ("My Studio!", named("My Studio!")),
+        ("mystudio*", named("mystudio*")),
+        ("ns", named("ns")),
+        ("local", named("local")),
+        ("a name with a colon", named("\"a:b\"")),
+        ("a name past ASCII", named("\"st\u{fc}dio\"")),
+        ("reserved cg", named("cg-config-v4.0.0_aces-v2.0_ocio-v2.5")),
+        (
+            "reserved upper case",
+            named("CG-config-v4.0.0_aces-v2.0_ocio-v2.5"),
+        ),
+        (
+            "reserved future",
+            named("studio-config-v5.1.2_aces-v2.2.1_ocio-v2.7"),
+        ),
+        (
+            "reserved v10",
+            named("cg-config-v10.0.0_aces-v2.0_ocio-v2.5"),
+        ),
+        (
+            "not reserved v3",
+            named("studio-config-v3.0.0_aces-v2.0_ocio-v2.4"),
+        ),
+        (
+            "not reserved suffix",
+            named("cg-config-v4.0.0_aces-v2.0_ocio-v2.5_custom"),
+        ),
+        (
+            "not reserved huge",
+            named("cg-config-v99999999999.0.0_aces-v2.0_ocio-v2.5"),
+        ),
+        (
+            "not reserved two digits",
+            named("cg-config-v4.0_aces-v2.0_ocio-v2.5"),
+        ),
+        (
+            "not reserved empty aces",
+            named("cg-config-v4.0.0_aces-v_ocio-v2.5"),
+        ),
+        ("reserved dots", named("cg-config-v4.0.0_aces-v..._ocio-v.")),
+        (
+            "reserved leading zeros",
+            named("cg-config-v0004.0.0_aces-v2_ocio-v2"),
+        ),
+    ];
+    // Every config loads, so that the getters, not the reader's error, are compared.
+    for (label, text) in &cases {
+        assert!(Config::create_from_stream(text).is_ok(), "{label}");
+    }
     check(&cases);
 }
