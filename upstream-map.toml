@@ -114,8 +114,8 @@ note = "build system"
 path = "src/OpenColorIO/CPUInfo.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_info.rs"]
-status = "partial"
-note = "S4: x86-64, ARM64 and unknown branches (x86-32 asm not needed). Identical to the wheels' ociocpuinfo on Windows and Rocky 9 (tests/cpu_info_oracle.rs). No EPYC 9V45 quirk: that is post-2.5.2 (upstream c2bd98f7) 2.6.0: changed at v2.6.0 lines 184-195; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "S4: x86-64, ARM64 and unknown branches (x86-32 asm not needed). Identical to the wheels' ociocpuinfo on Windows and Rocky 9 (tests/cpu_info_oracle.rs). No EPYC 9V45 quirk: that is post-2.5.2 (upstream c2bd98f7) ocio26-base: the EPYC 9V45 quirk (185-195) at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/CPUInfo.h"
@@ -462,8 +462,8 @@ note = "P58: both namespace entry points already exist: read (ocio_yaml.rs:3166;
 path = "src/OpenColorIO/OCIOZArchive.cpp"
 kind = "src"
 target = ["crates/ocio/src/ocioz_archive.rs", "crates/ocio/src/minizip/mod.rs"]
-status = "partial"
-note = "p4-baker 4.9a: reading archives (390-661: readEntryBuffer, getFileBufferByPath, getFileStringFromArchiveFile, getFileBufferFromArchive, getEntriesMappingFromArchiveFile, CIOPOciozArchive) through minizip-ng 4.0.10's reader, ported in crates/ocio/src/minizip/ (upstream/minizip-ng), checked against the wheel in crates/ocio/tests/ocioz_read_oracle.rs; getFileBufferByExtension and getFileBufferFromArchiveByExtension (441-451, 526-529) are called nowhere in OCIO 2.5.2 and aren't ported. 4.9a2: minizip-ng's recovery of a central directory it can't read (mz_zip_recover_cd, with mz_stream_find, mz_zip_entry_read_descriptor and the central mz_zip_entry_write_header). 4.9a3: its zipped central directory (mz_zip_reader_unzip_cd). 4.9b1: archiveConfig and addSupportedFiles (149-333) on minizip-ng's writer (mz_zip_writer_*, the writing half of mz_zip.c, its system functions) and flate2 at level 9, checked against the wheel in crates/ocio/tests/ocioz_archive_oracle.rs (deviation D-6). 4.9b2: ExtractOCIOZArchive (335-388) on mz_zip_reader_save_all and mz_zip_reader_entry_save_file, checked against the wheel in crates/ocio/tests/ocioz_extract_oracle.rs 2.6.0: changed at v2.6.0 lines 229, 245, 344, 475, 539; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p4-baker 4.9a: reading archives (390-661: readEntryBuffer, getFileBufferByPath, getFileStringFromArchiveFile, getFileBufferFromArchive, getEntriesMappingFromArchiveFile, CIOPOciozArchive) through minizip-ng 4.0.10's reader, ported in crates/ocio/src/minizip/ (upstream/minizip-ng), checked against the wheel in crates/ocio/tests/ocioz_read_oracle.rs; getFileBufferByExtension and getFileBufferFromArchiveByExtension (441-451, 526-529) are called nowhere in OCIO 2.5.2 and aren't ported. 4.9a2: minizip-ng's recovery of a central directory it can't read (mz_zip_recover_cd, with mz_stream_find, mz_zip_entry_read_descriptor and the central mz_zip_entry_write_header). 4.9a3: its zipped central directory (mz_zip_reader_unzip_cd). 4.9b1: archiveConfig and addSupportedFiles (149-333) on minizip-ng's writer (mz_zip_writer_*, the writing half of mz_zip.c, its system functions) and flate2 at level 9, checked against the wheel in crates/ocio/tests/ocioz_archive_oracle.rs (deviation D-6). 4.9b2: ExtractOCIOZArchive (335-388) on mz_zip_reader_save_all and mz_zip_reader_entry_save_file, checked against the wheel in crates/ocio/tests/ocioz_extract_oracle.rs ocio26-base: 2.6.0 writes MZ_VERSION_BUILD's bound in hex (0x040000), which selects the same minizip-ng 4 branch."
 
 [[file]]
 path = "src/OpenColorIO/OCIOZArchive.h"
@@ -650,8 +650,8 @@ note = "p3-model-objects (3.4c)"
 path = "src/OpenColorIO/ViewingRules.cpp"
 kind = "src"
 target = ["crates/ocio/src/viewing_rules.rs"]
-status = "partial"
-note = "P67 complete source audit: rule names, color spaces/encodings/custom keys, insertion/removal/copy/text, FindRule, IsEncodingUsed and both rule/collection validation are implemented in viewing_rules.rs. Existing index conversion behavior remains documented as I-135; no rule behavior changes. 2.6.0: changed at v2.6.0 lines 159, after 389 (deleted), 392, 397; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P67 complete source audit: rule names, color spaces/encodings/custom keys, insertion/removal/copy/text, FindRule, IsEncodingUsed and both rule/collection validation are implemented in viewing_rules.rs. Existing index conversion behavior remains documented as I-135; no rule behavior changes. ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ViewingRules.h"
@@ -1241,8 +1241,8 @@ note = "P57: every declaration is implemented: AllocationData fields/default, ge
 path = "src/OpenColorIO/ops/cdl/CDLOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/cdl_transform.rs"]
-status = "partial"
-note = "P68 complete wrapper/factory audit: CDL op data, factories, validation/finalization/cache/combination/inverse identity and GPU extraction are implemented; transform reconstruction/build lives in cdl_transform.rs. The separate CDLOpCPU source owns renderer implementation and CPU qualification remains separately tracked. 2.6.0: changed at v2.6.0 lines 180; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P68 complete wrapper/factory audit: CDL op data, factories, validation/finalization/cache/combination/inverse identity and GPU extraction are implemented; transform reconstruction/build lives in cdl_transform.rs. The separate CDLOpCPU source owns renderer implementation and CPU qualification remains separately tracked. ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.h"
@@ -1269,8 +1269,8 @@ note = "1.3c2: RenderParams, the 4 scalar and 4 SSE2 (fast-math) renderers, GetC
 path = "src/OpenColorIO/ops/cdl/CDLOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op_data.rs"]
-status = "partial"
-note = "1.3c1: the whole class, with ChannelParams; getSimplerReplacement and getIdentityReplacement reach the optimizer with OpData::Cdl (1.3c3) 2.6.0: changed at v2.6.0 lines 364, 385; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.3c1: the whole class, with ChannelParams; getSimplerReplacement and getIdentityReplacement reach the optimizer with OpData::Cdl (1.3c3) ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpData.h"
@@ -1297,8 +1297,8 @@ note = "1.3c4 (p1-gpu-ops2): GetCDLGPUShaderProgram; checked against the wheel i
 path = "src/OpenColorIO/ops/exponent/ExponentOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs", "crates/ocio-gpu/src/ops/exponent/exponent_op_gpu.rs", "crates/ocio/src/transforms/exponent_transform.rs"]
-status = "partial"
-note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Its GPU part: extractGpuShaderInfo in ocio-gpu (exponent_op_gpu.rs, exponent_op_gpu_oracle.rs). p1-transforms-fam2 (1.8d): CreateExponentTransform, in crates/ocio/src/transforms/exponent_transform.rs 2.6.0: changed at v2.6.0 lines 315, 333; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Its GPU part: extractGpuShaderInfo in ocio-gpu (exponent_op_gpu.rs, exponent_op_gpu_oracle.rs). p1-transforms-fam2 (1.8d): CreateExponentTransform, in crates/ocio/src/transforms/exponent_transform.rs ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.h"
@@ -1311,8 +1311,8 @@ note = "P68 complete declaration audit: Exponent op/data and factories are imple
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op.rs", "crates/ocio/src/transforms/exposure_contrast_transform.rs"]
-status = "partial"
-note = "p5-ec 5.1b: the op and CreateExposureContrastOp; 5.1c: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); p5-transforms 5.5a: CreateExposureContrastTransform and BuildExposureContrastOp (197-221), in crates/ocio exposure_contrast_transform.rs 2.6.0: changed at v2.6.0 lines 183, 189; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p5-ec 5.1b: the op and CreateExposureContrastOp; 5.1c: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); p5-transforms 5.5a: CreateExposureContrastTransform and BuildExposureContrastOp (197-221), in crates/ocio exposure_contrast_transform.rs ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOp.h"
@@ -1396,8 +1396,8 @@ note = "p2-aces2-cpu 2.4a-2.4d: the declarations, in transform.rs"
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op.rs", "crates/ocio/src/transforms/fixed_function_transform.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3e: the op, CreateFixedFunctionOp (both), and in crates/ocio BuildFixedFunctionOp and CreateFixedFunctionTransform. p2-ff-gpu 2.3f: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's FixedFunction arm (gpu_processor.rs) 2.6.0: changed at v2.6.0 lines 160; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-ff-cpu 2.3e: the op, CreateFixedFunctionOp (both), and in crates/ocio BuildFixedFunctionOp and CreateFixedFunctionTransform. p2-ff-gpu 2.3f: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's FixedFunction arm (gpu_processor.rs) ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.h"
@@ -1450,8 +1450,8 @@ note = "p2-ff-gpu 2.3f: the two functions it declares"
 path = "src/OpenColorIO/ops/gamma/GammaOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
-status = "partial"
-note = "P68 complete wrapper/factory audit: Gamma op/data behavior, all defined factories, transform reconstruction/build and GPU extraction are present. Physical CPU rendering belongs to the separately mapped GammaOpCPU files; no arithmetic change. 2.6.0: changed at v2.6.0 lines 144; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P68 complete wrapper/factory audit: Gamma op/data behavior, all defined factories, transform reconstruction/build and GPU extraction are present. Physical CPU rendering belongs to the separately mapped GammaOpCPU files; no arithmetic change. ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.h"
@@ -1534,8 +1534,8 @@ note = "see GradingHueCurve.cpp"
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradinghuecurve/grading_hue_curve_op.rs", "crates/ocio/src/transforms/grading_hue_curve_transform.rs"]
-status = "partial"
-note = "p5-huecurve 5.4a: the op and CreateGradingHueCurveOp; 5.4b: getCPUOp; 5.4c: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateGradingHueCurveTransform and BuildGradingHueCurveOp with 5.5e; p5-transforms 5.5e: CreateGradingHueCurveTransform and BuildGradingHueCurveOp in crates/ocio grading_hue_curve_transform.rs 2.6.0: changed at v2.6.0 lines 214; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p5-huecurve 5.4a: the op and CreateGradingHueCurveOp; 5.4b: getCPUOp; 5.4c: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateGradingHueCurveTransform and BuildGradingHueCurveOp with 5.5e; p5-transforms 5.5e: CreateGradingHueCurveTransform and BuildGradingHueCurveOp in crates/ocio grading_hue_curve_transform.rs ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurveOp.h"
@@ -1601,8 +1601,8 @@ note = "p5-values 5.0a: GradingRGBM and GradingPrimary as plain values (P5-2) wi
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op.rs", "crates/ocio/src/transforms/grading_primary_transform.rs"]
-status = "partial"
-note = "p5-primary 5.2a: the op and CreateGradingPrimaryOp; 5.2b-c: getCPUOp; 5.2d: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateGradingPrimaryTransform and BuildGradingPrimaryOp with 5.5b; p5-transforms 5.5b: CreateGradingPrimaryTransform and BuildGradingPrimaryOp in crates/ocio grading_primary_transform.rs 2.6.0: changed at v2.6.0 lines 218; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p5-primary 5.2a: the op and CreateGradingPrimaryOp; 5.2b-c: getCPUOp; 5.2d: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateGradingPrimaryTransform and BuildGradingPrimaryOp with 5.5b; p5-transforms 5.5b: CreateGradingPrimaryTransform and BuildGradingPrimaryOp in crates/ocio grading_primary_transform.rs ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOp.h"
@@ -1682,8 +1682,8 @@ status = "done"
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op.rs", "crates/ocio/src/transforms/grading_rgb_curve_transform.rs"]
-status = "partial"
-note = "p2-rgbcurve 2.6d: the op (as GradingRgbCurveOpData's Op methods) and CreateGradingRGBCurveOp; Phase 3 (3.1): CreateGradingRGBCurveTransform, with GradingRGBCurveTransform; p5-transforms 5.5c: CreateGradingRGBCurveTransform and BuildGradingRGBCurveOp in crates/ocio grading_rgb_curve_transform.rs 2.6.0: changed at v2.6.0 lines 218; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-rgbcurve 2.6d: the op (as GradingRgbCurveOpData's Op methods) and CreateGradingRGBCurveOp; Phase 3 (3.1): CreateGradingRGBCurveTransform, with GradingRGBCurveTransform; p5-transforms 5.5c: CreateGradingRGBCurveTransform and BuildGradingRGBCurveOp in crates/ocio grading_rgb_curve_transform.rs ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOp.h"
@@ -1749,8 +1749,8 @@ note = "p5-values 5.0b: GradingRGBMSW and GradingTone as plain values (P5-2) wit
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op.rs", "crates/ocio/src/transforms/grading_tone_transform.rs"]
-status = "partial"
-note = "p5-tone 5.3a: the op and CreateGradingToneOp; 5.3b: getCPUOp; 5.3d: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateGradingToneTransform and BuildGradingToneOp with 5.5d; p5-transforms 5.5d: CreateGradingToneTransform and BuildGradingToneOp in crates/ocio grading_tone_transform.rs 2.6.0: changed at v2.6.0 lines 212; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p5-tone 5.3a: the op and CreateGradingToneOp; 5.3b: getCPUOp; 5.3d: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateGradingToneTransform and BuildGradingToneOp with 5.5d; p5-transforms 5.5d: CreateGradingToneTransform and BuildGradingToneOp in crates/ocio grading_tone_transform.rs ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOp.h"
@@ -1802,8 +1802,8 @@ status = "done"
 path = "src/OpenColorIO/ops/log/LogOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/log_transform.rs", "crates/ocio/src/transforms/log_affine_transform.rs", "crates/ocio/src/transforms/log_camera_transform.rs"]
-status = "partial"
-note = "P68 complete wrapper/factory audit: Log op/data behavior, all three defined factory overloads, transform reconstruction/build and GPU extraction are present. The separately mapped LogOpCPU files own physical renderers; no arithmetic change. 2.6.0: changed at v2.6.0 lines 133, 139, 152; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P68 complete wrapper/factory audit: Log op/data behavior, all three defined factory overloads, transform reconstruction/build and GPU extraction are present. The separately mapped LogOpCPU files own physical renderers; no arithmetic change. ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.h"
@@ -1858,8 +1858,8 @@ note = "1.3l4 (p1-gpu-ops3): GetLogGPUShaderProgram; checked against the wheel i
 path = "src/OpenColorIO/ops/log/LogUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_utils.rs"]
-status = "partial"
-note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset. 1.3l1: the CTF conversion, bit-exact against the wheel through CTF files (tests/log_utils_oracle.rs), and the style strings (I-52); the CTF reader that uses them is WP 1.6 2.6.0: changed at v2.6.0 lines 6; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset. 1.3l1: the CTF conversion, bit-exact against the wheel through CTF files (tests/log_utils_oracle.rs), and the style strings (I-52); the CTF reader that uses them is WP 1.6 ocio26-base: 2.6.0 adds an include only."
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogUtils.h"
@@ -1872,8 +1872,8 @@ note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLin
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs", "crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
-status = "partial"
-note = "P68 complete wrapper/factory audit: LUT1D op behavior, factories, composition, identity/linear-scale construction, transform reconstruction/build and GPU extraction are implemented. Physical renderers remain separately mapped and full CPU qualification remains open. 2.6.0: changed at v2.6.0 lines 126, 190; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P68 complete wrapper/factory audit: LUT1D op behavior, factories, composition, identity/linear-scale construction, transform reconstruction/build and GPU extraction are implemented. Physical renderers remain separately mapped and full CPU qualification remains open. ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -1984,8 +1984,8 @@ note = "p2-lut1d-gpu 2.1h"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op.rs"]
-status = "partial"
-note = "p2-lut3d 2.2b: GenerateIdentityLut3D, Get3DLutEdgeLenFromNumPixels, Lut3DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, getCacheID, getCPUOp, supportedByLegacyShader), CreateLut3DOp, the OpData::Lut3D arms. 2.2c: CreateLut3DTransform and BuildLut3DOp, in crates/ocio/src/transforms/lut3d_transform.rs. p2-lut3d-inv 2.2e: combineWith; 2.2f: extractGpuShaderInfo, in crates/ocio-gpu/src/ops/lut3d/lut3d_op_gpu.rs 2.6.0: changed at v2.6.0 lines 178, 231; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-lut3d 2.2b: GenerateIdentityLut3D, Get3DLutEdgeLenFromNumPixels, Lut3DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, getCacheID, getCPUOp, supportedByLegacyShader), CreateLut3DOp, the OpData::Lut3D arms. 2.2c: CreateLut3DTransform and BuildLut3DOp, in crates/ocio/src/transforms/lut3d_transform.rs. p2-lut3d-inv 2.2e: combineWith; 2.2f: extractGpuShaderInfo, in crates/ocio-gpu/src/ops/lut3d/lut3d_op_gpu.rs ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.h"
@@ -2096,8 +2096,8 @@ note = "p2-lut3d-inv 2.2f: GetLut3DGPUShaderProgram, and Lut3DOp::extractGpuShad
 path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/matrix_transform.rs"]
-status = "partial"
-note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)) and the MatrixOffsetOp(m44, offset4, direction) constructor, checked against the wheel through AllocationTransform, a v1 CDLTransform and .spi1d files (tests/matrix_factories_oracle.rs). p1-transforms-fam1 (1.8b): CreateMatrixTransform and BuildMatrixOp, in crates/ocio/src/transforms/matrix_transform.rs. The float overloads of CreateMatrixOffsetOp and CreateFitOp are declared in MatrixOp.h and never defined. extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs). 2.6.0: changed at v2.6.0 lines 291, 351, 358; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)) and the MatrixOffsetOp(m44, offset4, direction) constructor, checked against the wheel through AllocationTransform, a v1 CDLTransform and .spi1d files (tests/matrix_factories_oracle.rs). p1-transforms-fam1 (1.8b): CreateMatrixTransform and BuildMatrixOp, in crates/ocio/src/transforms/matrix_transform.rs. The float overloads of CreateMatrixOffsetOp and CreateFitOp are declared in MatrixOp.h and never defined. extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs). ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
@@ -2152,8 +2152,8 @@ note = "see MatrixOpGPU.cpp"
 path = "src/OpenColorIO/ops/noop/NoOps.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
-status = "partial"
-note = "1.2c: FileNoOp and LookNoOp; 1.3n1: AllocationNoOp; 1.8h1: dumpMetadata in Processor::compute_metadata; 7.1a: PartitionGPUOps, Create3DLut and helpers 2.6.0: changed at v2.6.0 lines 106, 236, 245, 278, 284, 368, 452; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.2c: FileNoOp and LookNoOp; 1.3n1: AllocationNoOp; 1.8h1: dumpMetadata in Processor::compute_metadata; 7.1a: PartitionGPUOps, Create3DLut and helpers ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/noop/NoOps.h"
@@ -2166,8 +2166,8 @@ note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; 7.1a: Part
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/range_transform.rs"]
-status = "partial"
-note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). p1-optimizer B: the Lut1D arms of canCombineWith and combineWith (an identity range before a forward standard-domain LUT goes). p1-transforms-fam1 (1.8c): BuildRangeOp and CreateRangeTransform, in crates/ocio/src/transforms/range_transform.rs. p4-ctf-read-3 (WP 4.10a, found by OpOptimizers optimization2): the Lut3D arms of canCombineWith and combineWith (RangeOp.cpp:126-133, 159-164: an identity range before a forward Lut3D goes). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Range arm with its finalize check (gpu_processor.rs, 1.3r3) 2.6.0: changed at v2.6.0 lines 241; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). p1-optimizer B: the Lut1D arms of canCombineWith and combineWith (an identity range before a forward standard-domain LUT goes). p1-transforms-fam1 (1.8c): BuildRangeOp and CreateRangeTransform, in crates/ocio/src/transforms/range_transform.rs. p4-ctf-read-3 (WP 4.10a, found by OpOptimizers optimization2): the Lut3D arms of canCombineWith and combineWith (RangeOp.cpp:126-133, 159-164: an identity range before a forward Lut3D goes). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Range arm with its finalize check (gpu_processor.rs, 1.3r3) ocio26-base: 2.6.0 only refactors this file (emplace_back, temporaries inlined), the same behaviour."
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.h"
@@ -4669,8 +4669,8 @@ note = "gpu, identity_lut_1d; Lut1D create_transform and Lut1DTransform build_op
 path = "tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_tests.rs"]
-status = "partial"
-note = "S4: both tests, each run in every SIMD mode the CPU supports 2.6.0: changed at v2.6.0 lines 58-149; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "S4: both tests, each run in every SIMD mode the CPU supports ocio26-base: nan_tetra_test re-marked and avx512_tetrahedral_bounds new at v2.6.0."
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpData_tests.cpp"

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp @ v2.5.2.
+//! Port of tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp @ v2.5.2 (nan_tetra_test and the new
+//! avx512_tetrahedral_bounds @ v2.6.0).
 
 use ocio_testkit::upstream::{check_close, check_equal};
 
@@ -74,7 +75,7 @@ fn nan_linear_test() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(Lut3DRenderer, nan_tetra_test)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Lut3DRenderer, nan_tetra_test)` @ v2.6.0.
 #[test]
 fn nan_tetra_test() {
     for cpu in simd_modes() {
@@ -186,6 +187,38 @@ fn real_kernels_match_their_lanes() {
             renderer.apply_sse2(&mut a);
             renderer.apply_sse2_lanes(&mut b);
             assert_eq!(bits(&a), bits(&b), "trilinear: {row_name}");
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut3DRenderer, avx512_tetrahedral_bounds)` @ v2.6.0. Upstream places
+/// every buffer against a `PAGE_NOACCESS` page (Windows only) so that any access past it
+/// faults; here each buffer is a heap slice of exactly the requested size, which safe code
+/// can't pass, and the kernel's gathers stay inside the table (`simd::fits`), so the test
+/// checks the same sizes (dims 2 and 32, 1 to 33 pixels, across the 16-lane boundary) on every
+/// platform with AVX-512. Skipped, as upstream, without AVX-512.
+#[test]
+fn avx512_tetrahedral_bounds() {
+    if !CpuInfo::instance().has_avx512() {
+        return;
+    }
+
+    for dim in [2i32, 32] {
+        let lut_floats = (dim * dim * dim * 4) as usize;
+        let lut: Box<[f32]> = (0..lut_floats).map(|i| (i % 7) as f32 / 7.0).collect();
+
+        for num_pixels in 1..=33i32 {
+            eprintln!("avx512_tetrahedral_bounds: dim={dim} numPixels={num_pixels}");
+
+            let mut pixels: Box<[f32]> = (0..num_pixels as usize * 4)
+                .map(|i| (i % 5) as f32 / 5.0)
+                .collect();
+            crate::ops::lut3d::lut3d_op_cpu_avx512::apply_tetrahedral_avx512(
+                &lut,
+                dim,
+                &mut pixels,
+                num_pixels,
+            );
         }
     }
 }
