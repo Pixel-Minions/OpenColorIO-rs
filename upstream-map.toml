@@ -3274,7 +3274,7 @@ path = "src/bindings/python/PyConfig.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_config.rs", "crates/ocio-py/src/py_config_utils.rs"]
 status = "partial"
-note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs. 2.6.0: changed at v2.6.0 lines 42, 69-70, 152-156, 340-344, 360-363, 381-391, 437-439, 441-443, 463-468, 500-511, 528-532, 535-537, 539-541, 1345-1367; not yet re-ported (ocio26 cards)."
+note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs. 2.6.0: changed at v2.6.0 lines 42, 69-70, 152-156, 340-344, 360-363, 381-391, 437-439, 441-443, 463-468, 500-511, 528-532, 535-537, 539-541, 1345-1367; not yet re-ported (ocio26 cards). ocio26-config: 42, 69-70, 152-156, 340-343, 360-363, 381-391 (LocateBuiltinColorSpace, py_config_utils.rs), 437-443, 463-468, 500-511, 528-541, 1345-1367 ported (DisplayViewAliasIterator; self_kind.rs lists its methods and getUseDisplayAliases)."
 
 [[file]]
 path = "src/bindings/python/PyConfigIOProxy.cpp"
@@ -3380,14 +3380,14 @@ path = "src/bindings/python/PyOpenColorIO.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs"]
 status = "partial"
-note = "P70 complete binding registration audit: all binders, module functions/exceptions/constants/metadata and module initialization are registered in the existing binding modules. The original48 required Python modules/384 functions and complete module metadata already run in normal CI; retain the approved D-16 native C++ pointer boundary. 2.6.0: changed at v2.6.0 lines 100; not yet re-ported (ocio26 cards)."
+note = "P70 complete binding registration audit: all binders, module functions/exceptions/constants/metadata and module initialization are registered in the existing binding modules. The original48 required Python modules/384 functions and complete module metadata already run in normal CI; retain the approved D-16 native C++ pointer boundary. 2.6.0: changed at v2.6.0 lines 100; not yet re-ported (ocio26 cards). ocio26-config: 100 (bindPyConfigCompatibilityHelpers) ported."
 
 [[file]]
 path = "src/bindings/python/PyOpenColorIO.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs", "crates/ocio-py/src/py_transform.rs", "crates/ocio-py/src/lib.rs"]
 status = "partial"
-note = "P70 complete declaration audit: every binder declaration has its registration, and polymorphic class_name/to_py dispatch covers all supported classes. Existing Rust/Python ownership and D-16 native C++ pointer boundaries remain; the old partial note predated full binding completion. 2.6.0: changed at v2.6.0 lines 59; not yet re-ported (ocio26 cards)."
+note = "P70 complete declaration audit: every binder declaration has its registration, and polymorphic class_name/to_py dispatch covers all supported classes. Existing Rust/Python ownership and D-16 native C++ pointer boundaries remain; the old partial note predated full binding completion. 2.6.0: changed at v2.6.0 lines 59; not yet re-ported (ocio26 cards). ocio26-config: 59 (bindPyConfigCompatibilityHelpers' declaration) ported."
 
 [[file]]
 path = "src/bindings/python/PyPackedImageDesc.cpp"
@@ -3450,7 +3450,7 @@ path = "src/bindings/python/PyTypes.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_types.rs"]
 status = "partial"
-note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984; not yet re-ported (ocio26 cards)."
+note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984; not yet re-ported (ocio26 cards). ocio26-config: 864-871 (ConfigCompatibility) ported; 618-619 (HMJ) is ocio26-ops', 984 (METADATA_ID_ELEMENT) ocio26-clf's."
 
 [[file]]
 path = "src/bindings/python/PyUtils.cpp"
@@ -3490,8 +3490,8 @@ status = "done"
 path = "src/bindings/python/apphelpers/PyConfigCompatibilityHelpers.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/apphelpers/py_config_compatibility_helpers.rs"]
-status = "todo"
-note = "New in 2.6.0 (PR #2344); card ocio26-config."
+status = "done"
+note = "New in 2.6.0 (PR #2344); card ocio26-config. ocio26-config: bindPyConfigCompatibilityHelpers (9-16), the submodule ConfigCompatibilityHelpers and CheckCompatibility (a value of ConfigCompatibility other than 0 is U-112)."
 
 [[file]]
 path = "src/bindings/python/apphelpers/PyDisplayViewHelpers.cpp"
