@@ -2660,12 +2660,14 @@ fn add_color_space() {
     assert_eq!(config.num_color_spaces(), 0);
 }
 
-/// Port of `OCIO_ADD_TEST(Config, get_processor_from_two_configs)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Config, get_processor_from_two_configs)` @ v2.6.0.
 #[test]
 fn get_processor_from_two_configs() {
     let _env = EnvGuard::new();
     const SIMPLE_CONFIG1: &str = r#"
-ocio_profile_version: 2
+ocio_profile_version: 2.6
+
+use_display_aliases: true
 
 environment:
   {}
@@ -2674,17 +2676,27 @@ roles:
   default: raw1
   aces_interchange: aces1
   cie_xyz_d65_interchange: display1
+  color_timing: raw1
+  compositing_log: raw1
+  scene_linear: aces1
 
 displays:
   displayname:
     - !<View> {name: view1, colorspace: displaytest1}
-    - !<View> {name: view2, view_transform: vt1, display_colorspace: display2}
+    - !<View> {name: view2, view_transform: vt1, display_colorspace: displayname,
+               aliases: [oldview2]}
     - !<View> {name: view3, colorspace: data_space}
+    - !<View> {name: view4, view_transform: vt2, display_colorspace: <USE_DISPLAY_NAME>,
+               aliases: [oldview4]}
 
 view_transforms:
   - !<ViewTransform>
     name: vt1
     from_scene_reference: !<RangeTransform> {min_in_value: 0., min_out_value: 0.}
+
+  - !<ViewTransform>
+    name: vt2
+    from_scene_reference: !<MatrixTransform> {offset: [0.02, 0.03, 0.04, 0]}
 
 colorspaces:
   - !<ColorSpace>
@@ -2720,6 +2732,12 @@ display_colorspaces:
     name: display2
     allocation: uniform
     from_display_reference: !<FixedFunctionTransform> {style: ACES_RedMod03}
+
+  - !<ColorSpace>
+    name: displayname
+    aliases: [olddisplayname]
+    allocation: uniform
+    from_display_reference: !<ExposureContrastTransform> {style: linear, exposure: 1.5}
 
 "#;
 
@@ -2923,7 +2941,88 @@ display_colorspaces:
     let t3 = group.transform(3).unwrap();
     assert!(matches!(t3, Transform::Range(_)));
     let t4 = group.transform(4).unwrap();
-    assert!(matches!(t4, Transform::FixedFunction(_)));
+    assert!(matches!(t4, Transform::ExposureContrast(_)));
+
+    // Test that aliases for display and view names work.
+
+    // Basic test using aliased display and view names.
+    let p = Config::processor_from_configs_to_display_view_with_interchange(
+        &config2,
+        "test2",
+        "aces2",
+        &config1,
+        "olddisplayname",
+        "oldview2",
+        "aces1",
+        TransformDirection::Forward,
+    )
+    .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 5);
+
+    // Test that the fallback works with just the single config getProcessor too. The result
+    // goes through "displayname" itself (a ECTransform), confirming the resolved view actually
+    // belongs with the resolved display.
+    let p = config1
+        .processor_for_display_view(
+            "aces1",
+            "olddisplayname",
+            "oldview2",
+            TransformDirection::Forward,
+        )
+        .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 3);
+    assert!(matches!(
+        group.transform(0).unwrap(),
+        Transform::Exponent(_)
+    ));
+    assert!(matches!(group.transform(1).unwrap(), Transform::Range(_)));
+    assert!(matches!(
+        group.transform(2).unwrap(),
+        Transform::ExposureContrast(_)
+    ));
+
+    // Verify that <USE_DISPLAY_NAME> substitution happens.
+    let p = config1
+        .processor_for_display_view(
+            "aces1",
+            "displayname",
+            "oldview4",
+            TransformDirection::Forward,
+        )
+        .unwrap();
+    let group = p.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 3);
+    assert!(matches!(
+        group.transform(0).unwrap(),
+        Transform::Exponent(_)
+    ));
+    assert!(matches!(group.transform(1).unwrap(), Transform::Matrix(_)));
+    assert!(matches!(
+        group.transform(2).unwrap(),
+        Transform::ExposureContrast(_)
+    ));
+
+    // Turn off display aliasing and ensure the result now throws. (View alias resolution is
+    // always active, but the display fails to resolve.)
+    {
+        let mut config1_no_fallback = config1.create_editable_copy().unwrap();
+        config1_no_fallback.set_use_display_aliases(false);
+        check_throw_what(
+            Config::processor_from_configs_to_display_view_with_interchange(
+                &config2,
+                "test2",
+                "aces2",
+                &config1_no_fallback,
+                "olddisplayname",
+                "oldview2",
+                "aces1",
+                TransformDirection::Forward,
+            ),
+            "DisplayViewTransform error. Display 'olddisplayname' not found.",
+        );
+    }
 
     // If one of the spaces is a data space, the whole result must be a no-op.
     let p = Config::processor_from_configs_to_display_view(
@@ -4227,6 +4326,714 @@ displays:
             "Aliases are not supported for virtual display views.",
         );
     }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, aliased_view_name)` @ v2.6.0.
+#[test]
+fn aliased_view_name() {
+    let _env = EnvGuard::new();
+    // Test that Config::getCanonicalViewName resolves a view by one of its aliases. Unlike
+    // display name aliasing (see the aliased_display_name test below), this resolution is
+    // always active, i.e. it does not depend on Config::getUseDisplayAliases. See the
+    // view_aliases test above for the machinery of setting and querying view aliases.
+
+    const SIMPLE_CONFIG: &str = r#"
+ocio_profile_version: 2.6
+
+roles:
+  default: ref1
+  aces_interchange: ref1
+  color_timing: ref1
+  compositing_log: ref1
+  scene_linear: ref1
+
+shared_views:
+  - !<View> {name: sview, colorspace: ref1, aliases: [sv_alias]}
+
+displays:
+  display1:
+    - !<View> {name: view1, colorspace: ref1, aliases: [v1_alias, v1_alias2]}
+    - !<View> {name: view2, colorspace: cs1}
+    - !<Views> [sview]
+  display2:
+    - !<View> {name: view3, colorspace: ref1, aliases: [v1_alias]}
+    - !<Views> [sview]
+  act_display:
+    - !<View> {name: act_view, colorspace: cs1}
+
+# The view aliasing works even if the display and/or view are inactive.
+active_displays: [act_display]
+active_views: [act_view]
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref1
+
+  - !<ColorSpace>
+    name: cs1
+"#;
+
+    let config = Config::create_from_stream(SIMPLE_CONFIG.as_bytes()).unwrap();
+
+    // Alias resolution is always active, regardless of getUseDisplayAliases (which only gates
+    // display name aliasing).
+    assert!(!config.use_display_aliases());
+
+    // Resolve a display-defined view by one of its aliases.
+    assert_eq!(config.canonical_view_name("display1", "v1_alias"), b"view1");
+    assert_eq!(
+        config.canonical_view_name("display1", "v1_alias2"),
+        b"view1"
+    );
+
+    // Resolve a shared view by its alias, through either display that references it.
+    assert_eq!(config.canonical_view_name("display1", "sv_alias"), b"sview");
+    assert_eq!(config.canonical_view_name("display2", "sv_alias"), b"sview");
+
+    // Aliases only need to be unique among the views used by a single display, so the same
+    // alias string ("v1_alias") can be reused by an unrelated view in a different display.
+    assert_eq!(config.canonical_view_name("display2", "v1_alias"), b"view3");
+
+    // An exact view name always takes priority and needs no alias resolution.
+    assert_eq!(config.canonical_view_name("display1", "view2"), b"view2");
+
+    // No match at all: unknown alias, unknown display, or empty/null arguments.
+    assert_eq!(config.canonical_view_name("display1", "not_a_view"), b"");
+    assert_eq!(config.canonical_view_name("not_a_display", "v1_alias"), b"");
+    assert_eq!(config.canonical_view_name("display1", ""), b"");
+    assert_eq!(config.canonical_view_name("display1", ""), b"");
+    assert_eq!(config.canonical_view_name("", "view1"), b"");
+    assert_eq!(config.canonical_view_name("", "view1"), b"");
+
+    // A comma-containing alias also resolves.
+    {
+        let mut edit = config.create_editable_copy().unwrap();
+        edit.add_display_view_with_aliases(
+            "display1",
+            "view4",
+            "",
+            "ref1",
+            "",
+            "",
+            "",
+            &["a,b", "plain"],
+        )
+        .unwrap();
+        assert_eq!(edit.canonical_view_name("display1", "a,b"), b"view4");
+    }
+
+    // Unlike getCanonicalViewName, the other Config methods that take a view name are not
+    // meant to resolve it against a view alias. These functions are meant to tell exactly what
+    // the Config object contains, which would become less clear if they resolved aliases.
+    assert!(config.has_view("display1", "view1"));
+    assert!(!config.has_view("display1", "v1_alias"));
+
+    assert_eq!(
+        config.display_view_transform_name("display1", "v1_alias"),
+        b""
+    );
+    assert_eq!(
+        config.display_view_color_space_name("display1", "v1_alias"),
+        b""
+    );
+    assert_eq!(config.display_view_looks("display1", "v1_alias"), b"");
+    assert_eq!(config.display_view_rule("display1", "v1_alias"), b"");
+    assert_eq!(config.display_view_description("display1", "v1_alias"), b"");
+
+    let mut config_edit = config.create_editable_copy().unwrap();
+    check_throw_what(
+        config_edit.remove_display_view("display1", "v1_alias"),
+        "Could not find a view named 'v1_alias",
+    );
+
+    // Aliases may not be used in the active_views list.
+    {
+        let mut edit = config.create_editable_copy().unwrap();
+        assert_eq!(edit.num_views("display1"), 3);
+        edit.set_active_views("v1_alias").unwrap();
+        // Has no effect.
+        assert_eq!(edit.num_views("display1"), 3);
+        assert_eq!(edit.view("display1", 0), b"view1");
+        assert_eq!(edit.view("display1", 1), b"view2");
+        assert_eq!(edit.view("display1", 2), b"sview");
+        // Note: Config validation currently does not validate active_views, so that is not
+        // something that could be tested here.
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, aliased_display_name)` @ v2.6.0.
+#[test]
+fn aliased_display_name() {
+    use crate::view_transform::ViewTransform;
+    use ocio_ops::open_color_types::{ReferenceSpaceType, ViewTransformDirection};
+
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    config.set_version(2, 6).unwrap();
+
+    let mut raw = ColorSpace::new();
+    raw.set_name("raw");
+    config.add_color_space(&raw).unwrap();
+
+    // The display color space associated with the "sRGB - Display" display keeps the display's
+    // old name, "sRGB", as an alias.
+    let mut dcs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+    dcs.set_name("sRGB - Display");
+    dcs.add_alias("sRGB");
+    config.add_color_space(&dcs).unwrap();
+
+    config
+        .add_display_view("sRGB - Display", "view1", "raw", "")
+        .unwrap();
+
+    // Exact, case-insensitive match.
+    assert_eq!(
+        config.canonical_display_name("sRGB - Display"),
+        b"sRGB - Display"
+    );
+    assert_eq!(
+        config.canonical_display_name("srgb - display"),
+        b"sRGB - Display"
+    );
+
+    // Display aliasing is opt-in and disabled by default.
+    assert!(!config.use_display_aliases());
+    config.set_use_display_aliases(true);
+
+    // Resolving via the display color space's alias also requires that the display actually use
+    // that color space in one of its views. So far "sRGB - Display" only has view1, whose color
+    // space is "raw", so there is no connection to the display color space and the match fails.
+    assert_eq!(config.canonical_display_name("sRGB"), b"");
+
+    // Add a view that uses the display color space itself, satisfying that requirement.
+    config
+        .add_display_view("sRGB - Display", "view2", "sRGB - Display", "")
+        .unwrap();
+    // Now the alias works.
+    assert_eq!(config.canonical_display_name("sRGB"), b"sRGB - Display");
+
+    // Remove that view, the alias no longer works.
+    config
+        .remove_display_view("sRGB - Display", "view2")
+        .unwrap();
+    assert_eq!(config.canonical_display_name("sRGB"), b"");
+
+    // Now test that a shared view that uses <USE_DISPLAY_NAME> is sufficient to establish a
+    // connection between the display and a display color space.
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+    vt.set_name("vt1");
+    vt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config.add_view_transform(&vt).unwrap();
+    config
+        .add_shared_view("sview", "vt1", "<USE_DISPLAY_NAME>", "", "", "")
+        .unwrap();
+    config
+        .add_display_shared_view("sRGB - Display", "sview")
+        .unwrap();
+    // The alias works again.
+    assert_eq!(config.canonical_display_name("sRGB"), b"sRGB - Display");
+
+    // If there is a display named "sRGB" added, make sure it returns that one.
+    config.add_display_view("sRGB", "view1", "raw", "").unwrap();
+    assert_eq!(config.canonical_display_name("sRGB"), b"sRGB");
+    config.remove_display_view("sRGB", "view1").unwrap();
+    assert_eq!(config.canonical_display_name("sRGB"), b"sRGB - Display");
+
+    // If the display color space's own name doesn't match any display, its aliases are tried
+    // too. Here the name of "other_dcs" matches no display, but one of its aliases does.
+    config
+        .add_display_view("AliasedDisplay", "view1", "raw", "")
+        .unwrap();
+    let mut other_dcs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+    other_dcs.set_name("other_dcs");
+    other_dcs.add_alias("AliasedDisplay");
+    other_dcs.add_alias("other_alias");
+    other_dcs.add_alias("another_alias");
+    config.add_color_space(&other_dcs).unwrap();
+
+    // As above, the name match alone isn't enough: "AliasedDisplay" only has view1, whose
+    // colorspace is "raw", so it isn't yet found to be using "other_dcs".
+    assert_eq!(config.canonical_display_name("other_dcs"), b"");
+
+    // Add a view that uses the display color space, satisfying that requirement. Note that the
+    // display_colorspace may resolve via an alias of the display color space.
+    config
+        .add_display_view("AliasedDisplay", "view2", "other_alias", "")
+        .unwrap();
+    assert_eq!(
+        config.canonical_display_name("other_dcs"),
+        b"AliasedDisplay"
+    );
+
+    // Any alias of other_dcs will find the AliasedDisplay.
+    assert_eq!(
+        config.canonical_display_name("another_alias"),
+        b"AliasedDisplay"
+    );
+
+    // Don't resolve against role names.
+    config
+        .set_role("display_role", Some("sRGB - Display".as_bytes()))
+        .unwrap();
+    assert_eq!(config.canonical_display_name("display_role"), b"");
+    config.set_role("display_role", None).unwrap();
+
+    // The fallback is opt-in.
+    config.set_use_display_aliases(false);
+    assert_eq!(config.canonical_display_name("sRGB"), b"");
+    config.set_use_display_aliases(true);
+
+    // The alias resolution still works even if the display being found is not part of the
+    // active_displays list.
+    config.set_active_displays("not_a_real_display").unwrap();
+    assert_eq!(config.canonical_display_name("sRGB"), b"sRGB - Display");
+    assert_eq!(
+        config.canonical_display_name("other_dcs"),
+        b"AliasedDisplay"
+    );
+    config.clear_active_displays();
+
+    // It also still works even if the display color space is in the inactive_colorspaces list.
+    config.set_inactive_color_spaces("sRGB - Display, other_dcs");
+    assert_eq!(config.canonical_display_name("sRGB"), b"sRGB - Display");
+    assert_eq!(
+        config.canonical_display_name("other_dcs"),
+        b"AliasedDisplay"
+    );
+    config.set_inactive_color_spaces("");
+
+    // No match at all, and null/empty input.
+    assert_eq!(config.canonical_display_name("does not exist"), b"");
+    assert_eq!(config.canonical_display_name(""), b"");
+    assert_eq!(config.canonical_display_name(""), b"");
+
+    // Unlike getCanonicalDisplayName, the other Config methods that take a display name are not
+    // meant to resolve it via the display color space alias fallback. These functions are
+    // meant to tell exactly what the Config object contains, which would become less clear if
+    // they resolved aliases.
+    assert_eq!(config.num_views("sRGB"), 0);
+    assert!(!config.has_view("sRGB", "view1"));
+    assert_eq!(config.default_view("sRGB"), b"");
+    assert_eq!(config.view("sRGB", 0), b"");
+    assert_eq!(config.display_view_color_space_name("sRGB", "view1"), b"");
+    assert_eq!(config.display_view_transform_name("sRGB", "view1"), b"");
+
+    check_throw_what(
+        config.remove_display_view("sRGB", "view1"),
+        "Could not find a display named 'sRGB'",
+    );
+
+    // Replace the display color space with a scene-referred one of the same name, keeping the
+    // same "sRGB" alias. Since it is no longer display-referred, "sRGB" must no longer resolve
+    // to the display, even though the color space's canonical name still matches it exactly.
+    let mut scs = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
+    scs.set_name("sRGB - Display");
+    scs.add_alias("sRGB");
+    config.add_color_space(&scs).unwrap();
+
+    assert_eq!(config.canonical_display_name("sRGB"), b"");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, active_display_alias)` @ v2.6.0.
+#[test]
+fn active_display_alias() {
+    let _env = EnvGuard::new();
+    // Aliases may not be used in the active_displays list.
+
+    let config =
+        Config::create_from_builtin_config("cg-config-v4.0.0_aces-v2.0_ocio-v2.5").unwrap();
+
+    let mut edit = config.create_editable_copy().unwrap();
+    edit.set_version(2, 6).unwrap();
+    edit.set_use_display_aliases(true);
+
+    // "srgb_rec709_display" is an alias of the "sRGB - Display" display color space, and
+    // resolves to the "sRGB - Display" display.
+    assert_eq!(
+        edit.canonical_display_name("srgb_rec709_display"),
+        b"sRGB - Display"
+    );
+
+    assert_eq!(edit.num_displays(), 8);
+    edit.set_active_displays("srgb_rec709_display").unwrap();
+    // It has no effect, there are still eight displays.
+    assert_eq!(edit.num_displays(), 8);
+    check_throw_what(
+        edit.validate(),
+        "The list of active displays [srgb_rec709_display] from the config file is invalid.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, display_description)` @ v2.6.0.
+#[test]
+fn display_description() {
+    use ocio_ops::open_color_types::ReferenceSpaceType;
+
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    config.set_version(2, 6).unwrap();
+
+    let mut raw = ColorSpace::new();
+    raw.set_name("raw");
+    config.add_color_space(&raw).unwrap();
+
+    let mut dcs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+    dcs.set_name("sRGB - Display");
+    dcs.add_alias("sRGB");
+    dcs.set_description("The sRGB display.");
+    config.add_color_space(&dcs).unwrap();
+
+    config
+        .add_display_view("sRGB - Display", "view1", "raw", "")
+        .unwrap();
+
+    // The name match alone isn't enough: the display must also actually use that color space in
+    // one of its views. So far "sRGB - Display" only has view1, whose color space is "raw", so
+    // there is no connection to the display color space and the match fails, even though it is
+    // an exact name match.
+    assert!(!config.use_display_aliases());
+    assert_eq!(config.display_description("sRGB - Display"), b"");
+
+    // Add a view that uses the display color space itself, satisfying that requirement.
+    config
+        .add_display_view("sRGB - Display", "view2", "sRGB - Display", "")
+        .unwrap();
+
+    // Exact match works even though the fallback is disabled by default.
+    assert_eq!(
+        config.display_description("sRGB - Display"),
+        b"The sRGB display."
+    );
+
+    // Matching via the color space's alias requires the switch.
+    assert_eq!(config.display_description("sRGB"), b"");
+    config.set_use_display_aliases(true);
+    assert_eq!(config.display_description("sRGB"), b"The sRGB display.");
+
+    // A color space that isn't display-referred doesn't count, even with a matching name and
+    // even though it is actually used by a display's view (so this fails specifically because
+    // it isn't display-referred, not merely because it goes unused).
+    let mut scs = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
+    scs.set_name("scene_cs");
+    scs.set_description("A scene color space.");
+    config.add_color_space(&scs).unwrap();
+    config
+        .add_display_view("scene_cs", "view1", "scene_cs", "")
+        .unwrap();
+    assert_eq!(config.display_description("scene_cs"), b"");
+
+    // No color space at all, and null/empty input.
+    assert_eq!(config.display_description("does not exist"), b"");
+    assert_eq!(config.display_description(""), b"");
+    assert_eq!(config.display_description(""), b"");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, resolved_display_view_color_space_name)` @ v2.6.0.
+#[test]
+fn resolved_display_view_color_space_name() {
+    use crate::named_transform::NamedTransform;
+    use crate::view_transform::ViewTransform;
+    use ocio_ops::open_color_types::{
+        ReferenceSpaceType, TransformDirection, ViewTransformDirection,
+    };
+
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    config.set_version(2, 6).unwrap();
+
+    let mut raw = ColorSpace::new();
+    raw.set_name("raw");
+    config.add_color_space(&raw).unwrap();
+
+    // The display color space associated with the "sRGB - Display" display keeps the display's
+    // old name, "sRGB", as an alias.
+    let mut dcs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+    dcs.set_name("sRGB - Display");
+    dcs.add_alias("sRGB");
+    config.add_color_space(&dcs).unwrap();
+
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+    vt.set_name("vt_new");
+    vt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config.add_view_transform(&vt).unwrap();
+
+    // A plain view, with just a color space.
+    config
+        .add_display_view("sRGB - Display", "view1", "raw", "")
+        .unwrap();
+
+    // A view with a view transform, whose display color space is <USE_DISPLAY_NAME>. It has its
+    // own alias, "view2_old", so getCanonicalViewName can find it from that old name.
+    config
+        .add_display_view_with_aliases(
+            "sRGB - Display",
+            "view2",
+            "vt_new",
+            "<USE_DISPLAY_NAME>",
+            "",
+            "",
+            "",
+            &["view2_old"],
+        )
+        .unwrap();
+
+    let resolved = |config: &Config, display: &str, view: &str| {
+        config
+            .resolved_display_view_color_space_name(display, view)
+            .to_vec()
+    };
+
+    // The plain case behaves like getDisplayViewColorSpaceName.
+    assert_eq!(resolved(&config, "sRGB - Display", "view1"), b"raw");
+
+    // <USE_DISPLAY_NAME> is resolved to the display's own display color space, rather than
+    // being returned as the placeholder string. This does not require getUseDisplayAliases.
+    assert!(!config.use_display_aliases());
+    assert_eq!(
+        config.display_view_color_space_name("sRGB - Display", "view2"),
+        b"<USE_DISPLAY_NAME>"
+    );
+    assert_eq!(
+        resolved(&config, "sRGB - Display", "view2"),
+        b"sRGB - Display"
+    );
+
+    // Resolving a view by one of its own aliases is always active, unlike resolving the display
+    // name, which is opt-in (see getCanonicalDisplayName/getCanonicalViewName).
+    assert_eq!(
+        resolved(&config, "sRGB - Display", "view2_old"),
+        b"sRGB - Display"
+    );
+
+    // Resolving the display is opt-in.
+    assert_eq!(resolved(&config, "sRGB", "view1"), b"");
+
+    config.set_use_display_aliases(true);
+
+    // The display is resolved from the old name kept as an alias on its display color space.
+    assert_eq!(resolved(&config, "sRGB", "view1"), b"raw");
+
+    // The view is still resolved from its own alias, and the display may be out of date at the
+    // same time.
+    assert_eq!(
+        resolved(&config, "sRGB - Display", "view2_old"),
+        b"sRGB - Display"
+    );
+    assert_eq!(resolved(&config, "sRGB", "view2_old"), b"sRGB - Display");
+
+    // A view whose colorspace attribute is an alias of a color space returns the canonical name
+    // of that color space.
+    let mut aliased = ColorSpace::new();
+    aliased.set_name("cs_new");
+    aliased.add_alias("cs_old");
+    config.add_color_space(&aliased).unwrap();
+    config
+        .add_display_view("sRGB - Display", "view3", "cs_old", "")
+        .unwrap();
+    assert_eq!(
+        config.display_view_color_space_name("sRGB - Display", "view3"),
+        b"cs_old"
+    );
+    assert_eq!(resolved(&config, "sRGB - Display", "view3"), b"cs_new");
+
+    // Likewise for a role.
+    config
+        .set_role("cs_role", Some("cs_new".as_bytes()))
+        .unwrap();
+    config
+        .add_display_view("sRGB - Display", "view4", "cs_role", "")
+        .unwrap();
+    assert_eq!(resolved(&config, "sRGB - Display", "view4"), b"cs_new");
+
+    // A view with no view transform may use a named transform in place of a color space, and
+    // named transforms have aliases too.
+    let mut nt = NamedTransform::new();
+    nt.set_name("nt_new");
+    nt.add_alias("nt_old");
+    nt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        TransformDirection::Forward,
+    )
+    .unwrap();
+    config.add_named_transform(&nt).unwrap();
+    config
+        .add_display_view("sRGB - Display", "view5", "nt_old", "")
+        .unwrap();
+    assert_eq!(resolved(&config, "sRGB - Display", "view5"), b"nt_new");
+
+    // A shared view attached to the display is found too, and its <USE_DISPLAY_NAME> resolves
+    // to the display's own color space.
+    config
+        .add_shared_view("shared1", "vt_new", "<USE_DISPLAY_NAME>", "", "", "")
+        .unwrap();
+    config
+        .add_display_shared_view("sRGB - Display", "shared1")
+        .unwrap();
+    assert_eq!(
+        resolved(&config, "sRGB - Display", "shared1"),
+        b"sRGB - Display"
+    );
+    assert_eq!(resolved(&config, "sRGB", "shared1"), b"sRGB - Display");
+
+    // If the color space named after the display doesn't exist, the display name is returned
+    // as-is, so that callers can report which color space they were unable to find.
+    config
+        .add_display_view_with_view_transform(
+            "no_cs_display",
+            "view1",
+            "vt_new",
+            "<USE_DISPLAY_NAME>",
+            "",
+            "",
+            "",
+        )
+        .unwrap();
+    assert_eq!(
+        resolved(&config, "no_cs_display", "view1"),
+        b"no_cs_display"
+    );
+
+    // Nonexistent display or view, and null/empty input.
+    assert_eq!(resolved(&config, "sRGB - Display", "not a view"), b"");
+    assert_eq!(resolved(&config, "not a display", "view1"), b"");
+    assert_eq!(resolved(&config, "sRGB - Display", ""), b"");
+    assert_eq!(resolved(&config, "sRGB - Display", ""), b"");
+
+    // Unlike getDisplayViewColorSpaceName, an empty display does not mean "look at the
+    // config-level shared views", since a shared view's color space is only meaningful in the
+    // context of a display.
+    assert_eq!(
+        config.display_view_color_space_name("", "shared1"),
+        b"<USE_DISPLAY_NAME>"
+    );
+    assert_eq!(resolved(&config, "", "shared1"), b"");
+    assert_eq!(resolved(&config, "", "shared1"), b"");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, is_colorspace_used_aliases)` @ v2.6.0.
+#[test]
+fn is_colorspace_used_aliases() {
+    let _env = EnvGuard::new();
+    // Config::isColorSpaceUsed must resolve both the name it is given and each of the names it
+    // finds in the config down to a canonical name before comparing them, since either side may
+    // be an alias or a role rather than the color space's name.
+
+    const CONFIG: &str = r#"
+ocio_profile_version: 2.6
+
+roles:
+  aces_interchange: raw
+  cie_xyz_d65_interchange: cie_xyz_d65
+  color_timing: raw
+  compositing_log: raw
+  default: default_old
+  scene_linear: raw
+  some_role: role_old
+
+file_rules:
+  - !<Rule> {name: rule1, colorspace: fr_old, pattern: "*", extension: "*"}
+  - !<Rule> {name: Default, colorspace: default}
+
+shared_views:
+  - !<View> {name: shared1, view_transform: vt1, display_colorspace: <USE_DISPLAY_NAME>}
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: view_old}
+  AliasedDisplay:
+    - !<Views> [shared1]
+
+view_transforms:
+  - !<ViewTransform>
+    name: vt1
+    from_scene_reference: !<MatrixTransform> {offset: [0.1, 0.1, 0.1, 0]}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: other_dcs
+    aliases: [AliasedDisplay]
+    to_display_reference: !<MatrixTransform> {offset: [0.25, 0.15, 0.35, 0]}
+
+  - !<ColorSpace>
+    name: cie_xyz_d65
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+
+  - !<ColorSpace>
+    name: default_new
+    aliases: [default_old]
+
+  - !<ColorSpace>
+    name: view_new
+    aliases: [view_old]
+
+  - !<ColorSpace>
+    name: role_new
+    aliases: [role_old]
+
+  - !<ColorSpace>
+    name: fr_new
+    aliases: [fr_old]
+
+  - !<ColorSpace>
+    name: unused_new
+    aliases: [unused_old]
+"#;
+
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    // The display-defined view "view1" refers to "view_new" by its alias. Nothing else in the
+    // config mentions this color space, so the view is the only thing that can make it used.
+    let used = [
+        "view_new",
+        "view_old",
+        "other_dcs",
+        "AliasedDisplay",
+        "role_new",
+        "role_old",
+        "some_role",
+        "fr_new",
+        "fr_old",
+        "default_new",
+        "default_old",
+    ];
+    for name in used {
+        assert!(config.is_color_space_used(name), "{name}");
+    }
+
+    // The Default rule's color space is written as the "default" role, which in turn refers to
+    // "default_new" by its alias, so resolving the rule takes two steps (checked above).
+
+    // A color space that really isn't used anywhere is still reported as unused, whether it is
+    // named by its canonical name or by an alias.
+    assert!(!config.is_color_space_used("unused_new"));
+    assert!(!config.is_color_space_used("unused_old"));
+
+    // None of the above depends on Config::getUseDisplayAliases, which was off.
+    // Turning it on must not change any result.
+    let mut editable_config = config.create_editable_copy().unwrap();
+    assert!(!editable_config.use_display_aliases());
+    editable_config.set_use_display_aliases(true);
+    editable_config.validate().unwrap();
+
+    for name in used {
+        assert!(editable_config.is_color_space_used(name), "{name}");
+    }
+
+    assert!(!editable_config.is_color_space_used("unused_new"));
+    assert!(!editable_config.is_color_space_used("unused_old"));
 }
 
 /// Port of `OCIO_ADD_TEST(Config, display)` @ v2.5.2.

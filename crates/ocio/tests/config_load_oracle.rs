@@ -295,6 +295,43 @@ fn getters(c: &Config) -> Vec<Getter> {
             vec![s(&name)],
             json!(c.is_inactive_color_space(&name)),
         ));
+        // 2.6: whether it is used, by its name and by each alias (either side resolves to the
+        // canonical name), and the display each names (with use_display_aliases, through the
+        // display color spaces) and its description.
+        let mut names = vec![name.clone()];
+        if let Some(cs) = c.color_space(&name) {
+            names.extend((0..cs.num_aliases()).map(|a| cs.alias(a).to_vec()));
+        }
+        for n in names {
+            out.push(g(
+                "isColorSpaceUsed",
+                vec![s(&n)],
+                json!(c.is_color_space_used(&n)),
+            ));
+            out.push(g(
+                "getCanonicalDisplayName",
+                vec![s(&n)],
+                s(c.canonical_display_name(&n)),
+            ));
+            out.push(g(
+                "getDisplayDescription",
+                vec![s(&n)],
+                s(c.display_description(&n)),
+            ));
+        }
+    }
+    for i in 0..c.num_roles() {
+        let role = c.role_name(i).to_vec();
+        out.push(g(
+            "isColorSpaceUsed",
+            vec![s(&role)],
+            json!(c.is_color_space_used(&role)),
+        ));
+        out.push(g(
+            "getCanonicalDisplayName",
+            vec![s(&role)],
+            s(c.canonical_display_name(&role)),
+        ));
     }
     // The current context, then strings it resolves (the oracle stores it as `ctx`).
     out.push(g("getCurrentContext", vec![], Value::Null));
@@ -349,6 +386,37 @@ fn getters(c: &Config) -> Vec<Getter> {
             args.clone(),
             list(aliases.iter().cloned()),
         ));
+        // The names the display and view resolve to (2.6), by the view's name and each alias.
+        out.push(g(
+            "getCanonicalViewName",
+            args.clone(),
+            s(c.canonical_view_name(display, view)),
+        ));
+        out.push(g(
+            "getResolvedDisplayViewColorSpaceName",
+            args.clone(),
+            s(c.resolved_display_view_color_space_name(display, view)),
+        ));
+        // The view's name upper-cased: found ignoring case, and kept as the caller spells it.
+        let upper = view.to_ascii_uppercase();
+        out.push(g(
+            "getCanonicalViewName",
+            vec![s(display), s(&upper)],
+            s(c.canonical_view_name(display, &upper)),
+        ));
+        for alias in &aliases {
+            let alias_args = vec![s(display), s(alias)];
+            out.push(g(
+                "getCanonicalViewName",
+                alias_args.clone(),
+                s(c.canonical_view_name(display, alias)),
+            ));
+            out.push(g(
+                "getResolvedDisplayViewColorSpaceName",
+                alias_args,
+                s(c.resolved_display_view_color_space_name(display, alias)),
+            ));
+        }
         let mut probes: Vec<Vec<u8>> = Vec::new();
         for alias in &aliases {
             probes.push(alias.clone());
@@ -367,6 +435,16 @@ fn getters(c: &Config) -> Vec<Getter> {
     };
     for i in 0..c.num_displays_all() {
         let display = c.display_all(i).to_vec();
+        out.push(g(
+            "getCanonicalDisplayName",
+            vec![s(&display)],
+            s(c.canonical_display_name(&display)),
+        ));
+        out.push(g(
+            "getDisplayDescription",
+            vec![s(&display)],
+            s(c.display_description(&display)),
+        ));
         out.push(g(
             "getViews",
             vec![s(&display)],
@@ -1648,6 +1726,68 @@ fn view_aliases_load_as_in_the_wheel() {
                 "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [a]}\n\
                  displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\nvirtual_display:\n  \
                  - !<Views> [sv]\n",
+            ),
+        ),
+    ];
+    check(&cases);
+}
+
+/// Display and view names resolved as in the wheel (2.6): canonical display names through the
+/// display color spaces and their aliases (with and without `use_display_aliases`), canonical
+/// view names through view aliases, the views' resolved color spaces (`<USE_DISPLAY_NAME>`,
+/// aliases, roles, named transforms, names that resolve to nothing), display descriptions, and
+/// whether each color space, alias and role is used.
+#[test]
+fn display_aliases_resolve_as_in_the_wheel() {
+    const DISPLAY_SPACES: &str = "  - !<ColorSpace> {name: d1, aliases: [d1_old, D1 alias], \
+                                  description: the first}\n  - !<ColorSpace> {name: d2_cs, \
+                                  aliases: [d2], description: the second}\n  - !<ColorSpace> \
+                                  {name: unused_dcs, aliases: [d3], description: unused}\n";
+    let config = |use_display_aliases: &str, extra: &str| {
+        format!(
+            "ocio_profile_version: 2.6\n{use_display_aliases}environment: {{}}\nroles: \
+             {{default: raw, cs_role: cs, d_role: d1, dr: d2_cs}}\ncolorspaces:\n  - !<ColorSpace> {{name: \
+             raw}}\n  - !<ColorSpace> {{name: cs, aliases: [cs_old]}}\n  - !<ColorSpace> \
+             {{name: d4, description: scene}}\n  - !<ColorSpace> {{name: s1, aliases: [sd]}}\n  \
+             - !<ColorSpace> {{name: x, aliases: [x_old]}}\n\
+             display_colorspaces:\n{DISPLAY_SPACES}\
+             view_transforms:\n  - !<ViewTransform> {{name: vt, from_scene_reference: \
+             !<MatrixTransform> {{}}}}\nnamed_transforms:\n  - !<NamedTransform> {{name: nt, \
+             aliases: [nt_old], transform: !<MatrixTransform> {{}}}}\n{extra}"
+        )
+        .into_bytes()
+    };
+    let displays = "shared_views:\n  - !<View> {name: sv, view_transform: vt, display_colorspace: \
+                    <USE_DISPLAY_NAME>, aliases: [sv_old]}\ndisplays:\n  d1:\n    - !<View> \
+                    {name: v1, view_transform: vt, display_colorspace: d1_old, aliases: [v1_old]}\n\
+                    \x20   - !<View> {name: v2, colorspace: cs_old}\n    - !<View> {name: v3, \
+                    colorspace: cs_role}\n    - !<View> {name: v4, colorspace: nt_old}\n    - \
+                    !<View> {name: v5, colorspace: x_old}\n    - \
+                    !<Views> [sv]\n  d2:\n    - !<Views> [sv]\n  d3:\n    - !<View> {name: v, \
+                    colorspace: raw}\n  d4:\n    - !<View> {name: v, colorspace: d4}\n  sd:\n    - \
+                    !<View> {name: v, colorspace: s1}\n  d_role:\n    \
+                    - !<View> {name: v, view_transform: vt, display_colorspace: nothing}\n";
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "display aliases on",
+            config("use_display_aliases: true\n", displays),
+        ),
+        ("display aliases off", config("", displays)),
+        (
+            "a display named by an alias",
+            config(
+                "use_display_aliases: true\n",
+                "displays:\n  D1 alias:\n    - !<View> {name: v, view_transform: vt, \
+                 display_colorspace: d1}\n  d1_old:\n    - !<View> {name: w, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "views of an inactive display",
+            config(
+                "use_display_aliases: true\n",
+                "displays:\n  d1:\n    - !<View> {name: v, colorspace: d1, aliases: [old]}\n  \
+                 other:\n    - !<View> {name: o, colorspace: raw}\nactive_displays: [other]\n\
+                 active_views: [o]\ninactive_colorspaces: [d1]\n",
             ),
         ),
     ];

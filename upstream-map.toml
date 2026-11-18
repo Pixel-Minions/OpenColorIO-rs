@@ -177,7 +177,7 @@ path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
 status = "partial"
-note = "P67 complete source audit: config construction/edit/query, context/rules/serialization/version/validation, processors/caches and public statics are implemented in config.rs, including all8 inter-config overloads and monitor/ICC display instantiation. Supersedes the obsolete incremental partial note; existing Rust API decisions and documented upstream limitations remain. 2.6.0: changed at v2.6.0 lines 14, 251, 324, 337-352, 460, 474-477, 758-783, 983-1059, 1281, 1284, 1296-1303, 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914, 3084-3162, 3593-3600, 3615-3643, 3866-3867, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103, 4105, 4176-4427, 4745-4746, 4947-4948, 5742-5743, 5751-5772, 5779, 6105-6112, 6306-6326, 6423-6434, 6642-6686; not yet re-ported (ocio26 cards). ocio26-config: 251 (LastSupportedMinorVersion 6) and 6306-6318 (the MIRROR NEGS styles need 2.5) ported; 6319-6326 and 6423-6434 (APPLE_LOG, HMJ) are card ocio26-ops. Then 324 and 460 (m_useDisplayAliases), 758-783 (validateSharedView's collision check), 3593-3643, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103 (view aliases: the overloads with aliases, their collision checks, the alias getters), 4180-4191 (get/setUseDisplayAliases) and 6642-6686 (their version checks)."
+note = "P67 complete source audit: config construction/edit/query, context/rules/serialization/version/validation, processors/caches and public statics are implemented in config.rs, including all8 inter-config overloads and monitor/ICC display instantiation. Supersedes the obsolete incremental partial note; existing Rust API decisions and documented upstream limitations remain. 2.6.0: changed at v2.6.0 lines 14, 251, 324, 337-352, 460, 474-477, 758-783, 983-1059, 1281, 1284, 1296-1303, 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914, 3084-3162, 3593-3600, 3615-3643, 3866-3867, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103, 4105, 4176-4427, 4745-4746, 4947-4948, 5742-5743, 5751-5772, 5779, 6105-6112, 6306-6326, 6423-6434, 6642-6686; not yet re-ported (ocio26 cards). ocio26-config: 251 (LastSupportedMinorVersion 6) and 6306-6318 (the MIRROR NEGS styles need 2.5) ported; 6319-6326 and 6423-6434 (APPLE_LOG, HMJ) are card ocio26-ops. Then 324 and 460 (m_useDisplayAliases), 758-783 (validateSharedView's collision check), 3593-3643, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103 (view aliases: the overloads with aliases, their collision checks, the alias getters), 4180-4191 (get/setUseDisplayAliases) and 6642-6686 (their version checks). Then 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914 (isColorSpaceUsed through canonical names), 4194-4424 (DisplayUsesColorSpace, getCanonicalDisplayName, getResolvedDisplayViewColorSpaceName, getDisplayDescription, getCanonicalViewName) and 5742-5743, 5751-5772, 5779 (GetProcessorFromConfigs's data check through the resolved view color space)."
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -708,8 +708,8 @@ status = "done"
 path = "src/OpenColorIO/apphelpers/LegacyViewingPipeline.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs"]
-status = "partial"
-note = "2.6.0: changed at v2.6.0 lines 208-222, 224-228, 230, 233-238; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "2.6.0: changed at v2.6.0 lines 208-222, 224-228, 230, 233-238: ocio26-config ported them (getProcessor resolves the display and view first, and the display color space through getResolvedDisplayViewColorSpaceName)."
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/LegacyViewingPipeline.h"
@@ -2288,8 +2288,8 @@ note = "p3-transforms (3.1a): the class (18-151), its validation and operator<< 
 path = "src/OpenColorIO/transforms/DisplayViewTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/display_view_transform.rs"]
-status = "partial"
-note = "p3-transforms (3.1a): the class (18-171), its validation and operator<< (I-121), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2c: BuildSourceToDisplay, BuildDisplayToSource, BuildNamedTransformToDisplay, BuildDisplayToNamedTransform, BuildDisplayOps and CollectContextVariables (177-600), an error where upstream dereferences a null source color space (U-57). 2.6.0: changed at v2.6.0 lines 327-337, 346-354, 356-357, 362, 378-380, 382-384, 388-389, 449, 565-584, 594, 617; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-transforms (3.1a): the class (18-171), its validation and operator<< (I-121), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2c: BuildSourceToDisplay, BuildDisplayToSource, BuildNamedTransformToDisplay, BuildDisplayToNamedTransform, BuildDisplayOps and CollectContextVariables (177-600), an error where upstream dereferences a null source color space (U-57). 2.6.0: changed at v2.6.0 lines 327-337, 346-354, 356-357, 362, 378-380, 382-384, 388-389, 449, 565-584, 594, 617: ocio26-config ported them (BuildDisplayOps and CollectContextVariables resolve the display and view through getCanonicalDisplayName, getCanonicalViewName and getResolvedDisplayViewColorSpaceName)."
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentTransform.cpp"

@@ -431,6 +431,33 @@ fn alias_vec(aliases: &[impl AsRef<[u8]>]) -> StringVec {
         .collect()
 }
 
+/// Whether one of `views` (a display's, its own and the shared ones it uses, active or not)
+/// uses the display color space `cs`: its color space is `<USE_DISPLAY_NAME>`, or names `cs`
+/// (by its name, an alias or a role). A display might have a display color space with a
+/// matching name purely by coincidence.
+///
+/// Port of `DisplayUsesColorSpace` (src/OpenColorIO/Config.cpp:4199-4221 @ v2.6.0).
+fn display_uses_color_space(config: &Config, views: &[&View], cs: &ColorSpace) -> bool {
+    for view in views {
+        // Only requiring one (rather than all) the display's views to match since sometimes a
+        // display will have utility views such as "Raw" that don't rely on a display color
+        // space.
+
+        if view.use_display_name_for_colorspace() {
+            // The display_colorspace is <USE_DISPLAY_NAME>.
+            return true;
+        }
+        if let Some(view_cs) = config.color_space(&view.colorspace)
+            && compare(c_str(view_cs.name()), c_str(cs.name()))
+        {
+            // The canonical name of the view's display_colorspace (or colorspace) equals that
+            // of cs.
+            return true;
+        }
+    }
+    false
+}
+
 /// Adds the color spaces `transform` names, and the groups it holds name, to
 /// `color_space_names`: a color space transform's source and destination (their context
 /// variables resolved), a display view transform's source, a look transform's source and
@@ -3504,6 +3531,245 @@ impl Config {
         self.reset_cache_ids();
     }
 
+    /// The display `display_name` names: the display of that name (ignoring case); else, when
+    /// [`Config::use_display_aliases`] is on and `display_name` isn't a role, the display that
+    /// uses the display-referred color space `display_name` names (by its name or an alias)
+    /// and is named after that color space or one of its aliases (see
+    /// [`display_uses_color_space`]). `""` when none is found.
+    ///
+    /// Port of `Config::getCanonicalDisplayName` (src/OpenColorIO/Config.cpp:4225-4302 @
+    /// v2.6.0).
+    #[doc(alias = "getCanonicalDisplayName")]
+    pub fn canonical_display_name(&self, display_name: impl AsRef<[u8]>) -> &[u8] {
+        let display_name = c_str(display_name.as_ref());
+        if display_name.is_empty() {
+            return &[];
+        }
+
+        // This is the normal case, there is a display called displayName.
+        if let Some(iter) = find_display(&self.displays, display_name) {
+            return c_str(&self.displays[iter].0);
+        }
+
+        // Use of the fallback requires a config-level opt-in, which is false by default.
+        if !self.use_display_aliases {
+            return &[];
+        }
+
+        // Normally, getColorSpace searches roles, but that is not the intended use-case and
+        // could be confusing, so don't resolve against them.
+        if self.has_role(display_name) {
+            return &[];
+        }
+
+        // Look for a display color space that has displayName as its name or an alias.
+        let Some(cs) = self.color_space(display_name) else {
+            return &[];
+        };
+
+        // Only consider display-referred color spaces.
+        if cs.reference_space_type() == ReferenceSpaceType::Scene {
+            return &[];
+        }
+
+        // A candidate display found by name match alone isn't enough: it must also actually use
+        // this color space, i.e. have a view whose display_colorspace is <USE_DISPLAY_NAME> or
+        // that resolves (by name or alias) to this same color space. Otherwise, a display that
+        // merely happens to share a name with an unrelated color space would incorrectly match.
+        let uses_color_space = |candidate: usize| {
+            // Consider both display-defined views and shared views used by this display, and
+            // both active and inactive views.
+            display_uses_color_space(self, &self.impl_views(&self.displays[candidate].1), cs)
+        };
+
+        if let Some(iter) = find_display(&self.displays, cs.name())
+            && uses_color_space(iter)
+        {
+            // A display exists with the name of the color space. In this case, displayName was
+            // an alias of the color space.
+            return c_str(&self.displays[iter].0);
+        }
+
+        for i in 0..cs.num_aliases() {
+            if let Some(iter) = find_display(&self.displays, cs.alias(i))
+                && uses_color_space(iter)
+            {
+                // A display exists with the name of an alias of the color space. In this case,
+                // displayName was either the color space name or one of the other aliases.
+                //
+                // The reason to allow this match is because <USE_DISPLAY_NAME> resolves via
+                // getColorSpace(displanName), which works via color space aliases, independent
+                // of display aliases. Therefore, configs may already contain display color
+                // spaces that are set up to only match the display name via their aliases. In
+                // addition, this allows for renaming a display but keeping the display color
+                // space name unchanged, if that were desired for some reason.
+                return c_str(&self.displays[iter].0);
+            }
+        }
+
+        &[]
+    }
+
+    /// The color space of the view `view` of the display `display`, both resolved first
+    /// ([`Config::canonical_display_name`], [`Config::canonical_view_name`]): the display's
+    /// name for a view whose color space is `<USE_DISPLAY_NAME>`, else the view's color space,
+    /// then its canonical name ([`Config::canonical_name`]) when it names a color space or a
+    /// named transform, else as the view spells it. `""` when the display or view can't be
+    /// resolved, or either is empty.
+    ///
+    /// Port of `Config::getResolvedDisplayViewColorSpaceName` (src/OpenColorIO/Config.cpp:
+    /// 4304-4338 @ v2.6.0).
+    #[doc(alias = "getResolvedDisplayViewColorSpaceName")]
+    pub fn resolved_display_view_color_space_name(
+        &self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+    ) -> &[u8] {
+        let display = c_str(display.as_ref());
+        let view = c_str(view.as_ref());
+        if display.is_empty() || view.is_empty() {
+            return &[];
+        }
+
+        let resolved_display = self.canonical_display_name(display);
+        if resolved_display.is_empty() {
+            return &[];
+        }
+
+        let resolved_view = self.canonical_view_name(resolved_display, view);
+        if resolved_view.is_empty() {
+            return &[];
+        }
+
+        let Some(view_ptr) = self.impl_view(resolved_display, resolved_view) else {
+            return &[];
+        };
+
+        // A shared view that has a view transform may set its display_colorspace to
+        // <USE_DISPLAY_NAME>, meaning that the display color space named after the display is
+        // used.
+        let cs_name = if view_ptr.use_display_name_for_colorspace() {
+            resolved_display
+        } else {
+            c_str(&view_ptr.colorspace)
+        };
+
+        // Return the canonical name, since csName may be a role or an alias. (Note that the
+        // view's colorspace attribute is allowed to name a named transform rather than a color
+        // space, if the view has no view_transform, and getCanonicalName handles both.) If it
+        // doesn't name anything at all, return it as-is so callers can report what they were
+        // unable to find.
+        let canonical_name = c_str(self.canonical_name(cs_name));
+        if canonical_name.is_empty() {
+            cs_name
+        } else {
+            canonical_name
+        }
+    }
+
+    /// The description of the display color space `display` names, when it names one that
+    /// a display uses: by its name, or (when [`Config::use_display_aliases`] is on) by an
+    /// alias; `""` otherwise.
+    ///
+    /// Port of `Config::getDisplayDescription` (src/OpenColorIO/Config.cpp:4340-4380 @
+    /// v2.6.0).
+    #[doc(alias = "getDisplayDescription")]
+    pub fn display_description(&self, display: impl AsRef<[u8]>) -> &[u8] {
+        let display = c_str(display.as_ref());
+        if display.is_empty() {
+            return &[];
+        }
+
+        // Getting a description requires that the display name matches the name or alias of a
+        // display color space in the config.
+        let Some(cs) = self.color_space(display) else {
+            return &[];
+        };
+
+        // Only support display color spaces.
+        if cs.reference_space_type() != ReferenceSpaceType::Display {
+            return &[];
+        }
+
+        // If the color space was found via its aliases, exit now if display alias support is
+        // off.
+        if !compare(c_str(cs.name()), display) && !self.use_display_aliases {
+            return &[];
+        }
+
+        // Check that there is an actual display with this name.
+        let canonical_display = self.canonical_display_name(cs.name());
+        if canonical_display.is_empty() {
+            return &[];
+        }
+
+        // Confirm that the display has a view that references this display color space. This
+        // rules out matches that coincidentally share the same name but are unrelated.
+        match find_display(&self.displays, canonical_display) {
+            Some(iter)
+                if display_uses_color_space(self, &self.impl_views(&self.displays[iter].1), cs) =>
+            {
+                c_str(cs.description())
+            }
+            _ => &[],
+        }
+    }
+
+    /// The view `view_name` of the display `display_name` names: `view_name` itself (as the
+    /// caller spells it) when the display, resolved first ([`Config::canonical_display_name`];
+    /// as given when that finds none), has a view of that name (ignoring case); else the name
+    /// of the first view of the display (its own, then the shared views it uses, active or
+    /// not) that has the alias `view_name` (resolving view aliases needs no opt-in). `""` when
+    /// none is found or either name is empty.
+    ///
+    /// The result borrows from the config or from `view_name`: upstream returns the caller's
+    /// `viewName` pointer in the normal case (`return viewName;`, Config.cpp:4405-4409 @
+    /// v2.6.0), the matching view's name in the alias case.
+    ///
+    /// Port of `Config::getCanonicalViewName` (src/OpenColorIO/Config.cpp:4382-4424 @ v2.6.0).
+    #[doc(alias = "getCanonicalViewName")]
+    pub fn canonical_view_name<'a, V: AsRef<[u8]> + ?Sized>(
+        &'a self,
+        display_name: impl AsRef<[u8]>,
+        view_name: &'a V,
+    ) -> &'a [u8] {
+        let display_name = c_str(display_name.as_ref());
+        let view_name = c_str(view_name.as_ref());
+        if display_name.is_empty() || view_name.is_empty() {
+            return &[];
+        }
+
+        // Resolve the displayName first, since it may itself be an alias. (That fallback is
+        // gated by m_useDisplayAliases; view alias resolution below is not, since view aliases
+        // are an explicit attribute of the view rather than a heuristic fallback.)
+        let canonical_display = self.canonical_display_name(display_name);
+        let resolved_display = if canonical_display.is_empty() {
+            display_name
+        } else {
+            canonical_display
+        };
+
+        // This is the normal case, the display has a view named viewName.
+        if self.impl_view(resolved_display, view_name).is_some() {
+            return view_name;
+        }
+
+        // Otherwise, look for a view used by this display (whether display-defined or a
+        // referenced shared view, active or inactive) that has viewName as an alias.
+        let Some(iter) = find_display(&self.displays, resolved_display) else {
+            // The requested display does not exist.
+            return &[];
+        };
+
+        for candidate in self.impl_views(&self.displays[iter].1) {
+            if candidate.has_alias(view_name) {
+                return c_str(&candidate.name);
+            }
+        }
+
+        &[]
+    }
+
     /// The number of views of `type_` of `display`: its shared or its own views; with an empty
     /// display name, the config's shared views; 0 for an unknown display.
     ///
@@ -6422,12 +6688,13 @@ impl Config {
         Ok(())
     }
 
-    /// Whether a color space named `name` is used other than where it is defined: by a
-    /// transform (a color space, display view or look transform, context variables resolved),
-    /// a role, a shared view, a (display, view) pair, a look's process space or a file rule;
-    /// ignoring case.
+    /// Whether the color space `name` (a name, alias or role) is used other than where it is
+    /// defined: by a transform (a color space, display view or look transform, context
+    /// variables resolved), a role, a shared view, a (display, view) pair, a look's process
+    /// space or a file rule. Each name compares by its canonical name ([`Config::canonical_name`],
+    /// as it is when it names nothing), ignoring case.
     ///
-    /// Port of `Config::isColorSpaceUsed` (src/OpenColorIO/Config.cpp:2659-2771 @ v2.5.2).
+    /// Port of `Config::isColorSpaceUsed` (src/OpenColorIO/Config.cpp:2793-2921 @ v2.6.0).
     #[doc(alias = "isColorSpaceUsed")]
     pub fn is_color_space_used(&self, name: impl AsRef<[u8]>) -> bool {
         // Check if a color space is used somewhere in the config other than where it is
@@ -6438,6 +6705,23 @@ impl Config {
         if name.is_empty() {
             return false;
         }
+
+        // Resolve any aliases, so both source and target are comparing the canonical names.
+        let resolve_name = |cs_name: &[u8]| -> Vec<u8> {
+            let canonical_name = c_str(self.canonical_name(cs_name));
+            if canonical_name.is_empty() {
+                c_str(cs_name).to_vec()
+            } else {
+                canonical_name.to_vec()
+            }
+        };
+
+        let search_name = resolve_name(name);
+
+        let is_match = |cs_name: &[u8]| {
+            let cs_name = c_str(cs_name);
+            !cs_name.is_empty() && compare(&resolve_name(cs_name), &search_name)
+        };
 
         // Check for all color spaces, looks and view transforms.
 
@@ -6452,10 +6736,7 @@ impl Config {
             );
         }
 
-        if color_space_names
-            .iter()
-            .any(|cs_name| strcasecmp(name, c_str(cs_name)).is_eq())
-        {
+        if color_space_names.iter().any(|cs_name| is_match(cs_name)) {
             return true;
         }
 
@@ -6464,7 +6745,7 @@ impl Config {
         for idx in 0..self.num_roles() {
             let role_name = self.role_name(idx);
             let cs_name = lookup_role(&self.roles, role_name);
-            if strcasecmp(cs_name, name).is_eq() {
+            if is_match(cs_name) {
                 return true;
             }
         }
@@ -6474,7 +6755,7 @@ impl Config {
         if self
             .shared_views
             .iter()
-            .any(|view| strcasecmp(&view.colorspace, name).is_eq())
+            .any(|view| is_match(&view.colorspace))
         {
             return true;
         }
@@ -6484,16 +6765,17 @@ impl Config {
         for (disp_name, display) in &self.displays {
             for view in &display.views {
                 let cs_name = self.display_view_color_space_name(disp_name, &view.name);
-                if strcasecmp(cs_name, name).is_eq() {
+                if is_match(cs_name) {
                     return true;
                 }
             }
             for shared_view in &display.shared_views {
                 if let Some(i) = find_view(&self.shared_views, shared_view) {
                     let view = &self.shared_views[i];
+                    // The view uses the display color space named after the display.
                     if !view.view_transform.is_empty()
                         && view.use_display_name_for_colorspace()
-                        && strcasecmp(disp_name, name).is_eq()
+                        && is_match(disp_name)
                     {
                         return true;
                     }
@@ -6507,7 +6789,7 @@ impl Config {
             let look_name = self.look_name_by_index(idx);
 
             let l = self.look(look_name).expect("a look of the config");
-            if strcasecmp(l.process_space(), name).is_eq() {
+            if is_match(l.process_space()) {
                 return true;
             }
         }
@@ -6519,7 +6801,7 @@ impl Config {
         let num_rules = rules.num_entries();
         for idx in 0..num_rules {
             let cs_name = rules.color_space(idx).expect("a rule's index");
-            if strcasecmp(&cs_name, name).is_eq() {
+            if is_match(&cs_name) {
                 return true;
             }
         }
@@ -7337,14 +7619,15 @@ impl Config {
     /// space, and the destination config's display view processor from its interchange space,
     /// concatenated in the order of `direction` (inverse: the display view first, inverted,
     /// then the source side from its interchange space). When the source color space or the
-    /// view's display color space is a data space, the processor is empty.
+    /// view's color space (resolved: aliases, `<USE_DISPLAY_NAME>`; a named transform is none)
+    /// is a data space, the processor is empty.
     ///
     /// The names are C strings (`const char *`): each up to its first NUL.
     ///
     /// Port of `Config::GetProcessorFromConfigs(const ConstContextRcPtr &, const
     /// ConstConfigRcPtr &, const char *, const char *, const ConstContextRcPtr &, const
     /// ConstConfigRcPtr &, const char *, const char *, const char *, TransformDirection)`
-    /// (Config.cpp:5083-5145 @ v2.5.2).
+    /// (Config.cpp:5704-5788 @ v2.6.0).
     #[doc(alias = "GetProcessorFromConfigs")]
     #[allow(clippy::too_many_arguments)]
     pub fn processor_from_configs_to_display_view_with_interchange_with_contexts(
@@ -7375,7 +7658,7 @@ impl Config {
 
     /// Binding-only nullable contexts, preserving the context check at each getProcessor.
     ///
-    /// Port of `Config::GetProcessorFromConfigs` (Config.cpp:4898-5145 @ v2.5.2).
+    /// Port of `Config::GetProcessorFromConfigs` (Config.cpp:5704-5788 @ v2.6.0).
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     pub fn processor_from_configs_to_display_view_with_interchange_with_contexts_optional(
@@ -7430,19 +7713,8 @@ impl Config {
             Some(src_ex_cs),
         )?;
 
-        let cs_name = dst_config.display_view_color_space_name(dst_display, dst_view);
-        let display_color_space_name = if View::use_display_name(cs_name) {
-            dst_display
-        } else {
-            c_str(cs_name)
-        };
-        let Some(display_color_space) = dst_config.color_space(display_color_space_name) else {
-            return Err(Exception::new(
-                "Can't create the processor for the destination config: display color space \
-                 not found.",
-            ));
-        };
-
+        // This creates a DisplayViewTransform and uses the standard BuildDisplayOps to build it,
+        // handle aliases, and do any necessary error handling.
         let mut p2 = dst_config.processor_for_display_view_with_context(
             dst_context
                 .ok_or_else(|| Exception::new("Config::GetProcessor failed. Context is null."))?,
@@ -7452,6 +7724,26 @@ impl Config {
             direction,
         )?;
 
+        // Although we now have a valid processor, we still need to get the view's color space
+        // to check if it's actually a data space. This resolution process handles aliases and
+        // the <USE_DISPLAY_NAME> case.
+        let mut view_is_data = false;
+        let cs_name = dst_config.resolved_display_view_color_space_name(dst_display, dst_view);
+        match dst_config.color_space(cs_name) {
+            None => {
+                // A view's color space could be a Named Transform. In this case, viewIsData
+                // should remain false.
+                if dst_config.named_transform(cs_name).is_none() {
+                    // Given that the getProcessor call succeeded above, this should never
+                    // happen.
+                    return Err(Exception::new(
+                        "Can't create the processor for the destination config.",
+                    ));
+                }
+            }
+            Some(view_color_space) => view_is_data = view_color_space.is_data(),
+        }
+
         let mut processor = Processor::new();
         processor.set_processor_cache_flags(src_config.processor_cache_flags());
 
@@ -7459,7 +7751,7 @@ impl Config {
         // empty, but need to make sure the entire result is also empty to better match the
         // semantics of how data spaces are handled. (After the swap above, upstream's
         // srcColorSpace is the source interchange space in the inverse direction.)
-        if !src_color_space.is_data() && !display_color_space.is_data() {
+        if !src_color_space.is_data() && !view_is_data {
             if direction == TransformDirection::Inverse {
                 std::mem::swap(&mut p1, &mut p2);
             }
