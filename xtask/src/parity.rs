@@ -35,11 +35,15 @@ pub(crate) struct UpstreamTest {
     pub(crate) file: String,
 }
 
-/// Removes comments, `#define` bodies and `#if 0` blocks, keeping line structure.
+/// Removes comments, `#define` bodies and `#if 0` blocks, keeping line structure. String and
+/// character literals (raw strings included) are kept as they are, so that a `/*` or `//`
+/// inside one starts no comment (2.6.0's `SanitizeIDToken("abc.-_~/*#%^+()[]|09")` did, and
+/// hid the tests after it).
 fn preprocess(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     let mut in_block = false;
+    let mut prev = '\0';
     while let Some(c) = chars.next() {
         if in_block {
             if c == '*' && chars.peek() == Some(&'/') {
@@ -50,7 +54,46 @@ fn preprocess(text: &str) -> String {
             }
             continue;
         }
+        let ident_before = prev.is_ascii_alphanumeric() || prev == '_';
+        prev = c;
         match c {
+            // A raw string literal, R"delim( ... )delim": up to its closing delimiter.
+            '"' if out.ends_with('R') && !out[..out.len() - 1].ends_with(is_ident_char) => {
+                out.push(c);
+                let mut delim = String::new();
+                for d in chars.by_ref() {
+                    out.push(d);
+                    if d == '(' {
+                        break;
+                    }
+                    delim.push(d);
+                }
+                let close = format!("){delim}\"");
+                let mut tail = String::new();
+                for d in chars.by_ref() {
+                    out.push(d);
+                    tail.push(d);
+                    if tail.ends_with(&close) {
+                        break;
+                    }
+                }
+                prev = '"';
+            }
+            // A string or character literal (not a digit separator): up to its unescaped end.
+            '"' | '\'' if !(c == '\'' && ident_before) => {
+                out.push(c);
+                while let Some(d) = chars.next() {
+                    out.push(d);
+                    if d == '\\' {
+                        if let Some(e) = chars.next() {
+                            out.push(e);
+                        }
+                    } else if d == c || d == '\n' {
+                        break;
+                    }
+                }
+                prev = c;
+            }
             '/' if chars.peek() == Some(&'*') => {
                 chars.next();
                 in_block = true;
@@ -145,6 +188,11 @@ fn macro_ids(text: &str) -> Vec<(&'static str, String)> {
         }
     }
     ids
+}
+
+/// A character of a C++ identifier (or of a number).
+fn is_ident_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
 }
 
 fn is_ident(s: &str) -> bool {
@@ -734,6 +782,27 @@ mod tests {
         assert!(problems[0].contains("A.py::A.test_a") && problems[0].contains("order"));
         assert!(problems[1].contains("A.py::A.test_b") && problems[1].contains("order"));
         assert!(problems[2].contains("X.py::X.test_x") && problems[2].contains("not an upstream"));
+    }
+
+    #[test]
+    fn preprocess_keeps_string_and_char_literals() {
+        // A comment opener inside a string, a raw string or a character literal starts no
+        // comment (ConfigUtils_tests.cpp @ v2.6.0), and a digit separator starts no literal.
+        let src = r#"OCIO_ADD_TEST(A, a)
+{ f("abc.-_~/*#%^+()[]|09"); g("ocio://x", '/', '\'', "\"/*", 1'000); }
+OCIO_ADD_TEST(A, b)
+{ h(R"(/* not a comment
+)"); i(R"x(a)" /* )x"); }
+OCIO_ADD_TEST(A, c)
+/* a real comment OCIO_ADD_TEST(A, hidden) */
+// OCIO_ADD_TEST(A, hidden2)
+OCIO_ADD_TEST(A, d)
+"#;
+        let ids: Vec<String> = macro_ids(&preprocess(src))
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect();
+        assert_eq!(ids, ["A/a", "A/b", "A/c", "A/d"]);
     }
 
     #[test]
