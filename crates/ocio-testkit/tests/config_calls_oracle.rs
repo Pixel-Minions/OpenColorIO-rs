@@ -238,12 +238,8 @@ fn exceptions_are_reported_per_call() {
 
 /// The dump of a built-in config reaches every getter but the two that take what no config
 /// holds (a file path, a processor's arguments), and lists them; its lookups find each color
-/// space by name, alias and role.
-///
-/// OCIO 2.6.0 added six display and view getters (display/view aliases, PR #2341, and
-/// `getDisplayDescription`). The dump reaches them once card `ocio26-config` ports them
-/// (docs/ocio-2.6-plan.md, phase 3); until then they are listed here by name, so a getter the
-/// wheel adds or drops still fails this test.
+/// space by name, alias and role. That includes the six display and view getters OCIO 2.6.0
+/// added (display and view aliases, PR #2341, and `getDisplayDescription`).
 #[test]
 fn the_dump_reaches_every_getter() {
     let response = call(json!({
@@ -253,16 +249,7 @@ fn the_dump_reaches_every_getter() {
     let dump = result(&calls(&response)[0]);
     assert_eq!(
         dump["not_dumped"],
-        json!([
-            "getCanonicalDisplayName",
-            "getCanonicalViewName",
-            "getColorSpaceFromFilepath",
-            "getDisplayDescription",
-            "getDisplayViewAliases",
-            "getProcessor",
-            "getResolvedDisplayViewColorSpaceName",
-            "hasDisplayViewAlias"
-        ])
+        json!(["getColorSpaceFromFilepath", "getProcessor"])
     );
     for key in [
         "getters",
@@ -302,6 +289,61 @@ fn the_dump_reaches_every_getter() {
     assert!(found.contains(&(b"ACEScg".to_vec(), b"ACEScg".to_vec())));
     assert!(found.contains(&(b"lin_ap1".to_vec(), b"ACEScg".to_vec())));
     assert!(found.contains(&(b"scene_linear".to_vec(), b"ACEScg".to_vec())));
+}
+
+/// The 2.6 display and view getters of the dump: a view's aliases as the config gives them,
+/// each looked up as it is and upper-cased, the names a display and a view resolve to, a
+/// display's description, and the lookups of a display color space's alias.
+#[test]
+fn the_dump_reaches_the_aliases() {
+    let config = b"ocio_profile_version: 2.6\nroles: {default: raw}\nuse_display_aliases: true\n\
+                   colorspaces:\n  - !<ColorSpace> {name: raw}\ndisplay_colorspaces:\n  - \
+                   !<ColorSpace> {name: d, aliases: [d_alias], description: the display}\n\
+                   displays:\n  d:\n    - !<View> {name: v, colorspace: d, aliases: [a1, a2]}\n";
+    let response =
+        call(json!({"config": {"yaml": bytes_arg(config)}, "calls": [{"dump": "config"}]}));
+    let dump = result(&calls(&response)[0]);
+    assert_eq!(dump["not_dumped"], json!(["getColorSpaceFromFilepath", "getProcessor"]));
+    let display = &dump["displays"][0];
+    assert_eq!(bytes(&display["display"]), b"d", "{display}");
+    assert_eq!(bytes(&display["getCanonicalDisplayName"]), b"d", "{display}");
+    assert_eq!(bytes(&display["getDisplayDescription"]), b"the display", "{display}");
+    let view = &display["views"][0];
+    assert_eq!(bytes(&view["view"]), b"v", "{view}");
+    let aliases: Vec<Vec<u8>> = view["getDisplayViewAliases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(bytes)
+        .collect();
+    assert_eq!(aliases, [b"a1".to_vec(), b"a2".to_vec()], "{view}");
+    let probes: Vec<(Vec<u8>, Value)> = view["hasDisplayViewAlias"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (bytes(&p[0]), p[1].clone()))
+        .collect();
+    assert_eq!(
+        probes,
+        [
+            (b"a1".to_vec(), json!(true)),
+            (b"A1".to_vec(), json!(true)),
+            (b"a2".to_vec(), json!(true)),
+            (b"A2".to_vec(), json!(true))
+        ],
+        "{view}"
+    );
+    assert_eq!(bytes(&view["getCanonicalViewName"]), b"v", "{view}");
+    assert_eq!(bytes(&view["getResolvedDisplayViewColorSpaceName"]), b"d", "{view}");
+    // The display color space's alias resolves to the display (use_display_aliases).
+    let lookup = dump["lookups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| bytes(&l["name"]) == b"d_alias")
+        .unwrap();
+    assert_eq!(bytes(&lookup["getCanonicalDisplayName"]), b"d", "{lookup}");
+    assert_eq!(bytes(&lookup["getDisplayDescription"]), b"the display", "{lookup}");
 }
 
 /// A config whose names the binding can't decode dumps whole: the names come back as their

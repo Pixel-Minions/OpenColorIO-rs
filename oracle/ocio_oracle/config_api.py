@@ -690,10 +690,12 @@ def dump_config(config):
       lookups       per name of the color spaces, their aliases, the roles, the named transforms
                     and their aliases, the looks and the view transforms (each once, in that
                     order): {"name", "getColorSpace" (the found space's name, or null),
-                    "getCanonicalName", "getNamedTransform" (the found one's name, or null)}
+                    "getCanonicalName", "getNamedTransform" (the found one's name, or null),
+                    "getCanonicalDisplayName", "getDisplayDescription"}
       environment   per name of getEnvironmentVarNames(): [name, getEnvironmentVarDefault]
       displays      per display of getDisplaysAll(): {"display", "isDisplayTemporary",
-                    "getDefaultView", "getViews": getViews(display), "VIEW_SHARED" and
+                    "getDefaultView", "getViews": getViews(display), "getCanonicalDisplayName",
+                    "getDisplayDescription", "VIEW_SHARED" and
                     "VIEW_DISPLAY_DEFINED": getViews(type, display), "views": per view of
                     those (each once) the view getters below, "by_color_space": per color space
                     [name, getViews(display, name), getDefaultView(display, name)]}
@@ -713,8 +715,10 @@ def dump_config(config):
       serialize     serialize()
       validate      null, or validate()'s exception (or {"undecodable"})
       not_dumped    the get*/is*/has* methods the dump never calls
-    The view getters: {"view", "hasView", "isViewShared", and getDisplayView{TransformName,
-    ColorSpaceName,Looks,Rule,Description}}."""
+    The view getters: {"view", "hasView", "isViewShared", getDisplayView{TransformName,
+    ColorSpaceName,Looks,Rule,Description}, and OCIO 2.6's "getDisplayViewAliases",
+    "hasDisplayViewAlias": per alias of those, as it is and upper-cased, [alias, the lookup],
+    "getCanonicalViewName" and "getResolvedDisplayViewColorSpaceName"}."""
     out = {"class": "Config"}
     getters, _ = _getters(config, skip=("getColorSpaces", "getLooks", "getViewTransforms",
                                         "getNamedTransforms"))
@@ -785,7 +789,9 @@ def dump_config(config):
     out["lookups"] = [{"name": value_out(k),
                        "getColorSpace": attempt(found_name, config.getColorSpace, k),
                        "getCanonicalName": attempt(config.getCanonicalName, k),
-                       "getNamedTransform": attempt(found_name, config.getNamedTransform, k)}
+                       "getNamedTransform": attempt(found_name, config.getNamedTransform, k),
+                       "getCanonicalDisplayName": attempt(config.getCanonicalDisplayName, k),
+                       "getDisplayDescription": attempt(config.getDisplayDescription, k)}
                       for k in keys]
     note("getCanonicalName", "getNamedTransform")
 
@@ -799,6 +805,18 @@ def dump_config(config):
         for what in ("TransformName", "ColorSpaceName", "Looks", "Rule", "Description"):
             entry[f"getDisplayView{what}"] = attempt(getattr(config, f"getDisplayView{what}"),
                                                      display, view)
+        # OCIO 2.6: the view's aliases, each looked up as it is and upper-cased (the lookup
+        # ignores case), and the names the display and view resolve to.
+        entry["getDisplayViewAliases"] = attempt(config.getDisplayViewAliases, display, view)
+        probes = []
+        for alias in raw_strings(lambda: config.getDisplayViewAliases(display, view)):
+            probes += [alias, alias.upper()]
+        entry["hasDisplayViewAlias"] = [
+            [value_out(a), attempt(config.hasDisplayViewAlias, display, view, a)]
+            for a in probes]
+        entry["getCanonicalViewName"] = attempt(config.getCanonicalViewName, display, view)
+        entry["getResolvedDisplayViewColorSpaceName"] = attempt(
+            config.getResolvedDisplayViewColorSpaceName, display, view)
         return entry
 
     displays = []
@@ -806,7 +824,9 @@ def dump_config(config):
         entry = {"display": value_out(display),
                  "isDisplayTemporary": attempt(config.isDisplayTemporary, display),
                  "getDefaultView": attempt(config.getDefaultView, display),
-                 "getViews": attempt(config.getViews, display)}
+                 "getViews": attempt(config.getViews, display),
+                 "getCanonicalDisplayName": attempt(config.getCanonicalDisplayName, display),
+                 "getDisplayDescription": attempt(config.getDisplayDescription, display)}
         views = []
         for vt in _enum_members(OCIO.ViewType):
             entry[vt.name] = attempt(config.getViews, vt, display)
@@ -822,7 +842,9 @@ def dump_config(config):
     out["shared_views"] = [view_getters("", v) for v in raw_strings(config.getSharedViews)]
     note("isDisplayTemporary", "getDefaultView", "getViews", "hasView", "isViewShared",
          *[f"getDisplayView{w}" for w in ("TransformName", "ColorSpaceName", "Looks", "Rule",
-                                          "Description")])
+                                          "Description")],
+         "getCanonicalDisplayName", "getDisplayDescription", "getDisplayViewAliases",
+         "hasDisplayViewAlias", "getCanonicalViewName", "getResolvedDisplayViewColorSpaceName")
 
     virtual = {}
     vviews = []
