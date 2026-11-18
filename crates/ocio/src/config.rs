@@ -44,7 +44,8 @@ use crate::color_space::ColorSpace;
 use crate::color_space_set::ColorSpaceSet;
 use crate::config_io_proxy::ConfigIoProxy;
 use crate::config_utils::{
-    get_interchange_roles_for_color_space_conversion, interchange_role_name,
+    ColorSpaceFingerprints, TestVals, get_interchange_roles_for_color_space_conversion,
+    interchange_role_name,
 };
 use crate::context::Context;
 use crate::context_variable_utils::{
@@ -523,6 +524,20 @@ struct CacheIds {
     cache_id_no_context: String,
 }
 
+/// The color space fingerprints of a config that `LocateBuiltinColorSpace` uses, computed when
+/// first needed and kept until the config changes: held by pointer, so that a caller that uses
+/// them isn't affected when the config changes.
+///
+/// Port of `Config::Impl`'s `m_csTestVals` and `m_csFingerprints` (src/OpenColorIO/
+/// Config.cpp:336-350 @ v2.6.0), under `m_fingerprintMutex`.
+#[derive(Debug, Default)]
+struct FingerprintCache {
+    /// `m_csTestVals`.
+    test_vals: Option<Arc<TestVals>>,
+    /// `m_csFingerprints`.
+    fingerprints: Option<Arc<ColorSpaceFingerprints>>,
+}
+
 impl CacheIds {
     fn new() -> CacheIds {
         CacheIds {
@@ -619,6 +634,11 @@ pub struct Config {
     cache_flags: AtomicU32,
     /// `m_processorCache`: the processors, by `std::hash` of their key.
     processor_cache: ProcessorCache<u64, Arc<Processor>>,
+    /// The fingerprints of `LocateBuiltinColorSpace`, under `m_fingerprintMutex`.
+    fingerprint_cache: Mutex<FingerprintCache>,
+    /// `m_fingerprintCalcMutex`: serializes the computation of the fingerprints, which never
+    /// runs under `m_fingerprintMutex`.
+    fingerprint_calc: Mutex<()>,
 }
 
 impl Clone for Config {
@@ -629,8 +649,10 @@ impl Clone for Config {
     /// `Clone` can't fail, so it doesn't read the environment as upstream's copy does: code that
     /// must answer as upstream calls [`Config::create_editable_copy`].
     ///
+    /// The fingerprints aren't copied: the copy computes them again when needed.
+    ///
     /// Port of `Config::Impl::operator=` (src/OpenColorIO/Config.cpp:379-457 @ v2.5.2), with
-    /// `m_useDisplayAliases` (Config.cpp:460 @ v2.6.0).
+    /// `m_useDisplayAliases` and the fingerprints (Config.cpp:460, 476-478 @ v2.6.0).
     fn clone(&self) -> Config {
         let context = Arc::new((*self.shared_context.get()).clone());
         let config = Config {
@@ -670,6 +692,9 @@ impl Clone for Config {
             cache_ids: Mutex::new(self.lock_cache_ids().clone()),
             cache_flags: AtomicU32::new(self.cache_flags.load(Ordering::Relaxed)),
             processor_cache: ProcessorCache::new(),
+            // The fingerprints are not copied, they will be recalculated if needed.
+            fingerprint_cache: Mutex::new(FingerprintCache::default()),
+            fingerprint_calc: Mutex::new(()),
         };
         config.processor_cache.clear();
         config.processor_cache.enable(
@@ -875,6 +900,8 @@ impl Config {
             cache_ids: Mutex::new(CacheIds::new()),
             cache_flags: AtomicU32::new(ProcessorCacheFlags::DEFAULT.0),
             processor_cache: ProcessorCache::new(),
+            fingerprint_cache: Mutex::new(FingerprintCache::default()),
+            fingerprint_calc: Mutex::new(()),
         };
         config.processor_cache.enable(
             config
@@ -928,10 +955,11 @@ impl Config {
         self.cache_ids.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Resets what the config computed from its state: the validation, the cache IDs, and the
-    /// cache of processors. Every change of the state calls it.
+    /// Resets what the config computed from its state: the validation, the cache IDs, the
+    /// cache of processors and the color space fingerprints. Every change of the state calls
+    /// it.
     ///
-    /// Port of `Config::Impl::resetCacheIDs` (src/OpenColorIO/Config.cpp:5462-5474 @ v2.5.2).
+    /// Port of `Config::Impl::resetCacheIDs` (src/OpenColorIO/Config.cpp:6095-6113 @ v2.6.0).
     fn reset_cache_ids(&mut self) {
         let cache_ids = self.cache_ids.get_mut().unwrap_or_else(|e| e.into_inner());
         cache_ids.cache_ids.clear();
@@ -942,6 +970,87 @@ impl Config {
         // As any changes could impact the cache keys, it's better to always flush the cache
         // of processors to not keep in memory useless instances.
         self.processor_cache.clear();
+
+        // Any change could also affect the color space fingerprints (e.g. the transform of a
+        // color space or the interchange roles), so they must be recalculated on next use.
+        *self
+            .fingerprint_cache
+            .get_mut()
+            .unwrap_or_else(|e| e.into_inner()) = FingerprintCache::default();
+    }
+
+    fn lock_fingerprint_cache(&self) -> MutexGuard<'_, FingerprintCache> {
+        self.fingerprint_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn lock_fingerprint_calc(&self) -> MutexGuard<'_, ()> {
+        self.fingerprint_calc
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The fingerprint test values of this config, computed when first needed
+    /// ([`initialize_test_vals`](crate::config_utils::initialize_test_vals)).
+    ///
+    /// Port of `Config::Impl::getColorSpaceTestVals` (src/OpenColorIO/Config.cpp:983-1019 @
+    /// v2.6.0).
+    fn color_space_test_vals(&self) -> Arc<TestVals> {
+        if let Some(test_vals) = &self.lock_fingerprint_cache().test_vals {
+            return Arc::clone(test_vals);
+        }
+
+        // The calculation is serialized with its own mutex rather than the one that protects
+        // the pointers (upstream: a config being modified takes m_cacheidMutex and then clears
+        // this cache, whereas the calculation calls getProcessor, which takes m_cacheidMutex).
+        let _calc_lock = self.lock_fingerprint_calc();
+
+        // Another thread may have completed the calculation in the meantime.
+        if let Some(test_vals) = &self.lock_fingerprint_cache().test_vals {
+            return Arc::clone(test_vals);
+        }
+
+        let mut test_vals = TestVals::default();
+        crate::config_utils::initialize_test_vals(&mut test_vals, self);
+        let test_vals = Arc::new(test_vals);
+
+        self.lock_fingerprint_cache().test_vals = Some(Arc::clone(&test_vals));
+        test_vals
+    }
+
+    /// The fingerprints of every color space of this config, computed when first needed
+    /// ([`initialize_fingerprint_vec`](crate::config_utils::initialize_fingerprint_vec) of
+    /// [`Config::color_space_test_vals`]).
+    ///
+    /// Port of `Config::Impl::getColorSpaceFingerprints` (src/OpenColorIO/Config.cpp:1021-1059
+    /// @ v2.6.0).
+    fn color_space_fingerprints(&self) -> Result<Arc<ColorSpaceFingerprints>> {
+        if let Some(fingerprints) = &self.lock_fingerprint_cache().fingerprints {
+            return Ok(Arc::clone(fingerprints));
+        }
+
+        // Get the test values used to calculate the fingerprints. Note that this must be done
+        // before taking the calculation mutex below.
+        let test_vals = self.color_space_test_vals();
+
+        // As above, the calculation must not be done while holding m_fingerprintMutex.
+        let _calc_lock = self.lock_fingerprint_calc();
+
+        // Another thread may have completed the calculation in the meantime.
+        if let Some(fingerprints) = &self.lock_fingerprint_cache().fingerprints {
+            return Ok(Arc::clone(fingerprints));
+        }
+
+        let mut fingerprints = ColorSpaceFingerprints {
+            test_vals: (*test_vals).clone(),
+            vec: Vec::new(),
+        };
+        crate::config_utils::initialize_fingerprint_vec(&mut fingerprints, self)?;
+        let fingerprints = Arc::new(fingerprints);
+
+        self.lock_fingerprint_cache().fingerprints = Some(Arc::clone(&fingerprints));
+        Ok(fingerprints)
     }
 
     /// Changes the current context through `change`, as the callers of `getCurrentContext` see
@@ -7928,6 +8037,104 @@ impl Config {
             src_config,
             builtin_config,
             builtin_color_space_name.as_ref(),
+        )
+    }
+
+    /// The name of the color space of `builtin_config` (active or inactive) equivalent to the
+    /// color space `src_color_space_name` (a name, role or alias; inactive allowed) of
+    /// `src_config`, found by comparing the fingerprints of test colors through the interchange
+    /// spaces (the roles, else the heuristics); `""` when none is equivalent. A data space finds
+    /// the built-in config's `raw`. The fingerprints of the built-in config are computed on the
+    /// first call and kept until it changes, and so are the source config's test values. An
+    /// error for an empty name, a color space the source config doesn't have, and a source or
+    /// built-in config whose interchange space (of the color space's reference space type)
+    /// can't be identified.
+    ///
+    /// The name is a C string (`const char *`): up to its first NUL.
+    ///
+    /// Port of `Config::LocateBuiltinColorSpace` (src/OpenColorIO/Config.cpp:3084-3151 @
+    /// v2.6.0), with `ConfigUtils::LocateBuiltinColorSpace` (ConfigUtils.cpp:1510-1532).
+    #[doc(alias = "LocateBuiltinColorSpace")]
+    pub fn locate_builtin_color_space<'b>(
+        src_config: &Config,
+        src_color_space_name: impl AsRef<[u8]>,
+        builtin_config: &'b Config,
+    ) -> Result<&'b [u8]> {
+        let src_color_space_name = c_str(src_color_space_name.as_ref());
+        if src_color_space_name.is_empty() {
+            return Err(Exception::new(
+                "LocateBuiltinColorSpace: arguments must not be null.",
+            ));
+        }
+
+        // Note that this resolves roles and aliases and finds inactive color spaces.
+        let Some(src_color_space) = src_config.color_space(src_color_space_name) else {
+            return Err(Exception::new(
+                [
+                    b"LocateBuiltinColorSpace: Source config does not contain the requested color \
+                      space: "
+                        .as_slice(),
+                    src_color_space_name,
+                    b".",
+                ]
+                .concat(),
+            ));
+        };
+
+        if src_color_space.is_data() {
+            // Data spaces have no colorimetry to compare, so return early rather than
+            // requiring an interchange space to be identified. Built-in configs always have a
+            // "raw" data color space, so just use that rather than searching for one.
+            return Ok(builtin_config
+                .color_space("raw")
+                .map_or(b"", |cs| cs.name()));
+        }
+
+        // Calculate (or reuse) the cached fingerprints of both configs.
+        let src_test_vals = src_config.color_space_test_vals();
+
+        let ref_space_type = src_color_space.reference_space_type();
+
+        let test_vals_are_usable = |tv: &TestVals| {
+            if ref_space_type == ReferenceSpaceType::Display {
+                tv.display_ref_test_vals_converted
+            } else {
+                tv.scene_ref_test_vals_converted
+            }
+        };
+
+        // The src test values are the same colors as the ones used for the built-in config,
+        // but expressed in the reference space of the source config, which is what allows the
+        // fingerprints of the two configs to be compared without needing to adjust the
+        // reference space of the src color space itself.
+        if !test_vals_are_usable(&src_test_vals) {
+            return Err(Exception::new(
+                [
+                    b"Heuristics were not able to find an interchange space in the source \
+                      config, so it is not possible to search for the color space: "
+                        .as_slice(),
+                    src_color_space.name(),
+                    b".",
+                ]
+                .concat(),
+            ));
+        }
+
+        let builtin_fingerprints = builtin_config.color_space_fingerprints()?;
+
+        if !test_vals_are_usable(&builtin_fingerprints.test_vals) {
+            return Err(Exception::new(
+                "Heuristics were not able to find an interchange space in the built-in config.",
+            ));
+        }
+
+        // Returns "" if no match is found.
+        crate::config_utils::locate_builtin_color_space(
+            src_config,
+            src_color_space,
+            builtin_config,
+            &src_test_vals,
+            &builtin_fingerprints,
         )
     }
 

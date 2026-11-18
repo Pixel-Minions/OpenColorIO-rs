@@ -2582,7 +2582,7 @@ impl<'o, 'a> ColorspacesMerger<'o, 'a> {
         // when the inactive list is regenerated to avoid listing removed color spaces,
         // some color spaces that were inactive may become active.
         let duplicate_in_base =
-            config_utils::find_equivalent_colorspace(fingerprints, input_config, input_cs)?
+            config_utils::find_equivalent_color_space(fingerprints, input_config, input_cs)?
                 .to_vec();
 
         let strategy = m.params.colorspaces();

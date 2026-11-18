@@ -605,7 +605,7 @@ colorspaces:   # reference space = linear rec 709
     }
 }
 
-/// Port of `OCIO_ADD_TEST(MergeConfigs, config_utils_find_equivalent_colorspace)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(MergeConfigs, config_utils_find_equivalent_colorspace)` @ v2.6.0.
 #[test]
 fn config_utils_find_equivalent_colorspace() {
     const INPUT: &str = r#"ocio_profile_version: 2.1
@@ -724,7 +724,7 @@ display_colorspaces:
 
     let find = |name: &str| -> Vec<u8> {
         let cs = input_config.color_space(name).unwrap();
-        find_equivalent_colorspace(&fingerprints, &input_config, cs)
+        find_equivalent_color_space(&fingerprints, &input_config, cs)
             .unwrap()
             .to_vec()
     };
@@ -745,7 +745,7 @@ display_colorspaces:
     assert!(
         !calc_color_space_fingerprint(
             &mut fingerprint_vals,
-            &fingerprints,
+            &fingerprints.test_vals,
             &input_config,
             input_config.color_space("Rec.601 - Display").unwrap(),
         )
@@ -758,7 +758,7 @@ display_colorspaces:
     assert!(
         !calc_color_space_fingerprint(
             &mut fingerprint_vals,
-            &fingerprints,
+            &fingerprints.test_vals,
             &input_config,
             input_config.color_space("Rec.601 (PAL) - Display").unwrap(),
         )
@@ -767,6 +767,38 @@ display_colorspaces:
     for v in &fingerprint_vals {
         assert!(f64::from(*v) >= 0.);
     }
+
+    // Test the overload that uses the test values of the input config rather than those of
+    // the base config. This is what Config::LocateBuiltinColorSpace uses, since it allows the
+    // color spaces of two configs to be compared without first adjusting the reference space
+    // of the input color space.
+
+    let mut input_test_vals = TestVals::default();
+    initialize_test_vals(&mut input_test_vals, &input_config);
+
+    // The base config has both interchange roles.
+    assert!(fingerprints.test_vals.scene_ref_test_vals_converted);
+    assert!(fingerprints.test_vals.display_ref_test_vals_converted);
+
+    // The input config has neither interchange role, so the heuristics are used. They are able
+    // to identify the scene-referred reference space ("ref_space"), but they do not support
+    // display-referred spaces. (The display-referred test values happen to be correct anyway
+    // here, since the display reference space is CIE-XYZ-D65.)
+    assert!(input_test_vals.scene_ref_test_vals_converted);
+    assert!(!input_test_vals.display_ref_test_vals_converted);
+
+    // The reference space of the input config is also ACES2065-1, so the results are the same
+    // as the ones above.
+    let find_with = |name: &str| -> Vec<u8> {
+        let cs = input_config.color_space(name).unwrap();
+        find_equivalent_color_space_with(&fingerprints, &input_test_vals, &input_config, cs)
+            .unwrap()
+            .to_vec()
+    };
+    assert_eq!(find_with("ACES cg"), b"ACEScg");
+    assert_eq!(find_with("standard RGB"), b"sRGB - Texture");
+    assert_eq!(find_with("very approx. standard RGB"), b"");
+    assert_eq!(find_with("pq display"), b"Rec.2100-PQ - Display");
 }
 
 /// Port of `OCIO_ADD_TEST(ConfigUtils, sanitize_id_token)` @ v2.6.0.
