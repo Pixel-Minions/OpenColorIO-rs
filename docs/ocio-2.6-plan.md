@@ -105,6 +105,12 @@ config, display/view alias, interop ID, merge and compatibility ones (and `Confi
 `Config/display_view`) to `ocio26-config`; built-in configs and transforms and the fixed
 functions to `ocio26-ops`; the rest to `ocio26-base` (phase 1).
 
+The list is also data, `xtask/data/upstream-tests-changed-2.6.0.txt` (`cargo xtask
+upstream-changed` writes it, `--check` checks it): `cargo xtask parity` warns about the stale
+markers and lists them in `docs/parity.md` ("Stale ports"), and `cargo xtask ci --no-stale`,
+a step of the 1.1.0 release (`docs/release-checklist.md`), fails while any remain. The ratchet
+still counts them (orchestrator, 2026-11-18, option (b)).
+
 | Test | Upstream file:line @ v2.6.0 | | Card |
 |---|---|---|---|
 | `OCIO_ADD_TEST(BuiltinConfigs, basic)` | `tests/cpu/builtinconfigs/BuiltinConfig_tests.cpp` | changed | `ocio26-ops` |

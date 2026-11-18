@@ -216,15 +216,18 @@ const MARKER_VERSIONS: &[&str] = &["v2.5.2", "v2.6.0"];
 /// The upstream test a port marker line names: `/// Port of `, one upstream test macro in
 /// backquotes, then ` @ v2.5.2.` or ` @ v2.6.0.`, with anything after that. Any other line
 /// names none.
+#[cfg(test)]
 fn marker_id(line: &str) -> Option<(&'static str, String)> {
+    marker_with_version(line).map(|(suite, id, _)| (suite, id))
+}
+
+/// `marker_id` and the version the marker names.
+fn marker_with_version(line: &str) -> Option<(&'static str, String, &'static str)> {
     let rest = line.trim_start().strip_prefix("/// Port of `")?;
     let (invocation, after) = rest.split_once('`')?;
-    if !MARKER_VERSIONS
+    let version = *MARKER_VERSIONS
         .iter()
-        .any(|v| after.starts_with(&format!(" @ {v}.")))
-    {
-        return None;
-    }
+        .find(|v| after.starts_with(&format!(" @ {v}.")))?;
     // The backquotes hold exactly one macro, and nothing else.
     if !invocation.starts_with("OCIO_ADD_") || !invocation.ends_with(')') {
         return None;
@@ -233,16 +236,16 @@ fn marker_id(line: &str) -> Option<(&'static str, String)> {
     if ids.len() != 1 {
         return None;
     }
-    ids.pop()
+    ids.pop().map(|(suite, id)| (suite, id, version))
 }
 
 /// The upstream tests `text` (a Rust source) marks as ported: each marker line
 /// ([`marker_id`]) in a comment block directly above a `#[test]` function.
-fn markers_in(text: &str) -> Vec<(&'static str, String)> {
+fn markers_in(text: &str) -> Vec<(&'static str, String, &'static str)> {
     let lines: Vec<&str> = text.lines().collect();
     let mut ids = Vec::new();
     for (i, line) in lines.iter().enumerate() {
-        let Some(id) = marker_id(line) else {
+        let Some(id) = marker_with_version(line) else {
             continue;
         };
         // The marker must be in the comment block directly above a #[test] function.
@@ -260,16 +263,34 @@ fn markers_in(text: &str) -> Vec<(&'static str, String)> {
 
 /// Ported-test markers in Rust sources: (suite, id) -> Rust files marking it.
 pub(crate) fn ported_markers() -> Result<BTreeMap<(&'static str, String), Vec<String>>, String> {
-    let root = paths::workspace_root();
     let mut found: BTreeMap<(&'static str, String), Vec<String>> = BTreeMap::new();
+    for ((suite, id, _), files) in versioned_markers()? {
+        found.entry((suite, id)).or_default().extend(files);
+    }
+    for files in found.values_mut() {
+        files.sort();
+    }
+    Ok(found)
+}
+
+/// Ported-test markers with the version each names: (suite, id, version) -> Rust files.
+pub(crate) type VersionedMarkers = BTreeMap<(&'static str, String, &'static str), Vec<String>>;
+
+/// Ported-test markers in Rust sources with the version each names.
+pub(crate) fn versioned_markers() -> Result<VersionedMarkers, String> {
+    let root = paths::workspace_root();
+    let mut found = VersionedMarkers::new();
     for rel in crate::walk(&root.join("crates")) {
         if !rel.ends_with(".rs") {
             continue;
         }
         let file = format!("crates/{rel}");
         let text = std::fs::read_to_string(root.join(&file)).map_err(|e| format!("{file}: {e}"))?;
-        for (suite, id) in markers_in(&text) {
-            found.entry((suite, id)).or_default().push(file.clone());
+        for (suite, id, version) in markers_in(&text) {
+            found
+                .entry((suite, id, version))
+                .or_default()
+                .push(file.clone());
         }
     }
     Ok(found)
@@ -532,6 +553,8 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     let map = crate::upstream::load_map()?;
     let waivers = crate::guards::load_waivers()?;
     let python = upstream_python_tests();
+    let markers = versioned_markers()?;
+    let stale = crate::stale::stale(&markers, &crate::stale::changed_list()?);
 
     let mut per_file: BTreeMap<&str, (&str, usize, usize, usize)> = BTreeMap::new();
     for t in &c.upstream {
@@ -592,11 +615,36 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
         map.files.len()
     );
     let _ = writeln!(md, "| Open waivers | {} | | |", waivers.waivers.len());
+    let _ = writeln!(
+        md,
+        "| Stale ports (marked @ {}, upstream body changed since) | {} | | |",
+        crate::stale::OLD_MARKER,
+        stale.len()
+    );
     let _ = writeln!(md, "\n## Upstream test files\n");
     let _ = writeln!(md, "| File | Suite | Ported | N/A | Tests |");
     let _ = writeln!(md, "|---|---|---:|---:|---:|");
     for (file, (suite, n, p, a)) in &per_file {
         let _ = writeln!(md, "| `{file}` | {suite} | {p} | {a} | {n} |");
+    }
+    let _ = writeln!(md, "\n## Stale ports\n");
+    let _ = writeln!(
+        md,
+        "Ported tests still marked `@ {}` whose upstream body changed in the pinned release \
+         (`{}`): each owning card re-ports them `@ v2.6.0`; `cargo xtask ci --no-stale` fails \
+         while any remain.\n",
+        crate::stale::OLD_MARKER,
+        crate::stale::CHANGED_LIST
+    );
+    if stale.is_empty() {
+        let _ = writeln!(md, "None.");
+    } else {
+        let _ = writeln!(md, "| Test | Suite | Rust files |");
+        let _ = writeln!(md, "|---|---|---|");
+        for (suite, id, files) in &stale {
+            let files: Vec<String> = files.iter().map(|f| format!("`{f}`")).collect();
+            let _ = writeln!(md, "| `{id}` | {suite} | {} |", files.join(", "));
+        }
     }
     let _ = writeln!(md, "\n## Upstream files by kind\n");
     let mut kinds: BTreeMap<&str, [usize; 4]> = BTreeMap::new();
@@ -629,6 +677,14 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     }
     std::fs::create_dir_all(path.parent().expect("docs dir")).map_err(|e| e.to_string())?;
     std::fs::write(&path, md).map_err(|e| e.to_string())?;
+    if !stale.is_empty() {
+        println!(
+            "parity: warning: {} ported tests are marked @ {} but their upstream body changed \
+             (docs/parity.md, \"Stale ports\")",
+            stale.len(),
+            crate::stale::OLD_MARKER
+        );
+    }
     println!(
         "parity: cpu {}/{}, gpu {}/{}, python {}/{}",
         ported("cpu"),
@@ -776,7 +832,7 @@ fn after_code() {}
 #[test]
 fn partial() {}
 ";
-        let ids: Vec<String> = markers_in(text).into_iter().map(|(_, id)| id).collect();
+        let ids: Vec<String> = markers_in(text).into_iter().map(|(_, id, _)| id).collect();
         assert_eq!(ids, ["A/attached", "A/with_lines_between"]);
     }
 }

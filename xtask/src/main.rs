@@ -26,6 +26,7 @@ mod register_merge;
 mod registers;
 mod scratch;
 mod shards;
+mod stale;
 mod upstream;
 mod wheel;
 mod wheel_audit;
@@ -85,10 +86,13 @@ Guardrails:
   ratchet [--update] [--base <rev>]
                               ported upstream tests may only increase (--update records
                               the current counts; `xtask land` does it at merge time)
-  ci [--main] [--base <rev> | --base-file <path>]
+  ci [--main] [--no-stale] [--base <rev> | --base-file <path>]
                               guards + fixtures verify + ported tests >= the baseline;
                               --main (main and land commits): docs/ratchet.toml and
-                              docs/parity.md are current
+                              docs/parity.md are current; --no-stale (the release): no
+                              ported test marked @ v2.5.2 whose upstream body changed
+  upstream-changed [--check]  write (check) xtask/data/upstream-tests-changed-2.6.0.txt,
+                              the upstream tests whose body changed since v2.5.2
   The ratchet's baseline is docs/ratchet.toml at <rev> (the base: a PR's base, or where the
   branch left phase0) or in <path>; without either, this checkout's own, which a branch
   could lower.
@@ -191,8 +195,17 @@ fn main() -> ExitCode {
         ["upstream-tests"] => parity::list_tests(),
         ["parity"] => parity::write_dashboard(false),
         ["parity", "--check"] => parity::write_dashboard(true),
-        ["ci", rest @ ..] => parse_base(rest, &["--main"])
-            .and_then(|(flags, base)| ci(flags.contains(&"--main"), &base)),
+        ["ci", rest @ ..] => {
+            parse_base(rest, &["--main", "--no-stale"]).and_then(|(flags, base)| {
+                ci(
+                    flags.contains(&"--main"),
+                    flags.contains(&"--no-stale"),
+                    &base,
+                )
+            })
+        }
+        ["upstream-changed"] => stale::upstream_changed(false),
+        ["upstream-changed", "--check"] => stale::upstream_changed(true),
         ["help"] | [] => {
             print!("{USAGE}");
             Ok(())
@@ -237,7 +250,7 @@ fn parse_base<'a>(args: &[&'a str], flags: &[&str]) -> Result<(Vec<&'a str>, Bas
 /// `cargo xtask ci`. Branch mode (the default) checks that the ported-test count is at least
 /// the baseline; chunks never edit `docs/ratchet.toml` or `docs/parity.md`. `--main` checks
 /// that both generated files are current, as `main` and land commits must be.
-fn ci(main: bool, base: &Baseline) -> Result<(), String> {
+fn ci(main: bool, no_stale: bool, base: &Baseline) -> Result<(), String> {
     if main {
         println!("ci: main mode: docs/ratchet.toml and docs/parity.md must be current");
     } else {
@@ -258,7 +271,31 @@ fn ci(main: bool, base: &Baseline) -> Result<(), String> {
     if main {
         parity::write_dashboard(true)?;
     }
+    if no_stale {
+        no_stale_markers()?;
+    }
     Ok(())
+}
+
+/// `cargo xtask ci --no-stale`: an error while a ported test is marked `@ v2.5.2` though its
+/// upstream body changed in the pinned release (`stale.rs`; the release's step).
+fn no_stale_markers() -> Result<(), String> {
+    stale::upstream_changed(true)?;
+    let markers = parity::versioned_markers()?;
+    let stale = stale::stale(&markers, &stale::changed_list()?);
+    if stale.is_empty() {
+        println!("ci: no stale port markers");
+        return Ok(());
+    }
+    let mut message = format!(
+        "{} ported tests are marked @ {} but their upstream body changed:",
+        stale.len(),
+        stale::OLD_MARKER
+    );
+    for (suite, id, files) in &stale {
+        message.push_str(&format!("\n  {suite} {id}: {}", files.join(", ")));
+    }
+    Err(message)
 }
 
 /// Files under `dir` (recursively), as paths relative to `dir` with `/` separators, sorted.
