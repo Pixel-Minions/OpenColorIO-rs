@@ -10,7 +10,7 @@ use ocio_testkit::oracle::{Oracle, machine_description};
 use ocio_testkit::paths;
 use serde::Deserialize;
 
-const ORACLE_PACKAGE: &str = "opencolorio==2.5.2";
+const ORACLE_PACKAGE: &str = "opencolorio==2.6.0";
 
 #[derive(Deserialize)]
 struct RegenOutput {

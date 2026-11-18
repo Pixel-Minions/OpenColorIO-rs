@@ -239,6 +239,11 @@ fn exceptions_are_reported_per_call() {
 /// The dump of a built-in config reaches every getter but the two that take what no config
 /// holds (a file path, a processor's arguments), and lists them; its lookups find each color
 /// space by name, alias and role.
+///
+/// OCIO 2.6.0 added six display and view getters (display/view aliases, PR #2341, and
+/// `getDisplayDescription`). The dump reaches them once card `ocio26-config` ports them
+/// (docs/ocio-2.6-plan.md, phase 3); until then they are listed here by name, so a getter the
+/// wheel adds or drops still fails this test.
 #[test]
 fn the_dump_reaches_every_getter() {
     let response = call(json!({
@@ -248,7 +253,16 @@ fn the_dump_reaches_every_getter() {
     let dump = result(&calls(&response)[0]);
     assert_eq!(
         dump["not_dumped"],
-        json!(["getColorSpaceFromFilepath", "getProcessor"])
+        json!([
+            "getCanonicalDisplayName",
+            "getCanonicalViewName",
+            "getColorSpaceFromFilepath",
+            "getDisplayDescription",
+            "getDisplayViewAliases",
+            "getProcessor",
+            "getResolvedDisplayViewColorSpaceName",
+            "hasDisplayViewAlias"
+        ])
     );
     for key in [
         "getters",

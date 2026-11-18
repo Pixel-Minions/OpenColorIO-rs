@@ -481,23 +481,37 @@ fn extract_reports_links() {
     }
 }
 
-/// What an extraction writes through a link outside the destination, but inside the request's
-/// temporary directory, is reported as "outside": a link `esc` to `..`, then a file
-/// `esc/outside.txt`. Linux only: on Windows the process may not make links.
+/// An archive whose link leads out of the destination, but stays inside the request's
+/// temporary directory (a link `esc` to `..`, then a file `esc/outside.txt`): the 2.5.2 wheel
+/// extracted it and wrote `outside.txt` there, which the request reported as "outside"; the
+/// 2.6.0 wheel's minizip-ng refuses the link and extracts nothing ("Could not extract", also for
+/// links to `../side`, `../side/` and, from a directory, `../..`; probed in Rocky Linux 9,
+/// 2026-11-18). The request reports the exception at the extract stage, and that nothing was
+/// written, in the destination or outside it. Linux only: on Windows the process may not make
+/// links.
 #[cfg(unix)]
 #[test]
 fn extract_reports_what_is_written_outside() {
     let archive = zip(&[link(b"esc", b".."), entry(b"esc/outside.txt", b"out")]);
     let (result, blobs) = extract(&archive);
-    assert!(result.get("exception").is_none(), "{result}");
-    assert_eq!(paths(&result, "files"), Vec::<Vec<u8>>::new(), "{result}");
+    assert_eq!(result["stage"], "extract", "{result}");
     assert_eq!(
-        paths(&result["outside"], "files"),
-        [b"outside.txt"],
+        result["exception"]["message"], "Could not extract: $FILES/a.ocioz",
         "{result}"
     );
-    let f = &result["outside"]["files"][0];
-    assert_eq!(blobs[f["contents"].as_u64().unwrap() as usize], b"out");
+    for key in ["files", "dirs", "links"] {
+        assert_eq!(
+            paths(&result, key),
+            Vec::<Vec<u8>>::new(),
+            "{key}: {result}"
+        );
+        assert_eq!(
+            paths(&result["outside"], key),
+            Vec::<Vec<u8>>::new(),
+            "outside {key}: {result}"
+        );
+    }
+    assert!(blobs.is_empty(), "{result}");
 }
 
 /// Archives whose links could make the extraction write outside the request's temporary

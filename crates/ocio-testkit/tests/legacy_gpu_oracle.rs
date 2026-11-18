@@ -107,7 +107,7 @@ print(json.dumps({"classes":seen,"languages":len(OCIO.GpuLanguage.__members__),"
         classes.iter().map(|v| v.as_str().unwrap()).collect();
     assert_eq!(unique.len(), classes.len());
     assert!(report["languages"].as_u64().unwrap() >= 10);
-    assert_eq!(report["abi"]["wheel_version"], json!("2.5.2"));
+    assert_eq!(report["abi"]["wheel_version"], json!("2.6.0"));
     assert_eq!(report["source_key"].as_str().unwrap().len(), 64);
     assert_eq!(report["nondefault_dynamic_values"], json!(4));
     assert_eq!(report["config_sources"], json!(3));
