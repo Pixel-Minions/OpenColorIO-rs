@@ -134,9 +134,10 @@ fn families() -> Vec<Family> {
             doc: Box::new(|n| {
                 // The name's characters are one byte in the file and two in UTF-8: its buffer
                 // holds 3n + 3 bytes. Its values sit just above the threshold's (fewer bytes of
-                // the second value's block than the threshold needs).
+                // the second value's block than the threshold needs): 16,783,850 for expat
+                // 2.8.4's structures, where 2.7.2's smaller ones took 16,783,700.
                 let mut doc = b"<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n".to_vec();
-                let mut rest = base(16_783_700, PAD, V2, "", "");
+                let mut rest = base(16_783_850, PAD, V2, "", "");
                 let at = rest
                     .windows(8)
                     .position(|w| w == b"<t>\n</t>")

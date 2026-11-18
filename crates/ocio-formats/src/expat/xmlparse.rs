@@ -44,9 +44,10 @@
 //! `XML_ERROR_NO_MEMORY` once expat's own heap use reaches 64 MiB at more than 100 times the
 //! document's direct bytes. The port counts what expat would allocate, block for block
 //! ([`super::heap`]): its pools' blocks, its hash tables, its tags' buffers, its attribute
-//! array, its open entities, its default attributes and its group connector, with the sizes
-//! the wheels' compilers give expat's structures; so it refuses the same documents, at the
-//! same allocation (checked against both wheels by `crates/ocio/tests/xml_memory_oracle.rs`).
+//! array, its open entities, its default attributes and their name tables, and its group
+//! connector, with the sizes the wheels' compilers give expat's structures; so it refuses
+//! the same documents, at the same allocation (checked against both wheels by
+//! `crates/ocio/tests/xml_memory_oracle.rs`).
 //!
 //! **Memory.** Upstream keeps strings in pools and positions as pointers; the port owns its
 //! strings and keeps positions as indices into the text being parsed (the parse buffer, or an
@@ -1906,15 +1907,23 @@ impl<'a, E> Parser<'a, E> {
         // defaultAtts: 8 at first, then twice as many.
         let len = element.default_atts.len();
         self.heap.grow_default_atts(ty, len)?;
+        if !is_cdata {
+            self.dtd.att_ids[att_id].maybe_tokenized = true;
+        }
+        // The name's entry in defaultAttForName, made if missing; refused, the attribute is
+        // not added.
+        if !self.dtd.elements[ty]
+            .default_att_for_name
+            .contains_key(&att_id)
+        {
+            self.heap.insert_default_att_name(ty)?;
+        }
         let element = &mut self.dtd.elements[ty];
         element.default_atts.push(DefaultAttribute {
             id: att_id,
             is_cdata,
             value,
         });
-        if !is_cdata {
-            self.dtd.att_ids[att_id].maybe_tokenized = true;
-        }
         // NOTE: The XML 1.0r4 spec says: "When more than one definition is provided for the
         // same attribute of a given element type, the first declaration is binding and later
         // declarations are ignored."

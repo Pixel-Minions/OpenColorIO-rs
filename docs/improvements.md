@@ -2789,18 +2789,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-xml` (4.4b, `crates/ocio-formats/src/expat/xmlparse.rs`,
   `do_content`).
 
-### I-171. The XML parser's memory limit is 40 bytes apart on Windows and Linux
+### I-171. The XML parser's memory limit is 32 bytes apart on Windows and Linux
 
-- **Upstream:** expat 2.7.2's allocation tracker fails an allocation, and with it the parse
-  (`XML_ERROR_NO_MEMORY`, "out of memory"), once the heap expat allocated reaches 64 MiB and
-  more than 100 times the document's direct bytes (`expat_heap_increase_tolerable`,
-  `expat_malloc`, `expat_realloc`, `expat/lib/xmlparse.c:812-1005` @ R_2_7_2; the defaults in
-  `internal.h:152-154`). It counts the sizes of expat's own blocks: its parser structure,
-  pools, hash tables, tags, attribute arrays, open entities and default attributes, each
-  with an 8-byte header. They are the same in both wheels but the parser structure's, which
-  holds `long` and `unsigned long` fields: 1,048 bytes as MSVC lays it out and 1,088 with GCC.
-  So a document within 40 bytes of the limit (a pool block of 32 MiB, say, filled to within
-  20 bytes of it) is refused on Linux and read on Windows.
+- **Upstream:** expat's allocation tracker (2.7.2, and 2.8.4 with OCIO 2.6.0) fails an
+  allocation, and with it the parse (`XML_ERROR_NO_MEMORY`, "out of memory"), once the heap
+  expat allocated reaches 64 MiB and more than 100 times the document's direct bytes
+  (`expat_heap_increase_tolerable`, `expat_malloc`, `expat_realloc`,
+  `expat/lib/xmlparse.c:870-1069` @ R_2_8_4; the defaults in `internal.h:149-151`). It counts
+  the sizes of expat's own blocks: its parser structure, pools, hash tables, tags, attribute
+  arrays, open entities, default attributes and their name tables, each with an 8-byte
+  header. They are the same in both wheels but the parser structure's, which holds `long` and
+  `unsigned long` fields: in expat 2.8.4, 1,072 bytes as MSVC lays it out and 1,104 with GCC
+  (2.7.2's were 1,048 and 1,088: 40 bytes apart). So a document within 32 bytes of the limit
+  (a pool block of 32 MiB, say, filled to within 16 bytes of it) is refused on Linux and read
+  on Windows.
 - **Who notices:** only documents at the limit: tens of MiB of parser memory from a document a
   hundred times smaller, which no LUT or CDL file comes near.
 - **A fix:** none needed; dropping the parser structure from the count would make the
@@ -2810,6 +2812,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/tests/xml_memory_oracle.rs` finds where families of documents start being
   refused, and both wheels agree to the byte). Before that chunk the port counted its own
   structures (the owner's decision of 2026-10-08, superseded once the exact count worked).
+  Moved to expat 2.8.4's sizes, its default-attribute name tables and its single free list of
+  open entities in `ocio26-deps` (chunk 5).
 
 ### I-172. The XML readers read a number out of range as 0 on Linux, and as infinity on Windows
 
