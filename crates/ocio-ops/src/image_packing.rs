@@ -11,10 +11,11 @@
 
 use core::ffi::{c_int, c_long};
 
-use crate::bit_depth_utils::ChannelType;
+use crate::bit_depth_utils::{ChannelType, get_bit_depth_max_value};
 use crate::exception::{Exception, Result};
 use crate::image_desc::{ChannelPos, GenericImageDesc};
 use crate::op::{Pixels, PixelsMut};
+use crate::open_color_types::BitDepth;
 
 /// Where the channels of the pixel at `image_pixel_start_index` are: each channel's buffer and
 /// byte offset (`None` for a missing alpha). `None` when the position isn't in the image.
@@ -92,16 +93,21 @@ fn run_is_inside(
 /// Packing and unpacking for one channel type (`BitDepthInfo<BD>::Type`). `f32` has its own
 /// implementation, as upstream specializes `Generic<float>`.
 ///
-/// Port of `Generic<Type>` (src/OpenColorIO/ImagePacking.h:49-63,
-/// src/OpenColorIO/ImagePacking.cpp:21-309 @ v2.5.2).
+/// Port of `Generic<Type>` (src/OpenColorIO/ImagePacking.h:49-64,
+/// src/OpenColorIO/ImagePacking.cpp:21-317 @ v2.6.0).
 pub trait Generic: ChannelType {
+    /// `(Type)(maxValue)`: the C++ cast of a bit depth's maximum (an integer code, or 1 for
+    /// half) to the channel type, exact for every bit depth of the type.
+    fn from_max_value(max_value: f32) -> Self;
+
     /// Reads `output_buffer_size` pixels of `src_img`, from pixel `image_pixel_start_index`
-    /// along its row, into `in_bit_depth_buffer` as RGBA (alpha 0 when the image has none),
-    /// then converts them into `output_buffer` with the image's bit-depth op. A run that would
-    /// reach outside the buffers returns [`WRAPPED_INDEX`] (U-15).
+    /// along its row, into `in_bit_depth_buffer` as RGBA (alpha the maximum code of
+    /// `input_bit_depth` when the image has none), then converts them into `output_buffer`
+    /// with the image's bit-depth op. A run that would reach outside the buffers returns
+    /// [`WRAPPED_INDEX`] (U-15).
     ///
-    /// Port of `Generic<Type>::PackRGBAFromImageDesc` (src/OpenColorIO/ImagePacking.cpp:21-89
-    /// @ v2.5.2). Its null-buffer check has no Rust counterpart: slices aren't null.
+    /// Port of `Generic<Type>::PackRGBAFromImageDesc` (src/OpenColorIO/ImagePacking.cpp:21-96
+    /// @ v2.6.0). Its null-buffer check has no Rust counterpart: slices aren't null.
     fn pack_rgba_from_image_desc(
         src_img: &GenericImageDesc,
         src_buffers: &[&[u8]],
@@ -109,13 +115,22 @@ pub trait Generic: ChannelType {
         output_buffer: &mut [f32],
         output_buffer_size: c_int,
         image_pixel_start_index: c_long,
+        input_bit_depth: BitDepth,
     ) -> Result<()> {
+        let alpha = || -> Result<Self> {
+            let max_value = get_bit_depth_max_value(input_bit_depth)? as f32;
+            if max_value <= 0.0 {
+                return Err(Exception::new("Invalid bit depth max value."));
+            }
+            Ok(Self::from_max_value(max_value))
+        };
         let pixels_copied = gather(
             src_img,
             src_buffers,
             in_bit_depth_buffer,
             output_buffer_size,
             image_pixel_start_index,
+            alpha,
         )?;
         let values = 4 * pixels_copied;
 
@@ -177,16 +192,39 @@ pub trait Generic: ChannelType {
     }
 }
 
-impl Generic for u8 {}
-impl Generic for u16 {}
-impl Generic for half::f16 {}
+impl Generic for u8 {
+    /// A `float` to `uint8_t` conversion: 255 for `BIT_DEPTH_UINT8`.
+    fn from_max_value(max_value: f32) -> Self {
+        max_value as u8
+    }
+}
 
-/// Port of `Generic<float>` (src/OpenColorIO/ImagePacking.cpp:91-159, 231-299 @ v2.5.2): the
+impl Generic for u16 {
+    /// A `float` to `uint16_t` conversion: 1023, 4095 or 65535.
+    fn from_max_value(max_value: f32) -> Self {
+        max_value as u16
+    }
+}
+
+impl Generic for half::f16 {
+    /// Imath's `half(float)`: 1 for `BIT_DEPTH_F16`.
+    fn from_max_value(max_value: f32) -> Self {
+        half::f16::from_bits(crate::imath_half::float_to_half(max_value))
+    }
+}
+
+/// Port of `Generic<float>` (src/OpenColorIO/ImagePacking.cpp:98-166, 238-306 @ v2.6.0): the
 /// pixels go straight into, or come straight from, the float scanline, and the image's
 /// bit-depth op, the first or the last op of the processing, works on it in place.
 impl Generic for f32 {
+    /// Unused: the float packing's missing alpha is `1.0f` itself.
+    fn from_max_value(max_value: f32) -> Self {
+        max_value
+    }
+
     /// Port of `Generic<float>::PackRGBAFromImageDesc`
-    /// (src/OpenColorIO/ImagePacking.cpp:91-159 @ v2.5.2): `in_bit_depth_buffer` is unused.
+    /// (src/OpenColorIO/ImagePacking.cpp:98-166 @ v2.6.0): `in_bit_depth_buffer` and
+    /// `input_bit_depth` are unused, and alpha is 1 when the image has none.
     fn pack_rgba_from_image_desc(
         src_img: &GenericImageDesc,
         src_buffers: &[&[u8]],
@@ -194,6 +232,7 @@ impl Generic for f32 {
         output_buffer: &mut [f32],
         output_buffer_size: c_int,
         image_pixel_start_index: c_long,
+        _input_bit_depth: BitDepth,
     ) -> Result<()> {
         let pixels_copied = gather(
             src_img,
@@ -201,6 +240,7 @@ impl Generic for f32 {
             output_buffer,
             output_buffer_size,
             image_pixel_start_index,
+            || Ok(1.0),
         )?;
 
         // In the float specialization, the BitDepthOp is the first Op of the color processing.
@@ -282,10 +322,14 @@ fn gather<T: ChannelType>(
     rgba: &mut [T],
     count: c_int,
     image_pixel_start_index: c_long,
+    alpha: impl FnOnce() -> Result<T>,
 ) -> Result<usize> {
     let Some(mut positions) = start_positions(img, image_pixel_start_index) else {
         return Err(Exception::new("Invalid output image position."));
     };
+    // The alpha of an image without one, checked where upstream checks it: after the
+    // position, before reading any pixel.
+    let missing_alpha = alpha()?;
     let size = size_of::<T>();
     check_run(img, &positions, count, size, |buffer| buffers[buffer].len())?;
     let read = |(buffer, offset): (usize, isize)| {
@@ -301,7 +345,7 @@ fn gather<T: ChannelType>(
         pixel[0] = read(r.expect("red"));
         pixel[1] = read(g.expect("green"));
         pixel[2] = read(b.expect("blue"));
-        pixel[3] = a.map_or(T::default(), read);
+        pixel[3] = a.map_or(missing_alpha, read);
 
         pixels_copied += 1;
         positions = advance(positions, img.x_stride_bytes);

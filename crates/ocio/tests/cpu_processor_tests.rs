@@ -160,7 +160,7 @@ fn dynamic_properties() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CPUProcessor, with_one_matrix)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CPUProcessor, with_one_matrix)` @ v2.6.0.
 #[test]
 #[rustfmt::skip]
 fn with_one_matrix() {
@@ -317,9 +317,9 @@ fn with_one_matrix() {
                     1.0000,  1.2500,  1.9900  ];
 
         let res_img: Vec<f32>
-            = vec![ -0.01929,  -0.3995,  0.4002, 0.5,
-                     1.58960,   0.9050,  1.5025, 0.5,
-                     2.070699,  1.6505,  2.4002, 0.5   ];
+            = vec![ -0.01929,  -0.3995,  0.4002, 1.5,
+                     1.58960,   0.9050,  1.5025, 1.5,
+                     2.070699,  1.6505,  2.4002, 1.5   ];
 
         compute_values::<F32, F32>(
             &processor,
@@ -2443,7 +2443,7 @@ fn simple_profile() -> String {
      allocation: uniform\n"
 }
 
-/// Port of `OCIO_ADD_TEST(CPUProcessor, with_one_1d_lut)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CPUProcessor, with_one_1d_lut)` @ v2.6.0.
 #[test]
 #[rustfmt::skip]
 fn with_one_1d_lut() {
@@ -2604,10 +2604,10 @@ fn with_one_1d_lut() {
               5120,  20480, 65535  ];
 
         let res_img: Vec<u16> =
-            vec![    95,    24,     0,     0,
-                  268,   178,   123,     0,
-                  955,   598,   394,     0,
-                65535,  8589,  1986,     0 ];
+            vec![    95,    24,     0,     65535,
+                  268,   178,   123,     65535,
+                  955,   598,   394,     65535,
+                65535,  8589,  1986,     65535 ];
 
         compute_values::<Uint16, Uint16>(
             &processor,
@@ -2642,10 +2642,10 @@ fn with_one_1d_lut() {
                   128,  1023,   640  ];
 
         let ui10_res_img: Vec<u16> =
-            vec![     0,     6,    15,   0,
-                   26,    48,   106,   0,
-                   36,   106,   252,   0,
-                   48,  1023,   384,   0 ];
+            vec![     0,     6,    15,   1023,
+                   26,    48,   106,   1023,
+                   36,   106,   252,   1023,
+                   48,  1023,   384,   1023 ];
 
         compute_values::<Uint10, Uint10>(
             &processor,
@@ -2655,10 +2655,10 @@ fn with_one_1d_lut() {
             f32::NAN);
 
         let ui16_res_img: Vec<u16> =
-            vec![     0,   394,   955,   0,
-                 1656,  3092,  6794,   0,
-                 2301,  6794, 16162,   0,
-                 3092, 65535, 24593,   0 ];
+            vec![     0,   394,   955,   65535,
+                 1656,  3092,  6794,   65535,
+                 2301,  6794, 16162,   65535,
+                 3092, 65535, 24593,   65535 ];
 
         compute_values::<Uint10, Uint16>(
             &processor,
@@ -2693,10 +2693,10 @@ fn with_one_1d_lut() {
                  1024,  2048,  4095  ];
 
         let ui12_res_img: Vec<u16> =
-            vec![     0,    11,    25,   0,
-                   37,    60,   103,   0,
-                   49,   103,   193,   0,
-                  424,  1009,  4095,   0 ];
+            vec![     0,    11,    25,   4095,
+                   37,    60,   103,   4095,
+                   49,   103,   193,   4095,
+                  424,  1009,  4095,   4095 ];
 
         compute_values::<Uint12, Uint12>(
             &processor,
@@ -2705,10 +2705,10 @@ fn with_one_1d_lut() {
             NB_PIXELS,
             f32::NAN);
         let ui16_res_img: Vec<u16> =
-            vec![     0,   178,   394,   0,
-                  598,   955,  1655,   0,
-                  779,  1655,  3089,   0,
-                 6789, 16143, 65535,   0 ];
+            vec![     0,   178,   394,   65535,
+                  598,   955,  1655,   65535,
+                  779,  1655,  3089,   65535,
+                 6789, 16143, 65535,   65535 ];
 
         compute_values::<Uint12, Uint16>(
             &processor,

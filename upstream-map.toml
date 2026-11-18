@@ -358,15 +358,15 @@ note = "1.1b-1.1c: PackedImageDesc, PlanarImageDesc and GenericImageDesc, with t
 path = "src/OpenColorIO/ImagePacking.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/image_packing.rs"]
-status = "partial"
-note = "1.1d: Generic<Type>::PackRGBAFromImageDesc and UnpackRGBAToImageDesc, checked against the wheel through image_apply (tests/image_packing_oracle.rs), with the Windows failure of huge images (I-1) 2.6.0: changed at v2.6.0 lines 26-27, 66-71, 75, 80, 103-104, 151; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.1d: Generic<Type>::PackRGBAFromImageDesc and UnpackRGBAToImageDesc, checked against the wheel through image_apply (tests/image_packing_oracle.rs), with the Windows failure of huge images (I-1) 2.6.0 (ocio26-base, PR #2197): a missing alpha packs as the input bit depth's maximum (1 for float), with the \"Invalid bit depth max value.\" check."
 
 [[file]]
 path = "src/OpenColorIO/ImagePacking.h"
 kind = "src"
 target = ["crates/ocio-ops/src/image_packing.rs", "crates/ocio-ops/src/image_desc.rs"]
-status = "partial"
-note = "1.1b: GenericImageDesc (16-47) is in image_desc.rs, next to its methods (ImageDesc.cpp:75-112); 1.1d: Generic<Type>, as a trait of the channel types 2.6.0: changed at v2.6.0 lines 56-57; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.1b: GenericImageDesc (16-47) is in image_desc.rs, next to its methods (ImageDesc.cpp:75-112); 1.1d: Generic<Type>, as a trait of the channel types 2.6.0 (ocio26-base): PackRGBAFromImageDesc takes the input bit depth."
 
 [[file]]
 path = "src/OpenColorIO/Logging.cpp"
@@ -581,8 +581,8 @@ note = "S4: scalar profile. The software half conversions (with sse2_blendv) pro
 path = "src/OpenColorIO/ScanlineHelper.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/scanline_helper.rs"]
-status = "partial"
-note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors; from an image to itself, init_same, through the CPU processor's apply_same in tests/cpu_processor_apply_oracle.rs). As upstream, an RGBA-packed F32 destination is processed in its own memory, and the scratch rows are sized only where upstream sizes them; the rows of RGBA-packed images are read and written through typed views, with a copy only for a row that isn't aligned for its channel type. Very wide and very tall images follow the general rule (U-3) 2.6.0: changed at v2.6.0 lines 146-147; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors; from an image to itself, init_same, through the CPU processor's apply_same in tests/cpu_processor_apply_oracle.rs). As upstream, an RGBA-packed F32 destination is processed in its own memory, and the scratch rows are sized only where upstream sizes them; the rows of RGBA-packed images are read and written through typed views, with a copy only for a row that isn't aligned for its channel type. Very wide and very tall images follow the general rule (U-3) 2.6.0 (ocio26-base): prepRGBAScanline passes m_inputBitDepth to the packing."
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.h"

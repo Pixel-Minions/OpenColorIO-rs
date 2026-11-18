@@ -506,8 +506,9 @@ impl<'a, I: Generic, O: Generic> ScanlineHelper<'a> for GenericScanlineHelper<'a
     }
 
     /// Port of `GenericScanlineHelper::prepRGBAScanline`
-    /// (src/OpenColorIO/ScanlineHelper.cpp:117-150 @ v2.5.2).
+    /// (src/OpenColorIO/ScanlineHelper.cpp:117-151 @ v2.6.0).
     fn prep_rgba_scanline(&mut self) -> Result<Option<&mut [f32]>> {
+        let input_bit_depth = self.input_bit_depth;
         let GenericScanlineHelper {
             src_img: Some(src_img),
             dst_img: Some(dst_img),
@@ -594,6 +595,7 @@ impl<'a, I: Generic, O: Generic> ScanlineHelper<'a> for GenericScanlineHelper<'a
                             rgba,
                             width as c_int,
                             index,
+                            input_bit_depth,
                         )?;
                     }
                     Ok(Some(rgba))
@@ -625,6 +627,7 @@ impl<'a, I: Generic, O: Generic> ScanlineHelper<'a> for GenericScanlineHelper<'a
                     rgba,
                     width as c_int,
                     index,
+                    input_bit_depth,
                 )?;
             }
             Ok(Some(rgba))
