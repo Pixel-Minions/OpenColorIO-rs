@@ -6521,9 +6521,9 @@ impl Config {
                 // The benefit to using the existing one is that it may already have an
                 // optimized Processor, CPUProcessor, or GPUProcessor inside it.
 
-                // Upstream compares the two cache IDs with `strcmp`; a cache ID is a hash or
-                // "<NOOP>", without NUL. Both processors' ops are finalized, so neither cache
-                // ID can fail.
+                // Upstream compares the two cache IDs with `strcmp`; a cache ID is a hash,
+                // without NUL. Both processors' ops are finalized, so neither cache ID can
+                // fail.
                 for entry in cache.entries().values() {
                     if entry.cache_id()? == proc.cache_id()? {
                         processor = Some(entry.clone());
