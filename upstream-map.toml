@@ -26,7 +26,7 @@ path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/image_desc.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/gpu_shader_desc.rs", "crates/ocio-gpu/src/gpu_shader.rs", "crates/ocio-ops/src/exception.rs", "crates/ocio-ops/src/platform.rs", "crates/ocio/src/caching.rs", "crates/ocio/src/path_utils.rs", "crates/ocio/src/config.rs", "crates/ocio/src/file_rules.rs", "crates/ocio/src/viewing_rules.rs", "crates/ocio/src/color_space.rs", "crates/ocio/src/color_space_set.rs", "crates/ocio/src/look.rs", "crates/ocio/src/named_transform.rs", "crates/ocio/src/view_transform.rs", "crates/ocio/src/processor.rs", "crates/ocio-ops/src/cpu_processor.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/baker.rs", "crates/ocio/src/ocioz_archive.rs", "crates/ocio/src/context.rs", "crates/ocio/src/config_io_proxy.rs", "crates/ocio/src/system_monitor.rs", "crates/ocio/src/transforms/builtins/builtin_transform_registry.rs", "crates/ocio/src/builtinconfigs/builtin_config_registry.rs"]
 status = "partial"
-note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs; p3-context: GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent (197-203), re-exported from ocio_ops::platform (3.5a); Context (3865-3951) in context.rs and ConfigIOProxy (4095-4138) in config_io_proxy.rs (3.5e); p9-monitors9.3a: SystemMonitors (4047-4083), exported from lib.rs with P9-3's process singleton and fallible index getters; P89: declaration-block audit in docs/cards/p89-public-header-completion.md accounts for every existing Rust API implementation and reference test; P88 completes the final legacy post-extraction dynamic qualification. Retains the approved concrete shader-description and existing Rust/ABI boundaries. This closes source accounting only, not final SDE/release acceptance 2.6.0: changed at v2.6.0 lines 222-223, 382-383, 389-390, 661-663, 756-792, 830-881, 956-966, 1022-1023, 1033-1054, 1089-1102, 1127-1203, 1333-1335, 1374-1376, 2780, 2789; not yet re-ported (ocio26 cards)."
+note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs; p3-context: GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent (197-203), re-exported from ocio_ops::platform (3.5a); Context (3865-3951) in context.rs and ConfigIOProxy (4095-4138) in config_io_proxy.rs (3.5e); p9-monitors9.3a: SystemMonitors (4047-4083), exported from lib.rs with P9-3's process singleton and fallible index getters; P89: declaration-block audit in docs/cards/p89-public-header-completion.md accounts for every existing Rust API implementation and reference test; P88 completes the final legacy post-extraction dynamic qualification. Retains the approved concrete shader-description and existing Rust/ABI boundaries. This closes source accounting only, not final SDE/release acceptance. 2.6.0: changed at v2.6.0 lines 222-223, 382-383, 389-390, 661-663, 756-792, 830-881, 956-966, 1022-1023, 1033-1054, 1089-1102, 1127-1203, 1333-1335, 1374-1376, 2780, 2789; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
@@ -184,14 +184,14 @@ path = "src/OpenColorIO/ConfigUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/config_utils.rs"]
 status = "partial"
-note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion (59-162). 9.1a: the heuristics (14-58, 164-805: getSRGBColorSpaceName, getBuiltinLinearSpaceName, containsSRGB with I-377, getRefSpaceName, getDataSpaceName, isIdentityTransform, hasNonTrivialMatrixTransform, containsBlockedTransform, excludeColorSpaceFromHeuristics, getReferenceSpaceFromLinearSpace, getReferenceSpaceFromSRGBSpace with I-378, IdentifyInterchangeSpace, IdentifyBuiltinColorSpace), checked against the wheel in crates/ocio/tests/config_utils_oracle.rs. 9.1c: the reference-space converters and fingerprints (843-1478: simplifyTransform, invertTransform with I-379, getTransformForDir, getRefSpaceConverter, transformIsEmpty, updateReferenceColorspace, updateReferenceView, hasColorSpaceRefType, initializeRefSpaceConverters, calcColorSpaceFingerprint, initializeTestVals, initializeColorSpaceFingerprints, findEquivalentColorspace), with upstream's two ConfigUtils_tests; the Python module doesn't expose them, so the merge sweep (9.2j) checks them against the wheel 2.6.0: changed at v2.6.0 lines 10, 1196-1198, 1222, 1226, 1236, 1239-1240, 1242, 1244-1250, 1276-1277, 1315-1316, 1318-1320, 1363-1364, 1366-1368, 1376-1379, after 1382 (deleted), 1415, 1427-1432, 1435, 1437, 1445-1446, 1448-1457, 1466, 1498, 1503, 1510-1769; not yet re-ported (ocio26 cards)."
+note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion (59-162). 9.1a: the heuristics (14-58, 164-805: getSRGBColorSpaceName, getBuiltinLinearSpaceName, containsSRGB with I-377, getRefSpaceName, getDataSpaceName, isIdentityTransform, hasNonTrivialMatrixTransform, containsBlockedTransform, excludeColorSpaceFromHeuristics, getReferenceSpaceFromLinearSpace, getReferenceSpaceFromSRGBSpace with I-378, IdentifyInterchangeSpace, IdentifyBuiltinColorSpace), checked against the wheel in crates/ocio/tests/config_utils_oracle.rs. 9.1c: the reference-space converters and fingerprints (843-1478: simplifyTransform, invertTransform with I-379, getTransformForDir, getRefSpaceConverter, transformIsEmpty, updateReferenceColorspace, updateReferenceView, hasColorSpaceRefType, initializeRefSpaceConverters, calcColorSpaceFingerprint, initializeTestVals, initializeColorSpaceFingerprints, findEquivalentColorspace), with upstream's two ConfigUtils_tests; the Python module doesn't expose them, so the merge sweep (9.2j) checks them against the wheel. 2.6.0: changed at v2.6.0 lines 10, 1196-1198, 1222, 1226, 1236, 1239-1240, 1242, 1244-1250, 1276-1277, 1315-1316, 1318-1320, 1363-1364, 1366-1368, 1376-1379, after 1382 (deleted), 1415, 1427-1432, 1435, 1437, 1445-1446, 1448-1457, 1466, 1498, 1503, 1510-1769; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.h"
 kind = "src"
 target = ["crates/ocio/src/config_utils.rs"]
 status = "partial"
-note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion's declaration (config_utils.rs: the function, and InterchangeRoles for its out-parameters). 9.1a: IdentifyInterchangeSpace, IdentifyBuiltinColorSpace and SuspendCacheGuard (U-171). 9.1c: Fingerprint, ColorSpaceFingerprints and the rest of the declarations 2.6.0: changed at v2.6.0 lines 7-9, 58-60, 65-68, after 69 (deleted), 72-82, 85-99, 102-110, 114-115, 118-166; not yet re-ported (ocio26 cards)."
+note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion's declaration (config_utils.rs: the function, and InterchangeRoles for its out-parameters). 9.1a: IdentifyInterchangeSpace, IdentifyBuiltinColorSpace and SuspendCacheGuard (U-171). 9.1c: Fingerprint, ColorSpaceFingerprints and the rest of the declarations. 2.6.0: changed at v2.6.0 lines 7-9, 58-60, 65-68, after 69 (deleted), 72-82, 85-99, 102-110, 114-115, 118-166; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/Context.cpp"
@@ -226,14 +226,14 @@ path = "src/OpenColorIO/Display.cpp"
 kind = "src"
 target = ["crates/ocio/src/display.rs"]
 status = "partial"
-note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed 2.6.0: changed at v2.6.0 lines 53-54, 63-64, 73; not yet re-ported (ocio26 cards)."
+note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed. 2.6.0: changed at v2.6.0 lines 53-54, 63-64, 73; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/Display.h"
 kind = "src"
 target = ["crates/ocio/src/display.rs"]
 status = "partial"
-note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed 2.6.0: changed at v2.6.0 lines 31, 40-41, 48, 60-84, 94-95; not yet re-ported (ocio26 cards)."
+note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed. 2.6.0: changed at v2.6.0 lines 31, 40-41, 48, 60-84, 94-95; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.cpp"
@@ -435,7 +435,7 @@ path = "src/OpenColorIO/NamedTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/named_transform.rs"]
 status = "partial"
-note = "p3-model-objects (3.4c): the class and its operator<<; p3-builders 3.2a: NamedTransform::GetTransform and GetTransform(src, dst) (182-221, 310-334), an error where upstream dereferences null (U-52) 2.6.0: changed at v2.6.0 lines 89, 282; not yet re-ported (ocio26 cards)."
+note = "p3-model-objects (3.4c): the class and its operator<<; p3-builders 3.2a: NamedTransform::GetTransform and GetTransform(src, dst) (182-221, 310-334), an error where upstream dereferences null (U-52). 2.6.0: changed at v2.6.0 lines 89, 282; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/NamedTransform.h"
@@ -762,7 +762,7 @@ path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs"]
 status = "partial"
-note = "p9-merge-2 9.2d: SectionMerger (notify, merge), setMergedConfigVersion, GeneralMerger, RolesMerger; 9.2e: fileRulesAreEqual, copyRule, FileRulesMerger, LooksMerger; 9.2f: splitActiveList, mergeStringsWithoutDuplicates, viewingRulesAreEqual, copyViewingRule, addUniqueViewingRules, DisplayViewMerger; p9-merge-3 9.2g: viewTransformsAreEqual, ViewTransformsMerger; 9.2h: hasSearchPath, replaceSeparator, ColorspacesMerger; 9.2i: cleanUpInactiveList, NamedTransformsMerger 2.6.0: changed at v2.6.0 lines 2251; not yet re-ported (ocio26 cards)."
+note = "p9-merge-2 9.2d: SectionMerger (notify, merge), setMergedConfigVersion, GeneralMerger, RolesMerger; 9.2e: fileRulesAreEqual, copyRule, FileRulesMerger, LooksMerger; 9.2f: splitActiveList, mergeStringsWithoutDuplicates, viewingRulesAreEqual, copyViewingRule, addUniqueViewingRules, DisplayViewMerger; p9-merge-3 9.2g: viewTransformsAreEqual, ViewTransformsMerger; 9.2h: hasSearchPath, replaceSeparator, ColorspacesMerger; 9.2i: cleanUpInactiveList, NamedTransformsMerger. 2.6.0: changed at v2.6.0 lines 2251; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.h"
@@ -776,28 +776,28 @@ path = "src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.cpp"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/builtin_config_registry.rs"]
 status = "partial"
-note = "p3-loading 3.10a: ResolveConfigPath (its regex_search as search_builtin_uri, I-149), Get with init, addBuiltin, the getters 2.6.0: changed at v2.6.0 lines 6, 24-26, 64-85; not yet re-ported (ocio26 cards)."
+note = "p3-loading 3.10a: ResolveConfigPath (its regex_search as search_builtin_uri, I-149), Get with init, addBuiltin, the getters. 2.6.0: changed at v2.6.0 lines 6, 24-26, 64-85; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.h"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/builtin_config_registry.rs"]
 status = "partial"
-note = "p3-loading 3.10a: BuiltinConfigRegistryImpl and BuiltinConfigData, as BuiltinConfigRegistry 2.6.0: changed at v2.6.0 lines 8, 15-23; not yet re-ported (ocio26 cards)."
+note = "p3-loading 3.10a: BuiltinConfigRegistryImpl and BuiltinConfigData, as BuiltinConfigRegistry. 2.6.0: changed at v2.6.0 lines 8, 15-23; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/CG.cpp.in"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "partial"
-note = "p3-loading 3.10a: the texts, embedded from the submodule's files with the line ends of each platform's wheel (I-148) 2.6.0: changed at v2.6.0 lines 14-15; not yet re-ported (ocio26 cards)."
+note = "p3-loading 3.10a: the texts, embedded from the submodule's files with the line ends of each platform's wheel (I-148). 2.6.0: changed at v2.6.0 lines 14-15; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/CGConfig.cpp"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg_config.rs"]
 status = "partial"
-note = "p3-loading 3.10a 2.6.0: changed at v2.6.0 lines 48-54; not yet re-ported (ocio26 cards)."
+note = "p3-loading 3.10a. 2.6.0: changed at v2.6.0 lines 48-54; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/CGConfig.h"
@@ -811,14 +811,14 @@ path = "src/OpenColorIO/builtinconfigs/Studio.cpp.in"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "partial"
-note = "p3-loading 3.10a: the texts, embedded from the submodule's files with the line ends of each platform's wheel (I-148) 2.6.0: changed at v2.6.0 lines 22-25; not yet re-ported (ocio26 cards)."
+note = "p3-loading 3.10a: the texts, embedded from the submodule's files with the line ends of each platform's wheel (I-148). 2.6.0: changed at v2.6.0 lines 22-25; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/StudioConfig.cpp"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio_config.rs"]
 status = "partial"
-note = "p3-loading 3.10a 2.6.0: changed at v2.6.0 lines 48-54; not yet re-ported (ocio26 cards)."
+note = "p3-loading 3.10a. 2.6.0: changed at v2.6.0 lines 48-54; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/StudioConfig.h"
@@ -860,7 +860,7 @@ path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v5.0.0_aces-v2.1_ocio-v
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
 status = "todo"
-note = "New in 2.6.0: ACES 2.1 CG config; card ocio26-ops registers it. Copied byte for byte into crates/ocio/src/builtinconfigs/configs/ (the package-copy guard), not embedded yet."
+note = "New in. 2.6.0: ACES 2.1 CG config; card ocio26-ops registers it. Copied byte for byte into crates/ocio/src/builtinconfigs/configs/ (the package-copy guard), not embedded yet."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v1.0.0_aces-v1.3_ocio-v2.1.ocio"
@@ -895,7 +895,7 @@ path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v5.0.0_aces-v2.1_oc
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
 status = "todo"
-note = "New in 2.6.0: ACES 2.1 studio config; card ocio26-ops registers it. Copied byte for byte into crates/ocio/src/builtinconfigs/configs/ (the package-copy guard), not embedded yet."
+note = "New in. 2.6.0: ACES 2.1 studio config; card ocio26-ops registers it. Copied byte for byte into crates/ocio/src/builtinconfigs/configs/ (the package-copy guard), not embedded yet."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormat3DL.cpp"
@@ -937,7 +937,7 @@ path = "src/OpenColorIO/fileformats/FileFormatCTF.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_ctf.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: 1-1216 (the format infos, I-180; isLoadableCTF; XMLParserHelper; read); 4.5c: BuildOp, HandleLUTInterpolation, HandleLUT, buildFileOps (1219-1341); 4.5e: the GammaParams, LogParams, SatNode, Saturation, SOPNode and SOP value elements; 4.5f: the IndexMap element; the operators' readers 4.5g-4.5h; p4-after-p5 4.5i: the ECParams, GradingPrimary and GradingTone parameter elements; p4-ctf-read-3 4.6a: write (1555-1590); 4.6d: its second half (1577-1591) apart as write_ops; p4-ctf-bake 4.8d: bake (1343-1553) 2.6.0: changed at v2.6.0 lines 5, 32, 45-52, 158-187, 248, 260-275, 453-456, 458, 460-483, 540, 552-559, 781-790, 796, 870-871, 883, 920, 1074-1097, 1100, 1105-1112, 1167-1172, 1178, 1180-1203, 1229-1231, 1235-1238, 1242-1251, 1317-1321, 1329-1332, 1344-1351, 1479, 1729-1731, 1734-1740, after 1741 (deleted), 1759-1768, 1773; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5b: 1-1216 (the format infos, I-180; isLoadableCTF; XMLParserHelper; read); 4.5c: BuildOp, HandleLUTInterpolation, HandleLUT, buildFileOps (1219-1341); 4.5e: the GammaParams, LogParams, SatNode, Saturation, SOPNode and SOP value elements; 4.5f: the IndexMap element; the operators' readers 4.5g-4.5h; p4-after-p5 4.5i: the ECParams, GradingPrimary and GradingTone parameter elements; p4-ctf-read-3 4.6a: write (1555-1590); 4.6d: its second half (1577-1591) apart as write_ops; p4-ctf-bake 4.8d: bake (1343-1553). 2.6.0: changed at v2.6.0 lines 5, 32, 45-52, 158-187, 248, 260-275, 453-456, 458, 460-483, 540, 552-559, 781-790, 796, 870-871, 883, 920, 1074-1097, 1100, 1105-1112, 1167-1172, 1178, 1180-1203, 1229-1231, 1235-1238, 1242-1251, 1317-1321, 1329-1332, 1344-1351, 1479, 1729-1731, 1734-1740, after 1741 (deleted), 1759-1768, 1773; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatDiscreet1DL.cpp"
@@ -986,7 +986,7 @@ path = "src/OpenColorIO/fileformats/FileFormatIridasLook.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_iridas_look.rs"]
 status = "partial"
-note = "p4-look 4.4f: the XML parser, the hex floats, the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_look_oracle.rs 2.6.0: changed at v2.6.0 lines 6, 178-191, 263-266, 268-291, 377-398, 464-486, 556-559; not yet re-ported (ocio26 cards)."
+note = "p4-look 4.4f: the XML parser, the hex floats, the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_look_oracle.rs. 2.6.0: changed at v2.6.0 lines 6, 178-191, 263-266, 268-291, 377-398, 464-486, 556-559; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatPandora.cpp"
@@ -1056,14 +1056,14 @@ path = "src/OpenColorIO/fileformats/FormatMetadata.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/format_metadata.rs"]
 status = "partial"
-note = "1.2a, in ocio-ops because op data holds it. Checked against the wheel in tests/format_metadata_oracle.rs: every call Python reaches, replayed on a transform's metadata (errors, repr() and every node's getters: format_metadata_ops), and combine through the optimizer's matrix composition (format_metadata_combine); and by upstream's tests. Python can't reach getAttributeValue(name) (only through getName and getID), operator== or getAttributeName past the end, and reaches getFirstChildIndex only through CDLTransform's getFirstSOPDescription and setFirstSOPDescription (CDLTransform.cpp:331-357), to be pinned against the wheel with the CDL transform (p1-cdl). The case rules for attribute names (exact when adding, ASCII-insensitive when looking up and combining) and the misspelled 'reversed' message are copied (improvement candidates I-14, I-15) 2.6.0: changed at v2.6.0 lines 22-24, 222-235; not yet re-ported (ocio26 cards)."
+note = "1.2a, in ocio-ops because op data holds it. Checked against the wheel in tests/format_metadata_oracle.rs: every call Python reaches, replayed on a transform's metadata (errors, repr() and every node's getters: format_metadata_ops), and combine through the optimizer's matrix composition (format_metadata_combine); and by upstream's tests. Python can't reach getAttributeValue(name) (only through getName and getID), operator== or getAttributeName past the end, and reaches getFirstChildIndex only through CDLTransform's getFirstSOPDescription and setFirstSOPDescription (CDLTransform.cpp:331-357), to be pinned against the wheel with the CDL transform (p1-cdl). The case rules for attribute names (exact when adding, ASCII-insensitive when looking up and combining) and the misspelled 'reversed' message are copied (improvement candidates I-14, I-15). 2.6.0: changed at v2.6.0 lines 22-24, 222-235; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FormatMetadata.h"
 kind = "src"
 target = ["crates/ocio-ops/src/format_metadata.rs"]
 status = "partial"
-note = "see FormatMetadata.cpp 2.6.0: changed at v2.6.0 lines 58-60; not yet re-ported (ocio26 cards)."
+note = "see FormatMetadata.cpp. 2.6.0: changed at v2.6.0 lines 58-60; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLParser.cpp"
@@ -1112,42 +1112,42 @@ path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-261), CTFReaderMetadataElt and CTFReaderInfoElt (675-798), GetReader's version table (997-1183); 4.5c: CTFReaderArrayElt and CTFArrayMgt (265-418), CTFReaderOpElt (802-957, 1185-1195), the Matrix and Range readers and CTFReaderRangeValueElt (4561-5010); p4-ctf-read-2 4.5e: the ASC_CDL reader and its SatNode and SOPNode (1327-1413), the Gamma readers and GammaParams (1862-2200), the Log readers and LogParams (3545-4081); 4.5f: CTFReaderIndexMapElt and CTFIndexMapMgt (433-671), the Lut1D readers (4085-4385) and CTFReaderInvLut1DElt (3245-3429), RangeOpData's constructor from an IndexMap (as range_from_index_mapping, I-181 for raw halfs), the Lut3D readers (4389-4557) and CTFReaderInvLut3DElt (3433-3541); p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt (1556-1695), whose ExposureContrast and grading branches wait for their readers; 4.5g: the ACES reader and ACESParams (1199-1323), the FixedFunction and Function readers (1417-1548), the GradingRGBCurve reader (2580-2650) and its curve, control points and slopes elements (2738-2970); 4.5h: the Reference reader (5014-5109); p4-after-p5 4.5i: the ExposureContrast reader and ECParams (1699-1849), the GradingPrimary reader and its parameter element (2204-2576), the GradingHueCurve reader and GetHueCurveType (2659-2729, 2801-2838), the GradingTone reader and its parameter element (2974-3241), and the ExposureContrast and grading branches of CTFReaderDynamicParamElt 2.6.0: changed at v2.6.0 lines 63, 74, 77, 80-107, 115, 124, 132-135, 150, 170-172, 182, after 206 (deleted), 211, 213-218, 228-229, 236, 238, 240-241, 248, 256, 258, 301-319, 859-895, 925, 927, 940, 4474, 4476, 4646, 4648, 5029, 5034; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-261), CTFReaderMetadataElt and CTFReaderInfoElt (675-798), GetReader's version table (997-1183); 4.5c: CTFReaderArrayElt and CTFArrayMgt (265-418), CTFReaderOpElt (802-957, 1185-1195), the Matrix and Range readers and CTFReaderRangeValueElt (4561-5010); p4-ctf-read-2 4.5e: the ASC_CDL reader and its SatNode and SOPNode (1327-1413), the Gamma readers and GammaParams (1862-2200), the Log readers and LogParams (3545-4081); 4.5f: CTFReaderIndexMapElt and CTFIndexMapMgt (433-671), the Lut1D readers (4085-4385) and CTFReaderInvLut1DElt (3245-3429), RangeOpData's constructor from an IndexMap (as range_from_index_mapping, I-181 for raw halfs), the Lut3D readers (4389-4557) and CTFReaderInvLut3DElt (3433-3541); p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt (1556-1695), whose ExposureContrast and grading branches wait for their readers; 4.5g: the ACES reader and ACESParams (1199-1323), the FixedFunction and Function readers (1417-1548), the GradingRGBCurve reader (2580-2650) and its curve, control points and slopes elements (2738-2970); 4.5h: the Reference reader (5014-5109); p4-after-p5 4.5i: the ExposureContrast reader and ECParams (1699-1849), the GradingPrimary reader and its parameter element (2204-2576), the GradingHueCurve reader and GetHueCurveType (2659-2729, 2801-2838), the GradingTone reader and its parameter element (2974-3241), and the ExposureContrast and grading branches of CTFReaderDynamicParamElt. 2.6.0: changed at v2.6.0 lines 63, 74, 77, 80-107, 115, 124, 132-135, 150, 170-172, 182, after 206 (deleted), 211, 213-218, 228-229, 236, 238, 240-241, 248, 256, 258, 301-319, 859-895, 925, 927, 940, 4474, 4476, 4646, 4648, 5029, 5034; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.h"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; 4.5c: CTFReaderArrayElt, CTFArrayMgt, CTFReaderOpElt, the Matrix and Range readers, CTFReaderRangeValueElt; p4-ctf-read-2 4.5e: the CDL, Gamma and Log readers and their parameter elements; 4.5f: the IndexMap element and manager, the Lut1D, InverseLUT1D, Lut3D and InverseLUT3D readers; p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt; 4.5g: the ACES reader and ACESParams, the FixedFunction and Function readers, the GradingRGBCurve reader and its curve, control points and slopes elements; 4.5h: the Reference reader; p4-after-p5 4.5i: the ExposureContrast, GradingPrimary, GradingHueCurve and GradingTone readers and their parameter elements 2.6.0: changed at v2.6.0 lines 50, 74-109, 114-115, 157-160, 163-167, 172, 176-177, 181-183, 185-187, 349; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; 4.5c: CTFReaderArrayElt, CTFArrayMgt, CTFReaderOpElt, the Matrix and Range readers, CTFReaderRangeValueElt; p4-ctf-read-2 4.5e: the CDL, Gamma and Log readers and their parameter elements; 4.5f: the IndexMap element and manager, the Lut1D, InverseLUT1D, Lut3D and InverseLUT3D readers; p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt; 4.5g: the ACES reader and ACESParams, the FixedFunction and Function readers, the GradingRGBCurve reader and its curve, control points and slopes elements; 4.5h: the Reference reader; p4-after-p5 4.5i: the ExposureContrast, GradingPrimary, GradingHueCurve and GradingTone readers and their parameter elements. 2.6.0: changed at v2.6.0 lines 50, 74-109, 114-115, 157-160, 163-167, 172, 176-177, 181-183, 185-187, 349; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_utils.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5a 2.6.0: changed at v2.6.0 lines 6, 177-191; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5a. 2.6.0: changed at v2.6.0 lines 6, 177-191; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderUtils.h"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_utils.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5a: the element and attribute names 2.6.0: changed at v2.6.0 lines 21, 46, 119; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5a: the element and attribute names. 2.6.0: changed at v2.6.0 lines 21, 46, 119; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs", "crates/ocio/src/fileformats/ctf/ctf_writer.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5a (1-505): CTFVersion, CTFReaderTransform, GetElementsValues, fromMetadata, toMetadata; p4-ctf-read-3 4.6a (ctf_writer.rs): GetOpMinimumVersion and GetMinimumVersion (225-403), WriteDescriptions, WriteValue, SetOStream, WriteValues, OpWriter, BitDepthToCLFString, GetValidatedFileBitDepth (509-811), MatrixWriter (2284-2430), TransformWriter (2518-3004); 4.6b: CDLWriter (813-933), GammaWriter and AddGammaParams (1123-1276, Exponent ops written as gammas), LogWriter, AddLogParam, AddLogParams (1896-2037), RangeWriter and WriteTag (2434-2512); 4.6c: Lut1DWriter (2042-2179), Lut3DWriter (2183-2280); 4.6d: FixedFunctionWriter (1053-1119), GradingRGBCurveWriter (1502-1630); p4-after-p5 4.6f: ExposureContrastWriter (937-1050), GradingPrimaryWriter (1280-1499), GradingHueCurveWriter (1634-1772, its writeCurve as GradingRGBCurveWriter::writeCurve), GradingToneWriter (1776-1893) 2.6.0: changed at v2.6.0 lines 5, 8, after 11 (deleted), 42, 44, 46-72, 105-110, after 113 (deleted), 115-117, 127, 316-320, 423, 440, 442, 444, 446, 452, 454-455, 457, after 458 (deleted), 460-466, 469-470, 477, 479, 481, 487-519, 521-523, 526, after 534 (deleted), after 535 (deleted), after 539 (deleted), 541-547, 549-553, 555-579, 593, 595, 601-609, 831, 973, 1000, 1015, 1019, 1023, 2532-2533, 2539, 2544, 2548-2549, 2552, 2570-2578, 2625, 2628, 2642-2643, 2645-2647, 2649-2657, 2659-2660, 2662-2667, 2670-2672, 2676, 2679-2680, 2687-2689, 2691-2706, 2712-2730, 2732-2737, 2739, 2741-2743, 2746, 2748-2750, 2784, 2845-2918, 2928-2929, 2991, 3004, 3018, 3033, 3049, 3063, 3077, 3091, 3115, 3139, 3164, 3170-3190; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5a (1-505): CTFVersion, CTFReaderTransform, GetElementsValues, fromMetadata, toMetadata; p4-ctf-read-3 4.6a (ctf_writer.rs): GetOpMinimumVersion and GetMinimumVersion (225-403), WriteDescriptions, WriteValue, SetOStream, WriteValues, OpWriter, BitDepthToCLFString, GetValidatedFileBitDepth (509-811), MatrixWriter (2284-2430), TransformWriter (2518-3004); 4.6b: CDLWriter (813-933), GammaWriter and AddGammaParams (1123-1276, Exponent ops written as gammas), LogWriter, AddLogParam, AddLogParams (1896-2037), RangeWriter and WriteTag (2434-2512); 4.6c: Lut1DWriter (2042-2179), Lut3DWriter (2183-2280); 4.6d: FixedFunctionWriter (1053-1119), GradingRGBCurveWriter (1502-1630); p4-after-p5 4.6f: ExposureContrastWriter (937-1050), GradingPrimaryWriter (1280-1499), GradingHueCurveWriter (1634-1772, its writeCurve as GradingRGBCurveWriter::writeCurve), GradingToneWriter (1776-1893). 2.6.0: changed at v2.6.0 lines 5, 8, after 11 (deleted), 42, 44, 46-72, 105-110, after 113 (deleted), 115-117, 127, 316-320, 423, 440, 442, 444, 446, 452, 454-455, 457, after 458 (deleted), 460-466, 469-470, 477, 479, 481, 487-519, 521-523, 526, after 534 (deleted), after 535 (deleted), after 539 (deleted), 541-547, 549-553, 555-579, 593, 595, 601-609, 831, 973, 1000, 1015, 1019, 1023, 2532-2533, 2539, 2544, 2548-2549, 2552, 2570-2578, 2625, 2628, 2642-2643, 2645-2647, 2649-2657, 2659-2660, 2662-2667, 2670-2672, 2676, 2679-2680, 2687-2689, 2691-2706, 2712-2730, 2732-2737, 2739, 2741-2743, 2746, 2748-2750, 2784, 2845-2918, 2928-2929, 2991, 3004, 3018, 3033, 3049, 3063, 3077, 3091, 3115, 3139, 3164, 3170-3190; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.h"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs", "crates/ocio/src/fileformats/ctf/ctf_writer.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5a: CTFVersion, the versions, CTFReaderTransform, GetElementsValues; p4-ctf-read-3 4.6a: TransformWriter (266-289) 2.6.0: changed at v2.6.0 lines 25-31, 33, after 35 (deleted), 38, after 47 (deleted), 55, 72, 74-79, 81-85, 92-98, 140-142, 145, 172, 176, 178, 181, 185, 187, after 195 (deleted), 197, 199, 201, 203, 206, 208, 210, 212, after 235 (deleted), 237, after 239 (deleted), 257-265, 272, 284-285; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5a: CTFVersion, the versions, CTFReaderTransform, GetElementsValues; p4-ctf-read-3 4.6a: TransformWriter (266-289). 2.6.0: changed at v2.6.0 lines 25-31, 33, after 35 (deleted), 38, after 47 (deleted), 55, 72, 74-79, 81-85, 92-98, 140-142, 145, 172, 176, 178, 181, 185, 187, after 195 (deleted), 197, 199, 201, 203, 206, 208, 210, 212, after 235 (deleted), 237, after 239 (deleted), 257-265, 272, 284-285; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/IndexMapping.cpp"
@@ -1256,7 +1256,7 @@ path = "src/OpenColorIO/ops/cdl/CDLOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op_cpu.rs", "crates/ocio-ops/src/ops/cdl/cdl_op_cpu_sse2.rs"]
 status = "done"
-note = "1.3c2: RenderParams, the 4 scalar and 4 SSE2 (fast-math) renderers, GetCDLCPURenderer; bit-exact against the wheel through tests/cdl_oracle.rs, alpha passed through 2.6.0: changed only comments/blank lines (v2.6.0 lines 135, 157, 182, 190, 198, 235); still done."
+note = "1.3c2: RenderParams, the 4 scalar and 4 SSE2 (fast-math) renderers, GetCDLCPURenderer; bit-exact against the wheel through tests/cdl_oracle.rs, alpha passed through. 2.6.0: changed only comments/blank lines (v2.6.0 lines 135, 157, 182, 190, 198, 235); still done."
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpCPU.h"
@@ -1410,7 +1410,7 @@ path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu.rs", "crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu_sse2.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), whose every arm has its renderer since 2.3d2; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823); 2.3d1: LIN_TO_GAMMA_LOG, GAMMA_LOG_TO_LIN, LIN_TO_DOUBLE_LOG, DOUBLE_LOG_TO_LIN (389-474, 2230-2423); p2-aces2-cpu 2.4e1: Renderer_ACES_RGB_TO_JMh_20 and Renderer_ACES_TONESCALE_COMPRESS_20 (153-187, 1168-1319); 2.4e2: Renderer_ACES_OutputTransform20 and Renderer_ACES_GAMUT_COMPRESS_20 (133-151, 189-205, 1057-1166, 1321-1404); p2-ff-cpu-2 2.3d2: LIN_TO_PQ and PQ_TO_LIN, scalar and SSE (349-386, 2030-2227) 2.6.0: changed at v2.6.0 lines 172-188, 1260-1336, 2594-2600; not yet re-ported (ocio26 cards)."
+note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), whose every arm has its renderer since 2.3d2; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823); 2.3d1: LIN_TO_GAMMA_LOG, GAMMA_LOG_TO_LIN, LIN_TO_DOUBLE_LOG, DOUBLE_LOG_TO_LIN (389-474, 2230-2423); p2-aces2-cpu 2.4e1: Renderer_ACES_RGB_TO_JMh_20 and Renderer_ACES_TONESCALE_COMPRESS_20 (153-187, 1168-1319); 2.4e2: Renderer_ACES_OutputTransform20 and Renderer_ACES_GAMUT_COMPRESS_20 (133-151, 189-205, 1057-1166, 1321-1404); p2-ff-cpu-2 2.3d2: LIN_TO_PQ and PQ_TO_LIN, scalar and SSE (349-386, 2030-2227). 2.6.0: changed at v2.6.0 lines 172-188, 1260-1336, 2594-2600; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.h"
@@ -1423,14 +1423,14 @@ path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3a1: the styles, their names, GetStyle and both ConvertStyles; 2.3a2: the constructors, validate, isInverse, invert, inverse, the direction, equals, the cache ID 2.6.0: changed at v2.6.0 lines 59-60, 130-133, 263-270, 432-436, 550-553, 694-695, 966-975, 1144, 1168; not yet re-ported (ocio26 cards)."
+note = "p2-ff-cpu 2.3a1: the styles, their names, GetStyle and both ConvertStyles; 2.3a2: the constructors, validate, isInverse, invert, inverse, the direction, equals, the cache ID. 2.6.0: changed at v2.6.0 lines 59-60, 130-133, 263-270, 432-436, 550-553, 694-695, 966-975, 1144, 1168; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3a1: Style (FixedFunctionOpStyle); 2.3a2: the class 2.6.0: changed at v2.6.0 lines 61-62; not yet re-ported (ocio26 cards)."
+note = "p2-ff-cpu 2.3a1: Style (FixedFunctionOpStyle); 2.3a2: the class. 2.6.0: changed at v2.6.0 lines 61-62; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp"
@@ -1616,7 +1616,7 @@ path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs", "crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu_sse2.rs"]
 status = "done"
-note = "p5-primary 5.2b-c: GradingPrimaryOpCPU, the SSE2 helpers, the six renderers (operand orders of both wheels' machine code, I-226, I-227, I-228) and GetGradingPrimaryCPURenderer; checked by tests/grading_primary_oracle.rs 2.6.0: changed only comments/blank lines (v2.6.0 lines 193, 201, 219); still done."
+note = "p5-primary 5.2b-c: GradingPrimaryOpCPU, the SSE2 helpers, the six renderers (operand orders of both wheels' machine code, I-226, I-227, I-228) and GetGradingPrimaryCPURenderer; checked by tests/grading_primary_oracle.rs. 2.6.0: changed only comments/blank lines (v2.6.0 lines 193, 201, 219); still done."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpCPU.h"
@@ -2268,7 +2268,7 @@ path = "src/OpenColorIO/transforms/CDLTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/cdl_transform.rs"]
 status = "partial"
-note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the parameters, style, ID, first SOP description, validation, equals, operator<< on the shared stream, I-73), checked against the wheel in crates/ocio/tests/cdl_transform_oracle.rs. p4-cdl 4.4e: GetCDL, CreateFromFile and CreateGroupFromFile (copies, I-174) 2.6.0: changed at v2.6.0 lines after 9 (deleted); not yet re-ported (ocio26 cards)."
+note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the parameters, style, ID, first SOP description, validation, equals, operator<< on the shared stream, I-73), checked against the wheel in crates/ocio/tests/cdl_transform_oracle.rs. p4-cdl 4.4e: GetCDL, CreateFromFile and CreateGroupFromFile (copies, I-174). 2.6.0: changed at v2.6.0 lines after 9 (deleted); not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/transforms/CDLTransform.h"
@@ -2289,7 +2289,7 @@ path = "src/OpenColorIO/transforms/DisplayViewTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/display_view_transform.rs"]
 status = "partial"
-note = "p3-transforms (3.1a): the class (18-171), its validation and operator<< (I-121), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2c: BuildSourceToDisplay, BuildDisplayToSource, BuildNamedTransformToDisplay, BuildDisplayToNamedTransform, BuildDisplayOps and CollectContextVariables (177-600), an error where upstream dereferences a null source color space (U-57) 2.6.0: changed at v2.6.0 lines 327-337, 346-354, 356-357, 362, 378-380, 382-384, 388-389, 449, 565-584, 594, 617; not yet re-ported (ocio26 cards)."
+note = "p3-transforms (3.1a): the class (18-171), its validation and operator<< (I-121), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2c: BuildSourceToDisplay, BuildDisplayToSource, BuildNamedTransformToDisplay, BuildDisplayToNamedTransform, BuildDisplayOps and CollectContextVariables (177-600), an error where upstream dereferences a null source color space (U-57). 2.6.0: changed at v2.6.0 lines 327-337, 346-354, 356-357, 362, 378-380, 382-384, 388-389, 449, 565-584, 594, 617; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentTransform.cpp"
@@ -2554,7 +2554,7 @@ path = "src/OpenColorIO/transforms/builtins/AppleCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/apple_cameras.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (96-122); p3-after-p2: GenerateAppleLogToLinearOps (30-86, the OCIO_LUT_SUPPORT branch the file defines), the op creators, through the API sweeps (api_cases::BUILTINS_WITH_OPS) 2.6.0: changed at v2.6.0 lines 27-37, 123-138; not yet re-ported (ocio26 cards)."
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (96-122); p3-after-p2: GenerateAppleLogToLinearOps (30-86, the OCIO_LUT_SUPPORT branch the file defines), the op creators, through the API sweeps (api_cases::BUILTINS_WITH_OPS). 2.6.0: changed at v2.6.0 lines 27-37, 123-138; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/AppleCameras.h"
@@ -2756,7 +2756,7 @@ path = "src/apps/ociochecklut/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociochecklut.rs"]
 status = "partial"
-note = "built without OCIO_GPU_ENABLED, as both wheels are 2.6.0: changed at v2.6.0 lines 55, 59, 63, 65-66, 101; not yet re-ported (ocio26 cards)."
+note = "built without OCIO_GPU_ENABLED, as both wheels are. 2.6.0: changed at v2.6.0 lines 55, 59, 63, 65-66, 101; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/apps/ocioconvert/CMakeLists.txt"
@@ -3274,7 +3274,7 @@ path = "src/bindings/python/PyConfig.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_config.rs", "crates/ocio-py/src/py_config_utils.rs"]
 status = "partial"
-note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs 2.6.0: changed at v2.6.0 lines 42, 69-70, 152-156, 340-344, 360-363, 381-391, 437-439, 441-443, 463-468, 500-511, 528-532, 535-537, 539-541, 1345-1367; not yet re-ported (ocio26 cards)."
+note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs. 2.6.0: changed at v2.6.0 lines 42, 69-70, 152-156, 340-344, 360-363, 381-391, 437-439, 441-443, 463-468, 500-511, 528-532, 535-537, 539-541, 1345-1367; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/bindings/python/PyConfigIOProxy.cpp"
@@ -3450,7 +3450,7 @@ path = "src/bindings/python/PyTypes.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_types.rs"]
 status = "partial"
-note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984; not yet re-ported (ocio26 cards)."
+note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "src/bindings/python/PyUtils.cpp"
@@ -3945,7 +3945,7 @@ path = "tests/cpu/CPUProcessor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/cpu_processor_tests.rs", "crates/ocio/tests/cpu_processor_tests.rs"]
 status = "partial"
-note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target); p5-dynamic 5.6a: dynamic_properties (crates/ocio/tests/cpu_processor_tests.rs) 2.6.0: changed at v2.6.0 lines 279-281, 623-626, 659-662, 671-674, 707-710, 718-721; not yet re-ported (ocio26 cards)."
+note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target); p5-dynamic 5.6a: dynamic_properties (crates/ocio/tests/cpu_processor_tests.rs). 2.6.0: changed at v2.6.0 lines 279-281, 623-626, 659-662, 671-674, 707-710, 718-721; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/Caching_tests.cpp"
@@ -3966,14 +3966,14 @@ path = "tests/cpu/ColorSpace_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_tests.rs"]
 status = "partial"
-note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p4-ctf-bake 4.10b (its color spaces read CLF files); p9-config-utils 9.1a: ConfigUtils/processor_to_known_colorspace and ConfigUtils/processor_to_known_colorspace_alt_config 2.6.0: changed at v2.6.0 lines 1926-2088; not yet re-ported (ocio26 cards)."
+note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p4-ctf-bake 4.10b (its color spaces read CLF files); p9-config-utils 9.1a: ConfigUtils/processor_to_known_colorspace and ConfigUtils/processor_to_known_colorspace_alt_config. 2.6.0: changed at v2.6.0 lines 1926-2088; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/ConfigUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_utils_tests.rs"]
 status = "partial"
-note = "p9-config-utils 9.1c: MergeConfigs/config_utils_update_reference and MergeConfigs/config_utils_find_equivalent_colorspace 2.6.0: changed at v2.6.0 lines 715, 720, 725, 730, 735, 740, 745, 750, 755, 760, 766-767, 773-774, 779-1126; not yet re-ported (ocio26 cards)."
+note = "p9-config-utils 9.1c: MergeConfigs/config_utils_update_reference and MergeConfigs/config_utils_find_equivalent_colorspace. 2.6.0: changed at v2.6.0 lines 715, 720, 725, 730, 735, 740, 745, 750, 755, 760, 766-767, 773-774, 779-1126; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/Config_tests.cpp"
@@ -4110,7 +4110,7 @@ path = "tests/cpu/Processor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/processor_tests.rs"]
 status = "partial"
-note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut; p5-dynamic 5.6a: unique_dynamic_properties, dynamic_properties, is_noop, cache_optimized_processors, cache_cpu_processors and cache_gpu_processors. Cache tests on ops built directly add checks (cache_optimized_processors_of_ops, cache_cpu_processors_of_ops), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs and, for dynamic properties, crates/ocio/tests/dynamic_properties_oracle.rs 2.6.0: changed at v2.6.0 lines 22, 37, 44, 49, 56, 66, 74, 81, 86; not yet re-ported (ocio26 cards)."
+note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut; p5-dynamic 5.6a: unique_dynamic_properties, dynamic_properties, is_noop, cache_optimized_processors, cache_cpu_processors and cache_gpu_processors. Cache tests on ops built directly add checks (cache_optimized_processors_of_ops, cache_cpu_processors_of_ops), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs and, for dynamic properties, crates/ocio/tests/dynamic_properties_oracle.rs. 2.6.0: changed at v2.6.0 lines 22, 37, 44, 49, 56, 66, 74, 81, 86; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
@@ -4233,7 +4233,7 @@ path = "tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/merge_configs_helpers_tests.rs"]
 status = "done"
-note = "p9-merge-1 9.2c: ociom_parser, params_serialization, ociom_serialization, ociom_parser_no_overrides; p9-merge-2 9.2d: general_section, roles_section; 9.2e: file_rules_section, looks_section; 9.2f: displays_views_section; p9-merge-3 9.2g: view_transforms_section; 9.2h: overrides, colorspaces_section, colorspaces_section_common_reference_and_duplicates; 9.2i: colorspaces_section_errors, named_transform_section, named_transform_section_errors; 9.2j: merges_with_ociom_file, merges_with_ocioz_file, merge_in_memory_configs, merge_single_colorspace (all 20 tests) 2.6.0: changed only comments/blank lines (v2.6.0 lines 2321); still done."
+note = "p9-merge-1 9.2c: ociom_parser, params_serialization, ociom_serialization, ociom_parser_no_overrides; p9-merge-2 9.2d: general_section, roles_section; 9.2e: file_rules_section, looks_section; 9.2f: displays_views_section; p9-merge-3 9.2g: view_transforms_section; 9.2h: overrides, colorspaces_section, colorspaces_section_common_reference_and_duplicates; 9.2i: colorspaces_section_errors, named_transform_section, named_transform_section_errors; 9.2j: merges_with_ociom_file, merges_with_ocioz_file, merge_in_memory_configs, merge_single_colorspace (all 20 tests). 2.6.0: changed only comments/blank lines (v2.6.0 lines 2321); still done."
 
 [[file]]
 path = "tests/cpu/apphelpers/MixingHelpers_tests.cpp"
@@ -4246,7 +4246,7 @@ path = "tests/cpu/builtinconfigs/BuiltinConfig_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/builtinconfigs/builtin_config_tests.rs"]
 status = "partial"
-note = "p3-loading 3.10a: basic, basic_impl, resolve_config_path; 3.10b: create_builtin_config 2.6.0: changed at v2.6.0 lines 20, 135-163, 169, 198, 227, 256, 280-308, 311, 508-509, 554-597, 601-603; not yet re-ported (ocio26 cards)."
+note = "p3-loading 3.10a: basic, basic_impl, resolve_config_path; 3.10b: create_builtin_config. 2.6.0: changed at v2.6.0 lines 20, 135-163, 169, 198, 227, 256, 280-308, 311, 508-509, 554-597, 601-603; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormat3DL_tests.cpp"
@@ -4288,7 +4288,7 @@ path = "tests/cpu/fileformats/FileFormatCTF_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_ctf_tests.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: missing_file, wrong_format, binary_file, process_list_invalid_version, clf_process_list_bad_version, process_list_higher_version, clf_process_list_higher_version, process_list_missing, transform_missing, transform_missing_id, transform_empty, transform_id_empty; 4.5c: matrix4x4, matrix_with_offset, matrix_with_offset_1_3, matrix_1_3_3x3, matrix_1_3_4x4, matrix_1_3_offsets, matrix_1_3_alpha_offsets, matrix_identity, matrix_windows_eol, matrix_no_newlines, check_utf8, info_example, process_list_valid_version, process_list_version_revision, process_list_no_version, info_element_version_test, transform_element_end_missing, array_missing_values, array_bad_value, array_bad_dimension, array_too_many_values, matrix_end_missing, transform_bad_outdepth, transform_end_missing, transform_corrupted_tag, range_default, range_test1_clamp, range_test1_noclamp, range_test2, range_nonmatching_clamp, range_empty, range_bad_noclamp, range_bad_values; 4.5e: gamma_test1-6, gamma_alpha_test1-6, exponent_bad_value, exponent_bad_param, exponent_all_styles, clf2_exponent_parse, cdl_clamp_fwd, cdl_missing_style, cdl_all_styles, cdl_bad_slope, cdl_bad_sat, cdl_bad_power, cdl_missing_slope, cdl_missing_offset, cdl_missing_power, cdl_bad_style, cdl_missing_sop, cdl_missing_sat, cdl_various_in_ctf, log_all_styles, log_logtolin, log_logtolinv2, log_lintolog_3chan, log_bad_style, log_bad_version, log_bad_param, log_missing_breakpnt, log_ocio_params_channels, log_ocio_params_base_missmatch, log_default_params; 4.5f: lut_1d, lut1d_hue_adjust_invalid_style, lut_3by1d_with_nan_infinity, lut1d_half_domain_set_false, lut1d_raw_half_set_false, lut1d_half_domain_raw_half_set, lut1d_half_domain_missing_values, 3by1d_lut, lut1d_long_lut, lut1d_inv, lut1d_inv_scaling, invlut1d_clf, indexMap_test, indexMap_test1_clfv2, indexMap_test3, indexMap_test4_clfv2, transform_missing_inbitdepth, transform_missing_outbitdepth, transform_with_bitdepth_mismatch, inverse_of_id_test, lut3d, lut3d_inv, lut3d_unequal_size, tabluation_support, indexMap_test2_clfv2; p4-ctf-read-3 (verifier fixes): difficult_syntax, difficult_xml_unknown_elements, unknown_elements, clf3_index_map, multiple_ops, clf_examples, lut_interpolation_option; 4.5g: load_deprecated_ops_file, load_fixed_function_file, load_ff_fail_version, load_ff_fail_params, load_ff_fail_style, load_ff_aces_fail_gamma_param, load_ff_aces_fail_gamma_twice, load_ff_aces_fail_missing_param, load_grading_rgbcurves_lin, load_grading_rgbcurves_log; 4.5h: reference_load_alias, reference_load_path, reference_load_multiple, reference_load_path_utf8, reference_load_alias_path; 4.6a: CTFTransform load_edit_save_matrix, save_matrix, load_save_matrix, save_matrix_444, load_edit_save_matrix_clf, matrix3x3_clf, matrix_offset_alpha_ctf, matrix_offset_alpha_bitdepth_ctf, matrix_offset_alpha_inverse_ctf, no_ops_ctf; 4.6b: CTFTransform save_cdl, save_log, save_log_affine, save_log_camera, save_range, save_group, legacy_cdl, cdl_clf, cdl_ctf, range_ctf, range1_clf, range2_clf, range3_clf, range4_clf, exponent_ctf, gamma1_ctf, gamma1_mirror_ctf, gamma1_pass_thru_ctf, gamma2_ctf, gamma3_ctf, gamma4_ctf, gamma5_ctf, gamma6_ctf, log_lin_to_log_ctf, log_log_to_lin_ctf, log_antilog2_ctf; 4.6c: CTFTransform save_lut_1d_1component, save_lut_1d_3components, save_invlut_1d_3components, save_lut1d_halfdomain, save_lut1d_f16_raw, save_lut1d_f32, save_lut1d_interpolation, save_invalid_lut_1d, save_lut_3d, lut1d_clf, lut1d_inverse_clf, lut1d_ctf, lut1d_attributes_ctf, lut1d_array_16x1_ctf, lut1d_array_16x3_ctf, lut1d_10i_ctf, lut1d_inverse_ctf, lut3d_array_ctf, lut3d_inverse_clf, lut3d_inverse_ctf, save_lut3d_interpolation, bitdepth_ctf; 4.6d: CTFTransform fixed_function_aces_gamut_comp_13_ctf, fixed_function_aces_gamut_comp_13_inverse_ctf, fixed_function_rec2100_ctf, fixed_function_rec2100_inverse_ctf, fixed_function_lin_to_gammalog_ctf, fixed_function_lin_to_doublelog_ctf; 4.6e: FileFormatCTF ff_load_save_ctf; p4-after-p5 4.5i: exposure_contrast_video, exposure_contrast_log, exposure_contrast_linear, exposure_contrast_no_gamma, exposure_contrast_failures, attribute_float_parse_extra_values, attribute_float_parse_leading_spaces, load_grading_primary_log, load_grading_primary_lin, load_grading_primary_video, load_grading_primary_errors, load_grading_huecurves_log, load_grading_curves_errors, CTFTransform load_grading_tone, load_grading_tone_errors; p4-after-p5 4.6f: CTFTransform exposure_contrast_video_ctf, exposure_contrast_log_ctf, exposure_contrast_linear_ctf, exposure_contrast_not_dynamic_ctf, exposure_contrast_log_params_ctf, grading_primary_log_ctf, grading_primary_lin_ctf, grading_primary_video_ctf, grading_rgbcurve_log_ctf, grading_rgbcurve_video_ctf, grading_rgbcurve_lin_ctf, grading_huecurve_lin_ctf, grading_tone_log_ctf, grading_tone_lin_ctf, grading_tone_video_ctf 2.6.0: changed at v2.6.0 lines 30-50, 73-75, 77, 100-103, 125-133, 195-203, 238, 243-249, 304, 362, 367-373, 425, 477, 528, 577-578, 683-701, 752, 774, 826, 863, 932, 952, 1023, after 1047 (deleted), 1086, 1127, 1175-1176, 1221-1222, 1235-1236, 1273, 1289-1369, 1377-1386, 1389, 1404, 1407-1408, 1410-1413, 1415-1416, 1419, 1422-1425, 1427-1428, 1431-1438, 1441-1442, 1451-1727, 1738-1741, 1745-1750, 1752, 1757-1766, 1769, 1772-1773, 1776, 1892, 1976, 2085, 2096, 2103-2118, 2129, 2140, 2155, 2162-2182, 2240, 2336, 2339, 2360-2364, 2375, 2400, 2425, 2473, 2529, 2556, 2614-2617, 2619, 2648, 2679, 2709, 2756, 2778, 2809, 2845, 2877, 2918, 2974-2975, 3161-3170, 3205, 3229, 3305, 3326, 3349, 3390-3391, 3562-3563, 3590-3591, 3617-3618, 3661, 3694, 3747-3748, 3782-3783, 3896-3897, 3916-3917, 3935-3936, 3972-3973, 3997, 4030, 4067, 4104, 4176, 4191-4192, 4235-4236, 4282, 4304-4305, 4400-4403, 4530, 4634, 4735, 4934, 5022, 5120, 5328, 5417, 5459, 5493, 5500-5501, 5505-5506, 5508, 5511, 5543, 5577, 5585, 5587, 5589, 5591, 5593, 5595, 5597, 5599, 5625, 5650, 5673, 5753, 5802, 5844, 5959, 5989, 6002, 6013, 6060, 6075-6078, 6080-6082, 6097, 6099-6101, 6103-6106, 6108-6109, 6111-6113, 6129-6134, after 6135 (deleted), 6159, 6407, 6453, 6572, 6607, 6638, 6673, 6747, 6790, 6833, 6918, 7212-7260, 8217, 8992, 9068, 9110, 9162-9165, 9167, 9182, 9185-9188, 9266, 9316; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5b: missing_file, wrong_format, binary_file, process_list_invalid_version, clf_process_list_bad_version, process_list_higher_version, clf_process_list_higher_version, process_list_missing, transform_missing, transform_missing_id, transform_empty, transform_id_empty; 4.5c: matrix4x4, matrix_with_offset, matrix_with_offset_1_3, matrix_1_3_3x3, matrix_1_3_4x4, matrix_1_3_offsets, matrix_1_3_alpha_offsets, matrix_identity, matrix_windows_eol, matrix_no_newlines, check_utf8, info_example, process_list_valid_version, process_list_version_revision, process_list_no_version, info_element_version_test, transform_element_end_missing, array_missing_values, array_bad_value, array_bad_dimension, array_too_many_values, matrix_end_missing, transform_bad_outdepth, transform_end_missing, transform_corrupted_tag, range_default, range_test1_clamp, range_test1_noclamp, range_test2, range_nonmatching_clamp, range_empty, range_bad_noclamp, range_bad_values; 4.5e: gamma_test1-6, gamma_alpha_test1-6, exponent_bad_value, exponent_bad_param, exponent_all_styles, clf2_exponent_parse, cdl_clamp_fwd, cdl_missing_style, cdl_all_styles, cdl_bad_slope, cdl_bad_sat, cdl_bad_power, cdl_missing_slope, cdl_missing_offset, cdl_missing_power, cdl_bad_style, cdl_missing_sop, cdl_missing_sat, cdl_various_in_ctf, log_all_styles, log_logtolin, log_logtolinv2, log_lintolog_3chan, log_bad_style, log_bad_version, log_bad_param, log_missing_breakpnt, log_ocio_params_channels, log_ocio_params_base_missmatch, log_default_params; 4.5f: lut_1d, lut1d_hue_adjust_invalid_style, lut_3by1d_with_nan_infinity, lut1d_half_domain_set_false, lut1d_raw_half_set_false, lut1d_half_domain_raw_half_set, lut1d_half_domain_missing_values, 3by1d_lut, lut1d_long_lut, lut1d_inv, lut1d_inv_scaling, invlut1d_clf, indexMap_test, indexMap_test1_clfv2, indexMap_test3, indexMap_test4_clfv2, transform_missing_inbitdepth, transform_missing_outbitdepth, transform_with_bitdepth_mismatch, inverse_of_id_test, lut3d, lut3d_inv, lut3d_unequal_size, tabluation_support, indexMap_test2_clfv2; p4-ctf-read-3 (verifier fixes): difficult_syntax, difficult_xml_unknown_elements, unknown_elements, clf3_index_map, multiple_ops, clf_examples, lut_interpolation_option; 4.5g: load_deprecated_ops_file, load_fixed_function_file, load_ff_fail_version, load_ff_fail_params, load_ff_fail_style, load_ff_aces_fail_gamma_param, load_ff_aces_fail_gamma_twice, load_ff_aces_fail_missing_param, load_grading_rgbcurves_lin, load_grading_rgbcurves_log; 4.5h: reference_load_alias, reference_load_path, reference_load_multiple, reference_load_path_utf8, reference_load_alias_path; 4.6a: CTFTransform load_edit_save_matrix, save_matrix, load_save_matrix, save_matrix_444, load_edit_save_matrix_clf, matrix3x3_clf, matrix_offset_alpha_ctf, matrix_offset_alpha_bitdepth_ctf, matrix_offset_alpha_inverse_ctf, no_ops_ctf; 4.6b: CTFTransform save_cdl, save_log, save_log_affine, save_log_camera, save_range, save_group, legacy_cdl, cdl_clf, cdl_ctf, range_ctf, range1_clf, range2_clf, range3_clf, range4_clf, exponent_ctf, gamma1_ctf, gamma1_mirror_ctf, gamma1_pass_thru_ctf, gamma2_ctf, gamma3_ctf, gamma4_ctf, gamma5_ctf, gamma6_ctf, log_lin_to_log_ctf, log_log_to_lin_ctf, log_antilog2_ctf; 4.6c: CTFTransform save_lut_1d_1component, save_lut_1d_3components, save_invlut_1d_3components, save_lut1d_halfdomain, save_lut1d_f16_raw, save_lut1d_f32, save_lut1d_interpolation, save_invalid_lut_1d, save_lut_3d, lut1d_clf, lut1d_inverse_clf, lut1d_ctf, lut1d_attributes_ctf, lut1d_array_16x1_ctf, lut1d_array_16x3_ctf, lut1d_10i_ctf, lut1d_inverse_ctf, lut3d_array_ctf, lut3d_inverse_clf, lut3d_inverse_ctf, save_lut3d_interpolation, bitdepth_ctf; 4.6d: CTFTransform fixed_function_aces_gamut_comp_13_ctf, fixed_function_aces_gamut_comp_13_inverse_ctf, fixed_function_rec2100_ctf, fixed_function_rec2100_inverse_ctf, fixed_function_lin_to_gammalog_ctf, fixed_function_lin_to_doublelog_ctf; 4.6e: FileFormatCTF ff_load_save_ctf; p4-after-p5 4.5i: exposure_contrast_video, exposure_contrast_log, exposure_contrast_linear, exposure_contrast_no_gamma, exposure_contrast_failures, attribute_float_parse_extra_values, attribute_float_parse_leading_spaces, load_grading_primary_log, load_grading_primary_lin, load_grading_primary_video, load_grading_primary_errors, load_grading_huecurves_log, load_grading_curves_errors, CTFTransform load_grading_tone, load_grading_tone_errors; p4-after-p5 4.6f: CTFTransform exposure_contrast_video_ctf, exposure_contrast_log_ctf, exposure_contrast_linear_ctf, exposure_contrast_not_dynamic_ctf, exposure_contrast_log_params_ctf, grading_primary_log_ctf, grading_primary_lin_ctf, grading_primary_video_ctf, grading_rgbcurve_log_ctf, grading_rgbcurve_video_ctf, grading_rgbcurve_lin_ctf, grading_huecurve_lin_ctf, grading_tone_log_ctf, grading_tone_lin_ctf, grading_tone_video_ctf. 2.6.0: changed at v2.6.0 lines 30-50, 73-75, 77, 100-103, 125-133, 195-203, 238, 243-249, 304, 362, 367-373, 425, 477, 528, 577-578, 683-701, 752, 774, 826, 863, 932, 952, 1023, after 1047 (deleted), 1086, 1127, 1175-1176, 1221-1222, 1235-1236, 1273, 1289-1369, 1377-1386, 1389, 1404, 1407-1408, 1410-1413, 1415-1416, 1419, 1422-1425, 1427-1428, 1431-1438, 1441-1442, 1451-1727, 1738-1741, 1745-1750, 1752, 1757-1766, 1769, 1772-1773, 1776, 1892, 1976, 2085, 2096, 2103-2118, 2129, 2140, 2155, 2162-2182, 2240, 2336, 2339, 2360-2364, 2375, 2400, 2425, 2473, 2529, 2556, 2614-2617, 2619, 2648, 2679, 2709, 2756, 2778, 2809, 2845, 2877, 2918, 2974-2975, 3161-3170, 3205, 3229, 3305, 3326, 3349, 3390-3391, 3562-3563, 3590-3591, 3617-3618, 3661, 3694, 3747-3748, 3782-3783, 3896-3897, 3916-3917, 3935-3936, 3972-3973, 3997, 4030, 4067, 4104, 4176, 4191-4192, 4235-4236, 4282, 4304-4305, 4400-4403, 4530, 4634, 4735, 4934, 5022, 5120, 5328, 5417, 5459, 5493, 5500-5501, 5505-5506, 5508, 5511, 5543, 5577, 5585, 5587, 5589, 5591, 5593, 5595, 5597, 5599, 5625, 5650, 5673, 5753, 5802, 5844, 5959, 5989, 6002, 6013, 6060, 6075-6078, 6080-6082, 6097, 6099-6101, 6103-6106, 6108-6109, 6111-6113, 6129-6134, after 6135 (deleted), 6159, 6407, 6453, 6572, 6607, 6638, 6673, 6747, 6790, 6833, 6918, 7212-7260, 8217, 8992, 9068, 9110, 9162-9165, 9167, 9182, 9185-9188, 9266, 9316; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatDiscreet1DL_tests.cpp"
@@ -4390,7 +4390,7 @@ path = "tests/cpu/fileformats/ctf/CTFTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/ctf/ctf_transform_tests.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5a: read_version, accessors; p4-ctf-read-3 4.6e: version_write 2.6.0: changed at v2.6.0 lines 50, 55, 60, 65, 70, 75, 80-136, 139, 142, 145, 148, 151, 154, 157, 200-216, 222, 225, 237-238, 240-241, 243-244, 248-249, 252, 254-261, 265, 271-428; not yet re-ported (ocio26 cards)."
+note = "p4-ctf-read-1 4.5a: read_version, accessors; p4-ctf-read-3 4.6e: version_write. 2.6.0: changed at v2.6.0 lines 50, 55, 60, 65, 70, 75, 80-136, 139, 142, 145, 148, 151, 154, 157, 200-216, 222, 225, 237-238, 240-241, 243-244, 248-249, 252, 254-261, 265, 271-428; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/fileformats/ctf/IndexMapping_tests.cpp"
@@ -4457,14 +4457,14 @@ path = "tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu_tests.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID; 2.3d1: LIN_TO_GAMMA_LOG, LIN_TO_DOUBLE_LOG. 2.3d2: LIN_TO_PQ; p2-aces2-cpu 2.4e1: aces_rgb_to_jmh_20, aces_tonescale_compress_20; 2.4e2: aces_output_transform_20, aces_ot_20_edge_cases, aces_gamut_map_20; p2-api-parity: the round trips aces_ot_20_rec709_100n_rt, aces_ot_20_p3d65_100n_rt and aces_ot_20_p3d65_1000n_rt (GenerateIdentityLut3D came with p2-lut3d) 2.6.0: changed at v2.6.0 lines 791-823; not yet re-ported (ocio26 cards)."
+note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID; 2.3d1: LIN_TO_GAMMA_LOG, LIN_TO_DOUBLE_LOG. 2.3d2: LIN_TO_PQ; p2-aces2-cpu 2.4e1: aces_rgb_to_jmh_20, aces_tonescale_compress_20; 2.4e2: aces_output_transform_20, aces_ot_20_edge_cases, aces_gamut_map_20; p2-api-parity: the round trips aces_ot_20_rec709_100n_rt, aces_ot_20_p3d65_100n_rt and aces_ot_20_p3d65_1000n_rt (GenerateIdentityLut3D came with p2-lut3d). 2.6.0: changed at v2.6.0 lines 791-823; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data_tests.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3a2: all 7 2.6.0: changed at v2.6.0 lines 375-386; not yet re-ported (ocio26 cards)."
+note = "p2-ff-cpu 2.3a2: all 7. 2.6.0: changed at v2.6.0 lines 375-386; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp"
@@ -4736,7 +4736,7 @@ path = "tests/cpu/ops/reference/ReferenceOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/reference/reference_op_data_tests.rs", "crates/ocio/src/fileformats/reference_op_data_tests.rs"]
 status = "partial"
-note = "accessors; p4-ctf-read-3 4.5h: the load_* tests (load_path_resolve_failing, load_multiple_resolve, load_same_twice_resolve, load_nested_resolve, load_cycle_itself/2/3/rel_resolve_failing, load_one_reference, load_multiple_resolve_internal, load_nested_resolve_internal), in the ocio crate, as they need the file transform and the CTF reader 2.6.0: changed at v2.6.0 lines 236; not yet re-ported (ocio26 cards)."
+note = "accessors; p4-ctf-read-3 4.5h: the load_* tests (load_path_resolve_failing, load_multiple_resolve, load_same_twice_resolve, load_nested_resolve, load_cycle_itself/2/3/rel_resolve_failing, load_one_reference, load_multiple_resolve_internal, load_nested_resolve_internal), in the ocio crate, as they need the file transform and the CTF reader. 2.6.0: changed at v2.6.0 lines 236; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/transforms/AllocationTransform_tests.cpp"
@@ -4750,7 +4750,7 @@ path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtin_transform_tests.rs", "crates/ocio-ops/src/transforms/builtins/color_matrix_helpers_tests.rs", "crates/ocio/src/transforms/builtins/op_helpers_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); p2-api-parity: forward_inverse; p3-after-p2: interpolate (op_helpers_tests.rs, next to Interpolate1D), validate, aces2_displayview_roundtrip, aces2_Aab_to_RGB_nan 2.6.0: changed at v2.6.0 lines 594-596, 776, 794-801, 807-811, 894, 902, 911, 921, 931, 938, 940-959; not yet re-ported (ocio26 cards)."
+note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); p2-api-parity: forward_inverse; p3-after-p2: interpolate (op_helpers_tests.rs, next to Interpolate1D), validate, aces2_displayview_roundtrip, aces2_Aab_to_RGB_nan. 2.6.0: changed at v2.6.0 lines 594-596, 776, 794-801, 807-811, 894, 902, 911, 921, 931, 938, 940-959; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
@@ -4771,7 +4771,7 @@ path = "tests/cpu/transforms/DisplayViewTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/display_view_transform_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1a): basic; build_ops_with_looks, config_load, apply_fwd_inv and context_variables come with 3.2c, build_ops uses ExposureContrast (Phase 5); p3-builders 3.2c: build_ops_with_looks, config_load, apply_fwd_inv, context_variables; p5-dynamic 5.6b: build_ops 2.6.0: changed at v2.6.0 lines 1494-1872; not yet re-ported (ocio26 cards)."
+note = "p3-transforms (3.1a): basic; build_ops_with_looks, config_load, apply_fwd_inv and context_variables come with 3.2c, build_ops uses ExposureContrast (Phase 5); p3-builders 3.2c: build_ops_with_looks, config_load, apply_fwd_inv, context_variables; p5-dynamic 5.6b: build_ops. 2.6.0: changed at v2.6.0 lines 1494-1872; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/transforms/ExponentTransform_tests.cpp"
@@ -4799,14 +4799,14 @@ path = "tests/cpu/transforms/FileTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/file_transform_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; 4.1b: load_file_fail, and context_variables' cases 1-3 in a test of their own; p4-ctf-read-3 (4.1b, 4.1c): load_file_ok, interpolation_validity, cc_file_with_different_file_extension; P26 completes context_variables, including the ExposureContrast processor construction and all original CCC ID case-4 assertions (FileTransform_tests.cpp:368-497) 2.6.0: changed at v2.6.0 lines 83; not yet re-ported (ocio26 cards)."
+note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; 4.1b: load_file_fail, and context_variables' cases 1-3 in a test of their own; p4-ctf-read-3 (4.1b, 4.1c): load_file_ok, interpolation_validity, cc_file_with_different_file_extension; P26 completes context_variables, including the ExposureContrast processor construction and all original CCC ID case-4 assertions (FileTransform_tests.cpp:368-497). 2.6.0: changed at v2.6.0 lines 83; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/transforms/FixedFunctionTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/fixed_function_transform_tests.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3e: basic, createEditableCopy 2.6.0: changed at v2.6.0 lines 81-99; not yet re-ported (ocio26 cards)."
+note = "p2-ff-cpu 2.3e: basic, createEditableCopy. 2.6.0: changed at v2.6.0 lines 81-99; not yet re-ported (ocio26 cards)."
 
 [[file]]
 path = "tests/cpu/transforms/GradingHueCurveTransform_tests.cpp"
