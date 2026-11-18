@@ -59,8 +59,9 @@ impl MatrixCase {
     }
 }
 
-/// `g_epsilon` (tests/gpu/MatrixOp_test.cpp:12 @ v2.5.2).
-const MATRIX_EPSILON: f32 = 5e-7;
+/// `g_epsilon` (tests/gpu/MatrixOp_test.cpp:12-13 @ v2.6.0: 1e-6, for DirectX FMA rounding; 5e-7
+/// in 2.5.2).
+const MATRIX_EPSILON: f32 = 1e-6;
 
 /// The matrix the tests share (tests/gpu/MatrixOp_test.cpp:40-43 @ v2.5.2).
 const MATRIX: [f64; 16] = [

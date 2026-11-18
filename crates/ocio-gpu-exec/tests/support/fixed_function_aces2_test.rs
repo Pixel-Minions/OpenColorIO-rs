@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/gpu/FixedFunctionOp_test.cpp` @ v2.5.2, 23 ACES2 cases (7.3d).
+//! Port of `tests/gpu/FixedFunctionOp_test.cpp` @ v2.5.2 and v2.6.0 (the cases marked so), 23
+//! ACES2 cases (7.3d).
 //! Original inputs and settings; actual wheel CPU/shader references; no retests.
 #![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
@@ -480,7 +481,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "668f04116032ccb702310ba930a1f6f601612700755d3b03d33e123e0d70bb9c",
         padded_input_digest: "f962ffeabbdaa8e167e599a94f937be88e0d5e9bcacf36120f6ecb758dfb7c81",
     },
-    // FixedFunctionOp_test.cpp:605-623 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:606-624 @ v2.6.0.
     Case {
         name: "style_aces2_1000nit_p3_rndtrip",
         build: Build::DisplayView {
@@ -492,7 +493,7 @@ const CASES: &[Case] = &[
             edge: 17,
             scale: 0.75183,
         },
-        threshold: 0.012,
+        threshold: 0.014,
         relative: false,
         minimum: 1e-6,
         nan: true,
@@ -530,7 +531,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "cd2ef7177549b2b79bd9fd5279de4f89f664ca48582b2c3e648a1d38c703fd28",
         padded_input_digest: "4df6527d10fdc0869638876eab2f020122584a311fe0858cdfebdb493c8a8caf",
     },
-    // FixedFunctionOp_test.cpp:644-660 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:645-661 @ v2.6.0.
     Case {
         name: "style_aces2_4000nit_p3_rndtrip",
         build: Build::DisplayView {
@@ -542,7 +543,7 @@ const CASES: &[Case] = &[
             edge: 17,
             scale: 0.90257,
         },
-        threshold: 0.018,
+        threshold: 0.019,
         relative: false,
         minimum: 1e-6,
         nan: true,
@@ -580,7 +581,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "7f418aaca0bc4229564a4739d12db3fe5e92b144c073f30b123f44d4eb0a47fd",
         padded_input_digest: "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05",
     },
-    // FixedFunctionOp_test.cpp:681-697 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:682-698 @ v2.6.0.
     Case {
         name: "style_aces2_4000nit_rec2020_rndtrip",
         build: Build::DisplayView {
@@ -592,7 +593,7 @@ const CASES: &[Case] = &[
             edge: 17,
             scale: 0.90257,
         },
-        threshold: 0.03,
+        threshold: 0.034,
         relative: false,
         minimum: 1e-6,
         nan: true,
@@ -680,7 +681,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "7f418aaca0bc4229564a4739d12db3fe5e92b144c073f30b123f44d4eb0a47fd",
         padded_input_digest: "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05",
     },
-    // FixedFunctionOp_test.cpp:756-777 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:757-778 @ v2.6.0.
     Case {
         name: "style_aces2_nan_bug",
         build: Build::DisplayView {
@@ -702,7 +703,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "25265e456d75c70c4270d27fba8a68abcb4f4aba5fbe9dd44c7ab3fa94d4b778",
         padded_input_digest: "b04589158c71c748aabac981a96d68df981d0f1740c2cf8eeea0988a379f9198",
     },
-    // FixedFunctionOp_test.cpp:779-826 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:867-883 @ v2.6.0 (its values in g_aces2_rgb_values, 783-813).
     Case {
         name: "style_aces2_rgb_to_jmh_fwd",
         build: Build::Fixed {
@@ -838,7 +839,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "7445eac304174fcbd2c9b14c5fa142ee5bce5fca2160d434e46c8c95cd06d66f",
         padded_input_digest: "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319",
     },
-    // FixedFunctionOp_test.cpp:828-875 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:885-900 @ v2.6.0 (its values in g_aces2_jmh_values, 816-846).
     Case {
         name: "style_aces2_rgb_to_jmh_inv",
         build: Build::Fixed {
@@ -1838,7 +1839,7 @@ fn style_aces2_displayp3_rndtrip() {
 fn style_aces2_displayp3_inv() {
     run_case(6, "style_aces2_displayp3_inv");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_1000nit_p3_rndtrip)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_1000nit_p3_rndtrip)` @ v2.6.0.
 #[test]
 fn style_aces2_1000nit_p3_rndtrip() {
     run_case(7, "style_aces2_1000nit_p3_rndtrip");
@@ -1848,7 +1849,7 @@ fn style_aces2_1000nit_p3_rndtrip() {
 fn style_aces2_1000nit_p3_inv() {
     run_case(8, "style_aces2_1000nit_p3_inv");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_4000nit_p3_rndtrip)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_4000nit_p3_rndtrip)` @ v2.6.0.
 #[test]
 fn style_aces2_4000nit_p3_rndtrip() {
     run_case(9, "style_aces2_4000nit_p3_rndtrip");
@@ -1858,7 +1859,7 @@ fn style_aces2_4000nit_p3_rndtrip() {
 fn style_aces2_4000nit_p3_inv() {
     run_case(10, "style_aces2_4000nit_p3_inv");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_4000nit_rec2020_rndtrip)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_4000nit_rec2020_rndtrip)` @ v2.6.0.
 #[test]
 fn style_aces2_4000nit_rec2020_rndtrip() {
     run_case(11, "style_aces2_4000nit_rec2020_rndtrip");
@@ -1878,17 +1879,17 @@ fn style_aces2_d60_4000nit_p3_rndtrip() {
 fn style_aces2_d60_4000nit_p3_inv() {
     run_case(14, "style_aces2_d60_4000nit_p3_inv");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_nan_bug)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_nan_bug)` @ v2.6.0.
 #[test]
 fn style_aces2_nan_bug() {
     run_case(15, "style_aces2_nan_bug");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_jmh_fwd)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_jmh_fwd)` @ v2.6.0.
 #[test]
 fn style_aces2_rgb_to_jmh_fwd() {
     run_case(16, "style_aces2_rgb_to_jmh_fwd");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_jmh_inv)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_jmh_inv)` @ v2.6.0.
 #[test]
 fn style_aces2_rgb_to_jmh_inv() {
     run_case(17, "style_aces2_rgb_to_jmh_inv");

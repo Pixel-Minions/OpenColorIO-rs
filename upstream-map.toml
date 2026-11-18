@@ -302,15 +302,15 @@ note = "see GpuShader.cpp"
 path = "src/OpenColorIO/GpuShaderClassWrapper.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_class_wrapper.rs"]
-status = "partial"
-note = "1.7d: the default, OSL and Metal wrappers, one type over upstream's three subclasses. The Metal wrapper's parse returns an error where upstream reads past a line (U-10). Checked against the wheel's MSL and OSL shaders (gpu_shader) and the class wrapper's part of upstream's Metal tests 2.6.0: changed at v2.6.0 lines 184-187, 355-386, 397; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.7d: the default, OSL and Metal wrappers, one type over upstream's three subclasses. The Metal wrapper's parse returns an error where upstream reads past a line (U-10). Checked against the wheel's MSL and OSL shaders (gpu_shader) and the class wrapper's part of upstream's Metal tests ocio26-base: the Metal constructor binds the array members and rewriteArrayDeclarations (355-385) at v2.6.0 (PR #2342)."
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderClassWrapper.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_class_wrapper.rs"]
-status = "partial"
-note = "see GpuShaderClassWrapper.cpp 2.6.0: changed at v2.6.0 lines 123; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "see GpuShaderClassWrapper.cpp ocio26-base: rewriteArrayDeclarations declared at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderDesc.cpp"
@@ -323,15 +323,15 @@ note = "see GpuShader.cpp"
 path = "src/OpenColorIO/GpuShaderUtils.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_utils.rs"]
-status = "partial"
-note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers. BuildResourceName and the grading-log helpers take the creator's resource prefix or pixel name instead of the creator 2.6.0: changed at v2.6.0 lines 407-417; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers. BuildResourceName and the grading-log helpers take the creator's resource prefix or pixel name instead of the creator ocio26-base: GpuShaderText::intCast (407-416) at v2.6.0 (PR #2319)."
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderUtils.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_utils.rs"]
-status = "partial"
-note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers. BuildResourceName and the grading-log helpers take the creator's resource prefix or pixel name instead of the creator 2.6.0: changed at v2.6.0 lines 79-80; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers. BuildResourceName and the grading-log helpers take the creator's resource prefix or pixel name instead of the creator ocio26-base: intCast declared at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/HashUtils.cpp"
@@ -1437,7 +1437,7 @@ path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/fixedfunction/fixed_function_op_gpu.rs"]
 status = "partial"
-note = "p2-ff-gpu 2.3f: the ACES 1.x shaders (1-351, and Add_Surround_10_Fwd_Shader 1636-1649) and the dispatch (GetFixedFunctionGPUShaderProgram, GetFixedFunctionGPUProcessingText, 2225-2491), its other arms not ported yet; 2.3g1: the Rec.2100 surround, RGB<->HSV, the HSYs, XYZ<->xyY, u'v'Y and LUV (1651-1948); 2.3g2: PQ, gamma-log and double-log (1950-2223); p2-aces2-gpu 2.4f1: hue wrap, sin/cos, RGB<->Aab<->JMh (352-503), the RGB_TO_JMh entry points (1442-1492); 2.4f2: the reach table, toe, tone scale and chroma compression (505-805), the TONESCALE_COMPRESS entry points (1494-1548); 2.4g: the cusp table, focus gain, J intersection, gamut boundary and compression (807-1285), the GAMUT_COMPRESS entry points (1550-1634); 2.4h: the output transform (1287-1440), and the dispatch's last arms 2.6.0: changed at v2.6.0 lines 43, 870, 872-877, 1494-1519, 1612, 1654, 2376-2385; not yet re-ported (ocio26 cards)."
+note = "p2-ff-gpu 2.3f: the ACES 1.x shaders (1-351, and Add_Surround_10_Fwd_Shader 1636-1649) and the dispatch (GetFixedFunctionGPUShaderProgram, GetFixedFunctionGPUProcessingText, 2225-2491), its other arms not ported yet; 2.3g1: the Rec.2100 surround, RGB<->HSV, the HSYs, XYZ<->xyY, u'v'Y and LUV (1651-1948); 2.3g2: PQ, gamma-log and double-log (1950-2223); p2-aces2-gpu 2.4f1: hue wrap, sin/cos, RGB<->Aab<->JMh (352-503), the RGB_TO_JMh entry points (1442-1492); 2.4f2: the reach table, toe, tone scale and chroma compression (505-805), the TONESCALE_COMPRESS entry points (1494-1548); 2.4g: the cusp table, focus gain, J intersection, gamut boundary and compression (807-1285), the GAMUT_COMPRESS entry points (1550-1634); 2.4h: the output transform (1287-1440), and the dispatch's last arms ocio26-base: intCast in the hue weight and cusp table, gamut compress without _Add_SinCos_Shader at v2.6.0 (PR #2319); the HMJ shaders (1494-1518, 2376-2385) are card ocio26-ops."
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.h"
@@ -1655,8 +1655,8 @@ status = "done"
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs", "crates/ocio-gpu/src/ops/gradingrgbcurve/grading_rgb_curve_op_gpu.rs", "crates/ocio-gpu/src/ops/gradinghuecurve/grading_hue_curve_op_gpu.rs"]
-status = "partial"
-note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; 2.6b: the RGB curves' fitting (EstimateRGBSlopes, FitRGBSpline, AdjustRGBSlopes with U-35's guard, computeKnotsAndCoefsForRGBCurve), KnotsCoefs and evalCurve/evalCurveRev, the fitting and the evaluation in each wheel's operand order (I-91); 2.6e: AddShaderEvalFwd/Rev, in ocio-gpu's grading_rgb_curve_op_gpu.rs; p5-values 5.0d: the hue curves' fitting (PrepHueCurveData, CalcKsi, FitHueSpline, EstimateHueSlopes, computeKnotsAndCoefsForHueCurve with drawCurveOnly's identity knots) and the Create overloads with a HueCurveType (with_hue_curve_type, with_points_and_hue_curve_type), checked bit for bit against the uniforms of the wheel's dynamic GradingHueCurve op on Windows (tests/hue_curve_knots_oracle.rs); p5-huecurve 5.4b: KnotsCoefs::evalCurveRevHue (1385-1460) in each wheel's operand order, checked through the hue curve renderers' battery; 5.4c: AddShaderEvalRevHue (1168-1246), in ocio-gpu's grading_hue_curve_op_gpu.rs 2.6.0: changed at v2.6.0 lines 1193-1194, after 1202 (deleted); not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; 2.6b: the RGB curves' fitting (EstimateRGBSlopes, FitRGBSpline, AdjustRGBSlopes with U-35's guard, computeKnotsAndCoefsForRGBCurve), KnotsCoefs and evalCurve/evalCurveRev, the fitting and the evaluation in each wheel's operand order (I-91); 2.6e: AddShaderEvalFwd/Rev, in ocio-gpu's grading_rgb_curve_op_gpu.rs; p5-values 5.0d: the hue curves' fitting (PrepHueCurveData, CalcKsi, FitHueSpline, EstimateHueSlopes, computeKnotsAndCoefsForHueCurve with drawCurveOnly's identity knots) and the Create overloads with a HueCurveType (with_hue_curve_type, with_points_and_hue_curve_type), checked bit for bit against the uniforms of the wheel's dynamic GradingHueCurve op on Windows (tests/hue_curve_knots_oracle.rs); p5-huecurve 5.4b: KnotsCoefs::evalCurveRevHue (1385-1460) in each wheel's operand order, checked through the hue curve renderers' battery; 5.4c: AddShaderEvalRevHue (1168-1246), in ocio-gpu's grading_hue_curve_op_gpu.rs ocio26-base: AddShaderEvalRevHue offsets knStartY of the hue-fx curve at v2.6.0 (PR #2319)."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.h"
@@ -1722,8 +1722,8 @@ status = "done"
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gradingrgbcurve/grading_rgb_curve_op_gpu.rs"]
-status = "partial"
-note = "p2-rgbcurve 2.6e 2.6.0: changed at v2.6.0 lines 234-239, 241, 245, 249, 339-345; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p2-rgbcurve 2.6e ocio26-base: the inverse eval takes no identity_x at v2.6.0 (PR #2319)."
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpGPU.h"
@@ -4033,8 +4033,8 @@ status = "done"
 path = "tests/cpu/GpuShader_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-gpu/src/gpu_shader_tests.rs", "crates/ocio/tests/gpu_shader_tests.rs"]
-status = "partial"
-note = "P57: all 11 original OCIO_ADD_TEST cases in this pinned upstream file have port markers in crates/ocio-gpu/src/gpu_shader_tests.rs, crates/ocio/tests/gpu_shader_tests.rs. The prior partial phase notes were stale; this changes accounting only, with no assertion or test-source changes. Full normal CI validates the unchanged runtime suites. 2.6.0: changed at v2.6.0 lines 1218-1221, 1228-1231, 1336; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P57: all 11 original OCIO_ADD_TEST cases in this pinned upstream file have port markers in crates/ocio-gpu/src/gpu_shader_tests.rs, crates/ocio/tests/gpu_shader_tests.rs. The prior partial phase notes were stale; this changes accounting only, with no assertion or test-source changes. Full normal CI validates the unchanged runtime suites. ocio26-base: MetalSupport9 at v2.6.0."
 
 [[file]]
 path = "tests/cpu/Logging_tests.cpp"
@@ -4937,14 +4937,14 @@ path = "tests/gpu/FixedFunctionOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu-exec/tests/fixed_function_op_test.rs", "crates/ocio-gpu-exec/tests/support/fixed_function_aces2_test.rs", "crates/ocio-gpu-exec/tests/support/fixed_function_cases.rs"]
 status = "partial"
-note = "2.6.0: changed at v2.6.0 lines 306-307, 622-623, 660, 696-697, 780-866, 878, 881, 896, 899-938; not yet re-ported (ocio26 cards)."
+note = "ocio26-base: the 2.6.0 thresholds (gamutcomp13_inv, aces2 1000nit/4000nit p3 and 4000nit rec2020 round trips) and the shared JMh values; the HMJ tests are card ocio26-ops."
 
 [[file]]
 path = "tests/gpu/GPUUnitTest.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu-exec/src/gpu_unit_test.rs", "crates/ocio-testkit/src/upstream/gpu.rs", "crates/ocio-gpu-exec/tests/gpu_unit_test.rs"]
-status = "partial"
-note = "P70 complete in-scope harness mapping: input/defaults, exact upstream comparisons, run/retests, wheel-GPU whole-image identity, native-vs-Rust readback regression and rejection controls are implemented and qualified in the existing harness/tests. All264 original cases execute on the approved Rocky llvmpipe renderer with existing approved exceptions. The standalone main registry/CLI remains explicitly outside Phase7 card7.2c; no new exclusion. 2.6.0: changed at v2.6.0 lines 18-20, 22-27, 31-33, 179-188, 219, 224, 239-241, after 251 (deleted), 341, 344, 346-362, 416-421, after 422 (deleted), after 424 (deleted), 426, after 427 (deleted), 435, 520-559, 572-577, 588-593, 636-637, 649-660, 663-668, 676-680, 682, 688, 731-734, 736-753, 755, 786, 812-816, 820; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P70 complete in-scope harness mapping: input/defaults, exact upstream comparisons, run/retests, wheel-GPU whole-image identity, native-vs-Rust readback regression and rejection controls are implemented and qualified in the existing harness/tests. All264 original cases execute on the approved Rocky llvmpipe renderer with existing approved exceptions. The standalone main registry/CLI remains explicitly outside Phase7 card7.2c; no new exclusion. ocio26-base: 2.6.0 refactors the harness for its DirectX and Vulkan backends (not ported, docs/ocio-2.6-plan.md); the comparison is unchanged."
 
 [[file]]
 path = "tests/gpu/GPUUnitTest.h"
@@ -4964,8 +4964,8 @@ note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/g
 path = "tests/gpu/GradingHueCurveOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu-exec/tests/grading_hue_curve_op_test.rs"]
-status = "partial"
-note = "p7-suite4: upstream cases and dynamic retests in the Linux execution harness; uncached wheel streams, exact GPU identity and complete finite companions under the approved class 2.6.0: changed at v2.6.0 lines 106-179; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p7-suite4: upstream cases and dynamic retests in the Linux execution harness; uncached wheel streams, exact GPU identity and complete finite companions under the approved class ocio26-base: style_vid_fwd/_dynamic/rev/_dynamic new and style_log_rev_dynamic re-marked at v2.6.0."
 
 [[file]]
 path = "tests/gpu/GradingPrimaryOp_test.cpp"
@@ -5011,8 +5011,8 @@ status = "done"
 path = "tests/gpu/MatrixOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu-exec/tests/matrix_op_test.rs"]
-status = "partial"
-note = "P70 all10 original matrix cases, including8 legacy cases, already execute in matrix_op_test.rs with original settings/thresholds and whole-image wheel identity. Native readback regression/rejection controls and the existing ten-language shader-text test remain. The former pending-runtime note is obsolete; no test or exception change. 2.6.0: changed at v2.6.0 lines 12-13; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P70 all10 original matrix cases, including8 legacy cases, already execute in matrix_op_test.rs with original settings/thresholds and whole-image wheel identity. Native readback regression/rejection controls and the existing ten-language shader-text test remain. The former pending-runtime note is obsolete; no test or exception change. ocio26-base: g_epsilon 1e-6 at v2.6.0 (crates/ocio-testkit/src/gpu_cases.rs)."
 
 [[file]]
 path = "tests/gpu/RangeOp_test.cpp"

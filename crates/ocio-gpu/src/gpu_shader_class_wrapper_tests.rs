@@ -2,7 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the class wrappers. No upstream test covers them alone:
-//! - upstream's Metal shader tests (`tests/cpu/GpuShader_tests.cpp` @ v2.5.2) need processors,
+//! - upstream's Metal shader tests (`tests/cpu/GpuShader_tests.cpp` @ v2.5.2, MetalSupport9 @
+//!   v2.6.0) need processors,
 //!   so they are ported with that file; here, the wrapper writes its part of their expected
 //!   texts;
 //! - the OSL wrapper's text is in no upstream test. Both wrappers write their parts of the
@@ -350,7 +351,8 @@ float4 OCIOMain(
 }
 "#,
     },
-    // `MetalSupport9`: the expected text at lines 1201-1363.
+    // `MetalSupport9`: the expected text at lines 1201-1335 @ v2.6.0 (2.6.0 binds the uniform
+    // arrays instead of copying them).
     MetalCase {
         test: "MetalSupport9",
         function_name: "OCIOMain",
@@ -371,48 +373,20 @@ ocioOCIOMain(
   , bool ocio_grading_rgbcurve_localBypass
 )
 {
-  for(int i = 0; i < ocio_grading_rgbcurve_knotsOffsets_count; ++i)
-  {
-    this->ocio_grading_rgbcurve_knotsOffsets[i] = ocio_grading_rgbcurve_knotsOffsets[i];
-  }
-  for(int i = ocio_grading_rgbcurve_knotsOffsets_count; i < 8; ++i)
-  {
-    this->ocio_grading_rgbcurve_knotsOffsets[i] = 0;
-  }
-  for(int i = 0; i < ocio_grading_rgbcurve_knots_count; ++i)
-  {
-    this->ocio_grading_rgbcurve_knots[i] = ocio_grading_rgbcurve_knots[i];
-  }
-  for(int i = ocio_grading_rgbcurve_knots_count; i < 120; ++i)
-  {
-    this->ocio_grading_rgbcurve_knots[i] = 0;
-  }
-  for(int i = 0; i < ocio_grading_rgbcurve_coefsOffsets_count; ++i)
-  {
-    this->ocio_grading_rgbcurve_coefsOffsets[i] = ocio_grading_rgbcurve_coefsOffsets[i];
-  }
-  for(int i = ocio_grading_rgbcurve_coefsOffsets_count; i < 8; ++i)
-  {
-    this->ocio_grading_rgbcurve_coefsOffsets[i] = 0;
-  }
-  for(int i = 0; i < ocio_grading_rgbcurve_coefs_count; ++i)
-  {
-    this->ocio_grading_rgbcurve_coefs[i] = ocio_grading_rgbcurve_coefs[i];
-  }
-  for(int i = ocio_grading_rgbcurve_coefs_count; i < 360; ++i)
-  {
-    this->ocio_grading_rgbcurve_coefs[i] = 0;
-  }
+  this->ocio_grading_rgbcurve_knotsOffsets = ocio_grading_rgbcurve_knotsOffsets;
+  this->ocio_grading_rgbcurve_knots = ocio_grading_rgbcurve_knots;
+  this->ocio_grading_rgbcurve_coefsOffsets = ocio_grading_rgbcurve_coefsOffsets;
+  this->ocio_grading_rgbcurve_coefs = ocio_grading_rgbcurve_coefs;
   this->ocio_grading_rgbcurve_localBypass = ocio_grading_rgbcurve_localBypass;
 }
 
 
 // Declaration of all variables
 
-int ocio_grading_rgbcurve_knotsOffsets[8];
-float ocio_grading_rgbcurve_knots[120];
-int ocio_grading_rgbcurve_coefsOffsets[8];
-float ocio_grading_rgbcurve_coefs[360];
+constant int* ocio_grading_rgbcurve_knotsOffsets;
+constant float* ocio_grading_rgbcurve_knots;
+constant int* ocio_grading_rgbcurve_coefsOffsets;
+constant float* ocio_grading_rgbcurve_coefs;
 bool ocio_grading_rgbcurve_localBypass;
 
 "#,
@@ -449,6 +423,30 @@ float4 OCIOMain(
     },
 ];
 
+/// The declarations the Metal wrapper read, from the text it wrote: 2.6.0 writes each array
+/// declaration `type name[size];` it read as `constant type* name;`
+/// (`MetalShaderClassWrapper::rewriteArrayDeclarations`, GpuShaderClassWrapper.cpp:355-385
+/// @ v2.6.0), and the constructor's parameter `constant type name[size]` in `header` keeps
+/// the size.
+fn original_declarations(header: &str, declarations: &str) -> String {
+    let mut out = String::new();
+    for line in declarations.split_inclusive('\n') {
+        let rewritten = line
+            .strip_prefix("constant ")
+            .and_then(|rest| rest.strip_suffix(";\n"))
+            .and_then(|rest| rest.split_once("* "));
+        let Some((ty, name)) = rewritten else {
+            out.push_str(line);
+            continue;
+        };
+        let parameter = format!("constant {ty} {name}[");
+        let at = header.find(&parameter).expect(&parameter) + parameter.len() - 1;
+        let size = &header[at..=at + header[at..].find(']').expect(&parameter)];
+        out.push_str(&format!("{ty} {name}{size};\n"));
+    }
+    out
+}
+
 /// The Metal wrapper writes the class of each of upstream's Metal shaders, from the
 /// declarations those shaders hold: no parameter, a 1D, 2D or 3D LUT's texture and sampler,
 /// three LUTs (the 3D one first), float uniforms, and uniform arrays with a bool. A copy
@@ -459,7 +457,8 @@ fn metal_wrappers_write_the_classes_of_upstreams_shaders() {
         // The declarations are what the header ends with, after the constructor's closing
         // brace and the empty line the wrapper writes after it.
         let at = case.header.find("\n}\n\n").expect(case.test) + 4;
-        let declarations = &case.header.as_bytes()[at..];
+        let original = original_declarations(case.header, &case.header[at..]);
+        let declarations = original.as_bytes();
         let function_footer = "\n  return outColor;\n}\n";
         let expected_footer = format!("{function_footer}{}", case.footer);
 
@@ -795,6 +794,11 @@ fn wrappers_write_the_wheels_shaders() {
             ),
         };
 
+        let declarations = if case.language == GpuLanguage::Msl2_0 {
+            original_declarations(header, declarations)
+        } else {
+            declarations.to_owned()
+        };
         wrapper
             .prepare_class_wrapper(resource_prefix, function_name, declarations.as_bytes())
             .unwrap_or_else(|e| panic!("{label}: {e}"));

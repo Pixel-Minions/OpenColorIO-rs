@@ -586,6 +586,18 @@ impl GpuShaderText {
         "int"
     }
 
+    /// `expr`, a float expression, cast to int: a C-style cast for HLSL, whose compiler
+    /// flags the functional cast under -Wfloat-conversion, and `int(expr)` elsewhere (GLSL
+    /// forbids C-style casts).
+    ///
+    /// Port of `GpuShaderText::intCast` (GpuShaderUtils.cpp:407-416 @ v2.6.0).
+    pub fn int_cast(&self, expr: impl AsRef<[u8]>) -> Vec<u8> {
+        if self.lang == GpuLanguage::HlslSm5_0 {
+            return cat([b"(int)(".as_slice(), expr.as_ref(), b")"]);
+        }
+        cat([self.int_keyword().as_bytes(), b"(", expr.as_ref(), b")"])
+    }
+
     /// Port of `GpuShaderText::intKeywordConst` (GpuShaderUtils.cpp:407-415 @ v2.5.2).
     pub fn int_keyword_const(&self) -> String {
         let mut s = String::new();

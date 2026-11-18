@@ -88,7 +88,10 @@ fn add_hue_weight_shader(pxl: &[u8], st: &GpuShaderText, width: f32) -> Result<(
         .put(" = clamp(2. + hue * float(")
         .put(inv_width)
         .put("), 0., 4.);");
-    st.new_line().put("int j = int(min(knot_coord, 3.));");
+    st.new_line()
+        .put("int j = ")
+        .put(st.int_cast("min(knot_coord, 3.)"))
+        .put(";");
     st.new_line()
         .put(st.float_decl("t")?)
         .put(" = knot_coord - float(j);");
@@ -2650,37 +2653,32 @@ fn add_cusp_table(
     st.new_line()
         .put(st.int_decl("i")?)
         .put(" = ")
-        .put(st.int_keyword())
-        .put("(h) + ")
+        .put(st.int_cast("h"))
+        .put(" + ")
         .put(table_base::BASE_INDEX as u32)
         .put(";");
 
+    // `std::to_string` of the unsigned and int constants: their decimal digits.
     st.new_line()
         .put(st.int_decl("i_lo")?)
         .put(" = ")
-        .put(st.int_keyword())
-        .put("(max(")
-        .put(st.float_keyword())
-        .put("(")
-        .put(table_base::LOWER_WRAP_INDEX as u32)
-        .put("), ")
-        .put(st.float_keyword())
-        .put("(i + ")
-        .put(g.hue_linearity_search_range[0])
-        .put(")));");
+        .put(st.int_cast(format!(
+            "max({float}({}), {float}(i + {}))",
+            table_base::LOWER_WRAP_INDEX as u32,
+            g.hue_linearity_search_range[0],
+            float = st.float_keyword(),
+        )))
+        .put(";");
     st.new_line()
         .put(st.int_decl("i_hi")?)
         .put(" = ")
-        .put(st.int_keyword())
-        .put("(min(")
-        .put(st.float_keyword())
-        .put("(")
-        .put(table_base::UPPER_WRAP_INDEX as u32)
-        .put("), ")
-        .put(st.float_keyword())
-        .put("(i + ")
-        .put(g.hue_linearity_search_range[1])
-        .put(")));");
+        .put(st.int_cast(format!(
+            "min({float}({}), {float}(i + {}))",
+            table_base::UPPER_WRAP_INDEX as u32,
+            g.hue_linearity_search_range[1],
+            float = st.float_keyword(),
+        )))
+        .put(";");
 
     st.new_line().put("while (i_lo + 1 < i_hi)");
     st.new_line().put("{");
@@ -3365,7 +3363,7 @@ fn aces2_gamut_params(
 }
 
 /// Port of `Add_Gamut_Compress_Fwd_Shader` and `Add_Gamut_Compress_Inv_Shader`
-/// (FixedFunctionOpGPU.cpp:1550-1634 @ v2.5.2).
+/// (FixedFunctionOpGPU.cpp:1576-1658 @ v2.6.0).
 fn add_gamut_compress_shader(
     shader_creator: &mut GpuShaderDesc,
     st: &GpuShaderText,
@@ -3380,8 +3378,7 @@ fn add_gamut_compress_shader(
     let reach_name = add_reach_table(shader_creator, resource_index, &s.reach_m_table)?;
 
     add_wrap_hue_channel_shader(&pxl, st)?;
-    add_sin_cos_shader(&pxl, st)?;
-
+    // No _Add_SinCos_Shader: gamut-compress stays in JMh space, so cos_hr/sin_hr would be unused.
     st.new_line()
         .put(st.float_decl("reachMaxM")?)
         .put(" = ")
