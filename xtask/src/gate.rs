@@ -18,7 +18,7 @@ cargo xtask gate [--staged] [--crates a,b | --touched] [--release] [--rocky] [--
                  [--main] [--auto]
 
 Runs, in order, stopping at the first failure:
-  fmt            cargo fmt --all --check
+  fmt            cargo xtask fmt-check: cargo fmt --check, one workspace package at a time
   clippy         cargo clippy --workspace --all-targets -- -D warnings
   clippy-py      the same for ocio-py and ocio-py-ffi with their `python` feature (the
                  PyOpenColorIO bindings), built against the Python of target/py-port, which
@@ -200,11 +200,9 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
 
     let mut runner = Runner::new(log_dir.clone());
     runner.watch = LandWatch::from_env()?;
-    runner.step(
-        "fmt",
-        cargo(&root, &["fmt", "--all", "--check", "--", "--color=never"]),
-        Kind::Plain,
-    )?;
+    let mut fmt = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+    fmt.arg("fmt-check").current_dir(&root);
+    runner.step("fmt", fmt, Kind::Plain)?;
     runner.step(
         "clippy",
         cargo(
@@ -690,6 +688,41 @@ pub(crate) fn platform_sensitive(path: &str) -> bool {
         ".gitattributes",
     ];
     DIRS.iter().any(|d| path.starts_with(d)) || FILES.contains(&path)
+}
+
+/// `cargo xtask fmt-check`: `cargo fmt --check` for each workspace package, one at a time, which
+/// checks what `cargo fmt --all --check` checks (the workspace has no path dependencies outside
+/// it). `--all` hands every file of the workspace to one rustfmt, whose command line (28,906
+/// characters in a checkout at `D:/Projects/OpenColorIO-rs-wt/<card>`) passes Windows' limit of
+/// 32,767 under the staged gate's longer `target/gate-staged/wt` ("The filename or extension is
+/// too long", os error 206); one package's files stay far below it.
+pub(crate) fn fmt_check() -> Result<(), String> {
+    let root = crate::root();
+    let packages = crate::metadata::workspace(&root)?;
+    if packages.is_empty() {
+        return Err("cargo metadata lists no workspace packages".into());
+    }
+    let mut failed = Vec::new();
+    for package in &packages {
+        let status = cargo(
+            &root,
+            &["fmt", "--check", "-p", &package.name, "--", "--color=never"],
+        )
+        .status()
+        .map_err(|e| format!("could not run cargo fmt: {e}"))?;
+        if !status.success() {
+            failed.push(package.name.as_str());
+        }
+    }
+    if failed.is_empty() {
+        println!("fmt-check: {} packages formatted", packages.len());
+        Ok(())
+    } else {
+        Err(format!(
+            "cargo fmt --check failed for {}",
+            failed.join(", ")
+        ))
+    }
 }
 
 fn cargo(root: &Path, args: &[&str]) -> Command {

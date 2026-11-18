@@ -75,6 +75,9 @@ Oracle and fixtures (fixtures/ is written only by these commands):
   fixtures verify            every fixture matches fixtures/MANIFEST.toml, and vice versa
 
 Guardrails:
+  fmt-check                  cargo fmt --check for each workspace package (the gate's fmt
+                              step; one rustfmt for the whole workspace can pass Windows'
+                              command-line limit in a long checkout path)
   guards                     forbidden patterns, unsafe allowlist, waivers, headers,
                               the registers' structure (docs/improvements.md,
                               docs/deviations.md), ocio::internals and its feature only
@@ -171,6 +174,7 @@ fn main() -> ExitCode {
         ["oracle", "check-all"] => fixtures::check_all(),
         ["fixtures", "verify"] => fixtures::verify(),
         ["guards"] => guards::run(),
+        ["fmt-check"] => gate::fmt_check(),
         ["merge-register", base, ours, theirs] => {
             register_merge::driver(Path::new(base), Path::new(ours), Path::new(theirs))
         }
