@@ -21,6 +21,7 @@ use super::studio::{
 use super::{embedded_len, embedded_text};
 use crate::config::Config;
 use crate::test_env::EnvGuard;
+use ocio_ops::exception::ExceptionKind;
 
 /// Port of `OCIO_ADD_TEST(BuiltinConfigs, basic)` @ v2.5.2.
 #[test]
@@ -380,9 +381,16 @@ fn create_builtin_config() {
     let latest_studio_name = "studio-config-latest";
 
     // Test that CreateFromFile does not work without ocio:// prefix for built-in config.
+    // (The message of 2.6.0's existence check, PR #2310: BuiltinConfig_tests.cpp:505-510 @
+    // v2.6.0. The rest of the test is re-ported at v2.6.0 with the 2.6 built-in configs.)
+    let missing = Config::create_from_file("cg-config-v1.0.0_aces-v1.3_ocio-v2.1");
+    assert!(
+        matches!(&missing, Err(e) if e.kind() == ExceptionKind::MissingFile),
+        "{missing:?}"
+    );
     check_throw_what(
-        Config::create_from_file("cg-config-v1.0.0_aces-v1.3_ocio-v2.1"),
-        "Error could not read 'cg-config-v1.0.0_aces-v1.3_ocio-v2.1' OCIO profile.",
+        missing,
+        "'cg-config-v1.0.0_aces-v1.3_ocio-v2.1' file does not exist.",
     );
 
     {
