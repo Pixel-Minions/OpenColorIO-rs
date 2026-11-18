@@ -21,6 +21,25 @@ and Rocky Linux 9.
   and each later commit must shrink that list. `cargo xtask land` gates the card's final
   state, so nothing red ever reaches `ocio-2.6` or `main`.
 - **Version:** `1.1.0+ocio.2.6.0`.
+- **Phase 3 API (2026-11-18):** the 2.6 config API follows the existing conventions:
+  `Config::add_display_view_with_aliases(display, view, view_transform, color_space, looks,
+  rule, description, aliases: &[impl AsRef<[u8]>])` and `Config::add_shared_view_with_aliases(..)`
+  for the overloads with aliases (the existing functions forward an empty list);
+  `canonical_display_name`, `canonical_view_name`, `resolved_display_view_color_space_name`,
+  `display_description` and `display_view_alias` returning `&[u8]` (`""` for none);
+  `num_display_view_aliases -> i32`, `has_display_view_alias -> bool`,
+  `use_display_aliases()` / `set_use_display_aliases(bool)`;
+  `find_color_space_for_id -> Option<&ColorSpace>`,
+  `generate_local_id_for_color_space -> Result<Vec<u8>>`,
+  `Config::locate_builtin_color_space<'b>(src, name, builtin: &'b Config) -> Result<&'b [u8]>`;
+  `apphelpers::config_compatibility::check_compatibility(&Config, ConfigCompatibility) -> bool`
+  with `enum ConfigCompatibility { HdrDisplaySupport26 = 0 }`. `canonical_view_name` borrows
+  its result from the config or from its `view_name` argument, as upstream returns the
+  caller's pointer (orchestrator, within the owner's approval).
+- **CreateFromFile with a non-ASCII path on Windows (2026-11-18):** 2.6.0 checks the path with
+  `std::filesystem::exists`, which MSVC reads in the ANSI code page. The port is exact for
+  ASCII paths on Windows and for every path on Linux; a non-ASCII path on Windows is the port's
+  error (U-750, waiver W0028), following U-113/W0027.
 
 ## The upstream change, measured
 

@@ -7088,3 +7088,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   the ported test callers use consuming log-message patterns.
 - **Status:** preserved in the private test helper. No public OCIO API or numerical
   comparison is changed. A future fix could reject empty spans or advance the search.
+
+### I-980. Merging configs drops view aliases and `use_display_aliases`
+
+- **Upstream:** the config merger copies views with the `addDisplayView` and `addSharedView`
+  overloads that take no aliases (`DisplayViewMerger`,
+  src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.cpp:885, 987, 1000, 1039, 1184, 1221,
+  1231, 1543 and 1569 @ v2.6.0), and no merger reads or sets `use_display_aliases`
+  (`GeneralMerger` copies the strict parsing and family separator only). A view the merger
+  copies from either config loses its aliases (OCIO 2.6, PR #2341), and the merged config
+  keeps `use_display_aliases` only when it started as a copy of a config that had it.
+- **Who notices:** pipelines that merge 2.6 configs whose displays or views were renamed
+  and keep their old names as aliases: a `DisplayViewTransform` with an old name no longer
+  resolves in the merged config.
+- **A fix:** copy each view's aliases (`getNumDisplayViewAliases`/`getDisplayViewAlias`) with
+  the alias overloads, and merge `use_display_aliases` with the other general settings.
+- **Status:** matched in `ocio26-config` (the port's merger calls the same overloads,
+  `crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs`).

@@ -3946,6 +3946,289 @@ colorspaces:
     }
 }
 
+/// Checks that a (display, view) pair's aliases, as returned by `Config::display_view_alias`,
+/// match the expected value, preserving order.
+///
+/// Port of `CheckDisplayViewAliases` (tests/cpu/Config_tests.cpp:7419-7430 @ v2.6.0).
+#[track_caller]
+fn check_display_view_aliases(config: &Config, display: &str, view: &str, expected: &[&str]) {
+    assert_eq!(
+        config.num_display_view_aliases(display, view),
+        expected.len() as i32
+    );
+    for (i, e) in expected.iter().enumerate() {
+        assert_eq!(
+            config.display_view_alias(display, view, i as i32),
+            e.as_bytes()
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, view_aliases)` @ v2.6.0.
+#[test]
+fn view_aliases() {
+    let _env = EnvGuard::new();
+    // Views (display-defined or shared) may have their own aliases, set directly via
+    // Config::addDisplayView/addSharedView, and queried via Config::getDisplayViewAlias and
+    // Config::hasDisplayViewAlias. This test covers that machinery: setting aliases, querying
+    // them, keeping them unambiguous, requiring config version 2.6, and surviving a YAML
+    // serialize/reload round-trip. See the aliased_view_name test below for how aliases are
+    // resolved by Config::getCanonicalViewName.
+
+    const SIMPLE_CONFIG: &str = r#"
+ocio_profile_version: 2.6
+
+roles:
+  default: ref1
+  aces_interchange: ref1
+  color_timing: ref1
+  compositing_log: ref1
+  scene_linear: ref1
+
+shared_views:
+  - !<View> {name: sview, colorspace: ref1, aliases: [sv_alias]}
+
+displays:
+  display1:
+    - !<View> {name: view1, colorspace: ref1, aliases: [v1_alias2, v1_alias]}
+    - !<View> {name: view2, colorspace: cs1}
+    - !<Views> [sview]
+  display2:
+    - !<View> {name: view3, colorspace: ref1, aliases: [v1_alias]}
+    - !<Views> [sview]
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref1
+
+  - !<ColorSpace>
+    name: cs1
+"#;
+
+    let config = Config::create_from_stream(SIMPLE_CONFIG.as_bytes()).unwrap();
+
+    // Test getNumDisplayViewAliases/getDisplayViewAlias return the aliases in view order.
+    check_display_view_aliases(&config, "display1", "view1", &["v1_alias2", "v1_alias"]);
+    // A view with no aliases, an unknown view, or an unknown display all return none.
+    check_display_view_aliases(&config, "display1", "view2", &[]);
+    check_display_view_aliases(&config, "display1", "not_a_view", &[]);
+    check_display_view_aliases(&config, "not_a_display", "view1", &[]);
+
+    // A null/empty display means look up the view among the config's shared views, following
+    // the same convention as some of the other getters.
+    check_display_view_aliases(&config, "", "sview", &["sv_alias"]);
+    check_display_view_aliases(&config, "", "sview", &["sv_alias"]);
+
+    // Test hasDisplayViewAlias convenience method.
+    assert!(config.has_display_view_alias("display1", "view1", "v1_alias"));
+    assert!(!config.has_display_view_alias("display1", "view1", "not_an_alias"));
+    assert!(config.has_display_view_alias("", "sview", "sv_alias"));
+
+    // Aliases only need to be unique among the views used by a single display, so the same
+    // alias string ("v1_alias") can be reused by an unrelated view in a different display.
+    assert!(config.has_display_view_alias("display2", "view3", "v1_alias"));
+
+    // Aliases containing a comma must be quoted in the Yaml, e.g., similar to how the
+    // active_views list works.
+    {
+        let mut edit = config.create_editable_copy().unwrap();
+        edit.add_display_view_with_aliases(
+            "display1",
+            "view4",
+            "",
+            "ref1",
+            "",
+            "",
+            "",
+            &["a,b", "plain"],
+        )
+        .unwrap();
+        check_display_view_aliases(&edit, "display1", "view4", &["a,b", "plain"]);
+        assert!(edit.has_display_view_alias("display1", "view4", "a,b"));
+        assert!(edit.has_display_view_alias("display1", "view4", "plain"));
+
+        // The comma-containing alias survives a YAML serialize / reload round-trip, quoted as
+        // needed by the YAML emitter so that it stays a single flow-sequence entry rather than
+        // being split into two.
+        let os = edit.serialize().unwrap();
+
+        let reloaded = Config::create_from_stream(&os).unwrap();
+        reloaded.validate().unwrap();
+
+        check_display_view_aliases(&reloaded, "display1", "view4", &["a,b", "plain"]);
+        assert!(reloaded.has_display_view_alias("display1", "view4", "a,b"));
+        assert!(reloaded.has_display_view_alias("display1", "view4", "plain"));
+
+        // The other, comma-free aliases also survive the round-trip.
+        check_display_view_aliases(&reloaded, "display1", "view1", &["v1_alias2", "v1_alias"]);
+        check_display_view_aliases(&reloaded, "", "sview", &["sv_alias"]);
+    }
+
+    // A view's alias must not collide with the name or alias of another view used by the same
+    // display, whether display-defined or a referenced shared view. This is checked as soon as
+    // the collision would occur.
+    {
+        let mut edit = config.create_editable_copy().unwrap();
+
+        // Collides with view1's alias in display1.
+        check_throw_what(
+            edit.add_display_view_with_aliases(
+                "display1",
+                "view4",
+                "",
+                "ref1",
+                "",
+                "",
+                "",
+                &["v1_alias"],
+            ),
+            "already used as the name or alias",
+        );
+
+        // Collides with the "sview" shared view's alias, which display1 references.
+        check_throw_what(
+            edit.add_display_view_with_aliases(
+                "display1",
+                "view4",
+                "",
+                "ref1",
+                "",
+                "",
+                "",
+                &["sv_alias"],
+            ),
+            "already used as the name or alias",
+        );
+
+        // No collision in display2, since display2 does not use view1 or its aliases.
+        edit.add_display_view_with_aliases(
+            "display2",
+            "view4",
+            "",
+            "ref1",
+            "",
+            "",
+            "",
+            &["v1_alias2"],
+        )
+        .unwrap();
+
+        // A shared view's alias must not collide with another shared view's name or alias,
+        // regardless of which displays reference either of them (this keeps shared views
+        // unambiguous when looked up directly, e.g. via a null display argument).
+        check_throw_what(
+            edit.add_shared_view_with_aliases("sview2", "", "ref1", "", "", "", &["sv_alias"]),
+            "already used as the name or alias",
+        );
+
+        // Linking an existing shared view to a display is also checked against that display's
+        // own views.
+        edit.add_display_view("display3", "view5", "ref1", "")
+            .unwrap();
+        edit.add_display_view_with_aliases(
+            "display3",
+            "view5",
+            "",
+            "ref1",
+            "",
+            "",
+            "",
+            &["sv_alias"],
+        )
+        .unwrap();
+        check_throw_what(
+            edit.add_display_shared_view("display3", "sview"),
+            "already used as the name or alias",
+        );
+    }
+
+    // Defensive backstop: addSharedView can replace an already-linked shared view's aliases,
+    // and that call has no way to know which displays currently reference it, so this
+    // particular collision is only caught later, when the config is validated.
+    {
+        let mut edit = config.create_editable_copy().unwrap();
+        edit.add_display_view("display3", "view5", "ref1", "")
+            .unwrap();
+        edit.add_display_shared_view("display3", "sview").unwrap();
+
+        // No collision yet: "view5" has no alias, and "sview"'s alias is "sv_alias".
+        edit.validate().unwrap();
+
+        // Redefine "sview" so its alias now collides with "view5" in display3. addSharedView
+        // does not throw, since it only checks against sibling shared views.
+        edit.add_shared_view_with_aliases("sview", "", "ref1", "", "", "", &["view5"])
+            .unwrap();
+        check_throw_what(edit.validate(), "collides with the name or alias");
+    }
+
+    // View aliases require ocio_profile_version 2.6 or higher.
+    {
+        const OLD_CONFIG: &str = r#"
+ocio_profile_version: 2.5
+
+roles:
+  default: ref1
+  aces_interchange: ref1
+  color_timing: ref1
+  compositing_log: ref1
+  scene_linear: ref1
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref1
+
+displays:
+  disp:
+    - !<View> {name: view1, colorspace: ref1}
+"#;
+        let mut old_config = Config::create_from_stream(OLD_CONFIG.as_bytes())
+            .unwrap()
+            .create_editable_copy()
+            .unwrap();
+        old_config
+            .add_display_view_with_aliases("disp", "view1", "", "ref1", "", "", "", &["alias1"])
+            .unwrap();
+        check_throw_what(old_config.validate(), "less than 2.6");
+    }
+
+    // Test aliases in virtual displays.
+    {
+        let mut edit = config.create_editable_copy().unwrap();
+
+        // A virtual display may reference a shared view that has aliases ("sview" has the
+        // alias "sv_alias").
+        edit.add_virtual_display_shared_view("sview").unwrap();
+        assert_eq!(edit.virtual_display_num_views(ViewType::Shared), 1);
+        assert_eq!(edit.virtual_display_view(ViewType::Shared, 0), b"sview");
+        assert!(edit.has_display_view_alias("", "sview", "sv_alias"));
+        edit.validate().unwrap();
+
+        // The virtual display's reference to a shared view with an alias survives a
+        // serialize/reload round-trip without throwing.
+        let os_round_trip = edit.serialize().unwrap();
+        Config::create_from_stream(&os_round_trip).unwrap();
+
+        // But aliases on display-defined views on a virtual display are not supported.
+        // Validate that a hand-edited config file will throw if it tries to use them.
+
+        // Config::addVirtualDisplayView has no aliases argument, so an alias is injected into
+        // the serialized YAML to exercise the parser's check.
+        edit.add_virtual_display_view("vview", "", "ref1", "", "", "")
+            .unwrap();
+
+        let os = edit.serialize().unwrap();
+        let config_str = String::from_utf8(os).unwrap().replace(
+            "name: vview, colorspace: ref1}",
+            "name: vview, colorspace: ref1, aliases: [vv_alias]}",
+        );
+
+        check_throw_what(
+            Config::create_from_stream(config_str.as_bytes()),
+            "Aliases are not supported for virtual display views.",
+        );
+    }
+}
+
 /// Port of `OCIO_ADD_TEST(Config, display)` @ v2.5.2.
 #[test]
 fn display() {

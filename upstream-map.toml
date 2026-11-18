@@ -177,7 +177,7 @@ path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
 status = "partial"
-note = "P67 complete source audit: config construction/edit/query, context/rules/serialization/version/validation, processors/caches and public statics are implemented in config.rs, including all8 inter-config overloads and monitor/ICC display instantiation. Supersedes the obsolete incremental partial note; existing Rust API decisions and documented upstream limitations remain. 2.6.0: changed at v2.6.0 lines 14, 251, 324, 337-352, 460, 474-477, 758-783, 983-1059, 1281, 1284, 1296-1303, 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914, 3084-3162, 3593-3600, 3615-3643, 3866-3867, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103, 4105, 4176-4427, 4745-4746, 4947-4948, 5742-5743, 5751-5772, 5779, 6105-6112, 6306-6326, 6423-6434, 6642-6686; not yet re-ported (ocio26 cards). ocio26-config: 251 (LastSupportedMinorVersion 6) and 6306-6318 (the MIRROR NEGS styles need 2.5) ported; 6319-6326 and 6423-6434 (APPLE_LOG, HMJ) are card ocio26-ops."
+note = "P67 complete source audit: config construction/edit/query, context/rules/serialization/version/validation, processors/caches and public statics are implemented in config.rs, including all8 inter-config overloads and monitor/ICC display instantiation. Supersedes the obsolete incremental partial note; existing Rust API decisions and documented upstream limitations remain. 2.6.0: changed at v2.6.0 lines 14, 251, 324, 337-352, 460, 474-477, 758-783, 983-1059, 1281, 1284, 1296-1303, 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914, 3084-3162, 3593-3600, 3615-3643, 3866-3867, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103, 4105, 4176-4427, 4745-4746, 4947-4948, 5742-5743, 5751-5772, 5779, 6105-6112, 6306-6326, 6423-6434, 6642-6686; not yet re-ported (ocio26 cards). ocio26-config: 251 (LastSupportedMinorVersion 6) and 6306-6318 (the MIRROR NEGS styles need 2.5) ported; 6319-6326 and 6423-6434 (APPLE_LOG, HMJ) are card ocio26-ops. Then 324 and 460 (m_useDisplayAliases), 758-783 (validateSharedView's collision check), 3593-3643, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103 (view aliases: the overloads with aliases, their collision checks, the alias getters), 4180-4191 (get/setUseDisplayAliases) and 6642-6686 (their version checks)."
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -225,15 +225,15 @@ note = "p3-rules 3.9e: CustomKeysContainer's getSize, getName, getValue, set, va
 path = "src/OpenColorIO/Display.cpp"
 kind = "src"
 target = ["crates/ocio/src/display.rs"]
-status = "partial"
-note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed. 2.6.0: changed at v2.6.0 lines 53-54, 63-64, 73; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed. 2.6.0: changed at v2.6.0 lines 53-54, 63-64, 73: ocio26-config ported them (AddView with the view's aliases)."
 
 [[file]]
 path = "src/OpenColorIO/Display.h"
 kind = "src"
 target = ["crates/ocio/src/display.rs"]
-status = "partial"
-note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed. 2.6.0: changed at v2.6.0 lines 31, 40-41, 48, 60-84, 94-95; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed. 2.6.0: changed at v2.6.0 lines 31, 40-41, 48, 60-84, 94-95: ocio26-config ported them (View::m_aliases, hasAlias, FindNamingCollision, AddView's aliases)."
 
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.cpp"
@@ -448,8 +448,8 @@ note = "p3-model-objects (3.4c): NamedTransformImpl; p3-builders 3.2a: GetTransf
 path = "src/OpenColorIO/OCIOYaml.cpp"
 kind = "src"
 target = ["crates/ocio/src/ocio_yaml.rs"]
-status = "partial"
-note = "P67 complete source audit: typed value/transform loaders and savers, every one of the23 transform dispatch arms, complete Config read/write, file/viewing rules and version gates are implemented in ocio_yaml.rs. The prior partial status was stale incremental bookkeeping; no parser or formatting behavior changes. 2.6.0: changed at v2.6.0 lines 456-462, 510-515, 4686, 4716, 4745-4749, 4775-4779, 5056-5070, 5225-5226, 5255-5256, 5315-5320; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P67 complete source audit: typed value/transform loaders and savers, every one of the23 transform dispatch arms, complete Config read/write, file/viewing rules and version gates are implemented in ocio_yaml.rs. The prior partial status was stale incremental bookkeeping; no parser or formatting behavior changes. 2.6.0: changed at v2.6.0 lines 456-462, 510-515, 4686, 4716, 4745-4749, 4775-4779, 5056-5070, 5225-5226, 5255-5256, 5315-5320: ocio26-config ported them (view aliases read and written, use_display_aliases, the virtual display's refusal of aliases, GetViewAliasVec)."
 
 [[file]]
 path = "src/OpenColorIO/OCIOYaml.h"

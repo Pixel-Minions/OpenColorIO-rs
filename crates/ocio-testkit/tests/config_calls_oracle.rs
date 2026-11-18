@@ -303,11 +303,22 @@ fn the_dump_reaches_the_aliases() {
     let response =
         call(json!({"config": {"yaml": bytes_arg(config)}, "calls": [{"dump": "config"}]}));
     let dump = result(&calls(&response)[0]);
-    assert_eq!(dump["not_dumped"], json!(["getColorSpaceFromFilepath", "getProcessor"]));
+    assert_eq!(
+        dump["not_dumped"],
+        json!(["getColorSpaceFromFilepath", "getProcessor"])
+    );
     let display = &dump["displays"][0];
     assert_eq!(bytes(&display["display"]), b"d", "{display}");
-    assert_eq!(bytes(&display["getCanonicalDisplayName"]), b"d", "{display}");
-    assert_eq!(bytes(&display["getDisplayDescription"]), b"the display", "{display}");
+    assert_eq!(
+        bytes(&display["getCanonicalDisplayName"]),
+        b"d",
+        "{display}"
+    );
+    assert_eq!(
+        bytes(&display["getDisplayDescription"]),
+        b"the display",
+        "{display}"
+    );
     let view = &display["views"][0];
     assert_eq!(bytes(&view["view"]), b"v", "{view}");
     let aliases: Vec<Vec<u8>> = view["getDisplayViewAliases"]
@@ -334,7 +345,11 @@ fn the_dump_reaches_the_aliases() {
         "{view}"
     );
     assert_eq!(bytes(&view["getCanonicalViewName"]), b"v", "{view}");
-    assert_eq!(bytes(&view["getResolvedDisplayViewColorSpaceName"]), b"d", "{view}");
+    assert_eq!(
+        bytes(&view["getResolvedDisplayViewColorSpaceName"]),
+        b"d",
+        "{view}"
+    );
     // The display color space's alias resolves to the display (use_display_aliases).
     let lookup = dump["lookups"]
         .as_array()
@@ -343,7 +358,11 @@ fn the_dump_reaches_the_aliases() {
         .find(|l| bytes(&l["name"]) == b"d_alias")
         .unwrap();
     assert_eq!(bytes(&lookup["getCanonicalDisplayName"]), b"d", "{lookup}");
-    assert_eq!(bytes(&lookup["getDisplayDescription"]), b"the display", "{lookup}");
+    assert_eq!(
+        bytes(&lookup["getDisplayDescription"]),
+        b"the display",
+        "{lookup}"
+    );
 }
 
 /// A config whose names the binding can't decode dumps whole: the names come back as their

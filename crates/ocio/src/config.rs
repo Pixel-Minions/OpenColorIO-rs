@@ -423,6 +423,14 @@ fn get_view_names(views: &[&View]) -> StringVec {
     views.iter().map(|view| view.name.clone()).collect()
 }
 
+/// The aliases of a view as upstream's `std::vector<std::string>` holds them: each whole.
+fn alias_vec(aliases: &[impl AsRef<[u8]>]) -> StringVec {
+    aliases
+        .iter()
+        .map(|alias| alias.as_ref().to_vec())
+        .collect()
+}
+
 /// Adds the color spaces `transform` names, and the groups it holds name, to
 /// `color_space_names`: a color space transform's source and destination (their context
 /// variables resolved), a display view transform's source, a look transform's source and
@@ -571,6 +579,9 @@ pub struct Config {
     default_luma_coefs: [f64; 3],
     /// `m_strictParsing`.
     strict_parsing: bool,
+    /// `m_useDisplayAliases`: whether display names resolve through the display color spaces
+    /// and their aliases (`use_display_aliases`, version 2.6).
+    use_display_aliases: bool,
     /// `m_fileRules`.
     file_rules: ConfigRules<FileRules>,
     /// `m_viewingRules`.
@@ -591,7 +602,8 @@ impl Clone for Config {
     /// `Clone` can't fail, so it doesn't read the environment as upstream's copy does: code that
     /// must answer as upstream calls [`Config::create_editable_copy`].
     ///
-    /// Port of `Config::Impl::operator=` (src/OpenColorIO/Config.cpp:379-457 @ v2.5.2).
+    /// Port of `Config::Impl::operator=` (src/OpenColorIO/Config.cpp:379-457 @ v2.5.2), with
+    /// `m_useDisplayAliases` (Config.cpp:460 @ v2.6.0).
     fn clone(&self) -> Config {
         let context = Arc::new((*self.shared_context.get()).clone());
         let config = Config {
@@ -625,6 +637,7 @@ impl Clone for Config {
             active_views_env_override: self.active_views_env_override.clone(),
             default_luma_coefs: self.default_luma_coefs,
             strict_parsing: self.strict_parsing,
+            use_display_aliases: self.use_display_aliases,
             file_rules: ConfigRules::new((*self.file_rules.get()).clone()),
             viewing_rules: ConfigRules::new((*self.viewing_rules.get()).clone()),
             cache_ids: Mutex::new(self.lock_cache_ids().clone()),
@@ -786,6 +799,7 @@ impl Config {
             active_views_env_override: StringVec::new(),
             default_luma_coefs: DEFAULT_LUMA_COEFFS,
             strict_parsing: true,
+            use_display_aliases: false,
             file_rules: ConfigRules::new(FileRules::new()),
             viewing_rules: ConfigRules::new(ViewingRules::new()),
             cache_ids: Mutex::new(CacheIds::new()),
@@ -2589,7 +2603,8 @@ impl Config {
 
     /// Adds a shared view to the config, or replaces the one of that name (ignoring case).
     ///
-    /// Port of `Config::addSharedView` (src/OpenColorIO/Config.cpp:3361-3384 @ v2.5.2).
+    /// Port of `Config::addSharedView(const char *, const char *, const char *, const char *,
+    /// const char *, const char *)` (src/OpenColorIO/Config.cpp:3590-3595 @ v2.6.0).
     #[doc(alias = "addSharedView")]
     pub fn add_shared_view(
         &mut self,
@@ -2599,6 +2614,36 @@ impl Config {
         looks: impl AsRef<[u8]>,
         rule: impl AsRef<[u8]>,
         description: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        self.add_shared_view_with_aliases(
+            view,
+            view_transform,
+            color_space,
+            looks,
+            rule,
+            description,
+            &[] as &[&[u8]],
+        )
+    }
+
+    /// Adds a shared view with its aliases to the config, or replaces the one of that name
+    /// (ignoring case), aliases included. Refuses a name or an alias that is the name or an
+    /// alias of another shared view (ignoring case).
+    ///
+    /// Port of `Config::addSharedView(const char *, const char *, const char *, const char *,
+    /// const char *, const char *, const std::vector<std::string> &)`
+    /// (src/OpenColorIO/Config.cpp:3597-3649 @ v2.6.0).
+    #[doc(alias = "addSharedView")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_shared_view_with_aliases(
+        &mut self,
+        view: impl AsRef<[u8]>,
+        view_transform: impl AsRef<[u8]>,
+        color_space: impl AsRef<[u8]>,
+        looks: impl AsRef<[u8]>,
+        rule: impl AsRef<[u8]>,
+        description: impl AsRef<[u8]>,
+        aliases: &[impl AsRef<[u8]>],
     ) -> Result<()> {
         let view = c_str(view.as_ref());
         if view.is_empty() {
@@ -2615,6 +2660,45 @@ impl Config {
             ));
         }
 
+        let aliases = alias_vec(aliases);
+
+        let candidate = View::new(
+            view,
+            view_transform.as_ref(),
+            color_space,
+            looks.as_ref(),
+            rule.as_ref(),
+            description.as_ref(),
+            &aliases,
+        );
+
+        // Keep shared views unambiguous among themselves (independent of which displays end up
+        // referencing them), by checking the candidate's name/aliases against every sibling
+        // shared view (other than the one being replaced, if this call is updating an existing
+        // one).
+        //
+        // Note: this does not check the candidate against the views of displays that may
+        // already reference an existing shared view of this name. That case (redefining an
+        // already-linked shared view's aliases so that they collide with that display's own
+        // views) is instead caught defensively by validateSharedView.
+        for existing in &self.shared_views {
+            if compare(&existing.name, view) {
+                continue;
+            }
+            let collision = candidate.find_naming_collision(existing);
+            if !collision.is_empty() {
+                let mut os = OStringStream::new(Crt::NATIVE);
+                os.put_str("Shared view '");
+                os.put_c_str(view);
+                os.put_str("' could not be added to config: '");
+                os.put_bytes(&collision);
+                os.put_str("' is already used as the name or alias of the shared view '");
+                os.put_bytes(&existing.name);
+                os.put_str("'.");
+                return Err(Exception::new(os.into_bytes()));
+            }
+        }
+
         add_view(
             &mut self.shared_views,
             view,
@@ -2623,6 +2707,7 @@ impl Config {
             looks.as_ref(),
             rule.as_ref(),
             description.as_ref(),
+            &aliases,
         );
 
         self.clear_display_cache();
@@ -2967,6 +3052,60 @@ impl Config {
             .map_or(&[], |v| &v.description)
     }
 
+    /// The number of aliases of the view `view` of `display` (see [`Config::has_view`]); with
+    /// an empty display, of the config's shared view `view`. 0 for no such view.
+    ///
+    /// Port of `Config::getNumDisplayViewAliases` (src/OpenColorIO/Config.cpp:3898-3902 @
+    /// v2.6.0).
+    #[doc(alias = "getNumDisplayViewAliases")]
+    pub fn num_display_view_aliases(
+        &self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+    ) -> i32 {
+        self.impl_view(display.as_ref(), view.as_ref())
+            .map_or(0, |v| v.aliases.len() as i32)
+    }
+
+    /// The alias at `index` of the view `view` of `display` (an empty display: the config's
+    /// shared view), up to its first NUL; `""` for no such view or an index outside its
+    /// aliases.
+    ///
+    /// Port of `Config::getDisplayViewAlias` (src/OpenColorIO/Config.cpp:3904-3913 @ v2.6.0).
+    #[doc(alias = "getDisplayViewAlias")]
+    pub fn display_view_alias(
+        &self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        index: i32,
+    ) -> &[u8] {
+        let Some(view) = self.impl_view(display.as_ref(), view.as_ref()) else {
+            return &[];
+        };
+        match usize::try_from(index)
+            .ok()
+            .and_then(|i| view.aliases.get(i))
+        {
+            Some(alias) => c_str(alias),
+            None => &[],
+        }
+    }
+
+    /// Whether the view `view` of `display` (an empty display: the config's shared view) has
+    /// the alias `alias`, ignoring case.
+    ///
+    /// Port of `Config::hasDisplayViewAlias` (src/OpenColorIO/Config.cpp:3915-3920 @ v2.6.0).
+    #[doc(alias = "hasDisplayViewAlias")]
+    pub fn has_display_view_alias(
+        &self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        alias: impl AsRef<[u8]>,
+    ) -> bool {
+        self.impl_view(display.as_ref(), view.as_ref())
+            .is_some_and(|v| v.has_alias(alias.as_ref()))
+    }
+
     /// Whether `disp_name` has the view `view_name` (its own or a shared one it names), active
     /// or not; with an empty display name, whether the config has that shared view.
     ///
@@ -2981,7 +3120,7 @@ impl Config {
 
     /// Adds the config's shared view `shared_view` to `display` (made if needed).
     ///
-    /// Port of `Config::addDisplaySharedView` (src/OpenColorIO/Config.cpp:3646-3695 @ v2.5.2).
+    /// Port of `Config::addDisplaySharedView` (src/OpenColorIO/Config.cpp:3937-4007 @ v2.6.0).
     #[doc(alias = "addDisplaySharedView")]
     pub fn add_display_shared_view(
         &mut self,
@@ -3025,6 +3164,29 @@ impl Config {
             ));
         }
 
+        // If the shared view is already defined, make sure its aliases don't collide with this
+        // display's own views either (a plain name collision is already excluded above, since
+        // shared view names and display-defined view names share one namespace per display).
+        if let Some(shared_view_it) = find_view(&self.shared_views, shared_view) {
+            let shared = &self.shared_views[shared_view_it];
+            for existing in existing_views {
+                let collision = shared.find_naming_collision(existing);
+                if !collision.is_empty() {
+                    let mut os = OStringStream::new(Crt::NATIVE);
+                    os.put_str("Shared view '");
+                    os.put_c_str(shared_view);
+                    os.put_str("' could not be added to display '");
+                    os.put_c_str(display);
+                    os.put_str("': '");
+                    os.put_bytes(&collision);
+                    os.put_str("' is already used as the name or alias of the view '");
+                    os.put_bytes(&existing.name);
+                    os.put_str("' in this display.");
+                    return Err(Exception::new(os.into_bytes()));
+                }
+            }
+        }
+
         let views = &mut self.displays[iter].1.shared_views;
         if contain(views, shared_view) {
             return Err(Exception::new(
@@ -3050,7 +3212,7 @@ impl Config {
     /// with `looks`, or replaces the view of that name.
     ///
     /// Port of `Config::addDisplayView(const char *, const char *, const char *, const char *)`
-    /// (src/OpenColorIO/Config.cpp:3697-3701 @ v2.5.2).
+    /// (src/OpenColorIO/Config.cpp:4009-4013 @ v2.6.0).
     #[doc(alias = "addDisplayView")]
     pub fn add_display_view(
         &mut self,
@@ -3066,8 +3228,8 @@ impl Config {
     /// (ignoring case). Refuses a view named as one of the display's shared views.
     ///
     /// Port of `Config::addDisplayView(const char *, const char *, const char *, const char *,
-    /// const char *, const char *, const char *)` (src/OpenColorIO/Config.cpp:3703-3750 @
-    /// v2.5.2).
+    /// const char *, const char *, const char *)` (src/OpenColorIO/Config.cpp:4015-4020 @
+    /// v2.6.0).
     #[doc(alias = "addDisplayView")]
     #[allow(clippy::too_many_arguments)]
     pub fn add_display_view_with_view_transform(
@@ -3079,6 +3241,39 @@ impl Config {
         looks: impl AsRef<[u8]>,
         rule: impl AsRef<[u8]>,
         description: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        self.add_display_view_with_aliases(
+            display,
+            view,
+            view_transform,
+            color_space,
+            looks,
+            rule,
+            description,
+            &[] as &[&[u8]],
+        )
+    }
+
+    /// Adds the view `view` of `display` (made if needed) with its aliases, or replaces the
+    /// view of that name (ignoring case), aliases included. Refuses a view named as one of the
+    /// display's shared views, and a name or alias that is the name or an alias of another
+    /// view of the display, its own or a shared view it uses (ignoring case).
+    ///
+    /// Port of `Config::addDisplayView(const char *, const char *, const char *, const char *,
+    /// const char *, const char *, const char *, const std::vector<std::string> &)`
+    /// (src/OpenColorIO/Config.cpp:4022-4110 @ v2.6.0).
+    #[doc(alias = "addDisplayView")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_display_view_with_aliases(
+        &mut self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        view_transform: impl AsRef<[u8]>,
+        color_space: impl AsRef<[u8]>,
+        looks: impl AsRef<[u8]>,
+        rule: impl AsRef<[u8]>,
+        description: impl AsRef<[u8]>,
+        aliases: &[impl AsRef<[u8]>],
     ) -> Result<()> {
         let display = c_str(display.as_ref());
         let view = c_str(view.as_ref());
@@ -3101,6 +3296,8 @@ impl Config {
             ));
         }
 
+        let aliases = alias_vec(aliases);
+
         match find_display(&self.displays, display) {
             None => {
                 let mut d = Display::default();
@@ -3111,6 +3308,7 @@ impl Config {
                     looks.as_ref(),
                     rule.as_ref(),
                     description.as_ref(),
+                    &aliases,
                 ));
                 self.displays.push((display.to_vec(), d));
                 self.clear_display_cache();
@@ -3129,6 +3327,71 @@ impl Config {
                     ));
                 }
 
+                let candidate = View::new(
+                    view,
+                    view_transform.as_ref(),
+                    color_space,
+                    looks.as_ref(),
+                    rule.as_ref(),
+                    description.as_ref(),
+                    &aliases,
+                );
+
+                // "View '<view>' could not be added to display '<display>': '<collision>' is
+                // already used as the name or alias of the <what> '<other><tail>".
+                let collision_error = |collision: &[u8], what: &str, other: &[u8], tail: &str| {
+                    let mut os = OStringStream::new(Crt::NATIVE);
+                    os.put_str("View '");
+                    os.put_c_str(view);
+                    os.put_str("' could not be added to display '");
+                    os.put_c_str(display);
+                    os.put_str("': '");
+                    os.put_bytes(collision);
+                    os.put_str("' is already used as the name or alias of the ");
+                    os.put_str(what);
+                    os.put_str(" '");
+                    os.put_bytes(other);
+                    os.put_str(tail);
+                    Exception::new(os.into_bytes())
+                };
+
+                // Check the candidate's name/aliases against sibling views in this display
+                // (other than the one being replaced, if this call is updating an existing view
+                // by that name).
+                for existing in &self.displays[iter].1.views {
+                    if compare(&existing.name, view) {
+                        continue;
+                    }
+                    let collision = candidate.find_naming_collision(existing);
+                    if !collision.is_empty() {
+                        return Err(collision_error(
+                            &collision,
+                            "view",
+                            &existing.name,
+                            "' in this display.",
+                        ));
+                    }
+                }
+
+                // Check the candidate's name/aliases against the shared views this display
+                // references.
+                for shared_view_name in &self.displays[iter].1.shared_views {
+                    let Some(shared_view_it) = find_view(&self.shared_views, shared_view_name)
+                    else {
+                        continue;
+                    };
+                    let shared = &self.shared_views[shared_view_it];
+                    let collision = candidate.find_naming_collision(shared);
+                    if !collision.is_empty() {
+                        return Err(collision_error(
+                            &collision,
+                            "shared view",
+                            &shared.name,
+                            "' referenced by this display.",
+                        ));
+                    }
+                }
+
                 add_view(
                     &mut self.displays[iter].1.views,
                     view,
@@ -3137,6 +3400,7 @@ impl Config {
                     looks.as_ref(),
                     rule.as_ref(),
                     description.as_ref(),
+                    &aliases,
                 );
             }
         }
@@ -3219,6 +3483,23 @@ impl Config {
     pub fn clear_displays(&mut self) {
         self.displays.clear();
         self.clear_display_cache();
+
+        self.reset_cache_ids();
+    }
+
+    /// Whether display names resolve through the display color spaces and their aliases
+    /// (`use_display_aliases`, off by default; version 2.6).
+    ///
+    /// Port of `Config::getUseDisplayAliases` (src/OpenColorIO/Config.cpp:4180-4183 @ v2.6.0).
+    #[doc(alias = "getUseDisplayAliases")]
+    pub fn use_display_aliases(&self) -> bool {
+        self.use_display_aliases
+    }
+
+    /// Port of `Config::setUseDisplayAliases` (src/OpenColorIO/Config.cpp:4185-4191 @ v2.6.0).
+    #[doc(alias = "setUseDisplayAliases")]
+    pub fn set_use_display_aliases(&mut self, enabled: bool) {
+        self.use_display_aliases = enabled;
 
         self.reset_cache_ids();
     }
@@ -3354,6 +3635,7 @@ impl Config {
             looks.as_ref(),
             rule.as_ref(),
             description.as_ref(),
+            &[],
         ));
 
         self.reset_cache_ids();
@@ -5035,10 +5317,11 @@ impl Config {
     /// ([`Config::check_transform_version_consistency`]); in version 1 a family separator, file
     /// rules, inactive color spaces, viewing rules, shared views, a virtual display, display
     /// color spaces, interop IDs, view transforms and named transforms; before 2.5 interchange
-    /// attributes.
+    /// attributes; before 2.6 `use_display_aliases` and view aliases.
     ///
     /// Port of `Config::Impl::checkVersionConsistency()` (src/OpenColorIO/Config.cpp:5834-5993
-    /// @ v2.5.2).
+    /// @ v2.5.2), with the checks of `use_display_aliases` and of view aliases 2.6.0 added
+    /// (Config.cpp:6642-6685 @ v2.6.0).
     pub(crate) fn check_version_consistency(&self) -> Result<()> {
         let hex_version: u32 = (self.major_version << 24) | (self.minor_version << 16);
 
@@ -5172,6 +5455,41 @@ impl Config {
                         b"' has non-empty interchange attributes and config version is less \
                           than 2.5.",
                     );
+                    return Err(Exception::new(os));
+                }
+            }
+        }
+
+        // Check for use_display_aliases.
+
+        if hex_version < 0x02060000 && self.use_display_aliases {
+            return Err(Exception::new(
+                "Config failed validation: use_display_aliases is true and config version is \
+                 less than 2.6.",
+            ));
+        }
+
+        // Check for view aliases.
+
+        if hex_version < 0x02060000 {
+            let check_view_aliases =
+                |views: &'_ [View]| views.iter().find(|view| !view.aliases.is_empty()).cloned();
+
+            if let Some(view) = check_view_aliases(&self.shared_views) {
+                let mut os = b"Config failed validation. The shared view '".to_vec();
+                os.extend_from_slice(&view.name);
+                os.extend_from_slice(b"' has aliases and config version is less than 2.6.");
+                return Err(Exception::new(os));
+            }
+            // Note: the virtual display's views are not checked here, since there is currently
+            // no way to set aliases on them (addVirtualDisplayView has no aliases argument).
+            for (display_name, display) in &self.displays {
+                if let Some(view) = check_view_aliases(&display.views) {
+                    let mut os = b"Config failed validation. The view '".to_vec();
+                    os.extend_from_slice(&view.name);
+                    os.extend_from_slice(b"' in display '");
+                    os.extend_from_slice(display_name);
+                    os.extend_from_slice(b"' has aliases and config version is less than 2.6.");
                     return Err(Exception::new(os));
                 }
             }
@@ -6003,11 +6321,13 @@ impl Config {
     }
 
     /// Refuses a shared view of `display` that is also one of its own views, one the config
-    /// doesn't define, and (with `check_use_display_name`) a shared view with a view transform
-    /// and `<USE_DISPLAY_NAME>` whose display has no display-referred color space of its name.
+    /// doesn't define, one whose name or an alias is the name or an alias of one of the
+    /// display's own views, and (with `check_use_display_name`) a shared view with a view
+    /// transform and `<USE_DISPLAY_NAME>` whose display has no display-referred color space of
+    /// its name.
     ///
-    /// Port of `Config::Impl::validateSharedView` (src/OpenColorIO/Config.cpp:704-765 @
-    /// v2.5.2).
+    /// Port of `Config::Impl::validateSharedView` (src/OpenColorIO/Config.cpp:726-813 @
+    /// v2.6.0).
     fn validate_shared_view(
         &self,
         display: &[u8],
@@ -6033,53 +6353,71 @@ impl Config {
         }
 
         // Is the shared view defined?
-        match find_view(&self.shared_views, shared_view) {
-            None => {
-                let mut os = b"Config failed view validation. The display \x27".to_vec();
-                os.extend_from_slice(display);
-                os.extend_from_slice(b"\x27 contains a shared view \x27");
-                os.extend_from_slice(shared_view);
-                os.extend_from_slice(b"\x27 that is not defined.");
-                return fail(os);
+        let Some(idx) = find_view(&self.shared_views, shared_view) else {
+            let mut os = b"Config failed view validation. The display \x27".to_vec();
+            os.extend_from_slice(display);
+            os.extend_from_slice(b"\x27 contains a shared view \x27");
+            os.extend_from_slice(shared_view);
+            os.extend_from_slice(b"\x27 that is not defined.");
+            return fail(os);
+        };
+        let view = &self.shared_views[idx];
+
+        // Does the shared view's name or an alias collide with the name or an alias of a
+        // display-defined view in this display? This is normally already prevented by
+        // addDisplayView and addDisplaySharedView at the point a view is added to (or linked
+        // to) the display. However, addSharedView may replace an already-linked shared view's
+        // aliases afterwards, and that call does not check if any other displays currently
+        // reference it, so this check acts as the defensive backstop for that case.
+        for display_view in views_of_display {
+            let collision = view.find_naming_collision(display_view);
+            if !collision.is_empty() {
+                let mut os = OStringStream::new(Crt::NATIVE);
+                os.put_str("Config failed view validation. The display '");
+                os.put_bytes(display);
+                os.put_str("' contains a shared view '");
+                os.put_bytes(&view.name);
+                os.put_str("' whose name or alias '");
+                os.put_bytes(&collision);
+                os.put_str("' collides with the name or alias of the view '");
+                os.put_bytes(&display_view.name);
+                os.put_str("' in this display.");
+                return fail(os.into_bytes());
             }
-            Some(idx) if check_use_display_name => {
-                let view = &self.shared_views[idx];
-                if !view.view_transform.is_empty() && view.use_display_name_for_colorspace() {
-                    // Shared views using a view transform can omit the colorspace, in that
-                    // case the color space to use should be named from the display.
-                    match self.color_space(c_str(display)) {
-                        None => {
-                            let mut os =
-                                b"Config failed view validation. The display \x27".to_vec();
-                            os.extend_from_slice(display);
-                            os.extend_from_slice(b"\x27 contains a shared view \x27");
-                            os.extend_from_slice(&view.name);
-                            os.extend_from_slice(
-                                b"\x27 which does not define a color space and there is no \
-                                  color space that matches the display name.",
-                            );
-                            return fail(os);
-                        }
-                        Some(display_cs)
-                            if display_cs.reference_space_type() != ReferenceSpaceType::Display =>
-                        {
-                            let mut os =
-                                b"Config failed view validation. The display \x27".to_vec();
-                            os.extend_from_slice(display);
-                            os.extend_from_slice(b"\x27 contains a shared view \x27");
-                            os.extend_from_slice(&view.name);
-                            os.extend_from_slice(b"\x27 that refers to a color space, \x27");
-                            os.extend_from_slice(display);
-                            os.extend_from_slice(
-                                b"\x27, that is not a display-referred color space.",
-                            );
-                            return fail(os);
-                        }
-                        Some(_) => {}
-                    }
+        }
+
+        if check_use_display_name
+            && !view.view_transform.is_empty()
+            && view.use_display_name_for_colorspace()
+        {
+            // Shared views using a view transform can omit the colorspace, in that case the
+            // color space to use should be named from the display.
+            match self.color_space(c_str(display)) {
+                None => {
+                    let mut os = b"Config failed view validation. The display \x27".to_vec();
+                    os.extend_from_slice(display);
+                    os.extend_from_slice(b"\x27 contains a shared view \x27");
+                    os.extend_from_slice(&view.name);
+                    os.extend_from_slice(
+                        b"\x27 which does not define a color space and there is no color space \
+                          that matches the display name.",
+                    );
+                    return fail(os);
                 }
+                Some(display_cs)
+                    if display_cs.reference_space_type() != ReferenceSpaceType::Display =>
+                {
+                    let mut os = b"Config failed view validation. The display \x27".to_vec();
+                    os.extend_from_slice(display);
+                    os.extend_from_slice(b"\x27 contains a shared view \x27");
+                    os.extend_from_slice(&view.name);
+                    os.extend_from_slice(b"\x27 that refers to a color space, \x27");
+                    os.extend_from_slice(display);
+                    os.extend_from_slice(b"\x27, that is not a display-referred color space.");
+                    return fail(os);
+                }
+                Some(_) => {}
             }
-            Some(_) => {}
         }
         Ok(())
     }

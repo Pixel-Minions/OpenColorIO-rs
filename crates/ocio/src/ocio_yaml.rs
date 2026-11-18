@@ -2504,7 +2504,7 @@ pub(crate) fn load_viewing_rule(node: &Node, vr: &mut ViewingRules) -> LoadResul
 /// them up to it), and the description keeps its trailing newlines (I-144). A view needs a
 /// name, and either a color space or a view transform with a display color space.
 ///
-/// Port of `load(const YAML::Node&, View&)` (OCIOYaml.cpp:409-478 @ v2.5.2).
+/// Port of `load(const YAML::Node&, View&)` (OCIOYaml.cpp:409-485 @ v2.6.0).
 pub(crate) fn load_view(node: &Node, v: &mut View) -> LoadResult<()> {
     if node.tag()? != b"View" {
         return Ok(());
@@ -2538,6 +2538,10 @@ pub(crate) fn load_view(node: &Node, v: &mut View) -> LoadResult<()> {
             b"looks" | b"look" => v.looks = load_string(value)?,
             b"rule" => v.rule = load_string(value)?,
             b"description" => v.description = load_string(value)?,
+            // This uses load(const YAML::Node & node, StringUtils::StringVec & x), so the Yaml
+            // parser handles unquoting view names with embedded quotes, symmetric with the save
+            // function below, rather than using SplitStringEnvStyle.
+            b"aliases" => v.aliases = load_string_vec(value)?,
             _ => log_unknown_key_warning(node, &iter.first)?,
         }
     }
@@ -2611,8 +2615,8 @@ fn names_a_file(filename: Option<&[u8]>) -> Option<&[u8]> {
 /// directory, when `filename` names a file) and the environment. `filename` is upstream's
 /// `const char *`, `None` for a null pointer (a config read from a stream).
 ///
-/// Port of `load(const YAML::Node&, ConfigRcPtr&, const char*)` (OCIOYaml.cpp:4398-5031 @
-/// v2.5.2).
+/// Port of `load(const YAML::Node&, ConfigRcPtr&, const char*)` (OCIOYaml.cpp:4411-5054 @
+/// v2.6.0).
 pub(crate) fn load_config(
     node: &Node,
     config: &mut Config,
@@ -2858,13 +2862,14 @@ pub(crate) fn load_config(
 
                     let mut view = View::default();
                     load_view(&val, &mut view)?;
-                    config.add_shared_view(
+                    config.add_shared_view_with_aliases(
                         c_str(&view.name),
                         c_str(&view.view_transform),
                         c_str(&view.colorspace),
                         c_str(&view.looks),
                         c_str(&view.rule),
                         c_str(&view.description),
+                        &view.aliases,
                     )?;
                 }
             }
@@ -2893,7 +2898,7 @@ pub(crate) fn load_config(
                         if n.tag()? == b"View" {
                             let mut view = View::default();
                             load_view(&n, &mut view)?;
-                            config.add_display_view_with_view_transform(
+                            config.add_display_view_with_aliases(
                                 c_str(&display),
                                 c_str(&view.name),
                                 c_str(&view.view_transform),
@@ -2901,6 +2906,7 @@ pub(crate) fn load_config(
                                 c_str(&view.looks),
                                 c_str(&view.rule),
                                 c_str(&view.description),
+                                &view.aliases,
                             )?;
                         } else if n.tag()? == b"Views" {
                             for shared_view in load_string_vec(&n)? {
@@ -2928,6 +2934,13 @@ pub(crate) fn load_config(
                     if val.tag()? == b"View" {
                         let mut view = View::default();
                         load_view(&val, &mut view)?;
+                        if !view.aliases.is_empty() {
+                            return Err(throw_value_error(
+                                node.tag()?,
+                                &iter.first,
+                                b"Aliases are not supported for virtual display views.",
+                            ));
+                        }
                         config.add_virtual_display_view(
                             c_str(&view.name),
                             c_str(&view.view_transform),
@@ -2948,6 +2961,7 @@ pub(crate) fn load_config(
                     }
                 }
             }
+            b"use_display_aliases" => config.set_use_display_aliases(load_bool(value)?),
             b"active_displays" => {
                 let displays = join_string_env_style(&load_string_vec(value)?);
                 config.set_active_displays(c_str(&displays))?;
@@ -4228,10 +4242,10 @@ pub(crate) fn save_interchange_attributes(
 }
 
 /// A view, a flow map: its name, its color space (or its view transform and display color
-/// space), its looks and rule when set, and its description. The fields are written whole, as
-/// `std::string`s.
+/// space), its looks and rule when set, its aliases when it has some, and its description. The
+/// fields are written whole, as `std::string`s.
 ///
-/// Port of `save(YAML::Emitter&, const View&)` (OCIOYaml.cpp:480-505 @ v2.5.2).
+/// Port of `save(YAML::Emitter&, const View&)` (OCIOYaml.cpp:487-518 @ v2.6.0).
 pub(crate) fn save_view(out: &mut Emitter, view: &View) {
     out.put(verbatim_tag("View"));
     out.put(Flow);
@@ -4266,6 +4280,12 @@ pub(crate) fn save_view(out: &mut Emitter, view: &View) {
             .put("rule")
             .put(Value)
             .put(view.rule.as_slice());
+    }
+    if !view.aliases.is_empty() {
+        // The Yaml parser automatically quotes view name aliases that contain commas, so they
+        // are not confused with separators. No need to use JoinStringEnvStyle here.
+        out.put(Key).put("aliases").put(Value);
+        put_strings(out, &view.aliases);
     }
     save_description(out, &view.description);
     out.put(EndMap);
@@ -4645,6 +4665,17 @@ pub(crate) fn save_viewing_rule(
     Ok(())
 }
 
+/// The aliases of the view `name` of `display` (`""`: the config's shared views) as the
+/// config's getters give them, each up to its first NUL.
+///
+/// Port of `GetViewAliasVec` (OCIOYaml.cpp:5056-5069 @ v2.6.0).
+fn get_view_alias_vec(config: &Config, display: &[u8], name: &[u8]) -> Vec<Vec<u8>> {
+    let num_aliases = config.num_display_view_aliases(display, name);
+    (0..num_aliases)
+        .map(|i| config.display_view_alias(display, name, i).to_vec())
+        .collect()
+}
+
 /// The view `name` of `display` (`""`: the config's shared views) as the config's getters give
 /// it, each string up to its first NUL.
 fn config_view(config: &Config, display: &[u8], name: &[u8]) -> View {
@@ -4655,6 +4686,7 @@ fn config_view(config: &Config, display: &[u8], name: &[u8]) -> View {
         config.display_view_looks(display, name),
         config.display_view_rule(display, name),
         config.display_view_description(display, name),
+        &get_view_alias_vec(config, display, name),
     )
 }
 
@@ -4663,12 +4695,12 @@ fn config_view(config: &Config, display: &[u8], name: &[u8]) -> View {
 /// list); strict parsing; the family separator unless it's `/` (version 2); the luma; the name
 /// (version 2) and description; the roles; the file rules (version 2) and viewing rules
 /// (version 2, when there are some); the shared views; the displays, but those a virtual
-/// display made, with their views and shared views; the virtual display (version 2); the active
-/// displays and views and the inactive color spaces; the looks; the default view transform and
-/// the view transforms; the display color spaces (but those a virtual display made) and the
-/// color spaces; the named transforms.
+/// display made, with their views and shared views; the virtual display (version 2);
+/// `use_display_aliases` when it is on; the active displays and views and the inactive color
+/// spaces; the looks; the default view transform and the view transforms; the display color
+/// spaces (but those a virtual display made) and the color spaces; the named transforms.
 ///
-/// Port of `save(YAML::Emitter&, const Config&)` (OCIOYaml.cpp:5033-5414 @ v2.5.2).
+/// Port of `save(YAML::Emitter&, const Config&)` (OCIOYaml.cpp:5071-5460 @ v2.6.0).
 fn save_config(out: &mut Emitter, config: &Config) -> SaveResult {
     let config_major_version = config.major_version();
     let config_minor_version = config.minor_version();
@@ -4864,6 +4896,7 @@ fn save_config(out: &mut Emitter, config: &Config) -> SaveResult {
                 config.virtual_display_view_looks(view_name),
                 config.virtual_display_view_rule(view_name),
                 config.virtual_display_view_description(view_name),
+                &[],
             );
             save_view(out, &view);
         }
@@ -4882,6 +4915,11 @@ fn save_config(out: &mut Emitter, config: &Config) -> SaveResult {
 
     out.put(Newline);
     out.put(Newline);
+
+    if config.use_display_aliases() {
+        out.put(Key).put("use_display_aliases").put(Value).put(true);
+    }
+
     out.put(Key).put("active_displays");
     let active_displays: Vec<Vec<u8>> = (0..config.num_active_displays())
         .map(|i| c_str(config.active_display(i).unwrap_or_default()).to_vec())

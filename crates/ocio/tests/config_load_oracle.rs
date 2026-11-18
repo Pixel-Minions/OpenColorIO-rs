@@ -117,6 +117,11 @@ fn getters(c: &Config) -> Vec<Getter> {
             json!(c.is_strict_parsing_enabled()),
         ),
         g(
+            "getUseDisplayAliases",
+            vec![],
+            json!(c.use_display_aliases()),
+        ),
+        g(
             "getDefaultLumaCoefs",
             vec![],
             Value::Array(
@@ -331,9 +336,34 @@ fn getters(c: &Config) -> Vec<Getter> {
         ));
         out.push(g(
             "getDisplayViewDescription",
-            args,
+            args.clone(),
             s(c.display_view_description(display, view)),
         ));
+        // The view's aliases (2.6), and the alias lookup: each alias, upper-cased (it ignores
+        // case), and one it doesn't have.
+        let aliases: Vec<Vec<u8>> = (0..c.num_display_view_aliases(display, view))
+            .map(|i| c.display_view_alias(display, view, i).to_vec())
+            .collect();
+        out.push(g(
+            "getDisplayViewAliases",
+            args.clone(),
+            list(aliases.iter().cloned()),
+        ));
+        let mut probes: Vec<Vec<u8>> = Vec::new();
+        for alias in &aliases {
+            probes.push(alias.clone());
+            probes.push(alias.to_ascii_uppercase());
+        }
+        probes.push(b"not an alias".to_vec());
+        for alias in probes {
+            let mut alias_args = args.clone();
+            alias_args.push(s(&alias));
+            out.push(g(
+                "hasDisplayViewAlias",
+                alias_args,
+                json!(c.has_display_view_alias(display, view, &alias)),
+            ));
+        }
     };
     for i in 0..c.num_displays_all() {
         let display = c.display_all(i).to_vec();
@@ -540,7 +570,7 @@ fn configs_load_as_in_the_wheel() {
             b"ocio_profile_version: 2.6\nroles: {default: raw}\n".to_vec(),
         ),
         ("version 2.7", b"ocio_profile_version: 2.7\n".to_vec()),
-        ("no version",b"roles: {default: raw}\n".to_vec()),
+        ("no version", b"roles: {default: raw}\n".to_vec()),
         ("version x", b"ocio_profile_version: x\n".to_vec()),
         ("version 2.x", b"ocio_profile_version: 2.x\n".to_vec()),
         ("version 1.2.3", b"ocio_profile_version: 1.2.3\n".to_vec()),
@@ -1193,7 +1223,10 @@ fn configs_their_versions_cant_have_are_refused() {
         ("display - cie-xyz-d65_to_displayp3-hdr", 4),
         // The MIRROR NEGS styles of 2.5, whose check 2.6.0 added.
         ("DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS", 5),
-        ("DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS", 5),
+        (
+            "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS",
+            5,
+        ),
         ("DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS", 5),
         ("display - cie-xyz-d65_to_srgb - mirror negs", 5),
         ("DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS", 5),
@@ -1426,4 +1459,197 @@ fn active_displays_from_the_environment_as_in_the_wheel() {
     for value in ["qq:d", "qq", " , "] {
         check_env(&[("OCIO_ACTIVE_DISPLAYS", value)], &[(value, text.clone())]);
     }
+}
+
+/// A version 2.6 config of the color spaces `raw` (the default role's), `cs` and the display
+/// color space `dcs` (alias `dcs_alias`), with `extra` after them.
+fn v26(extra: &str) -> Vec<u8> {
+    format!(
+        "ocio_profile_version: 2.6\nenvironment: {{}}\nroles: {{default: raw}}\ncolorspaces:\n  \
+         - !<ColorSpace> {{name: raw}}\n  - !<ColorSpace> {{name: cs}}\ndisplay_colorspaces:\n  \
+         - !<ColorSpace> {{name: dcs, aliases: [dcs_alias]}}\nview_transforms:\n  - \
+         !<ViewTransform> {{name: vt, from_scene_reference: !<MatrixTransform> {{}}}}\n{extra}"
+    )
+    .into_bytes()
+}
+
+/// View aliases and `use_display_aliases` (2.6): read, kept, written and validated as in the
+/// wheel, and the loader's refusals of colliding names and aliases, of aliases on the virtual
+/// display's views and of what a version before 2.6 can't have.
+#[test]
+fn view_aliases_load_as_in_the_wheel() {
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "aliases of views and shared views",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, view_transform: vt, display_colorspace: \
+                 <USE_DISPLAY_NAME>, aliases: [sv_a, sv_b]}\ndisplays:\n  dcs:\n    - !<View> \
+                 {name: v1, colorspace: raw, aliases: [v1_b, v1_a]}\n    - !<View> {name: v2, \
+                 colorspace: cs, looks: l, rule: r, description: d, aliases: [v2_a]}\n    - \
+                 !<Views> [sv]\n  other:\n    - !<View> {name: v3, colorspace: raw, aliases: \
+                 [v1_a]}\n",
+            ),
+        ),
+        (
+            "use_display_aliases true",
+            v26(
+                "use_display_aliases: true\ndisplays:\n  dcs:\n    - !<View> {name: v, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "use_display_aliases false",
+            v26(
+                "use_display_aliases: false\ndisplays:\n  dcs:\n    - !<View> {name: v, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "use_display_aliases not a bool",
+            v26("use_display_aliases: maybe\n"),
+        ),
+        (
+            "use_display_aliases in 2.5",
+            ver("2.5", "use_display_aliases: true\n"),
+        ),
+        (
+            "use_display_aliases false in 2.5",
+            ver("2.5", "use_display_aliases: false\n"),
+        ),
+        (
+            "aliases that need quotes",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: [\"a,b\", \
+                 \"c: d\", \"'q'\", \"\\\"dq\\\"\", \"x\\xe9\", \" sp \", \"\"]}\n",
+            ),
+        ),
+        (
+            "an alias with a NUL",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: [\"a\0b\", c]}\n",
+            ),
+        ),
+        (
+            "aliases empty",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: []}\n"),
+        ),
+        (
+            "aliases null",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: ~}\n"),
+        ),
+        (
+            "aliases a scalar",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: a}\n"),
+        ),
+        (
+            "aliases a map",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: {a: b}}\n"),
+        ),
+        (
+            "an alias that is the view's own name",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: [V, v]}\n"),
+        ),
+        (
+            "an alias naming a sibling view",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v1, colorspace: raw}\n    - !<View> \
+                 {name: v2, colorspace: raw, aliases: [V1]}\n",
+            ),
+        ),
+        (
+            "a name that is a sibling's alias",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v1, colorspace: raw, aliases: [a]}\n    \
+                 - !<View> {name: A, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "aliases shared by siblings",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v1, colorspace: raw, aliases: [x, a]}\n    \
+                 - !<View> {name: v2, colorspace: raw, aliases: [y, A]}\n",
+            ),
+        ),
+        (
+            "a view replaced with other aliases",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v1, colorspace: raw, aliases: [a]}\n    \
+                 - !<View> {name: v2, colorspace: raw, aliases: [b]}\n    - !<View> {name: V1, \
+                 colorspace: cs, aliases: [c]}\n",
+            ),
+        ),
+        (
+            "a view alias naming a shared view of the display",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [s]}\n\
+                 displays:\n  d:\n    - !<Views> [sv]\n    - !<View> {name: v, colorspace: raw, \
+                 aliases: [S]}\n",
+            ),
+        ),
+        (
+            "a shared view whose alias names a view of the display",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [v]}\n\
+                 displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n    - !<Views> \
+                 [sv]\n",
+            ),
+        ),
+        (
+            "shared views sharing an alias",
+            v26(
+                "shared_views:\n  - !<View> {name: sv1, colorspace: raw, aliases: [a]}\n  - \
+                 !<View> {name: sv2, colorspace: raw, aliases: [b, A]}\n",
+            ),
+        ),
+        (
+            "a shared view named as another's alias",
+            v26(
+                "shared_views:\n  - !<View> {name: sv1, colorspace: raw, aliases: [a]}\n  - \
+                 !<View> {name: a, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "a shared view replaced",
+            v26(
+                "shared_views:\n  - !<View> {name: sv1, colorspace: raw, aliases: [a]}\n  - \
+                 !<View> {name: sv1, colorspace: cs, aliases: [b]}\n",
+            ),
+        ),
+        (
+            "an unused shared view's alias names a view",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [v]}\n\
+                 displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "view aliases in 2.5",
+            ver(
+                "2.5",
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: [a]}\n",
+            ),
+        ),
+        (
+            "shared view aliases in 2.5",
+            ver(
+                "2.5",
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [a]}\n\
+                 displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "virtual display view aliases",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\nvirtual_display:\n  \
+                 - !<View> {name: vv, colorspace: raw, aliases: [a]}\n",
+            ),
+        ),
+        (
+            "virtual display shared view with aliases",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [a]}\n\
+                 displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\nvirtual_display:\n  \
+                 - !<Views> [sv]\n",
+            ),
+        ),
+    ];
+    check(&cases);
 }
