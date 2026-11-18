@@ -5282,7 +5282,7 @@ fn display() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(Config, inactive_color_space_read_write)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Config, inactive_color_space_read_write)` @ v2.6.0.
 #[test]
 fn inactive_color_space_read_write() {
     // The unit tests validate the read/write.
@@ -5339,7 +5339,7 @@ fn inactive_color_space_read_write() {
         let config_str = [
             INACTIVE_CS_CONFIG_START,
             // Test a multi-line list.
-            "inactive_colorspaces: [cs1\t\n   \n,   \ncs2]\n",
+            "inactive_colorspaces: [cs1\t\n   \n   ,   \ncs2]\n",
             INACTIVE_CS_CONFIG_END,
         ]
         .concat();

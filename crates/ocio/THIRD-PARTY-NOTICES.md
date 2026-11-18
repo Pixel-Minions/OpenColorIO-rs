@@ -5,12 +5,12 @@ This package is part of OpenColorIO-rs, a port of OpenColorIO 2.5.2 under BSD-3-
 below. The sections are those of the repository's `THIRD-PARTY-NOTICES.md`, which lists every
 project the port takes code from. The crates this package depends on ship their own licenses.
 
-## yaml-cpp 0.8.0
+## yaml-cpp 0.9.0
 
-<https://github.com/jbeder/yaml-cpp>, the YAML library OpenColorIO 2.5.2 is built with. Its
+<https://github.com/jbeder/yaml-cpp>, the YAML library OpenColorIO 2.6.0 is built with. Its
 emitter and its parser are ported in `crates/ocio/src/yaml_cpp/`, together with its own tests.
-Its source is pinned as the submodule `upstream/yaml-cpp` (tag 0.8.0, commit
-f7320141120f720aecc4c32be25586e7da9eb978), so that the citations can be checked. Its
+Its source is pinned as the submodule `upstream/yaml-cpp` (tag yaml-cpp-0.9.0, commit
+56e3bb550c91fd7005566f19c079cb7a503223cf), so that the citations can be checked. Its
 `LICENSE`:
 
 ```text

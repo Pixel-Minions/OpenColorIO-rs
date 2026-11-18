@@ -29,10 +29,16 @@ pub fn load_all<'a>(input: impl Into<IStream<'a>>) -> Result<Vec<Node>> {
     let mut parser = Parser::new(input);
     loop {
         let mut builder = NodeBuilder::new();
+        // Since yaml-cpp 0.9.0 an empty document ends the list too (src/parse.cpp:56 @
+        // yaml-cpp-0.9.0, commit bc67157).
         if !parser.handle_next_document(&mut builder)? {
             break;
         }
-        docs.push(builder.root());
+        let root = builder.root();
+        if root.is_null()? {
+            break;
+        }
+        docs.push(root);
     }
     Ok(docs)
 }

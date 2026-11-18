@@ -299,8 +299,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-100. YAML positions wrap after 2^31 characters or lines
 
 - **Upstream:** yaml-cpp counts the reader's position, line and column in C++ `int`s with `++`
-  (`Stream::get`, `AdvanceCurrent`, yaml-cpp 0.8.0 `src/stream.cpp:262-303`), and prints the
-  line and column plus one (`include/yaml-cpp/exceptions.h:173-181`). Past 2^31 characters or
+  (`Stream::get`, `AdvanceCurrent`, `src/stream.cpp:260-316` @ yaml-cpp-0.9.0; 262-303 in
+  0.8.0), and prints the line and column plus one (`include/yaml-cpp/exceptions.h:173-181`). Past 2^31 characters or
   lines the counters overflow, undefined behaviour that a plain machine addition resolves by
   wrapping. The port wraps them: marks turn negative, and a mark of -1 everywhere reads as
   "no mark".
@@ -795,6 +795,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `ocio26-deps` (chunk 2, `crates/ocio/src/yaml_cpp/fptostring.rs`), with
   yaml-cpp 0.9.0's `fptostring_test.cpp` ported, and checked through the wheel by the YAML
   save tests.
+
+### I-951. The first line ending decides what starts a line, and a NUL byte does until then
+
+- **Upstream:** since yaml-cpp 0.9.0 (OCIO 2.6.0's wheels), the reader starts a new line, for
+  its marks and its indentation, only at the character its first line ending used: `\n` for
+  `\n` and `\r\n`, `\r` for a lone `\r` (`Stream::get`, `src/stream.cpp:260-290`, with
+  `m_lineEndingSymbol`, `src/stream.h:56` @ yaml-cpp-0.9.0). Before the first line ending the
+  symbol is 0, so a NUL byte starts a new line. So a config whose first line ends with a lone
+  `\r` and whose other lines end with `\n` reads as one long line after the first, and a NUL
+  byte before the first line break moves the line numbers of error messages. Seen through
+  the wheel: a file of one NUL byte fails "at line 2, column 2" (yaml-cpp 0.8.0 said line 1,
+  column 3). Configs with only `\r` line endings, which 0.8.0 couldn't read, read now.
+- **Who notices:** configs with mixed line endings or with NUL bytes before their first line
+  break: their parse, or the positions in their error messages.
+- **A fix:** start a line at any `\n`, `\r\n` or lone `\r`, and never at a NUL byte.
+- **Status:** matched in `ocio26-deps` (chunk 3, `crates/ocio/src/yaml_cpp/stream.rs`), with
+  yaml-cpp 0.9.0's `BlockCREncoded` test, and checked against the wheel by
+  `crates/ocio/tests/config_files_oracle.rs` (`tiny_files_read_as_in_the_wheel`).
 
 ## Numeric helpers
 
