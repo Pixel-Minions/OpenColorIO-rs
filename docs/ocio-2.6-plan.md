@@ -40,6 +40,11 @@ and Rocky Linux 9.
   `std::filesystem::exists`, which MSVC reads in the ANSI code page. The port is exact for
   ASCII paths on Windows and for every path on Linux; a non-ASCII path on Windows is the port's
   error (U-750, waiver W0028), following U-113/W0027.
+- **dragonbox licence (2026-11-18):** yaml-cpp 0.9.0 vendors dragonbox
+  (`src/contrib/dragonbox.h`), which the port translates for yaml-cpp's `FpToString`. Of the
+  licences that file offers (Apache-2.0 WITH LLVM-exception, BSL-1.0, or MIT for use in
+  yaml-cpp), `THIRD-PARTY-NOTICES.md` records it under Apache-2.0 WITH LLVM-exception, the
+  text it already reproduces for the MSVC STL.
 
 ## The upstream change, measured
 

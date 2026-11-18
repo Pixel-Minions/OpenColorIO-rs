@@ -94,7 +94,8 @@ all change with it.
   `core`'s shortest formatting (`{:e}`, Grisu with a Dragon4 fallback). It also gives the
   shortest, closest digits and needs no new notice, but it isn't a port, and its agreement on
   every tie and boundary would have to be proved through the wheel at precisions 7 and 15,
-  which can't show the digits past 15. **Recommendation: port dragonbox.**
+  which can't show the digits past 15. **Decided (2026-11-18): port dragonbox** (chunk 1).
+  Its notice: Apache-2.0 WITH LLVM-exception (owner decision, `ocio-2.6-plan.md`).
 - **Register:** a new I-entry (I-950): written numbers keep the zeros of a truncation and
   round on the shortest digits. The fix is `%.{p}g`, or strip the zeros.
 
@@ -439,7 +440,7 @@ copy that `cargo xtask guards` checks:
 |---|---|---|
 | `## Imath 3.2.1` | root, `crates/ocio-ops/THIRD-PARTY-NOTICES.md` | -> 3.2.3, "OpenColorIO 2.6.0". `LICENSE.md` @ 3.2.3 starts "Copyright Contributors to the OpenEXR Project.", BSD-3-Clause as quoted: no text change |
 | `## yaml-cpp 0.8.0` | root, `crates/ocio/THIRD-PARTY-NOTICES.md` | -> 0.9.0, tag `yaml-cpp-0.9.0` (tags use the `yaml-cpp-` prefix again), commit 56e3bb550c91fd7005566f19c079cb7a503223cf. `LICENSE` unchanged. `fptostring.*` carry no notice of their own since commit 06ffaf3 |
-| **new**: dragonbox (if Y1 ports it) | root, `crates/ocio/THIRD-PARTY-NOTICES.md` | `src/contrib/dragonbox.h` @ yaml-cpp 0.9.0: "SPDX-FileCopyrightText: 2020-2024 Junekey Jeon", `Apache-2.0 WITH LLVM-exception` or `BSL-1.0`, plus MIT "for usage in yaml-cpp". **Owner question:** which licence to cite. Recommendation: Apache-2.0 WITH LLVM-exception, whose full text this file already reproduces for the MSVC STL |
+| **new**: dragonbox (if Y1 ports it) | root, `crates/ocio/THIRD-PARTY-NOTICES.md` | `src/contrib/dragonbox.h` @ yaml-cpp 0.9.0: "SPDX-FileCopyrightText: 2020-2024 Junekey Jeon", `Apache-2.0 WITH LLVM-exception` or `BSL-1.0`, plus MIT "for usage in yaml-cpp". **Owner decision (2026-11-18):** Apache-2.0 WITH LLVM-exception, with the full text this file already reproduces for the MSVC STL. Added with chunk 1 |
 | `## expat 2.7.2` | root, `crates/ocio-formats/THIRD-PARTY-NOTICES.md`, the header of `crates/ocio-formats/src/expat/mod.rs` | -> 2.8.4, tag `R_2_8_4`, commit 12cf0b1f25f026a022fe728ad8f7e3d017285b80. The root `COPYING` now reads "Copyright (c) 2001-2026 Expat maintainers" (it said 2001-2025); `expat/COPYING` still says 2025. Quote the root file, as the other sections quote the project's top-level licence |
 | `## minizip-ng 4.0.10` | root, `crates/ocio/THIRD-PARTY-NOTICES.md` | -> 4.2.2, commit 7b2387161c542fa9f427352dcdef76097d0d692b, and `FindExtPackages.cmake`'s new line numbers. `LICENSE` unchanged |
 | zlib | none | Not translated. The crate table keeps `zlib-rs 0.6.8` unless Z1 says otherwise |
@@ -462,8 +463,9 @@ copy that `cargo xtask guards` checks:
 
 - **OCIO #2350's XML reader trampolines** (`FileFormatCTF.cpp`, `FileFormatIridasLook.cpp`,
   `cdl/CDLParser.cpp` @ v2.6.0). These are OCIO code, but they exist because of expat 2.8 and
-  need X4. Proposed here as chunk 6 below. Phase 5 (`ocio26-clf`) edits the same files, so the
-  orchestrator should decide who owns it, and order it before the CLF chunks.
+  need X4. **Handed to phase 5 (`ocio26-clf`)**, which edits those files (orchestrator,
+  2026-11-18): this card's chunk 4 provides `XML_StopParser(XML_FALSE)` and its status
+  handling with tests, and leaves the OCIO reader call sites alone.
 - **`Config_tests.cpp` `inactive_color_space_read_write`** (line 6539 @ v2.6.0). Its input
   changed because of Y2. The port's copy has to take the 2.6.0 text in the same chunk as Y2,
   or the test goes red.
@@ -472,7 +474,8 @@ copy that `cargo xtask guards` checks:
   products) will differ until Y1 lands. So will XML memory thresholds until X3 lands, and any
   probe hitting Y2, Y3, X1, X2 or M1. Phase 1 (`ocio26-base`) can't clear those itself. The
   yaml-cpp chunks, at least, should land in the same stack as phase 1, or phase 1's red list
-  should leave them out by name.
+  should leave them out by name. Decided (orchestrator, 2026-11-18): the yaml-cpp and expat
+  chunks land with phase 0/1 as one group.
 
 ## Evidence after phase 0
 
@@ -514,12 +517,10 @@ separately.
 | 3 | `ocio26-deps: yaml-cpp 0.9.0 parser` | Y2 scanner, Y3 stream line endings, Y5 `InvalidNode`, Y6 `LoadAll`. The load_node tests, the 2.6.0 input of `Config_tests` `inactive_color_space_read_write`, I-951, citations of the parser and node files | ~120 | `--rocky` |
 | 4 | `ocio26-deps: expat 2.8.4 parser` | X1, X2, X4 (`XML_StopParser(XML_FALSE)` and the status checks), `defineAttribute`/`storeAtts` through `defaultAttForName` (behaviour only). The basic and misc tests listed above. expat notice, `mod.rs` header and citations | ~250 | `--rocky` |
 | 5 | `ocio26-deps: expat 2.8.4 allocation tracker` | X3: the structure sizes per platform, the default-attribute tables, one free entity list, `poolGrowUntil`'s citation. I-171 rewritten. `xml_memory_oracle.rs` against 2.6.0 | ~150 | `--release --rocky` (platform sizes) |
-| 6 | `ocio26-deps: XML readers stop the parser` (cross-card, see above) | OCIO #2350's trampolines in the CTF, Iridas look and CDL readers on chunk 4's `stop_parser`: first error kept, the remaining handler calls of the token made. Oracle probes of item 5 above | ~150 | `--rocky` |
+| 6 | (handed to `ocio26-clf`) `XML readers stop the parser` | OCIO #2350's trampolines in the CTF, Iridas look and CDL readers on chunk 4's `stop_parser`: first error kept, the remaining handler calls of the token made. Oracle probes of item 5 above | ~150 | `--rocky` |
 | 7 | `ocio26-deps: minizip-ng 4.2.2` | M1 symlink safety on extraction, M2 the Linux create mode, M3 the `add_file`/`get_link_attribs` split. `test_path.cc` `symlink_target_base`. minizip-ng notice, `mod.rs` and citations to 4.2.2, I-207..I-214, U-78 and U-80 citations | ~200 | `--rocky` (Linux modes and links) |
 | 8 | `ocio26-deps: Imath 3.2.3 and zlib 1.3.2 bookkeeping` | Version labels and citations in `imath_half.rs`, `half_conversions.rs` and the Imath notice. D-6 and `minizip/mod.rs`/`inflate.rs` for zlib 1.3.2, after the Z1 probe agrees | ~20 (docs and comments) | `guards` + the half tests |
 
-Chunk 1 exceeds the usual ~600 lines because of its data tables, which can't be split from the
-code that indexes them without a chunk that is dead on its own. The orchestrator decides
-whether to allow it or split the binary32 and binary64 paths, which share the helpers. Chunks 1
-and 2 can merge if Rust `core`'s shortest formatting is chosen instead of the dragonbox port
-(owner question above).
+Chunk 1 exceeds the usual ~600 lines because of its data tables (697 entries). The
+orchestrator allowed it on 2026-11-18, with the tables copied verbatim from the vendored
+source.

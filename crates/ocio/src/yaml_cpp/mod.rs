@@ -41,6 +41,7 @@
 //!
 //! yaml-cpp is MIT-licensed; its notice is above and applies to this module.
 
+pub mod contrib;
 pub mod convert;
 pub mod emitter;
 pub mod emitter_manip;
