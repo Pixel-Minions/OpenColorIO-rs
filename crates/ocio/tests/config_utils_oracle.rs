@@ -378,13 +378,28 @@ fn source(label: impl Into<String>, load: Load, edits: Vec<Edit>) -> Source {
     }
 }
 
+/// `path` with forward slashes and without Windows' verbatim prefix (`\\?\`, which
+/// `ocio_testkit::paths::upstream_dir` gives on Windows): neither library locates a file
+/// through a search path that starts with `//?/`.
+fn plain_path(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    path.trim_start_matches("//?/").to_owned()
+}
+
 /// Upstream's test files directory (`GetTestFilesDir`), with forward slashes.
 fn test_files_dir() -> String {
-    ocio_testkit::paths::upstream_dir()
-        .join("tests/data/files")
-        .to_string_lossy()
-        .replace('\\', "/")
+    plain_path(&ocio_testkit::paths::upstream_dir().join("tests/data/files"))
 }
+
+/// The color spaces of the test configs whose transforms read a file of
+/// [`test_files_dir`]: the cases that build their processors prove the files are found.
+const FILE_SPACES: [&str; 5] = [
+    "File color space AP0 to linear rec.709",
+    "sRGB - curve 2",
+    "srgb clf",
+    "srgb spi1d",
+    "spimtx space",
+];
 
 /// Every name of a color space of `config`, inactive ones included, with its aliases.
 fn all_names(config: &Config) -> Vec<String> {
@@ -477,6 +492,8 @@ fn dynamic_sets(proc: &Processor) -> Vec<common::app_helpers::DynamicSet> {
 #[derive(Default)]
 struct Coverage {
     reached: Reached,
+    /// The color spaces of [`FILE_SPACES`] the port built a processor from.
+    file_spaces: BTreeSet<String>,
     names: usize,
     name_errors: usize,
     found: BTreeSet<String>,
@@ -631,16 +648,24 @@ fn check(
                         problems.push(format!("logs {} != {port_log:?}", wheel["log"]));
                     }
                 }
-                Outcome::Processor(made) => compare_processor_call(
-                    &response,
-                    results,
-                    at,
-                    &made,
-                    &port_log,
-                    applies,
-                    &mut coverage.reached,
-                    &mut problems,
-                ),
+                Outcome::Processor(made) => {
+                    if let (Ok(_), Case::ToBuiltin(src_name, _) | Case::FromBuiltin(_, src_name)) =
+                        (&made, case)
+                        && FILE_SPACES.contains(&src_name.as_str())
+                    {
+                        coverage.file_spaces.insert(src_name.clone());
+                    }
+                    compare_processor_call(
+                        &response,
+                        results,
+                        at,
+                        &made,
+                        &port_log,
+                        applies,
+                        &mut coverage.reached,
+                        &mut problems,
+                    )
+                }
             }
             if !problems.is_empty() {
                 failures.push(format!(
@@ -766,8 +791,11 @@ fn upstream_test_configs_match_the_wheel() {
         "mergeconfigs/merged3/base.ocio",
         "mergeconfigs/merged3/input.ocio",
     ] {
-        let path = configs.join(file).to_string_lossy().replace('\\', "/");
-        sources.push(source(file, Load::File(path), vec![]));
+        sources.push(source(
+            file,
+            Load::File(plain_path(&configs.join(file))),
+            vec![],
+        ));
     }
     let mut coverage = Coverage::default();
     let mut failures = Vec::new();
@@ -776,6 +804,16 @@ fn upstream_test_configs_match_the_wheel() {
     }
     report("config_utils_upstream", &failures);
     assert_eq!(coverage.reached.pixels, 2 * coverage.reached.made);
+    // The color spaces that read test files built processors, the CLF in a subdirectory of the
+    // search path among them: the files are found (a search path with Windows' verbatim prefix
+    // finds sRGB_to_linear.spi1d but not clf/lut3d_as_matrix.clf, on either side).
+    for name in ["File color space AP0 to linear rec.709", "sRGB - curve 2"] {
+        assert!(
+            coverage.file_spaces.contains(name),
+            "{name}: {:?}",
+            coverage.file_spaces
+        );
+    }
     assert!(
         coverage.names >= 200 && coverage.name_errors >= 100 && coverage.reached.made >= 40,
         "{} names, {} errors, {} processors",
@@ -816,6 +854,14 @@ fn generated_configs_match_the_wheel() {
     }
     report("config_utils_generated", &failures);
     assert_eq!(coverage.reached.pixels, 2 * coverage.reached.made);
+    // The color spaces that read test files built processors: the files are found.
+    for name in ["srgb spi1d", "spimtx space"] {
+        assert!(
+            coverage.file_spaces.contains(name),
+            "{name}: {:?}",
+            coverage.file_spaces
+        );
+    }
     for message in [
         "' refers to a color space that is missing in the source config.",
         "The supplied config does not have a color space for the reference.",
