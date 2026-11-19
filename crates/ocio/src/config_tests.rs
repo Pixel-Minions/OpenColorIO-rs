@@ -6230,7 +6230,7 @@ fn profile_v21_start() -> String {
     .concat()
 }
 
-/// Port of `OCIO_ADD_TEST(Config, fixed_function_serialization)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Config, fixed_function_serialization)` @ v2.6.0.
 #[test]
 fn fixed_function_serialization() {
     let _env = EnvGuard::new();
@@ -6466,6 +6466,32 @@ fn fixed_function_serialization() {
             // Mute the experimental warnings.
             let (ss, _log) = crate::test_env::capture_log(|| config.serialize().unwrap());
             check_serialized(&ss, &str);
+        }
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_RGB_TO_HMJ, params: [0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_RGB_TO_HMJ, params: [0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329], direction: inverse}\n",
+        );
+        load_error(
+            profile_start_v(2, 5) + str_end,
+            "Only config version 2.6 (or higher) can have FixedFunctionTransform style \
+             'ACES2_RGB_TO_HMJ'.",
+        );
+        Config::create_from_stream((profile_start_v(2, 6) + str_end).as_bytes()).unwrap();
+        {
+            let str2_end = concat!(
+                "    from_scene_reference: !<GroupTransform>\n",
+                "      children:\n",
+                "        - !<FixedFunctionTransform> {style: ACES2_RGB_TO_HMJ, params: [0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329, 0.], direction: inverse}\n",
+            );
+            validate_error(
+                profile_start_v(2, 6) + str2_end,
+                "The style 'HMJ_TO_RGB_20' must have 8 parameters but 9 found.",
+            );
         }
     }
 

@@ -1333,6 +1333,9 @@ fn configs_their_versions_cant_have_are_refused() {
         ("DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS", 5),
         ("display - cie-xyz-d65_to_srgb - mirror negs", 5),
         ("DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS", 5),
+        // The style of 2.6.
+        ("APPLE_LOG-APPLEWG_to_ACES2065-1", 6),
+        ("apple_log-applewg_to_aces2065-1", 6),
     ] {
         for minor in [first - 1, first] {
             cases.push((
@@ -1352,9 +1355,14 @@ fn configs_their_versions_cant_have_are_refused() {
         ("RGB_TO_HSY_LIN", 5),
         ("RGB_TO_HSY_LOG", 5),
         ("RGB_TO_HSY_VID", 5),
+        ("ACES2_RGB_TO_HMJ", 6),
+        ("aces2_rgb_to_hmj", 6),
     ] {
         let params = match style {
             "ACES_GamutComp13" => ", params: [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2]",
+            "ACES2_RGB_TO_HMJ" | "aces2_rgb_to_hmj" => {
+                ", params: [0.7347, 0.2653, 0, 1, 0.0001, -0.077, 0.32168, 0.33767]"
+            }
             "ACES2_OutputTransform" => {
                 ", params: [100, 0.7347, 0.2653, 0, 1, 0.0001, -0.077, 0.3127, 0.329]"
             }

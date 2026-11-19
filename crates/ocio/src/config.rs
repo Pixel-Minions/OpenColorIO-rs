@@ -5517,14 +5517,13 @@ impl Config {
     }
 
     /// Refuses a transform the config's version can't have: in version 1, the classes and
-    /// styles version 2 brought; in versions 2.0 to 2.4, the built-in and fixed function
+    /// styles version 2 brought; in versions 2.0 to 2.5, the built-in and fixed function
     /// styles of later minor versions. A group's children are checked the same way.
     ///
     /// Port of `Config::Impl::checkVersionConsistency(ConstTransformRcPtr&)`
-    /// (src/OpenColorIO/Config.cpp:5586-5832 @ v2.5.2), with the 2.5 check of the MIRROR NEGS
-    /// built-in styles 2.6.0 added (Config.cpp:6306-6318 @ v2.6.0); the 2.6 checks of
-    /// `APPLE_LOG-APPLEWG_to_ACES2065-1` and `ACES2_RGB_TO_HMJ` (Config.cpp:6319-6326,
-    /// 6429-6438 @ v2.6.0) come with those styles (card ocio26-ops). Two messages keep
+    /// (src/OpenColorIO/Config.cpp:6225-6503 @ v2.6.0): 2.6.0 added the 2.5 check of the MIRROR
+    /// NEGS built-in styles (6306-6318) and the 2.6 checks of `APPLE_LOG-APPLEWG_to_ACES2065-1`
+    /// (6319-6326) and of `ACES2_RGB_TO_HMJ` (6429-6438). Two messages keep
     /// upstream's misspellings (docs/improvements.md, I-146); the GradingHueCurveTransform's
     /// check leaves version 1 out (I-291).
     fn check_transform_version_consistency(&self, transform: &Transform) -> Result<()> {
@@ -5571,6 +5570,14 @@ impl Config {
                 }
                 if major == 2 && minor < 5 && BUILTIN_STYLES_2_5.iter().any(|s| is(s)) {
                     let mut os = b"Only config version 2.5 (or higher) can have BuiltinTransform \
+                                   style '"
+                        .to_vec();
+                    os.extend_from_slice(style);
+                    os.extend_from_slice(b"'.");
+                    return Err(Exception::new(os));
+                }
+                if major == 2 && minor < 6 && is("APPLE_LOG-APPLEWG_to_ACES2065-1") {
+                    let mut os = b"Only config version 2.6 (or higher) can have BuiltinTransform \
                                    style '"
                         .to_vec();
                     os.extend_from_slice(style);
@@ -5672,6 +5679,14 @@ impl Config {
                 {
                     return Err(Exception::new(format!(
                         "Only config version 2.5 (or higher) can have FixedFunctionTransform \
+                         style '{}'.",
+                        fixed_function_style_to_string(ffstyle)?
+                    )));
+                }
+
+                if major == 2 && minor < 6 && ffstyle == AcesRgbToHmj20 {
+                    return Err(Exception::new(format!(
+                        "Only config version 2.6 (or higher) can have FixedFunctionTransform \
                          style '{}'.",
                         fixed_function_style_to_string(ffstyle)?
                     )));
