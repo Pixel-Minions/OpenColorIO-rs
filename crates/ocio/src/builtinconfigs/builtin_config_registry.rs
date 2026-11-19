@@ -11,21 +11,21 @@ use ocio_ops::exception::{Exception, Result};
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::string_utils::c_str;
 
-/// `OUT_OF_RANGE_EXCEPTION_TEXT` (BuiltinConfigRegistry.cpp:19 @ v2.5.2).
+/// `OUT_OF_RANGE_EXCEPTION_TEXT` (BuiltinConfigRegistry.cpp:20 @ v2.6.0).
 const OUT_OF_RANGE_EXCEPTION_TEXT: &str = "Config index is out of range.";
 
-/// `DEFAULT_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:21 @ v2.5.2).
-const DEFAULT_BUILTIN_CONFIG_URI: &[u8] = b"ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5";
-/// `LATEST_CG_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:22 @ v2.5.2).
-const LATEST_CG_BUILTIN_CONFIG_URI: &[u8] = b"ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5";
-/// `LATEST_STUDIO_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:23 @ v2.5.2).
-const LATEST_STUDIO_BUILTIN_CONFIG_URI: &[u8] = b"ocio://studio-config-v4.0.0_aces-v2.0_ocio-v2.5";
+/// `DEFAULT_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:24 @ v2.6.0).
+const DEFAULT_BUILTIN_CONFIG_URI: &[u8] = b"ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6";
+/// `LATEST_CG_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:25 @ v2.6.0).
+const LATEST_CG_BUILTIN_CONFIG_URI: &[u8] = b"ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6";
+/// `LATEST_STUDIO_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:26 @ v2.6.0).
+const LATEST_STUDIO_BUILTIN_CONFIG_URI: &[u8] = b"ocio://studio-config-v5.0.0_aces-v2.1_ocio-v2.6";
 
-/// `BUILTIN_DEFAULT_NAME` (BuiltinConfigRegistry.cpp:25 @ v2.5.2).
+/// `BUILTIN_DEFAULT_NAME` (BuiltinConfigRegistry.cpp:28 @ v2.6.0).
 const BUILTIN_DEFAULT_NAME: &[u8] = b"default";
-/// `BUILTIN_LATEST_CG_NAME` (BuiltinConfigRegistry.cpp:26 @ v2.5.2).
+/// `BUILTIN_LATEST_CG_NAME` (BuiltinConfigRegistry.cpp:29 @ v2.6.0).
 const BUILTIN_LATEST_CG_NAME: &[u8] = b"cg-config-latest";
-/// `BUILTIN_LATEST_STUDIO_NAME` (BuiltinConfigRegistry.cpp:27 @ v2.5.2).
+/// `BUILTIN_LATEST_STUDIO_NAME` (BuiltinConfigRegistry.cpp:30 @ v2.6.0).
 const BUILTIN_LATEST_STUDIO_NAME: &[u8] = b"studio-config-latest";
 
 /// The prefix of the URIs of the built-in configs.

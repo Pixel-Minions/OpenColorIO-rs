@@ -96,6 +96,8 @@ fn paths() -> Vec<Vec<u8>> {
         "CG-CONFIG-V1.0.0_ACES-V1.3_OCIO-V2.1",
         "ocio://studio-config-v2.1.0_aces-v1.3_ocio-v2.3",
         "cg-config-v4.0.0_aces-v2.0_ocio-v2.5 ",
+        "ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6",
+        "STUDIO-CONFIG-V5.0.0_ACES-V2.1_OCIO-V2.6",
     ]
     .iter()
     .map(|p| p.as_bytes().to_vec())

@@ -29,15 +29,17 @@ fn the_class_has_the_wheels_surface() {
 
 /// The names of the wheel's built-in configs, which the script asks for one by one (the
 /// script also lists them through the iterator, so a name that changes fails there too).
-const NAMES: [&str; 8] = [
+const NAMES: [&str; 10] = [
     "cg-config-v1.0.0_aces-v1.3_ocio-v2.1",
     "cg-config-v2.1.0_aces-v1.3_ocio-v2.3",
     "cg-config-v2.2.0_aces-v1.3_ocio-v2.4",
     "cg-config-v4.0.0_aces-v2.0_ocio-v2.5",
+    "cg-config-v5.0.0_aces-v2.1_ocio-v2.6",
     "studio-config-v1.0.0_aces-v1.3_ocio-v2.1",
     "studio-config-v2.1.0_aces-v1.3_ocio-v2.3",
     "studio-config-v2.2.0_aces-v1.3_ocio-v2.4",
     "studio-config-v4.0.0_aces-v2.0_ocio-v2.5",
+    "studio-config-v5.0.0_aces-v2.1_ocio-v2.6",
 ];
 
 fn registry_script() -> Script {
@@ -80,10 +82,10 @@ fn registry_script() -> Script {
         let it = sc.call(ra(reg, make), vec![]);
         sc.call(n("type"), vec![r(it)]);
         sc.call(n("len"), vec![r(it)]);
-        for k in [0, 3, 7] {
+        for k in [0, 3, 7, 9] {
             sc.call(ra(it, "__getitem__"), vec![i(k)]);
         }
-        for k in [8, -1, 100, -2147483648] {
+        for k in [10, -1, 100, -2147483648] {
             sc.raises(ra(it, "__getitem__"), vec![i(k)]);
         }
         sc.raises(ra(it, "__getitem__"), vec![i(2147483648)]);

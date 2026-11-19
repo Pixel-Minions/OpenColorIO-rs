@@ -775,29 +775,29 @@ note = "p9-merge-2 9.2d: MergeHandlerOptions, SectionMerger, GeneralMerger, Role
 path = "src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.cpp"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/builtin_config_registry.rs"]
-status = "partial"
-note = "p3-loading 3.10a: ResolveConfigPath (its regex_search as search_builtin_uri, I-149), Get with init, addBuiltin, the getters. 2.6.0: changed at v2.6.0 lines 6, 24-26, 64-85; not yet re-ported (ocio26 cards). ocio26-config: IsReservedConfigName (64-84) ported in builtin_config_registry.rs; the 2.6 configs and URIs are card ocio26-ops."
+status = "done"
+note = "p3-loading 3.10a: ResolveConfigPath (its regex_search as search_builtin_uri, I-149), Get with init, addBuiltin, the getters. ocio26-ops: the default and latest URIs (24-26) name the v5.0.0 configs at v2.6.0; 6 (<charconv>) is IsReservedConfigName's. ocio26-config: IsReservedConfigName (64-84) ported in builtin_config_registry.rs; the 2.6 configs and URIs are card ocio26-ops."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.h"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/builtin_config_registry.rs"]
-status = "partial"
-note = "p3-loading 3.10a: BuiltinConfigRegistryImpl and BuiltinConfigData, as BuiltinConfigRegistry. 2.6.0: changed at v2.6.0 lines 8, 15-23; not yet re-ported (ocio26 cards). ocio26-config: the declaration of IsReservedConfigName ported."
+status = "done"
+note = "p3-loading 3.10a: BuiltinConfigRegistryImpl and BuiltinConfigData, as BuiltinConfigRegistry. ocio26-config: the declaration of IsReservedConfigName (8, 15-23) ported at v2.6.0. ocio26-config: the declaration of IsReservedConfigName ported."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/CG.cpp.in"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
-status = "partial"
-note = "p3-loading 3.10a: the texts, embedded from the submodule's files with the line ends of each platform's wheel (I-148). 2.6.0: changed at v2.6.0 lines 14-15; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-loading 3.10a: the texts, embedded from the submodule's files with the line ends of each platform's wheel (I-148). ocio26-ops: CG_CONFIG_V500_ACES_V21_OCIO_V26 (15) at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/CGConfig.cpp"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg_config.rs"]
-status = "partial"
-note = "p3-loading 3.10a. 2.6.0: changed at v2.6.0 lines 48-54; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-loading 3.10a. ocio26-ops: cg-config-v5.0.0_aces-v2.1_ocio-v2.6, recommended in place of v4.0.0 (48-54), at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/CGConfig.h"
@@ -810,15 +810,15 @@ note = "p3-loading 3.10a"
 path = "src/OpenColorIO/builtinconfigs/Studio.cpp.in"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
-status = "partial"
-note = "p3-loading 3.10a: the texts, embedded from the submodule's files with the line ends of each platform's wheel (I-148). 2.6.0: changed at v2.6.0 lines 22-25; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-loading 3.10a: the texts, embedded from the submodule's files with the line ends of each platform's wheel (I-148). ocio26-ops: STUDIO_CONFIG_V500_ACES_V21_OCIO_V26 (22-25) at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/StudioConfig.cpp"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio_config.rs"]
-status = "partial"
-note = "p3-loading 3.10a. 2.6.0: changed at v2.6.0 lines 48-54; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-loading 3.10a. ocio26-ops: studio-config-v5.0.0_aces-v2.1_ocio-v2.6, recommended in place of v4.0.0 (48-54), at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/StudioConfig.h"
@@ -859,8 +859,8 @@ note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/
 path = "src/OpenColorIO/builtinconfigs/configs/cg-config-v5.0.0_aces-v2.1_ocio-v2.6.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/cg.rs"]
-status = "todo"
-note = "New in. 2.6.0: ACES 2.1 CG config; card ocio26-ops registers it. Copied byte for byte into crates/ocio/src/builtinconfigs/configs/ (the package-copy guard), not embedded yet."
+status = "done"
+note = "New in 2.6.0: the ACES 2.1 CG config. ocio26-ops: embedded by include_bytes! from the byte-for-byte copy in crates/ocio/src/builtinconfigs/configs/ (the package-copy guard)."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v1.0.0_aces-v1.3_ocio-v2.1.ocio"
@@ -894,8 +894,8 @@ note = "p3-loading 3.10a; embedded by include_bytes! from a copy in crates/ocio/
 path = "src/OpenColorIO/builtinconfigs/configs/studio-config-v5.0.0_aces-v2.1_ocio-v2.6.ocio"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/studio.rs"]
-status = "todo"
-note = "New in. 2.6.0: ACES 2.1 studio config; card ocio26-ops registers it. Copied byte for byte into crates/ocio/src/builtinconfigs/configs/ (the package-copy guard), not embedded yet."
+status = "done"
+note = "New in 2.6.0: the ACES 2.1 studio config. ocio26-ops: embedded by include_bytes! from the byte-for-byte copy in crates/ocio/src/builtinconfigs/configs/ (the package-copy guard)."
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormat3DL.cpp"
@@ -4245,8 +4245,8 @@ status = "done"
 path = "tests/cpu/builtinconfigs/BuiltinConfig_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/builtinconfigs/builtin_config_tests.rs"]
-status = "partial"
-note = "p3-loading 3.10a: basic, basic_impl, resolve_config_path; 3.10b: create_builtin_config. 2.6.0: changed at v2.6.0 lines 20, 135-163, 169, 198, 227, 256, 280-308, 311, 508-509, 554-597, 601-603; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-loading 3.10a: basic, basic_impl, resolve_config_path; 3.10b: create_builtin_config. ocio26-ops: basic and create_builtin_config re-ported at v2.6.0 (the existence check's message by ocio26-config)."
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormat3DL_tests.cpp"
@@ -5213,8 +5213,8 @@ note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/BuiltinConfigRegistryTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 4 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 107, 112, 161-172, 224-235; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 4 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. ocio26-ops: the 4 functions pass at v2.6.0 (cargo xtask py-suite: 10 configs, the v5.0.0 defaults)."
 
 [[file]]
 path = "tests/python/BuiltinTransformRegistryTest.py"

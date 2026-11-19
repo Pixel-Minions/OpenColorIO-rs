@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the built-in configs: `tests/cpu/builtinconfigs/BuiltinConfig_tests.cpp` @ v2.5.2.
+//! Tests of the built-in configs: `tests/cpu/builtinconfigs/BuiltinConfig_tests.cpp` @ v2.6.0.
 //! The registry's texts, names and flags are compared with the wheel's in
 //! `tests/builtin_configs_oracle.rs`.
 
@@ -13,26 +13,28 @@ use super::builtin_config_registry::{
 use super::cg::{
     CG_CONFIG_V100_ACES_V13_OCIO_V21, CG_CONFIG_V210_ACES_V13_OCIO_V23,
     CG_CONFIG_V220_ACES_V13_OCIO_V24, CG_CONFIG_V400_ACES_V20_OCIO_V25,
+    CG_CONFIG_V500_ACES_V21_OCIO_V26,
 };
 use super::studio::{
     STUDIO_CONFIG_V100_ACES_V13_OCIO_V21, STUDIO_CONFIG_V210_ACES_V13_OCIO_V23,
     STUDIO_CONFIG_V220_ACES_V13_OCIO_V24, STUDIO_CONFIG_V400_ACES_V20_OCIO_V25,
+    STUDIO_CONFIG_V500_ACES_V21_OCIO_V26,
 };
 use super::{embedded_len, embedded_text};
 use crate::config::Config;
 use crate::test_env::EnvGuard;
 use ocio_ops::exception::ExceptionKind;
 
-/// Port of `OCIO_ADD_TEST(BuiltinConfigs, basic)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(BuiltinConfigs, basic)` @ v2.6.0.
 #[test]
 fn basic() {
     let registry = BuiltinConfigRegistry::get();
 
-    assert_eq!(registry.num_builtin_configs(), 8);
+    assert_eq!(registry.num_builtin_configs(), 10);
 
     // Each built-in config: its index, name, name for user interfaces, text and whether it is
     // recommended, as upstream checks them one block each.
-    let cases: [(usize, &str, &str, &[u8], bool); 8] = [
+    let cases: [(usize, &str, &str, &[u8], bool); 10] = [
         // Test builtin config cg-config-v1.0.0_aces-v1.3_ocio-v2.1.
         (
             0,
@@ -63,11 +65,19 @@ fn basic() {
             "cg-config-v4.0.0_aces-v2.0_ocio-v2.5",
             "Academy Color Encoding System - CG Config [COLORSPACES v4.0.0] [ACES v2.0] [OCIO v2.5]",
             CG_CONFIG_V400_ACES_V20_OCIO_V25,
+            false,
+        ),
+        // Test builtin config cg-config-v5.0.0_aces-v2.1_ocio-v2.6.
+        (
+            4,
+            "cg-config-v5.0.0_aces-v2.1_ocio-v2.6",
+            "Academy Color Encoding System - CG Config [COLORSPACES v5.0.0] [ACES v2.1] [OCIO v2.6]",
+            CG_CONFIG_V500_ACES_V21_OCIO_V26,
             true,
         ),
         // Test builtin config studio-config-v1.0.0_aces-v1.3_ocio-v2.1.
         (
-            4,
+            5,
             "studio-config-v1.0.0_aces-v1.3_ocio-v2.1",
             "Academy Color Encoding System - Studio Config [COLORSPACES v1.0.0] [ACES v1.3] [OCIO v2.1]",
             STUDIO_CONFIG_V100_ACES_V13_OCIO_V21,
@@ -75,7 +85,7 @@ fn basic() {
         ),
         // Test builtin config studio-config-v2.1.0_aces-v1.3_ocio-v2.3.
         (
-            5,
+            6,
             "studio-config-v2.1.0_aces-v1.3_ocio-v2.3",
             "Academy Color Encoding System - Studio Config [COLORSPACES v2.0.0] [ACES v1.3] [OCIO v2.3]",
             STUDIO_CONFIG_V210_ACES_V13_OCIO_V23,
@@ -83,7 +93,7 @@ fn basic() {
         ),
         // Test builtin config studio-config-v2.2.0_aces-v1.3_ocio-v2.4.
         (
-            6,
+            7,
             "studio-config-v2.2.0_aces-v1.3_ocio-v2.4",
             "Academy Color Encoding System - Studio Config [COLORSPACES v2.2.0] [ACES v1.3] [OCIO v2.4]",
             STUDIO_CONFIG_V220_ACES_V13_OCIO_V24,
@@ -91,10 +101,18 @@ fn basic() {
         ),
         // Test builtin config studio-config-v4.0.0_aces-v2.0_ocio-v2.5.
         (
-            7,
+            8,
             "studio-config-v4.0.0_aces-v2.0_ocio-v2.5",
             "Academy Color Encoding System - Studio Config [COLORSPACES v4.0.0] [ACES v2.0] [OCIO v2.5]",
             STUDIO_CONFIG_V400_ACES_V20_OCIO_V25,
+            false,
+        ),
+        // Test builtin config studio-config-v5.0.0_aces-v2.1_ocio-v2.6.
+        (
+            9,
+            "studio-config-v5.0.0_aces-v2.1_ocio-v2.6",
+            "Academy Color Encoding System - Studio Config [COLORSPACES v5.0.0] [ACES v2.1] [OCIO v2.6]",
+            STUDIO_CONFIG_V500_ACES_V21_OCIO_V26,
             true,
         ),
     ];
@@ -220,19 +238,22 @@ fn basic_impl() {
 /// Port of `OCIO_ADD_TEST(BuiltinConfigs, resolve_config_path)` @ v2.5.2.
 #[test]
 fn resolve_config_path_test() {
+    // Upstream compares with its constants DEFAULT_BUILTIN_CONFIG_URI, LATEST_CG_BUILTIN_CONFIG_URI
+    // and LATEST_STUDIO_BUILTIN_CONFIG_URI: their values (BuiltinConfigRegistry.cpp:24-26 @
+    // v2.6.0).
     assert_eq!(
         resolve_config_path(b"ocio://default"),
-        b"ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5"
+        b"ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6"
     );
 
     assert_eq!(
         resolve_config_path(b"ocio://cg-config-latest"),
-        b"ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5"
+        b"ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6"
     );
 
     assert_eq!(
         resolve_config_path(b"ocio://studio-config-latest"),
-        b"ocio://studio-config-v4.0.0_aces-v2.0_ocio-v2.5"
+        b"ocio://studio-config-v5.0.0_aces-v2.1_ocio-v2.6"
     );
 
     // ******************************************************************************
@@ -302,7 +323,7 @@ fn validate_muted(config: &Config) {
     print!("{}", String::from_utf8_lossy(&log));
 }
 
-/// Port of `OCIO_ADD_TEST(BuiltinConfigs, create_builtin_config)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(BuiltinConfigs, create_builtin_config)` @ v2.6.0.
 #[test]
 fn create_builtin_config() {
     let env = EnvGuard::new();
@@ -382,7 +403,7 @@ fn create_builtin_config() {
 
     // Test that CreateFromFile does not work without ocio:// prefix for built-in config.
     // (The message of 2.6.0's existence check, PR #2310: BuiltinConfig_tests.cpp:505-510 @
-    // v2.6.0. The rest of the test is re-ported at v2.6.0 with the 2.6 built-in configs.)
+    // v2.6.0.)
     let missing = Config::create_from_file("cg-config-v1.0.0_aces-v1.3_ocio-v2.1");
     assert!(
         matches!(&missing, Err(e) if e.kind() == ExceptionKind::MissingFile),
@@ -460,11 +481,70 @@ fn create_builtin_config() {
     }
 
     {
+        let cg_config_name = "cg-config-v4.0.0_aces-v2.0_ocio-v2.5";
+        let studio_config_name = "studio-config-v4.0.0_aces-v2.0_ocio-v2.5";
+        // Test CG builtin config #4
+        let nb_of_colorspaces_for_cg_config1 = 25;
+        test_from_builtin_config(cg_config_name, nb_of_colorspaces_for_cg_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{cg_config_name}"),
+            nb_of_colorspaces_for_cg_config1,
+            cg_config_name,
+        );
+
+        // Test STUDIO builtin config #4
+        let nb_of_colorspaces_for_studio_config1 = 55;
+        test_from_builtin_config(studio_config_name, nb_of_colorspaces_for_studio_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{studio_config_name}"),
+            nb_of_colorspaces_for_studio_config1,
+            studio_config_name,
+        );
+    }
+
+    {
+        let cg_config_name = "cg-config-v5.0.0_aces-v2.1_ocio-v2.6";
+        let studio_config_name = "studio-config-v5.0.0_aces-v2.1_ocio-v2.6";
+        // Test CG builtin config #5
+        let nb_of_colorspaces_for_cg_config1 = 25;
+        test_from_builtin_config(cg_config_name, nb_of_colorspaces_for_cg_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{cg_config_name}"),
+            nb_of_colorspaces_for_cg_config1,
+            cg_config_name,
+        );
+
+        // Test STUDIO builtin config #5
+        let nb_of_colorspaces_for_studio_config1 = 57;
+        test_from_builtin_config(studio_config_name, nb_of_colorspaces_for_studio_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{studio_config_name}"),
+            nb_of_colorspaces_for_studio_config1,
+            studio_config_name,
+        );
+
+        // Additionally test that the new display aliasing is working.
+
+        let config = Config::create_from_builtin_config(cg_config_name).unwrap();
+        assert!(config.use_display_aliases());
+
+        let mut dt = crate::transforms::display_view_transform::DisplayViewTransform::new();
+        dt.set_src("ACES2065-1");
+        dt.set_view("Un-tone-mapped");
+        // Use the display name from the previous configs.
+        dt.set_display("P3-D65 - Display");
+        // This would throw if the display were not found.
+        config
+            .processor(&crate::transform::Transform::from(dt))
+            .unwrap();
+    }
+
+    {
         // Test default config.
         let nb_of_colorspaces_for_default_cg_config = 25;
-        let nb_of_colorspaces_for_default_studio_config = 55;
-        let expected_cg_name = "cg-config-v4.0.0_aces-v2.0_ocio-v2.5";
-        let expected_studio_name = "studio-config-v4.0.0_aces-v2.0_ocio-v2.5";
+        let nb_of_colorspaces_for_default_studio_config = 57;
+        let expected_cg_name = "cg-config-v5.0.0_aces-v2.1_ocio-v2.6";
+        let expected_studio_name = "studio-config-v5.0.0_aces-v2.1_ocio-v2.6";
 
         test_from_builtin_config(
             default_name,

@@ -5,7 +5,7 @@
 //! `GetProcessorToBuiltinColorSpace` and `GetProcessorFromBuiltinColorSpace` (ConfigUtils'
 //! heuristics) against the wheel, through the oracle's `object_calls` (WP 9.1a).
 //!
-//! Source configs: the 8 built-in configs as they are (their interchange roles) and without
+//! Source configs: the built-in configs as they are (their interchange roles) and without
 //! their interchange roles (the heuristics); upstream's two test configs of
 //! `ConfigUtils/processor_to_known_colorspace*` with inactive lists that leave each heuristic
 //! its candidates; upstream's configs of `tests/data/files/configs`; and generated ones
@@ -1020,10 +1020,12 @@ fn an_api_built_lut3d_space_matches_the_wheel() {
 // LocateBuiltinColorSpace (2.6) ////////////////////////////////////////////////////////////////
 
 /// The configs `LocateBuiltinColorSpace` searches in the sweep, as the wheel and the port load
-/// them: built-in configs both have, and the raw config, whose interchange spaces can't be
-/// identified. (The 2.6 default and latest built-in configs, cg-config-v5.0.0, are card
-/// ocio26-ops'.)
-const LOCATE_TARGETS: [&str; 4] = [
+/// them: built-in configs both have (the 2.6 default and latest ones, cg-config-v5.0.0 and
+/// studio-config-v5.0.0, among them), and the raw config, whose interchange spaces can't be
+/// identified.
+const LOCATE_TARGETS: [&str; 6] = [
+    "ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6",
+    "ocio://studio-config-v5.0.0_aces-v2.1_ocio-v2.6",
     "ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5",
     "ocio://studio-config-v2.2.0_aces-v1.3_ocio-v2.4",
     "ocio://cg-config-v1.0.0_aces-v1.3_ocio-v2.1",
