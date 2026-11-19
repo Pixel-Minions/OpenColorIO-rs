@@ -418,14 +418,14 @@ fn ctf_cases() -> Vec<Case> {
     for name in [
         "clf/illegal/image_png.clf",
         "process_list_invalid_version.ctf",
-        "clf/illegal/process_list_bad_version.clf",
+        "clf/pre-smpte_only/illegal/process_list_bad_version.clf",
         "process_list_higher_version.ctf",
-        "clf/illegal/process_list_higher_version.clf",
+        "clf/pre-smpte_only/illegal/process_list_higher_version.clf",
         "clf/illegal/process_list_missing.clf",
         "clf/illegal/transform_missing.clf",
-        "clf/illegal/transform_missing_id.clf",
+        "clf/pre-smpte_only/illegal/transform_missing_id.clf",
         "clf/illegal/transform_empty.clf",
-        "clf/illegal/transform_id_empty.clf",
+        "clf/pre-smpte_only/illegal/transform_id_empty.clf",
         "info_version_invalid.ctf",
         "info_version_unsupported.ctf",
         "info_version_empty.ctf",
@@ -450,6 +450,410 @@ fn ctf_files_read_as_in_the_wheel() {
 #[test]
 fn ctf_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&ctf_cases());
+}
+
+/// SMPTE ST 2136-1 CLF (OCIO 2.6.0): the ProcessList's `xmlns` and `xmlns:*` attributes and
+/// its version strings, namespace prefixes on elements (stripped, but inside an Info), the Id
+/// element, descriptions and descriptors with a `language` attribute, and upstream's new
+/// test files.
+fn smpte_cases() -> Vec<Case> {
+    const SMPTE: &str = "http://www.smpte-ra.org/ns/2136-1/2024";
+    let m = "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n";
+    let with = |before: &str| format!("{before}{m}");
+    let x = format!("xmlns=\"{SMPTE}\"");
+    let mut cases = vec![
+        // The SMPTE namespace.
+        clf("the SMPTE xmlns without an id", &x, m),
+        ctf("the SMPTE xmlns in a .ctf", &x, m),
+        clf("the SMPTE xmlns and an id", &format!("id=\"a\" {x}"), m),
+        clf(
+            "the SMPTE xmlns in another case",
+            "xmlns=\"HTTP://www.SMPTE-ra.org/ns/2136-1/2024\"",
+            m,
+        ),
+        clf("the attribute XMLNS", &format!("XMLNS=\"{SMPTE}\""), m),
+        clf(
+            "a newer SMPTE xmlns",
+            "xmlns=\"http://www.smpte-ra.org/ns/2136-1/2025\"",
+            m,
+        ),
+        clf(
+            "another xmlns",
+            "id=\"a\" xmlns=\"urn:AMPAS:CLF:v3.0\" compCLFversion=\"3\"",
+            m,
+        ),
+        clf(
+            "another xmlns and no version",
+            "id=\"a\" xmlns=\"urn:x\"",
+            m,
+        ),
+        ctf("another xmlns in a .ctf", "id=\"a\" xmlns=\"urn:x\"", m),
+        clf("an empty xmlns", "id=\"a\" xmlns=\"\"", m),
+        clf(
+            "the SMPTE xmlns, then version",
+            &format!("{x} version=\"2.0\""),
+            m,
+        ),
+        clf(
+            "version, then the SMPTE xmlns",
+            &format!("version=\"2.0\" {x}"),
+            m,
+        ),
+        ctf(
+            "version, then another xmlns",
+            "id=\"a\" version=\"2.0\" xmlns=\"urn:x\"",
+            m,
+        ),
+        clf(
+            "the SMPTE xmlns and compCLFversion 3",
+            &format!("{x} compCLFversion=\"3\""),
+            m,
+        ),
+        clf(
+            "compCLFversion 2, then the SMPTE xmlns",
+            &format!("compCLFversion=\"2\" {x}"),
+            m,
+        ),
+        clf(
+            "the SMPTE xmlns, then compCLFversion 2",
+            &format!("{x} compCLFversion=\"2\""),
+            m,
+        ),
+        clf(
+            "the SMPTE xmlns, compCLFversion and version",
+            &format!("{x} compCLFversion=\"3\" version=\"2.0\""),
+            m,
+        ),
+        // The SMPTE compCLFversion.
+        clf(
+            "compCLFversion ST2136-1:2024",
+            "id=\"a\" compCLFversion=\"ST2136-1:2024\"",
+            m,
+        ),
+        clf(
+            "compCLFversion st2136-1:2024",
+            "id=\"a\" compCLFversion=\"st2136-1:2024\"",
+            m,
+        ),
+        clf(
+            "compCLFversion ST2136-1:2025",
+            "id=\"a\" compCLFversion=\"ST2136-1:2025\"",
+            m,
+        ),
+        clf(
+            "compCLFversion of the SMPTE xmlns",
+            &format!("id=\"a\" compCLFversion=\"{SMPTE}\""),
+            m,
+        ),
+        ctf(
+            "version ST2136-1:2024",
+            "id=\"a\" version=\"ST2136-1:2024\"",
+            m,
+        ),
+        clf(
+            "compCLFversion ST2136-1:2024 and a Log",
+            "id=\"a\" compCLFversion=\"ST2136-1:2024\"",
+            "    <Log inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log10\"/>\n",
+        ),
+        clf(
+            "the SMPTE xmlns and a FixedFunction",
+            &x,
+            "    <FixedFunction inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"RGB_TO_HSV\"/>\n",
+        ),
+        // xmlns:* attributes.
+        clf(
+            "xmlns:* attributes",
+            &format!("id=\"a\" {x} xmlns:b=\"urn:b\" xmlns:a=\"urn:a\""),
+            m,
+        ),
+        clf(
+            "an empty xmlns:*",
+            "id=\"a\" compCLFversion=\"3\" xmlns:b=\"\"",
+            m,
+        ),
+        clf(
+            "XMLNS:b",
+            "id=\"a\" compCLFversion=\"3\" XMLNS:b=\"urn:b\"",
+            m,
+        ),
+        ctf(
+            "xmlns:b in a .ctf",
+            "id=\"a\" version=\"2\" xmlns:b=\"urn:b\"",
+            m,
+        ),
+        // The attributes' order and case.
+        clf(
+            "name, inverseOf, then id",
+            &format!("name=\"n\" inverseOf=\"i\" id=\"a\" {x}"),
+            m,
+        ),
+        clf("id and ID", &format!("id=\"a\" ID=\"b\" {x}"), m),
+        // Namespace prefixes.
+        case(
+            "prefixed elements",
+            "lut.clf",
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <c:ProcessList xmlns:c=\"{SMPTE}\" id=\"a\" compCLFversion=\"3\">\n\
+                 \x20   <c:Description>d</c:Description>\n\
+                 \x20   <c:InputDescriptor>i</c:InputDescriptor>\n\
+                 \x20   <c:Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+                 \x20       <c:Description>md</c:Description>\n\
+                 \x20       <c:Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</c:Array>\n\
+                 \x20   </c:Matrix>\n</c:ProcessList>\n"
+            )
+            .as_bytes(),
+        ),
+        case(
+            "prefixes of two colons",
+            "lut.ctf",
+            b"<a:b:ProcessList id=\"a\" version=\"2\">\n\
+              <x:y:Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+              <x:y:Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</x:y:Array>\n\
+              </x:y:Matrix>\n</a:b:ProcessList>\n",
+        ),
+        case(
+            "a prefix that ends the name",
+            "lut.ctf",
+            b"<ProcessList id=\"a\" version=\"2\">\n<x:>text</x:>\n\
+              <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+              <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n</Matrix>\n</ProcessList>\n",
+        ),
+        case(
+            "a prefixed ProcessList on the first line",
+            "lut.ctf",
+            b"<p:ProcessList id=\"a\" version=\"2\"><p:Matrix inBitDepth=\"32f\" \
+              outBitDepth=\"32f\"><p:Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</p:Array></p:Matrix>\
+              </p:ProcessList>\n",
+        ),
+        case(
+            "an unknown prefixed element",
+            "lut.ctf",
+            format!("<ProcessList id=\"a\" version=\"2\">\n    <p:Foo/>\n{m}</ProcessList>\n")
+                .as_bytes(),
+        ),
+        clf(
+            "a prefixed Info",
+            "id=\"a\" compCLFversion=\"3\"",
+            &with("    <c:Info><c:Copyright>c</c:Copyright></c:Info>\n"),
+        ),
+        clf(
+            "an empty prefixed Info",
+            "id=\"a\" compCLFversion=\"3\"",
+            &with("    <c:Info/>\n"),
+        ),
+        clf(
+            "an Info of prefixed elements",
+            "id=\"a\" compCLFversion=\"3\"",
+            &with(
+                "    <Info a:x=\"1\"><a:Copyright>c</a:Copyright>\
+                 <a:Tags><a:T>t</a:T><Description>d</Description></a:Tags></Info>\n",
+            ),
+        ),
+        clf(
+            "two Info, prefixed elements in the second",
+            "id=\"a\" compCLFversion=\"3\"",
+            &with("    <Info><a>1</a></Info>\n    <Info><p:b>2</p:b></Info>\n"),
+        ),
+        // The Id element.
+        clf(
+            "an Id",
+            &x,
+            &with("    <Id>urn:uuid:9d768121-0cf9-40a3-a8e3-7b49f79858a7</Id>\n"),
+        ),
+        clf(
+            "an Id in upper case",
+            &x,
+            &with("    <Id>urn:uuid:9D768121-0CF9-40A3-A8E3-7B49F79858A7</Id>\n"),
+        ),
+        clf(
+            "an Id with URN in upper case",
+            &x,
+            &with("    <Id>URN:UUID:9d768121-0cf9-40a3-a8e3-7b49f79858a7</Id>\n"),
+        ),
+        clf(
+            "an Id with a group too long",
+            &x,
+            &with("    <Id>urn:uuid:9d768121-0cf9-40a3-a8e3-7b49f79858a77</Id>\n"),
+        ),
+        clf(
+            "an Id with a character not hex",
+            &x,
+            &with("    <Id>urn:uuid:9d768121-0cf9-40a3-a8e3-7b49f79858ag</Id>\n"),
+        ),
+        clf(
+            "an Id with a group short",
+            &x,
+            &with("    <Id>urn:uuid:9d76812-0cf9-40a3-a8e3-7b49f79858a7</Id>\n"),
+        ),
+        clf(
+            "an Id with spaces around",
+            &x,
+            &with("    <Id>  urn:uuid:9d768121-0cf9-40a3-a8e3-7b49f79858a7 </Id>\n"),
+        ),
+        clf(
+            "an Id on lines",
+            &x,
+            &with("    <Id>\nurn:uuid:9d768121-0cf9-\n40a3-a8e3-7b49f79858a7\n</Id>\n"),
+        ),
+        clf("an Id that isn't SMPTE", &x, &with("    <Id>abc</Id>\n")),
+        clf("an empty Id", &x, &with("    <Id></Id>\n    <Id/>\n")),
+        clf(
+            "two Id",
+            &x,
+            &with(
+                "    <Id>first</Id>\n    <Id>urn:uuid:9d768121-0cf9-40a3-a8e3-7b49f79858a7</Id>\n",
+            ),
+        ),
+        clf("an id element", &x, &with("    <id>abc</id>\n")),
+        clf(
+            "an Id with an attribute",
+            &x,
+            &with("    <Id a=\"b\">abc</Id>\n"),
+        ),
+        clf(
+            "an Id in an operator",
+            &x,
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Id>op id</Id>\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n",
+        ),
+        clf(
+            "an Id in a SOPNode and a SatNode",
+            &x,
+            "    <ASC_CDL inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"Fwd\">\n\
+             \x20       <SOPNode><Id>sop id</Id><Slope>1 1 1</Slope><Offset>0 0 0</Offset>\
+             <Power>1 1 1</Power></SOPNode>\n\
+             \x20       <SatNode><Id>sat id</Id><Saturation>1</Saturation></SatNode>\n\
+             \x20   </ASC_CDL>\n",
+        ),
+        clf(
+            "an Id in an Array",
+            &x,
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4<Id>x</Id></Array>\n    </Matrix>\n",
+        ),
+        ctf(
+            "an Id in a .ctf",
+            "id=\"a\" version=\"2\"",
+            &with("    <Id>abc</Id>\n"),
+        ),
+        // Descriptions, descriptors and their language.
+        clf(
+            "descriptions with a language",
+            &x,
+            &with(
+                "    <Description language=\"en\">e</Description>\n\
+                 \x20   <Description>none</Description>\n\
+                 \x20   <InputDescriptor language=\"fr\">i</InputDescriptor>\n\
+                 \x20   <OutputDescriptor LANGUAGE=\"de\">o</OutputDescriptor>\n",
+            ),
+        ),
+        clf(
+            "a language as the second attribute",
+            &x,
+            &with("    <Description a=\"x\" language=\"en\">d</Description>\n"),
+        ),
+        clf(
+            "a language and another attribute",
+            &x,
+            &with("    <Description language=\"en\" a=\"x\">d</Description>\n"),
+        ),
+        clf(
+            "an empty language",
+            &x,
+            &with("    <Description language=\"\">d</Description>\n"),
+        ),
+        clf(
+            "a language, then an empty attribute",
+            &x,
+            &with("    <Description language=\"en\" a=\"\">d</Description>\n"),
+        ),
+        clf(
+            "an empty Description and descriptors",
+            &x,
+            &with(
+                "    <Description/>\n    <Description></Description>\n\
+                 \x20   <InputDescriptor/>\n    <OutputDescriptor>\n</OutputDescriptor>\n",
+            ),
+        ),
+        clf(
+            "descriptors with spaces around and on lines",
+            &x,
+            &with(
+                "    <InputDescriptor>  in  </InputDescriptor>\n\
+                 \x20   <OutputDescriptor>\n  out \n</OutputDescriptor>\n",
+            ),
+        ),
+        clf(
+            "two of each descriptor",
+            &x,
+            &with(
+                "    <OutputDescriptor>o1</OutputDescriptor>\n\
+                 \x20   <InputDescriptor>i1</InputDescriptor>\n\
+                 \x20   <InputDescriptor>i2</InputDescriptor>\n\
+                 \x20   <OutputDescriptor>o2</OutputDescriptor>\n\
+                 \x20   <description>lower</description>\n",
+            ),
+        ),
+        clf(
+            "descriptions with a language in an operator and a CDL",
+            &x,
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Description language=\"en\">md</Description>\n\
+             \x20       <Description/>\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n\
+             \x20   <ASC_CDL inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"Fwd\">\n\
+             \x20       <Description language=\"en\">cdl</Description>\n\
+             \x20       <InputDescription language=\"fr\">in</InputDescription>\n\
+             \x20       <ViewingDescription>  view  </ViewingDescription>\n\
+             \x20       <SOPNode><Description language=\"de\">sop</Description><Slope>1 1 1</Slope>\
+             <Offset>0 0 0</Offset><Power>1 1 1</Power></SOPNode>\n\
+             \x20       <SatNode><Description/><Saturation>1</Saturation></SatNode>\n\
+             \x20   </ASC_CDL>\n",
+        ),
+        clf(
+            "a descriptor in an operator",
+            &x,
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <InputDescriptor>md</InputDescriptor>\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n",
+        ),
+    ];
+
+    // Upstream's 2.6.0 test files.
+    for name in [
+        "clf/bit_depth_identity.clf",
+        "clf/smpte_only/broadcast_profile_lut33.clf",
+        "clf/smpte_only/namespaces.clf",
+        "clf/smpte_only/illegal/id_bad_value.clf",
+        "clf/smpte_only/illegal/process_list_higher_ns_version.clf",
+        "clf/pre-smpte_only/process_list_v3_namespace.clf",
+        "clf/pre-smpte_only/matrix_example.clf",
+        "clf/pre-smpte_only/illegal/log_bad_version.clf",
+        "process_list_conflicting_versions.ctf",
+    ] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+#[test]
+fn smpte_files_read_as_in_the_wheel() {
+    check_processors(&smpte_cases());
+}
+
+/// The warnings of the SMPTE reads (Ids that aren't SMPTE, unknown attributes and elements),
+/// message by message.
+#[test]
+fn smpte_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&smpte_cases());
 }
 
 /// A Matrix of the attributes `attrs`, with an Array of the dimensions `dim` and `values`.
@@ -1486,7 +1890,7 @@ fn op_cases_e() -> Vec<Case> {
         "log_logtolinv2.ctf",
         "log_lintolog_3chan.ctf",
         "clf/illegal/log_bad_style.clf",
-        "clf/illegal/log_bad_version.clf",
+        "clf/pre-smpte_only/illegal/log_bad_version.clf",
         "clf/illegal/log_bad_param.clf",
         "clf/illegal/log_missing_breakpnt.clf",
     ] {

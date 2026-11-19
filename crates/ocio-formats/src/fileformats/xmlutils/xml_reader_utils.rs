@@ -23,6 +23,8 @@ use ocio_ops::{Exception, Result};
 pub const ATTR_ID: &[u8] = b"id";
 /// `ATTR_NAME`.
 pub const ATTR_NAME: &[u8] = b"name";
+/// `ATTR_XMLNS` (XMLReaderUtils.h:28 @ v2.6.0).
+pub const ATTR_XMLNS: &[u8] = b"xmlns";
 
 /// `CDL_TAG_COLOR_CORRECTION`.
 pub const CDL_TAG_COLOR_CORRECTION: &[u8] = b"ColorCorrection";

@@ -448,7 +448,7 @@ colorspaces:
     }
 }
 
-/// Port of `OCIO_ADD_TEST(FileTransform, load_file_ok)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileTransform, load_file_ok)` @ v2.6.0.
 #[test]
 fn load_file_ok() {
     // Discreet 1D LUT.
@@ -487,7 +487,7 @@ fn load_file_ok() {
     assert!(!proc.is_no_op().unwrap());
 
     // Academy/ASC common LUT format.
-    let clf_mat_transform = "clf/matrix_example.clf";
+    let clf_mat_transform = "clf/pre-smpte_only/matrix_example.clf";
     let proc = get_file_transform_processor(clf_mat_transform).unwrap();
     assert!(!proc.is_no_op().unwrap());
 

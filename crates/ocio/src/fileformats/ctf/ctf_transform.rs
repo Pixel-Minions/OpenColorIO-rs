@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The CLF/CTF versions and the transform the CTF reader builds: its id, name, descriptors,
-//! descriptions, info metadata and ops, to and from the format metadata of a group.
+//! The CLF/CTF versions and the transform the CTF reader builds: its format metadata (id,
+//! name, inverseOf and `xmlns:*` attributes, Id element, descriptions and descriptors), info
+//! metadata and ops, to and from the format metadata of a group.
 //!
-//! Port of `src/OpenColorIO/fileformats/ctf/CTFTransform.h` and `CTFTransform.cpp:1-505` @
-//! v2.5.2, so far the reader's half; the writers (`TransformWriter` and the op writers,
-//! `GetMinimumVersion`) come with WP 4.6.
+//! Port of `src/OpenColorIO/fileformats/ctf/CTFTransform.h` and `CTFTransform.cpp:1-586` @
+//! v2.6.0, the reader's half; the writers (`TransformWriter` and the op writers,
+//! `GetMinimumVersion`) are in `ctf_writer.rs`.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -14,52 +15,116 @@ use std::sync::Arc;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::format_metadata::{
-    Elements, FormatMetadataImpl, METADATA_DESCRIPTION, METADATA_ID, METADATA_INFO,
-    METADATA_INPUT_DESCRIPTOR, METADATA_NAME, METADATA_OUTPUT_DESCRIPTOR,
+    Elements, FormatMetadataImpl, METADATA_DESCRIPTION, METADATA_ID, METADATA_ID_ELEMENT,
+    METADATA_INFO, METADATA_INPUT_DESCRIPTOR, METADATA_NAME, METADATA_OUTPUT_DESCRIPTOR,
 };
 use ocio_ops::op::OpVec;
 use ocio_ops::op_data::OpDataRcPtr;
 use ocio_ops::open_color_types::BitDepth;
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::cscan::{ScanArg, ScanCrt, sscanf};
-use ocio_ops::utils::string_utils::c_str;
+use ocio_ops::utils::string_utils::{c_str, starts_with};
 use ocio_ops::{Exception, Result};
 
-use super::ctf_reader_utils::ATTR_INVERSE_OF;
+use super::ctf_reader_utils::{ATTR_INVERSE_OF, ATTR_LANGUAGE};
 
-/// A CLF or CTF version: MAJOR[.MINOR[.REVISION]].
+/// The namespace of SMPTE ST 2136-1 CLF, which its ProcessList's `xmlns` holds.
 ///
-/// Port of `CTFVersion` (CTFTransform.h:22-84, CTFTransform.cpp:42-161 @ v2.5.2).
-#[derive(Debug, Clone, Copy, Default)]
+/// Port of `SMPTE_XMLNS_URL` (CTFTransform.cpp:42 @ v2.6.0).
+pub const SMPTE_XMLNS_URL: &[u8] = b"http://www.smpte-ra.org/ns/2136-1/2024";
+
+/// The SMPTE ST 2136-1 version string a `compCLFversion` may hold.
+///
+/// The literal of `CTFVersion::CTFVersion` (CTFTransform.cpp:58-62 @ v2.6.0).
+const SMPTE_CLF_VERSION: &[u8] = b"ST2136-1:2024";
+
+/// The version strings a [`CtfVersion`] accepts besides MAJOR[.MINOR[.REVISION]], which is
+/// always accepted.
+///
+/// Port of `CTFVersion::StringFormat` (CTFTransform.h:25-30 @ v2.6.0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StringFormat {
+    /// `VERSION_NUMERIC`: numeric version is always accepted.
+    VersionNumeric = 0,
+    /// `VERSION_SMPTE_XMLNS`: the SMPTE namespace, [`SMPTE_XMLNS_URL`].
+    VersionSmpteXmlns = 1 << 1,
+    /// `VERSION_SMPTE_CLF`: the SMPTE version, `ST2136-1:2024`.
+    VersionSmpteClf = 1 << 2,
+}
+
+impl StringFormat {
+    /// The enumerator's value, which upstream tests bit by bit.
+    fn bits(self) -> u32 {
+        self as u32
+    }
+}
+
+/// A CLF or CTF version: MAJOR[.MINOR[.REVISION]], or a SMPTE ST 2136-1 version string, which
+/// counts as 3.0 and is written as it was read.
+///
+/// `Clone` is upstream's copy constructor and `operator=`; comparisons are by the numbers
+/// only (`operator==`, `operator<`, ...), whatever the version string.
+///
+/// Port of `CTFVersion` (CTFTransform.h:22-99, CTFTransform.cpp:44-191 @ v2.6.0).
+#[derive(Debug, Clone, Default)]
 pub struct CtfVersion {
-    /// `m_major`.
+    /// `m_major`: CTF and Academy/ASC CLF use the numeric version system.
     major: u32,
     /// `m_minor`.
     minor: u32,
     /// `m_revision`.
     revision: u32,
+    /// `m_version_string`: SMPTE CLF uses a non-numeric xmlns version system.
+    version_string: Vec<u8>,
 }
 
 impl CtfVersion {
     /// Port of `CTFVersion::CTFVersion(unsigned int, unsigned int, unsigned int)`
-    /// (CTFTransform.h:35-40 @ v2.5.2).
+    /// (CTFTransform.h:39-44 @ v2.6.0).
     pub const fn new(major: u32, minor: u32, revision: u32) -> CtfVersion {
         CtfVersion {
             major,
             minor,
             revision,
+            version_string: Vec::new(),
         }
     }
 
-    /// Reads `version_string`, which must be one to three numbers separated by dots
-    /// (MAJOR[.MINOR[.REVISION]]); the missing ones are 0.
+    /// Reads `version_string`: a SMPTE version string `accepted_format` allows (compared
+    /// ignoring ASCII case, and kept as it is), which counts as 3.0, or one to three numbers
+    /// separated by dots (MAJOR[.MINOR[.REVISION]]); the missing ones are 0.
     ///
-    /// Port of `CTFVersion::ReadVersion` (CTFTransform.cpp:42-89 @ v2.5.2). Its `::isdigit`
-    /// sees only the ASCII digits as digits here: the string comes from expat, as UTF-8, whose
-    /// first byte past ASCII is a lead byte (0xC2 to 0xF4), which neither wheel's runtime
-    /// takes for a digit. Its `sscanf("%d.%d.%d")` stores each number's low 32 bits, as both
-    /// runtimes do for numbers past `int` (docs/improvements.md, I-160).
-    pub fn read_version(version_string: &[u8]) -> Result<CtfVersion> {
+    /// Port of `CTFVersion::CTFVersion(const std::string &, StringFormat)`
+    /// (CTFTransform.cpp:44-118 @ v2.6.0). Its `::isdigit` sees only the ASCII digits as
+    /// digits here: the string comes from expat, as UTF-8, whose first byte past ASCII is a
+    /// lead byte (0xC2 to 0xF4), which neither wheel's runtime takes for a digit. Its
+    /// `sscanf("%d.%d.%d")` stores each number's low 32 bits, as both runtimes do for numbers
+    /// past `int` (docs/improvements.md, I-160).
+    pub fn read(version_string: &[u8], accepted_format: StringFormat) -> Result<CtfVersion> {
+        let accepted = accepted_format.bits();
+        let xmlns = StringFormat::VersionSmpteXmlns.bits();
+        let clf = StringFormat::VersionSmpteClf.bits();
+
+        // Parse the version string to see if that matches the SMPTE namespace/version
+        // patterns. If so store the version string and consider equivalent to v3.0.
+        if accepted & (xmlns | clf) != 0 {
+            let mut res = false;
+            if accepted & xmlns != 0 {
+                res = strcasecmp(c_str(version_string), SMPTE_XMLNS_URL).is_eq();
+            }
+
+            if !res && accepted & clf != 0 {
+                res = strcasecmp(c_str(version_string), SMPTE_CLF_VERSION).is_eq();
+            }
+
+            if res {
+                let mut version = CtfVersion::new(3, 0, 0);
+                version.version_string = version_string.to_vec();
+                return Ok(version);
+            }
+        }
+
+        // For non-SMPTE namespace versions, parse as MAJOR[.MINOR[.REVISION]]
         let mut num_dot: u32 = 0;
         let mut num_int: u32 = 0;
         let mut can_be_dot = false;
@@ -87,9 +152,17 @@ impl CtfVersion {
             let mut os = OStringStream::new(Crt::NATIVE);
             os.put_str("'");
             os.put_bytes(version_string);
-            os.put_str("' is not a valid version. ");
-            os.put_str("Expecting MAJOR[.MINOR[.REVISION]] ");
-            return Err(Exception::new(os.into_bytes()));
+            os.put_str("' is not a valid version. Expecting ");
+            if accepted & clf != 0 {
+                os.put_str("'ST2136-1:2024' or ");
+            }
+            if accepted & xmlns != 0 {
+                os.put_str("'");
+                os.put_bytes(SMPTE_XMLNS_URL);
+                os.put_str("' or ");
+            }
+            os.put_str("MAJOR[.MINOR[.REVISION]] ");
+            return Err(Exception::new(c_str(&os.into_bytes()).to_vec()));
         }
 
         let mut major: i32 = 0;
@@ -109,10 +182,38 @@ impl CtfVersion {
 
         Ok(CtfVersion::new(major as u32, minor as u32, revision as u32))
     }
+
+    /// [`read`](Self::read) of a numeric version only: `CTFVersion(versionString)`, whose
+    /// format defaults to `VERSION_NUMERIC` (CTFTransform.h:33 @ v2.6.0).
+    pub fn read_version(version_string: &[u8]) -> Result<CtfVersion> {
+        Self::read(version_string, StringFormat::VersionNumeric)
+    }
+
+    /// The bytes `operator<<` writes: the version string when there is one; else MAJOR, then
+    /// .MINOR when the minor or the revision isn't 0, then .REVISION when the revision isn't
+    /// 0.
+    ///
+    /// Port of `operator<<(std::ostream &, const CTFVersion &)` (CTFTransform.h:69-89 @
+    /// v2.6.0).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        if !self.version_string.is_empty() {
+            return self.version_string.clone();
+        }
+        let mut s = self.major.to_string();
+        if self.minor != 0 || self.revision != 0 {
+            s.push('.');
+            s.push_str(&self.minor.to_string());
+            if self.revision != 0 {
+                s.push('.');
+                s.push_str(&self.revision.to_string());
+            }
+        }
+        s.into_bytes()
+    }
 }
 
 impl PartialEq for CtfVersion {
-    /// Port of `CTFVersion::operator==` (CTFTransform.cpp:102-109 @ v2.5.2).
+    /// Port of `CTFVersion::operator==` (CTFTransform.cpp:132-139 @ v2.6.0): the numbers only.
     fn eq(&self, rhs: &CtfVersion) -> bool {
         self.major == rhs.major && self.minor == rhs.minor && self.revision == rhs.revision
     }
@@ -129,31 +230,24 @@ impl PartialOrd for CtfVersion {
 impl Ord for CtfVersion {
     /// By major, then minor, then revision.
     ///
-    /// Port of `CTFVersion::operator<`, `>`, `<=` and `>=` (CTFTransform.cpp:111-161 @ v2.5.2).
+    /// Port of `CTFVersion::operator<`, `>`, `<=` and `>=` (CTFTransform.cpp:141-191 @ v2.6.0).
     fn cmp(&self, rhs: &CtfVersion) -> Ordering {
         (self.major, self.minor, self.revision).cmp(&(rhs.major, rhs.minor, rhs.revision))
     }
 }
 
 impl fmt::Display for CtfVersion {
-    /// MAJOR, then .MINOR when the minor or the revision isn't 0, then .REVISION when the
-    /// revision isn't 0.
+    /// [`CtfVersion::to_bytes`] as text. The version string is UTF-8 from expat, or a
+    /// literal; a byte that isn't is shown as U+FFFD (only `to_bytes` keeps it).
     ///
-    /// Port of `operator<<(std::ostream &, const CTFVersion &)` (CTFTransform.h:65-78 @
-    /// v2.5.2).
+    /// Port of `operator<<(std::ostream &, const CTFVersion &)` (CTFTransform.h:69-89 @
+    /// v2.6.0).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.major)?;
-        if self.minor != 0 || self.revision != 0 {
-            write!(f, ".{}", self.minor)?;
-            if self.revision != 0 {
-                write!(f, ".{}", self.revision)?;
-            }
-        }
-        Ok(())
+        f.write_str(&String::from_utf8_lossy(&self.to_bytes()))
     }
 }
 
-// Process List Versions (CTFTransform.h:86-127 @ v2.5.2).
+// Process List Versions (CTFTransform.h:101-145 @ v2.6.0).
 
 /// Version 1.2 2012 initial Autodesk version.
 pub const CTF_PROCESS_LIST_VERSION_1_2: CtfVersion = CtfVersion::new(1, 2, 0);
@@ -179,41 +273,34 @@ pub const CTF_PROCESS_LIST_VERSION_2_1: CtfVersion = CtfVersion::new(2, 1, 0);
 pub const CTF_PROCESS_LIST_VERSION_2_4: CtfVersion = CtfVersion::new(2, 4, 0);
 /// Version 2.5 2025-08 adds the GradingHueCurve.
 pub const CTF_PROCESS_LIST_VERSION_2_5: CtfVersion = CtfVersion::new(2, 5, 0);
+/// Version 2.6 2026-08 adds the FixedFunction FIXED_FUNCTION_ACES_RGB_TO_HMJ_20.
+pub const CTF_PROCESS_LIST_VERSION_2_6: CtfVersion = CtfVersion::new(2, 6, 0);
 /// The latest version.
-pub const CTF_PROCESS_LIST_VERSION: CtfVersion = CTF_PROCESS_LIST_VERSION_2_5;
+pub const CTF_PROCESS_LIST_VERSION: CtfVersion = CTF_PROCESS_LIST_VERSION_2_6;
 
-/// Version 1.0 initial Autodesk version for InfoElt (CTFTransform.h:130-131 @ v2.5.2).
+/// Version 1.0 initial Autodesk version for InfoElt (CTFTransform.h:148-149 @ v2.6.0).
 pub const CTF_INFO_ELEMENT_VERSION_1_0: f32 = 1.0;
-/// Version 2.0 Flame 2017 Ext1 InfoElt (CTFTransform.h:133-134 @ v2.5.2).
+/// Version 2.0 Flame 2017 Ext1 InfoElt (CTFTransform.h:151-152 @ v2.6.0).
 pub const CTF_INFO_ELEMENT_VERSION_2_0: f32 = 2.0;
-/// The latest InfoElt version (CTFTransform.h:139 @ v2.5.2).
+/// The latest InfoElt version (CTFTransform.h:157 @ v2.6.0).
 pub const CTF_INFO_ELEMENT_VERSION: f32 = CTF_INFO_ELEMENT_VERSION_2_0;
 
 /// `ConstOpDataVec`: the op data of a transform.
 pub type ConstOpDataVec = Vec<OpDataRcPtr>;
 
-/// What the CTF reader builds from a ProcessList (and the writer writes): its attributes,
-/// descriptors, descriptions and info, its ops, and its versions.
+/// What the CTF reader builds from a ProcessList (and the writer writes): its format
+/// metadata (attributes, Id element, descriptions and descriptors), its info, its ops, and
+/// its versions.
 ///
-/// Port of `CTFReaderTransform` (CTFTransform.h:142-261, CTFTransform.cpp:163-208 @ v2.5.2).
+/// Port of `CTFReaderTransform` (CTFTransform.h:160-246, CTFTransform.cpp:193-238 @ v2.6.0).
 #[derive(Debug, Clone)]
 pub struct CtfReaderTransform {
-    /// `m_id`.
-    id: Vec<u8>,
-    /// `m_name`.
-    name: Vec<u8>,
-    /// `m_inverseOfId`.
-    inverse_of_id: Vec<u8>,
-    /// `m_inDescriptor`.
-    in_descriptor: Vec<u8>,
-    /// `m_outDescriptor`.
-    out_descriptor: Vec<u8>,
     /// `m_infoMetadata`.
     info_metadata: FormatMetadataImpl,
+    /// `m_formatMetadata`: a top-level element (`FormatMetadataImpl()`).
+    format_metadata: FormatMetadataImpl,
     /// `m_ops`.
     ops: ConstOpDataVec,
-    /// `m_descriptions`.
-    descriptions: Vec<Vec<u8>>,
     /// `m_version`: CTF version used even for CLF files. CLF versions <= 2.0 are interpreted
     /// as CTF version 1.7.
     version: CtfVersion,
@@ -232,17 +319,12 @@ impl Default for CtfReaderTransform {
 impl CtfReaderTransform {
     /// An empty transform of the latest CTF version.
     ///
-    /// Port of `CTFReaderTransform::CTFReaderTransform()` (CTFTransform.cpp:163-168 @ v2.5.2).
+    /// Port of `CTFReaderTransform::CTFReaderTransform()` (CTFTransform.cpp:193-198 @ v2.6.0).
     pub fn new() -> CtfReaderTransform {
         CtfReaderTransform {
-            id: Vec::new(),
-            name: Vec::new(),
-            inverse_of_id: Vec::new(),
-            in_descriptor: Vec::new(),
-            out_descriptor: Vec::new(),
             info_metadata: FormatMetadataImpl::new(METADATA_INFO, b"").expect("a non-empty name"),
+            format_metadata: FormatMetadataImpl::root(),
             ops: ConstOpDataVec::new(),
-            descriptions: Vec::new(),
             version: CTF_PROCESS_LIST_VERSION,
             version_clf: CtfVersion::new(0, 0, 0),
             prev_out_bd: BitDepth::Unknown,
@@ -253,7 +335,7 @@ impl CtfReaderTransform {
     /// ([`from_metadata`](Self::from_metadata)).
     ///
     /// Port of `CTFReaderTransform::CTFReaderTransform(const OpRcPtrVec &, const
-    /// FormatMetadataImpl &)` (CTFTransform.cpp:170-183 @ v2.5.2).
+    /// FormatMetadataImpl &)` (CTFTransform.cpp:200-213 @ v2.6.0).
     pub fn from_ops(ops: &OpVec, metadata: &FormatMetadataImpl) -> Result<CtfReaderTransform> {
         let mut transform = CtfReaderTransform::new();
         transform.from_metadata(metadata)?;
@@ -265,165 +347,122 @@ impl CtfReaderTransform {
         Ok(transform)
     }
 
-    /// Port of `CTFReaderTransform::getID` (CTFTransform.h:152-155 @ v2.5.2).
+    /// The format metadata's "id" attribute (found ignoring ASCII case), or "".
+    ///
+    /// Port of `CTFReaderTransform::getID` (CTFTransform.h:170-173 @ v2.6.0).
     pub fn get_id(&self) -> &[u8] {
-        &self.id
+        self.format_metadata
+            .get_attribute_value_string(Some(METADATA_ID))
     }
 
-    /// Port of `CTFReaderTransform::setID` (CTFTransform.h:156-159 @ v2.5.2): a C string.
-    pub fn set_id(&mut self, id: &[u8]) {
-        self.id = c_str(id).to_vec();
+    /// Sets the format metadata's "id" attribute: a C string.
+    ///
+    /// Port of `CTFReaderTransform::setID` (CTFTransform.h:174-177 @ v2.6.0).
+    pub fn set_id(&mut self, id: &[u8]) -> Result<()> {
+        self.format_metadata
+            .add_attribute(Some(METADATA_ID), Some(id))
     }
 
-    /// Port of `CTFReaderTransform::getName` (CTFTransform.h:160-163 @ v2.5.2).
+    /// The format metadata's "name" attribute (found ignoring ASCII case), or "".
+    ///
+    /// Port of `CTFReaderTransform::getName` (CTFTransform.h:179-182 @ v2.6.0).
     pub fn get_name(&self) -> &[u8] {
-        &self.name
+        self.format_metadata
+            .get_attribute_value_string(Some(METADATA_NAME))
     }
 
-    /// Port of `CTFReaderTransform::setName` (CTFTransform.h:164-167 @ v2.5.2): a C string.
-    pub fn set_name(&mut self, name: &[u8]) {
-        self.name = c_str(name).to_vec();
+    /// Sets the format metadata's "name" attribute: a C string.
+    ///
+    /// Port of `CTFReaderTransform::setName` (CTFTransform.h:183-186 @ v2.6.0).
+    pub fn set_name(&mut self, name: &[u8]) -> Result<()> {
+        self.format_metadata
+            .add_attribute(Some(METADATA_NAME), Some(name))
     }
 
-    /// Port of `CTFReaderTransform::getInverseOfId` (CTFTransform.h:168-171 @ v2.5.2).
-    pub fn get_inverse_of_id(&self) -> &[u8] {
-        &self.inverse_of_id
-    }
-
-    /// Port of `CTFReaderTransform::setInverseOfId` (CTFTransform.h:172-175 @ v2.5.2): a C
-    /// string.
-    pub fn set_inverse_of_id(&mut self, id: &[u8]) {
-        self.inverse_of_id = c_str(id).to_vec();
-    }
-
-    /// Port of `CTFReaderTransform::getInfoMetadata` (CTFTransform.h:180-183 @ v2.5.2).
+    /// Port of `CTFReaderTransform::getInfoMetadata` (CTFTransform.h:192-195 @ v2.6.0).
     pub fn get_info_metadata(&self) -> &FormatMetadataImpl {
         &self.info_metadata
     }
 
-    /// Port of `CTFReaderTransform::getInfoMetadata` (CTFTransform.h:176-179 @ v2.5.2).
+    /// Port of `CTFReaderTransform::getInfoMetadata` (CTFTransform.h:188-191 @ v2.6.0).
     pub fn get_info_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
         &mut self.info_metadata
     }
 
-    /// Port of `CTFReaderTransform::getOps` (CTFTransform.h:184-187 @ v2.5.2).
-    pub fn get_ops(&self) -> &ConstOpDataVec {
+    /// Port of `CTFReaderTransform::getFormatMetadata` (CTFTransform.h:201-204 @ v2.6.0).
+    pub fn get_format_metadata(&self) -> &FormatMetadataImpl {
+        &self.format_metadata
+    }
+
+    /// Port of `CTFReaderTransform::getFormatMetadata` (CTFTransform.h:197-200 @ v2.6.0).
+    pub fn get_format_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
+        &mut self.format_metadata
+    }
+
+    /// Port of `CTFReaderTransform::getOpDataVec` (CTFTransform.h:206-209 @ v2.6.0).
+    pub fn get_op_data_vec(&self) -> &ConstOpDataVec {
         &self.ops
     }
 
-    /// Port of `CTFReaderTransform::getOps` (CTFTransform.h:188-191 @ v2.5.2).
-    pub fn get_ops_mut(&mut self) -> &mut ConstOpDataVec {
+    /// Port of `CTFReaderTransform::getOpDataVec` (CTFTransform.h:210-213 @ v2.6.0).
+    pub fn get_op_data_vec_mut(&mut self) -> &mut ConstOpDataVec {
         &mut self.ops
     }
 
-    /// Port of `CTFReaderTransform::getDescriptions` (CTFTransform.h:192-195 @ v2.5.2).
-    pub fn get_descriptions(&self) -> &[Vec<u8>] {
-        &self.descriptions
+    /// Port of `CTFReaderTransform::setCTFVersion` (CTFTransform.cpp:215-218 @ v2.6.0).
+    pub fn set_ctf_version(&mut self, ver: &CtfVersion) {
+        self.version = ver.clone();
     }
 
-    /// Port of `CTFReaderTransform::getDescriptions` (CTFTransform.h:196-199 @ v2.5.2).
-    pub fn get_descriptions_mut(&mut self) -> &mut Vec<Vec<u8>> {
-        &mut self.descriptions
+    /// Port of `CTFReaderTransform::setCLFVersion` (CTFTransform.cpp:220-223 @ v2.6.0).
+    pub fn set_clf_version(&mut self, ver: &CtfVersion) {
+        self.version_clf = ver.clone();
     }
 
-    /// Port of `CTFReaderTransform::getInputDescriptor` (CTFTransform.h:201-204 @ v2.5.2).
-    pub fn get_input_descriptor(&self) -> &[u8] {
-        &self.in_descriptor
+    /// Port of `CTFReaderTransform::getCTFVersion` (CTFTransform.cpp:225-228 @ v2.6.0).
+    pub fn get_ctf_version(&self) -> &CtfVersion {
+        &self.version
     }
 
-    /// Port of `CTFReaderTransform::setInputDescriptor` (CTFTransform.h:206-209 @ v2.5.2).
-    pub fn set_input_descriptor(&mut self, input: &[u8]) {
-        self.in_descriptor = input.to_vec();
-    }
-
-    /// Port of `CTFReaderTransform::getOutputDescriptor` (CTFTransform.h:211-214 @ v2.5.2).
-    pub fn get_output_descriptor(&self) -> &[u8] {
-        &self.out_descriptor
-    }
-
-    /// Port of `CTFReaderTransform::setOutputDescriptor` (CTFTransform.h:216-219 @ v2.5.2).
-    pub fn set_output_descriptor(&mut self, out: &[u8]) {
-        self.out_descriptor = out.to_vec();
-    }
-
-    /// Port of `CTFReaderTransform::setCTFVersion` (CTFTransform.cpp:185-188 @ v2.5.2).
-    pub fn set_ctf_version(&mut self, ver: CtfVersion) {
-        self.version = ver;
-    }
-
-    /// Port of `CTFReaderTransform::setCLFVersion` (CTFTransform.cpp:190-193 @ v2.5.2).
-    pub fn set_clf_version(&mut self, ver: CtfVersion) {
-        self.version_clf = ver;
-    }
-
-    /// Port of `CTFReaderTransform::getCTFVersion` (CTFTransform.cpp:195-198 @ v2.5.2).
-    pub fn get_ctf_version(&self) -> CtfVersion {
-        self.version
-    }
-
-    /// Port of `CTFReaderTransform::getCLFVersion` (CTFTransform.cpp:200-203 @ v2.5.2).
-    pub fn get_clf_version(&self) -> CtfVersion {
-        self.version_clf
+    /// Port of `CTFReaderTransform::getCLFVersion` (CTFTransform.cpp:230-233 @ v2.6.0).
+    pub fn get_clf_version(&self) -> &CtfVersion {
+        &self.version_clf
     }
 
     /// Whether the file was a CLF: its CLF version isn't 0.
     ///
-    /// Port of `CTFReaderTransform::isCLF` (CTFTransform.cpp:205-208 @ v2.5.2).
+    /// Port of `CTFReaderTransform::isCLF` (CTFTransform.cpp:235-238 @ v2.6.0).
     pub fn is_clf(&self) -> bool {
         self.version_clf != CtfVersion::new(0, 0, 0)
     }
 
-    /// Port of `CTFReaderTransform::setPreviousOutBitDepth` (CTFTransform.h:232-235 @ v2.5.2).
+    /// Port of `CTFReaderTransform::setPreviousOutBitDepth` (CTFTransform.h:221-224 @ v2.6.0).
     pub fn set_previous_out_bit_depth(&mut self, out: BitDepth) {
         self.prev_out_bd = out;
     }
 
-    /// Port of `CTFReaderTransform::getPreviousOutBitDepth` (CTFTransform.h:236-239 @ v2.5.2).
+    /// Port of `CTFReaderTransform::getPreviousOutBitDepth` (CTFTransform.h:225-228 @ v2.6.0).
     pub fn get_previous_out_bit_depth(&self) -> BitDepth {
         self.prev_out_bd
     }
 
     /// Copies what the CLF spec keeps of `metadata`, the top level metadata of a ProcessList
-    /// (the metadata of the process nodes is in their op data):
-    /// - the attributes "name", "id" and "inverseOf"; other attributes are ignored;
-    /// - the value of the first "InputDescriptor" and of the last "OutputDescriptor", without
-    ///   their attributes or children;
-    /// - the values of all "Description" children, without their attributes or children;
+    /// (the metadata of the process nodes is in their op data), into the format metadata:
+    /// - the non-empty attributes "id", "name" and "inverseOf", in that order, then every
+    ///   non-empty "xmlns:*" attribute (the prefix compared exactly); other attributes are
+    ///   ignored;
+    /// - the value of the last "Id" child, if not empty;
+    /// - the "Description", then "InputDescriptor", then "OutputDescriptor" children, each
+    ///   with its name and value and its non-empty "language" attribute;
     /// - the "Info" children, merged into one with all their attributes and children;
     /// - any other children or attributes are ignored.
     ///
     /// Names compare ignoring case, but the Info children merge only when named exactly
     /// "Info" (`FormatMetadataImpl::combine`): another case fails.
     ///
-    /// Port of `CTFReaderTransform::fromMetadata` (CTFTransform.cpp:430-464 @ v2.5.2).
+    /// Port of `CTFReaderTransform::fromMetadata` (CTFTransform.cpp:471-533 @ v2.6.0).
     pub fn from_metadata(&mut self, metadata: &FormatMetadataImpl) -> Result<()> {
-        // Name & id handled as attributes of the root metadata.
-        self.name = metadata
-            .get_attribute_value_string(Some(METADATA_NAME))
-            .to_vec();
-        self.id = metadata
-            .get_attribute_value_string(Some(METADATA_ID))
-            .to_vec();
-        self.inverse_of_id = metadata
-            .get_attribute_value_string(Some(ATTR_INVERSE_OF))
-            .to_vec();
-
-        // Preserve first InputDescriptor, last OutputDescriptor, and all Descriptions.
-        self.in_descriptor = c_str(get_first_element_value(
-            metadata.get_children_elements(),
-            METADATA_INPUT_DESCRIPTOR,
-        ))
-        .to_vec();
-        self.out_descriptor = c_str(get_last_element_value(
-            metadata.get_children_elements(),
-            METADATA_OUTPUT_DESCRIPTOR,
-        ))
-        .to_vec();
-        get_elements_values(
-            metadata.get_children_elements(),
-            METADATA_DESCRIPTION,
-            &mut self.descriptions,
-        );
+        copy_process_list_metadata(&mut self.format_metadata, metadata)?;
 
         // Combine all Info elements.
         for elt in metadata.get_children_elements() {
@@ -434,31 +473,16 @@ impl CtfReaderTransform {
         Ok(())
     }
 
-    /// Adds the transform's ProcessList information to `metadata`: the non-empty name, id
-    /// and inverseOf attributes, the non-empty descriptors, the descriptions, and the info
-    /// when it has attributes, children or a value.
+    /// Adds the transform's ProcessList information to `metadata`, as
+    /// [`from_metadata`](Self::from_metadata) reads it, then the info when it has
+    /// attributes, children or a value.
     ///
-    /// Port of `CTFReaderTransform::toMetadata` (CTFTransform.cpp:485-504 @ v2.5.2), with
-    /// `AddNonEmptyElement` and `AddNonEmptyAttribute` (466-483).
+    /// Port of `CTFReaderTransform::toMetadata` (CTFTransform.cpp:537-586 @ v2.6.0).
     pub fn to_metadata(&self, metadata: &mut FormatMetadataImpl) -> Result<()> {
         // Put CTF processList information into the FormatMetadata.
-        add_non_empty_attribute(metadata, METADATA_NAME, self.get_name())?;
-        add_non_empty_attribute(metadata, METADATA_ID, self.get_id())?;
-        add_non_empty_attribute(metadata, ATTR_INVERSE_OF, self.get_inverse_of_id())?;
+        copy_process_list_metadata(metadata, &self.format_metadata)?;
 
-        add_non_empty_element(
-            metadata,
-            METADATA_INPUT_DESCRIPTOR,
-            self.get_input_descriptor(),
-        )?;
-        add_non_empty_element(
-            metadata,
-            METADATA_OUTPUT_DESCRIPTOR,
-            self.get_output_descriptor(),
-        )?;
-        for desc in &self.descriptions {
-            metadata.add_child_element(Some(METADATA_DESCRIPTION), Some(desc))?;
-        }
+        // Info Metadata.
         let info_value = self.info_metadata.get_element_value();
         if self.info_metadata.get_num_attributes() != 0
             || self.info_metadata.get_num_children_elements() != 0
@@ -472,12 +496,58 @@ impl CtfReaderTransform {
     }
 }
 
-/// `typedef OCIO_SHARED_PTR<CTFReaderTransform> CTFReaderTransformPtr` (CTFTransform.h:263).
+/// The part `fromMetadata` and `toMetadata` share, from `source` to `dest`: the attributes,
+/// the Id element, and the descriptions and descriptors.
+///
+/// Port of `CTFReaderTransform::fromMetadata` (CTFTransform.cpp:487-522 @ v2.6.0) and of the
+/// same lines of `CTFReaderTransform::toMetadata` (CTFTransform.cpp:541-577), whose code is
+/// the same but for the direction.
+fn copy_process_list_metadata(
+    dest: &mut FormatMetadataImpl,
+    source: &FormatMetadataImpl,
+) -> Result<()> {
+    // Attributes
+    copy_non_empty_attribute(dest, source, METADATA_ID)?;
+    copy_non_empty_attribute(dest, source, METADATA_NAME)?;
+    copy_non_empty_attribute(dest, source, ATTR_INVERSE_OF)?;
+
+    // all "xmlns:*" attributes needs to be copied too.
+    for i in 0..source.get_num_attributes() {
+        let attr_name = source.get_attribute_name(i).to_vec();
+        if starts_with(&attr_name, b"xmlns:") {
+            copy_non_empty_attribute(dest, source, &attr_name)?;
+        }
+    }
+
+    // Id Element
+    let id = get_last_element_value(source.get_children_elements(), METADATA_ID_ELEMENT).to_vec();
+    add_non_empty_element(dest, METADATA_ID_ELEMENT, &id)?;
+
+    // Description, input and output descriptors
+    for element_name in [
+        METADATA_DESCRIPTION,
+        METADATA_INPUT_DESCRIPTOR,
+        METADATA_OUTPUT_DESCRIPTOR,
+    ] {
+        for desc in source.get_children_elements_named(element_name) {
+            let mut new_el =
+                FormatMetadataImpl::new(desc.get_element_name(), c_str(desc.get_element_value()))?;
+            let lang = desc.get_attribute_value_string(Some(ATTR_LANGUAGE));
+            if !lang.is_empty() {
+                new_el.add_attribute(Some(ATTR_LANGUAGE), Some(lang))?;
+            }
+            dest.get_children_elements_mut().push(new_el);
+        }
+    }
+    Ok(())
+}
+
+/// `typedef OCIO_SHARED_PTR<CTFReaderTransform> CTFReaderTransformPtr` (CTFTransform.h:248).
 pub type CtfReaderTransformPtr = Arc<CtfReaderTransform>;
 
 /// Adds the value of each element named `name` (ignoring case) to `values`.
 ///
-/// Port of `GetElementsValues` (CTFTransform.cpp:210-221 @ v2.5.2). The values are C strings
+/// Port of `GetElementsValues` (CTFTransform.cpp:240-251 @ v2.6.0). The values are C strings
 /// (`getElementValue`).
 pub fn get_elements_values(elements: &Elements, name: &[u8], values: &mut Vec<Vec<u8>>) {
     for element in elements {
@@ -487,21 +557,9 @@ pub fn get_elements_values(elements: &Elements, name: &[u8], values: &mut Vec<Ve
     }
 }
 
-/// The value of the first element named `name` (ignoring case), or "".
-///
-/// Port of `GetFirstElementValue` (CTFTransform.cpp:405-415 @ v2.5.2).
-fn get_first_element_value<'a>(elements: &'a Elements, name: &[u8]) -> &'a [u8] {
-    for it in elements {
-        if strcasecmp(name, it.get_element_name()).is_eq() {
-            return it.get_element_value();
-        }
-    }
-    b""
-}
-
 /// The value of the last element named `name` (ignoring case), or "".
 ///
-/// Port of `GetLastElementValue` (CTFTransform.cpp:417-427 @ v2.5.2).
+/// Port of `GetLastElementValue` (CTFTransform.cpp:440-450 @ v2.6.0).
 fn get_last_element_value<'a>(elements: &'a Elements, name: &[u8]) -> &'a [u8] {
     for it in elements.iter().rev() {
         if strcasecmp(name, it.get_element_name()).is_eq() {
@@ -511,7 +569,23 @@ fn get_last_element_value<'a>(elements: &'a Elements, name: &[u8]) -> &'a [u8] {
     b""
 }
 
-/// Port of `AddNonEmptyElement` (CTFTransform.cpp:468-474 @ v2.5.2).
+/// Adds `source`'s attribute `attrname` (found ignoring case) to `dest` under that name,
+/// when its value isn't empty.
+///
+/// Port of `CopyNonEmptyAttribute` (CTFTransform.cpp:452-459 @ v2.6.0).
+fn copy_non_empty_attribute(
+    dest: &mut FormatMetadataImpl,
+    source: &FormatMetadataImpl,
+    attrname: &[u8],
+) -> Result<()> {
+    let value = source.get_attribute_value_string(Some(attrname));
+    if !value.is_empty() {
+        dest.add_attribute(Some(attrname), Some(value))?;
+    }
+    Ok(())
+}
+
+/// Port of `AddNonEmptyElement` (CTFTransform.cpp:461-467 @ v2.6.0).
 fn add_non_empty_element(
     metadata: &mut FormatMetadataImpl,
     name: &[u8],
@@ -519,18 +593,6 @@ fn add_non_empty_element(
 ) -> Result<()> {
     if !value.is_empty() {
         metadata.add_child_element(Some(name), Some(value))?;
-    }
-    Ok(())
-}
-
-/// Port of `AddNonEmptyAttribute` (CTFTransform.cpp:476-482 @ v2.5.2).
-fn add_non_empty_attribute(
-    metadata: &mut FormatMetadataImpl,
-    name: &[u8],
-    value: &[u8],
-) -> Result<()> {
-    if !value.is_empty() {
-        metadata.add_attribute(Some(name), Some(value))?;
     }
     Ok(())
 }

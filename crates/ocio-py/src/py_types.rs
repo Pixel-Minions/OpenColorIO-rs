@@ -313,7 +313,7 @@ pub(crate) fn bind_py_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "OCIO_VIEW_USE_DISPLAY_NAME",
         ocio::OCIO_VIEW_USE_DISPLAY_NAME,
     )?;
-    // FormatMetadata (967-973): ASCII names, held as bytes by the port.
+    // FormatMetadata (PyTypes.cpp:977-984 @ v2.6.0): ASCII names, held as bytes by the port.
     {
         use ocio_ops::format_metadata::*;
         for (name, value) in [
@@ -323,6 +323,7 @@ pub(crate) fn bind_py_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
             ("METADATA_OUTPUT_DESCRIPTOR", METADATA_OUTPUT_DESCRIPTOR),
             ("METADATA_NAME", METADATA_NAME),
             ("METADATA_ID", METADATA_ID),
+            ("METADATA_ID_ELEMENT", METADATA_ID_ELEMENT),
         ] {
             let text = std::str::from_utf8(value)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;

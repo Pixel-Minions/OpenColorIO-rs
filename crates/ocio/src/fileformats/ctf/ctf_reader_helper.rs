@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The CLF/CTF reader's elements: the ProcessList, its metadata, Info and descriptors, the
-//! versioned choice of each operator's reader, the operators' readers and their parameter
-//! elements.
+//! The CLF/CTF reader's elements: the ProcessList, its metadata, Info, Id, descriptions and
+//! descriptors, the versioned choice of each operator's reader, the operators' readers and
+//! their parameter elements.
 //!
 //! Port of `src/OpenColorIO/fileformats/ctf/CTFReaderHelper.h` and `CTFReaderHelper.cpp`
-//! (@ v2.5.2).
+//! (@ v2.5.2; where a citation says v2.6.0, of that release: the ProcessList, Id and
+//! description elements and the operators' `appendMetadata`).
 //!
 //! **Sharing.** Upstream's parser, ProcessList element and operator elements share one
 //! `CTFReaderTransform` (`CTFReaderTransformPtr`, a `shared_ptr`); here the parse shares a
@@ -29,8 +30,8 @@ use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     sat_node_append_metadata,
 };
 use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
-    ATTR_ID, ATTR_NAME, find_delim, find_next_token_start, get_next_number, get_numbers,
-    is_number_delimiter, is_space, parse_number, truncate_string,
+    ATTR_ID, ATTR_NAME, ATTR_XMLNS, find_delim, find_next_token_start, get_next_number,
+    get_numbers, is_number_delimiter, is_space, parse_number, truncate_string,
 };
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::cfmt::{Crt, OStringStream};
@@ -72,18 +73,19 @@ use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_ops::ops::reference::reference_op_data::ReferenceOpData;
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::cscan::{ScanArg, ScanCrt, sscanf};
-use ocio_ops::utils::string_utils::{c_str, lower};
+use ocio_ops::utils::string_utils::{c_str, lower, starts_with};
 use ocio_ops::{Exception, Result};
 
 use super::ctf_reader_utils::{
     ATTR_ALIAS, ATTR_BASE_PATH, ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST, ATTR_INTERPOLATION,
-    ATTR_IS_INVERTED, ATTR_PARAM, ATTR_PATH, ATTR_RAW_HALFS, TAG_DYN_PROP_CONTRAST,
+    ATTR_IS_INVERTED, ATTR_LANGUAGE, ATTR_PARAM, ATTR_PATH, ATTR_RAW_HALFS, TAG_DYN_PROP_CONTRAST,
     TAG_DYN_PROP_EXPOSURE, TAG_DYN_PROP_GAMMA, TAG_DYN_PROP_HUECURVE, TAG_DYN_PROP_LOOK,
     TAG_DYN_PROP_PRIMARY, TAG_DYN_PROP_RGBCURVE, TAG_DYN_PROP_TONE, TAG_HUE_CURVE_HUE_FX,
     TAG_HUE_CURVE_HUE_HUE, TAG_HUE_CURVE_HUE_LUM, TAG_HUE_CURVE_HUE_SAT, TAG_HUE_CURVE_LUM_LUM,
     TAG_HUE_CURVE_LUM_SAT, TAG_HUE_CURVE_SAT_LUM, TAG_HUE_CURVE_SAT_SAT, TAG_RGB_CURVE_BLUE,
     TAG_RGB_CURVE_GREEN, TAG_RGB_CURVE_MASTER, TAG_RGB_CURVE_RED,
     convert_string_to_grading_style_and_dir, get_interpolation_1d, get_interpolation_3d,
+    validate_smpte_id,
 };
 use super::ctf_reader_utils::{
     ATTR_BASE, ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_BYPASS, ATTR_BYPASS_LIN_TO_LOG, ATTR_CHAN,
@@ -107,6 +109,7 @@ use super::ctf_transform::{
     CTF_PROCESS_LIST_VERSION_1_3, CTF_PROCESS_LIST_VERSION_1_4, CTF_PROCESS_LIST_VERSION_1_5,
     CTF_PROCESS_LIST_VERSION_1_6, CTF_PROCESS_LIST_VERSION_1_7, CTF_PROCESS_LIST_VERSION_1_8,
     CTF_PROCESS_LIST_VERSION_2_0, CTF_PROCESS_LIST_VERSION_2_5, CtfReaderTransform, CtfVersion,
+    StringFormat,
 };
 use super::index_mapping::IndexMapping;
 use crate::lut_limits::{MAX_1D_LUT_LENGTH, MAX_3D_LUT_LENGTH};
@@ -167,12 +170,12 @@ impl CtfReaderTransformElt {
 
     /// Set the current transform CTF version.
     ///
-    /// Port of `CTFReaderTransformElt::setVersion` (CTFReaderHelper.cpp:234-241 @ v2.5.2).
-    pub fn set_version(&mut self, ver: CtfVersion) -> Result<()> {
-        if CTF_PROCESS_LIST_VERSION < ver {
+    /// Port of `CTFReaderTransformElt::setVersion` (CTFReaderHelper.cpp:272-279 @ v2.6.0).
+    pub fn set_version(&mut self, ver: &CtfVersion) -> Result<()> {
+        if CTF_PROCESS_LIST_VERSION < *ver {
             return Err(self.throw_m(&[
                 b"Unsupported transform file version '",
-                ver.to_string().as_bytes(),
+                &ver.to_bytes(),
                 b"' supplied.",
             ]));
         }
@@ -180,21 +183,21 @@ impl CtfReaderTransformElt {
         Ok(())
     }
 
-    /// Port of `CTFReaderTransformElt::setCLFVersion` (CTFReaderHelper.cpp:243-246 @ v2.5.2).
-    pub fn set_clf_version(&mut self, ver: CtfVersion) {
+    /// Port of `CTFReaderTransformElt::setCLFVersion` (CTFReaderHelper.cpp:281-284 @ v2.6.0).
+    pub fn set_clf_version(&mut self, ver: &CtfVersion) {
         self.transform.borrow_mut().set_clf_version(ver);
     }
 
     /// Get current xml transform version.
     ///
-    /// Port of `CTFReaderTransformElt::getVersion` (CTFReaderHelper.cpp:248-251 @ v2.5.2).
+    /// Port of `CTFReaderTransformElt::getVersion` (CTFReaderHelper.cpp:286-289 @ v2.6.0).
     pub fn get_version(&self) -> CtfVersion {
-        self.transform.borrow().get_ctf_version()
+        self.transform.borrow().get_ctf_version().clone()
     }
 
-    /// Port of `CTFReaderTransformElt::getCLFVersion` (CTFReaderHelper.cpp:253-256 @ v2.5.2).
+    /// Port of `CTFReaderTransformElt::getCLFVersion` (CTFReaderHelper.cpp:291-294 @ v2.6.0).
     pub fn get_clf_version(&self) -> CtfVersion {
-        self.transform.borrow().get_clf_version()
+        self.transform.borrow().get_clf_version().clone()
     }
 
     /// Whether the transform is a CLF's: its CLF version (not the parser's request).
@@ -213,15 +216,17 @@ impl XmlReaderElement for CtfReaderTransformElt {
         &mut self.element
     }
 
-    /// The ProcessList's attributes: `id` (required), `name`, `inverseOf`, and either
-    /// `version` (CTF) or `compCLFversion` (CLF, translated to a CTF version); `xmlns` is
-    /// ignored and other attributes are logged.
+    /// The ProcessList's attributes: `id` (required but for SMPTE files), `name`,
+    /// `inverseOf`, `xmlns` (a SMPTE namespace makes a CLF of version 3, others are ignored)
+    /// and `xmlns:*` (kept in the transform's metadata), and either `version` (CTF) or
+    /// `compCLFversion` (CLF, translated to a CTF version); other attributes are logged.
     ///
-    /// Port of `CTFReaderTransformElt::start` (CTFReaderHelper.cpp:58-212 @ v2.5.2).
+    /// Port of `CTFReaderTransformElt::start` (CTFReaderHelper.cpp:58-250 @ v2.6.0).
     fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
         let mut is_id_found = false;
         let mut is_version_found = false;
         let mut is_clf_version_found = false;
+        let mut is_smpte_version_found = false;
         let mut requested_version = CtfVersion::new(0, 0, 0);
         let mut requested_clf_version = CtfVersion::new(0, 0, 0);
 
@@ -230,14 +235,36 @@ impl XmlReaderElement for CtfReaderTransformElt {
             let (att, value) = (atts[i], atts[i + 1]);
             if equal_ignoring_case(ATTR_ID, att) {
                 if value.is_empty() {
-                    return Err(
-                        self.throw_message(b"Required attribute 'id' does not have a value.")
-                    );
+                    return Err(self.throw_message(b"Attribute 'id' does not have a value."));
                 }
 
-                self.transform.borrow_mut().set_id(value);
-                self.id = value.to_vec();
+                self.transform
+                    .borrow_mut()
+                    .get_format_metadata_mut()
+                    .add_attribute(Some(ATTR_ID), Some(value))?;
+                self.id = c_str(value).to_vec();
                 is_id_found = true;
+            } else if equal_ignoring_case(ATTR_XMLNS, att) {
+                if value.is_empty() {
+                    return Err(self.throw_message(b"Attribute 'xmlns' does not have a value."));
+                }
+
+                // Check if xmlns atrribute holds a SMPTE version string.
+                if let Ok(version) = CtfVersion::read(value, StringFormat::VersionSmpteXmlns) {
+                    requested_version = CTF_PROCESS_LIST_VERSION_2_0;
+                    requested_clf_version = version;
+                    is_smpte_version_found = true;
+                    self.is_clf = true;
+                }
+                // Ignore other xmlns attribute strings.
+
+                // Disallow Version and version-holding xmlns appering togather. Note that
+                // compCLFversion can appear together with xmlns.
+                if is_version_found && is_smpte_version_found {
+                    return Err(self.throw_message(
+                        b"SMPTE 'xmlns' version and 'Version' attribute cannot both be present.",
+                    ));
+                }
             } else if equal_ignoring_case(ATTR_NAME, att) {
                 if value.is_empty() {
                     return Err(self.throw_message(
@@ -245,7 +272,10 @@ impl XmlReaderElement for CtfReaderTransformElt {
                     ));
                 }
 
-                self.transform.borrow_mut().set_name(value);
+                self.transform
+                    .borrow_mut()
+                    .get_format_metadata_mut()
+                    .add_attribute(Some(ATTR_NAME), Some(value))?;
             } else if equal_ignoring_case(ATTR_INVERSE_OF, att) {
                 if value.is_empty() {
                     return Err(self.throw_message(
@@ -253,11 +283,19 @@ impl XmlReaderElement for CtfReaderTransformElt {
                     ));
                 }
 
-                self.transform.borrow_mut().set_inverse_of_id(value);
+                self.transform
+                    .borrow_mut()
+                    .get_format_metadata_mut()
+                    .add_attribute(Some(ATTR_INVERSE_OF), Some(value))?;
             } else if equal_ignoring_case(ATTR_VERSION, att) {
                 if is_clf_version_found {
                     return Err(self
                         .throw_message(b"'compCLFversion' and 'Version' cannot both be present."));
+                }
+                if is_smpte_version_found {
+                    return Err(self.throw_message(
+                        b"SMPTE 'xmlns' version and 'Version' attribute cannot both be present.",
+                    ));
                 }
                 if is_version_found {
                     return Err(self.throw_message(b"'Version' can only be there once."));
@@ -284,13 +322,16 @@ impl XmlReaderElement for CtfReaderTransformElt {
                         .throw_message(b"'compCLFversion' and 'Version' cannot be both present."));
                 }
 
+                // Note: compCLFversion can appear together with xmlns for SMPTE CLF files.
+
                 if value.is_empty() {
                     return Err(self.throw_message(
                         b"Required attribute 'compCLFversion' does not have a value.",
                     ));
                 }
 
-                requested_clf_version = match CtfVersion::read_version(value) {
+                requested_clf_version = match CtfVersion::read(value, StringFormat::VersionSmpteClf)
+                {
                     Ok(version) => version,
                     Err(ce) => return Err(self.throw_message(ce.what())),
                 };
@@ -312,12 +353,20 @@ impl XmlReaderElement for CtfReaderTransformElt {
                     requested_version = CTF_PROCESS_LIST_VERSION_2_0;
                 }
 
-                is_version_found = true;
                 is_clf_version_found = true;
                 // Handle as CLF.
                 self.is_clf = true;
-            } else if equal_ignoring_case(b"xmlns", att) {
-                // Ignore.
+            } else if starts_with(att, b"xmlns:") {
+                // push as metadata attribute.
+                if value.is_empty() {
+                    return Err(self.throw_message(
+                        b"If the attribute 'xmlns:*' is present, it must have a value.",
+                    ));
+                }
+                self.transform
+                    .borrow_mut()
+                    .get_format_metadata_mut()
+                    .add_attribute(Some(att), Some(value))?;
             } else {
                 self.element.log_parameter_warning(att);
             }
@@ -325,27 +374,28 @@ impl XmlReaderElement for CtfReaderTransformElt {
             i += 2;
         }
 
-        // Check mandatory elements.
-        if !is_id_found {
+        // Check mandatory id keyword for non-SMPTE variants.
+        if !is_id_found && !is_smpte_version_found {
             return Err(self.throw_message(b"Required attribute 'id' is missing."));
         }
 
         // Transform file format with no version means that the CTF format is 1.2.
-        if !is_version_found {
-            if self.is_clf && !is_clf_version_found {
-                return Err(self.throw_message(b"Required attribute 'compCLFversion' is missing."));
-            }
-            self.set_version(CTF_PROCESS_LIST_VERSION_1_2)?;
-        } else {
-            self.set_version(requested_version)?;
+        if !(is_version_found || is_clf_version_found || is_smpte_version_found) {
             if self.is_clf {
-                self.set_clf_version(requested_clf_version);
+                return Err(self.throw_message(
+                    b"No valid 'version', 'compCLFversion', or 'xmlns' attributes were found; \
+                      at least one of them is required.",
+                ));
             }
+            self.set_version(&CTF_PROCESS_LIST_VERSION_1_2)?;
+        } else {
+            self.set_version(&requested_version)?;
+            self.set_clf_version(&requested_clf_version);
         }
         Ok(())
     }
 
-    /// Port of `CTFReaderTransformElt::end` (CTFReaderHelper.cpp:214-216 @ v2.5.2).
+    /// Port of `CTFReaderTransformElt::end` (CTFReaderHelper.cpp:252-254 @ v2.6.0).
     fn end(&mut self) -> Result<()> {
         Ok(())
     }
@@ -354,14 +404,15 @@ impl XmlReaderElement for CtfReaderTransformElt {
         true
     }
 
-    /// The transform's id.
+    /// The transform's id: the value `start` gave the id attribute last (its metadata's
+    /// "id"), which the element keeps.
     ///
-    /// Port of `CTFReaderTransformElt::getIdentifier` (CTFReaderHelper.cpp:29-32 @ v2.5.2).
+    /// Port of `CTFReaderTransformElt::getIdentifier` (CTFReaderHelper.cpp:29-32 @ v2.6.0).
     fn get_identifier(&self) -> &[u8] {
         &self.id
     }
 
-    /// Port of `CTFReaderTransformElt::getTypeName` (CTFReaderHelper.cpp:228-232 @ v2.5.2).
+    /// Port of `CTFReaderTransformElt::getTypeName` (CTFReaderHelper.cpp:266-270 @ v2.6.0).
     fn get_type_name(&self) -> &[u8] {
         TAG_PROCESS_LIST
     }
@@ -378,16 +429,118 @@ impl XmlReaderElement for CtfReaderTransformElt {
 }
 
 impl XmlReaderContainerElt for CtfReaderTransformElt {
-    /// A description of the ProcessList.
+    /// A description, descriptor or Id of the ProcessList: a child of its metadata.
     ///
-    /// Port of `CTFReaderTransformElt::appendMetadata` (CTFReaderHelper.cpp:218-221 @
-    /// v2.5.2).
-    fn append_metadata(&mut self, _name: &[u8], value: &[u8]) -> Result<()> {
+    /// Port of `CTFReaderTransformElt::appendMetadata` (CTFReaderHelper.cpp:256-259 @
+    /// v2.6.0).
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
         self.transform
             .borrow_mut()
-            .get_descriptions_mut()
-            .push(value.to_vec());
+            .get_format_metadata_mut()
+            .get_children_elements_mut()
+            .push(metadata);
         Ok(())
+    }
+}
+
+/// The ProcessList's `Id` element (any container's, as the parser makes one under any): its
+/// text, which is logged when it isn't a SMPTE ST 2136-1 Id, becomes an element of its
+/// parent's metadata when not empty.
+///
+/// Port of `CTFReaderIdElt` (CTFReaderHelper.h:77-110, CTFReaderHelper.cpp:302-318 @
+/// v2.6.0).
+#[derive(Debug)]
+pub struct CtfReaderIdElt {
+    plain: XmlReaderPlainEltBase,
+    /// `m_id`.
+    id: Vec<u8>,
+}
+
+impl CtfReaderIdElt {
+    /// Port of `CTFReaderIdElt::CTFReaderIdElt` (CTFReaderHelper.h:82-88 @ v2.6.0).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_location: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderIdElt {
+        CtfReaderIdElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_location, xml_file),
+            id: Vec::new(),
+        }
+    }
+}
+
+impl XmlReaderElement for CtfReaderIdElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// Port of `CTFReaderIdElt::start` (CTFReaderHelper.h:94-97 @ v2.6.0).
+    fn start(&mut self, _atts: &[&[u8]]) -> Result<()> {
+        self.id.clear();
+        Ok(())
+    }
+
+    /// Port of `CTFReaderIdElt::end` (CTFReaderHelper.cpp:302-318 @ v2.6.0).
+    fn end(&mut self) -> Result<()> {
+        if !validate_smpte_id(&self.id) {
+            // We allow non-compliant Id values with a warning.
+            let mut ss = OStringStream::new(Crt::NATIVE);
+            ss.put_c_str(self.get_xml_file());
+            ss.put_str("(");
+            ss.put_u32(self.get_xml_line_number());
+            ss.put_str("): ");
+            ss.put_str("'");
+            ss.put_bytes(&self.id);
+            ss.put_str("' is not a SMPTE ST 2136-1 compliant Id value.");
+            log_warning(c_str(ss.str()));
+        }
+
+        if !self.id.is_empty() {
+            let metadata = FormatMetadataImpl::new(self.get_name(), &self.id)?;
+            let mut parent = self.plain.get_parent().borrow_mut();
+            parent
+                .as_container_mut()
+                .expect("a plain element's parent is a container")
+                .append_metadata(metadata)?;
+        }
+        Ok(())
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderIdElt {
+    /// This function can receive the text in small pieces, so keep adding to the string.
+    ///
+    /// Port of `CTFReaderIdElt::setRawData` (CTFReaderHelper.h:101-106 @ v2.6.0).
+    fn set_raw_data(&mut self, s: &[u8], _xml_line: u32) -> Result<()> {
+        self.id.extend_from_slice(s);
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
     }
 }
 
@@ -442,6 +595,11 @@ impl CtfReaderMetadataElt {
     pub fn set_raw_data(&mut self, s: &[u8], _xml_line: u32) -> Result<()> {
         let new_value = [self.metadata.get_element_value(), s].concat();
         self.metadata.set_element_value(Some(c_str(&new_value)))
+    }
+
+    /// Whether it is an `Info` element (`dynamic_pointer_cast<CTFReaderInfoElt>`).
+    pub fn is_info(&self) -> bool {
+        self.info
     }
 
     /// Port of `CTFReaderMetadataElt::getMetadata` (CTFReaderHelper.h:98 @ v2.5.2).
@@ -605,62 +763,89 @@ impl XmlReaderElement for CtfReaderMetadataElt {
 }
 
 impl XmlReaderContainerElt for CtfReaderMetadataElt {
-    /// Port of `XmlReaderComplexElt::appendMetadata` (XMLReaderHelper.h:342-345 @ v2.5.2).
-    fn append_metadata(&mut self, _name: &[u8], _value: &[u8]) -> Result<()> {
+    /// Port of `XmlReaderComplexElt::appendMetadata` (XMLReaderHelper.h:343-345 @ v2.6.0).
+    fn append_metadata(&mut self, _metadata: FormatMetadataImpl) -> Result<()> {
         Ok(())
     }
 }
 
-/// Which descriptor of the transform a [`CtfReaderDescriptorElt`] reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Descriptor {
-    /// `CTFReaderInputDescriptorElt`.
-    Input,
-    /// `CTFReaderOutputDescriptorElt`.
-    Output,
-}
-
-/// The ProcessList's `InputDescriptor` or `OutputDescriptor`: its text is appended to the
-/// transform's.
+/// A description, input descriptor or output descriptor (of the ProcessList, an operator or
+/// a CDL's node): its text, unstripped, and its `language` attribute become an element of
+/// its parent's metadata.
 ///
-/// Port of `CTFReaderInputDescriptorElt` and `CTFReaderOutputDescriptorElt`
-/// (CTFReaderHelper.h:120-190 @ v2.5.2).
+/// Port of `CTFReaderDescElt` (CTFReaderHelper.h:157-188, CTFReaderHelper.cpp:859-890 @
+/// v2.6.0).
 #[derive(Debug)]
-pub struct CtfReaderDescriptorElt {
+pub struct CtfReaderDescElt {
     plain: XmlReaderPlainEltBase,
-    descriptor: Descriptor,
+    /// `m_desc`.
+    desc: Vec<u8>,
+    /// `m_language`.
+    language: Vec<u8>,
 }
 
-impl CtfReaderDescriptorElt {
-    /// Port of the constructors of `CTFReaderInputDescriptorElt` and
-    /// `CTFReaderOutputDescriptorElt` (CTFReaderHelper.h:124-130, 160-166 @ v2.5.2).
+impl CtfReaderDescElt {
+    /// Port of `CTFReaderDescElt::CTFReaderDescElt` (CTFReaderHelper.h:164-170 @ v2.6.0).
     pub fn new(
         name: &[u8],
         parent: ContainerEltRcPtr,
         xml_line_number: u32,
         xml_file: &[u8],
-        descriptor: Descriptor,
-    ) -> CtfReaderDescriptorElt {
-        CtfReaderDescriptorElt {
+    ) -> CtfReaderDescElt {
+        CtfReaderDescElt {
             plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
-            descriptor,
+            desc: Vec::new(),
+            language: Vec::new(),
         }
     }
 }
 
-impl XmlReaderElement for CtfReaderDescriptorElt {
+impl XmlReaderElement for CtfReaderDescElt {
     fn element(&self) -> &XmlReaderElementBase {
         &self.plain.element
     }
     fn element_mut(&mut self) -> &mut XmlReaderElementBase {
         &mut self.plain.element
     }
-    fn start(&mut self, _atts: &[&[u8]]) -> Result<()> {
+
+    /// The `language` attribute. Upstream compares the first attribute's name (`*atts`)
+    /// whatever the attribute it is at: when the first is `language`, each attribute's value
+    /// is taken in turn, so the last one's is kept; when it isn't, none is
+    /// (docs/improvements.md, I-1030).
+    ///
+    /// Port of `CTFReaderDescElt::start` (CTFReaderHelper.cpp:859-879 @ v2.6.0).
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        self.desc.clear();
+        self.language.clear();
+
+        let mut i = 0;
+        while i < atts.len() && !atts[i].is_empty() {
+            if equal_ignoring_case(ATTR_LANGUAGE, atts[0]) {
+                if atts[i + 1].is_empty() {
+                    return Err(self.throw_message(b"Attribute 'language' does not have a value."));
+                }
+
+                self.language = c_str(atts[i + 1]).to_vec();
+            }
+
+            i += 2;
+        }
         Ok(())
     }
+
+    /// Port of `CTFReaderDescElt::end` (CTFReaderHelper.cpp:881-889 @ v2.6.0).
     fn end(&mut self) -> Result<()> {
-        Ok(())
+        let mut metadata = FormatMetadataImpl::new(self.get_name(), &self.desc)?;
+        if !self.language.is_empty() {
+            metadata.add_attribute(Some(ATTR_LANGUAGE), Some(&self.language))?;
+        }
+        let mut parent = self.plain.get_parent().borrow_mut();
+        parent
+            .as_container_mut()
+            .expect("a plain element's parent is a container")
+            .append_metadata(metadata)
     }
+
     fn is_container(&self) -> bool {
         false
     }
@@ -681,28 +866,12 @@ impl XmlReaderElement for CtfReaderDescriptorElt {
     }
 }
 
-impl XmlReaderPlainElt for CtfReaderDescriptorElt {
-    /// Port of `CTFReaderInputDescriptorElt::setRawData` and
-    /// `CTFReaderOutputDescriptorElt::setRawData` (CTFReaderHelper.h:144-153, 180-189 @
-    /// v2.5.2): the parent is the ProcessList's element (the parser makes a descriptor only
-    /// under it).
+impl XmlReaderPlainElt for CtfReaderDescElt {
+    /// This function may receive the text in small pieces, so keep adding to the string.
+    ///
+    /// Port of `CTFReaderDescElt::setRawData` (CTFReaderHelper.h:179-184 @ v2.6.0).
     fn set_raw_data(&mut self, s: &[u8], _xml_line: u32) -> Result<()> {
-        let parent = self.plain.get_parent().borrow();
-        let transform_elt = parent
-            .as_any()
-            .downcast_ref::<CtfReaderTransformElt>()
-            .expect("a descriptor is under the ProcessList");
-        let mut transform = transform_elt.get_transform().borrow_mut();
-        match self.descriptor {
-            Descriptor::Input => {
-                let value = [transform.get_input_descriptor(), s].concat();
-                transform.set_input_descriptor(&value);
-            }
-            Descriptor::Output => {
-                let value = [transform.get_output_descriptor(), s].concat();
-                transform.set_output_descriptor(&value);
-            }
-        }
+        self.desc.extend_from_slice(s);
         Ok(())
     }
     fn get_parent(&self) -> &ContainerEltRcPtr {
@@ -1203,7 +1372,7 @@ impl CtfReaderOpElt {
         // No data is copied since the parameters of the op have not been filled in yet.
         self.op_index = {
             let mut transform = self.get_transform().borrow_mut();
-            let ops = transform.get_ops_mut();
+            let ops = transform.get_op_data_vec_mut();
             ops.push(Arc::new(self.op.clone()));
             ops.len() - 1
         };
@@ -1458,7 +1627,7 @@ impl CtfReaderOpElt {
 
                 if is_debug_logging_enabled() {
                     let message: Option<&str> = if self.get_transform().borrow().get_ctf_version()
-                        < CTF_PROCESS_LIST_VERSION_2_0
+                        < &CTF_PROCESS_LIST_VERSION_2_0
                     {
                         (size == 2).then_some(
                             "Matrix array dimension should have 3 numbers for CTF before version 2.",
@@ -1814,7 +1983,7 @@ impl CtfReaderOpElt {
             self.op = OpData::Cdl(cdl.borrow().clone());
         }
         let mut transform = self.get_transform().borrow_mut();
-        transform.get_ops_mut()[self.op_index] = Arc::new(self.op.clone());
+        transform.get_op_data_vec_mut()[self.op_index] = Arc::new(self.op.clone());
     }
 }
 
@@ -2370,7 +2539,7 @@ impl CtfReaderOpElt {
             // opList. In other words, that this LUT's end() method will be called before any
             // other Op's start().
             let mut transform = self.get_transform().borrow_mut();
-            let ops = transform.get_ops_mut();
+            let ops = transform.get_op_data_vec_mut();
             let len = ops.len();
             let pos = len - 1;
             ops.insert(pos, Arc::new(OpData::Range(p_rng)));
@@ -3187,7 +3356,7 @@ impl XmlReaderElement for CtfReaderOpElt {
             // This code assumes that the current Range is at the end of the opList. In other
             // words, that this Op's end() method will be called before any other Op's start().
             let mut transform = self.get_transform().borrow_mut();
-            let ops = transform.get_ops_mut();
+            let ops = transform.get_op_data_vec_mut();
             let len = ops.len();
             let pos = len - 1;
 
@@ -3225,9 +3394,9 @@ impl XmlReaderElement for CtfReaderOpElt {
 impl XmlReaderContainerElt for CtfReaderOpElt {
     /// A description of the operator, as a child of its metadata.
     ///
-    /// Port of `CTFReaderOpElt::appendMetadata` (CTFReaderHelper.cpp:831-835 @ v2.5.2).
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
-        let item = FormatMetadataImpl::new(name, value)?;
+    /// Port of `CTFReaderOpElt::appendMetadata` (CTFReaderHelper.cpp:925-928 @ v2.6.0).
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
+        let item = metadata;
         match &self.cdl {
             Some(cdl) => cdl
                 .borrow_mut()
@@ -5500,8 +5669,8 @@ impl XmlReaderElement for CtfReaderGradingCurveElt {
 }
 
 impl XmlReaderContainerElt for CtfReaderGradingCurveElt {
-    /// Port of `XmlReaderComplexElt::appendMetadata` (XMLReaderHelper.h:342-344 @ v2.5.2).
-    fn append_metadata(&mut self, _name: &[u8], _value: &[u8]) -> Result<()> {
+    /// Port of `XmlReaderComplexElt::appendMetadata` (XMLReaderHelper.h:343-345 @ v2.6.0).
+    fn append_metadata(&mut self, _metadata: FormatMetadataImpl) -> Result<()> {
         Ok(())
     }
 }
@@ -5813,9 +5982,9 @@ impl XmlReaderElement for CtfReaderSatNodeElt {
 }
 
 impl XmlReaderContainerElt for CtfReaderSatNodeElt {
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
         let cdl = self.get_cdl();
-        sat_node_append_metadata(&cdl, name, value)
+        sat_node_append_metadata(&cdl, metadata)
     }
 }
 
@@ -5891,9 +6060,9 @@ impl XmlReaderElement for CtfReaderSopNodeElt {
 }
 
 impl XmlReaderContainerElt for CtfReaderSopNodeElt {
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
         let cdl = self.get_cdl();
-        XmlReaderSopNodeBase::append_metadata(&cdl, name, value)
+        XmlReaderSopNodeBase::append_metadata(&cdl, metadata)
     }
 }
 
@@ -6113,7 +6282,7 @@ impl XmlReaderElement for CtfReaderIndexMapElt {
 
         let parent = self.plain.get_parent().clone();
         let mut p_op_elt = op_parent(&parent);
-        if p_op_elt.get_transform().borrow().get_ctf_version() < CTF_PROCESS_LIST_VERSION_2_0 {
+        if p_op_elt.get_transform().borrow().get_ctf_version() < &CTF_PROCESS_LIST_VERSION_2_0 {
             p_op_elt.end_index_map(self.position)
         } else {
             let mut dbg = OStringStream::new(Crt::NATIVE);

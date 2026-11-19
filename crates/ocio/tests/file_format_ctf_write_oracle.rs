@@ -487,7 +487,7 @@ fn groups_of_matrices_write_as_in_the_wheel() {
 fn processors_of_matrix_files_write_as_in_the_wheel() {
     let mut cases = Vec::new();
     for src in [
-        "clf/matrix_example.clf",
+        "clf/pre-smpte_only/matrix_example.clf",
         "clf/matrix_3x4_example.clf",
         "matrix_example4x4.ctf",
         "matrix_offsets_example.ctf",
@@ -532,6 +532,177 @@ fn info_metadata_writes_as_in_the_wheel() {
                 Forward,
                 format,
             ));
+        }
+    }
+    check_writes(&cases);
+}
+
+/// SMPTE ST 2136-1 CLF (OCIO 2.6.0) in the writer: the SMPTE namespace beside
+/// compCLFversion, the id the writer makes from the ops when the group has none, the Id
+/// element (refused in a CLF when it isn't a SMPTE Id), the `xmlns:*` attributes, and the
+/// descriptions and descriptors with their names and attributes, from groups and from read
+/// files.
+#[test]
+fn smpte_metadata_writes_as_in_the_wheel() {
+    const VALID: &str = "urn:uuid:123e4567-e89b-12d3-a456-426655440000";
+    let m = matrix_cases();
+    let groups: Vec<(&str, Vec<Case>)> = vec![
+        ("empty", Vec::new()),
+        ("one matrix", vec![m[1].clone()]),
+        ("two matrices", vec![m[2].clone(), m[5].clone()]),
+    ];
+    let metadata: &[(&str, &[MetadataCall<'_>])] = &[
+        ("no metadata", &[]),
+        ("an id", &[("setID", "UID42", "")]),
+        ("an Id", &[("addChildElement", "Id", VALID)]),
+        (
+            "an Id and an id",
+            &[("setID", "UID42", ""), ("addChildElement", "Id", VALID)],
+        ),
+        (
+            "an Id that isn't SMPTE",
+            &[("addChildElement", "Id", "abc")],
+        ),
+        (
+            "an Id in upper case",
+            &[(
+                "addChildElement",
+                "Id",
+                "urn:uuid:123E4567-E89B-12D3-A456-426655440000",
+            )],
+        ),
+        (
+            "an Id with URN in upper case",
+            &[(
+                "addChildElement",
+                "Id",
+                "URN:uuid:123e4567-e89b-12d3-a456-426655440000",
+            )],
+        ),
+        (
+            "an Id with a trailing space",
+            &[(
+                "addChildElement",
+                "Id",
+                "urn:uuid:123e4567-e89b-12d3-a456-426655440000 ",
+            )],
+        ),
+        ("an empty Id", &[("addChildElement", "Id", "")]),
+        (
+            "two Id, the SMPTE one last",
+            &[
+                ("addChildElement", "Id", "abc"),
+                ("addChildElement", "Id", VALID),
+            ],
+        ),
+        (
+            "two Id, the SMPTE one first",
+            &[
+                ("addChildElement", "Id", VALID),
+                ("addChildElement", "Id", "abc"),
+            ],
+        ),
+        ("an id element", &[("addChildElement", "id", "abc")]),
+        (
+            "xmlns attributes",
+            &[
+                ("__setitem__", "xmlns:b", "urn:b"),
+                ("__setitem__", "xmlns:a", "urn:a & <a>"),
+                ("__setitem__", "xmlns:e", ""),
+                ("__setitem__", "XMLNS:c", "urn:c"),
+                ("__setitem__", "xmlns", "urn:d"),
+                ("__setitem__", "xmlns:", "urn:empty prefix"),
+            ],
+        ),
+        (
+            "the attributes in another order and case",
+            &[
+                ("__setitem__", "xmlns:b", "urn:b"),
+                ("__setitem__", "INVERSEOF", "inv"),
+                ("__setitem__", "NAME", "n"),
+                ("__setitem__", "ID", "i"),
+            ],
+        ),
+        (
+            "descriptions and descriptors in other cases",
+            &[
+                ("addChildElement", "OutputDescriptor", "o1"),
+                ("addChildElement", "description", "lower"),
+                ("addChildElement", "INPUTDESCRIPTOR", "i1"),
+                ("addChildElement", "Description", "d"),
+                ("addChildElement", "OutputDescriptor", "o2"),
+                ("addChildElement", "InputDescriptor", "i2"),
+                ("addChildElement", "Description", ""),
+            ],
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (label, children) in &groups {
+        for (md_label, md) in metadata {
+            for format in [CTF, CLF] {
+                cases.push(group_case(
+                    &format!("{label}, {md_label}"),
+                    children,
+                    md,
+                    format,
+                ));
+            }
+        }
+    }
+
+    // Read files: their Id, xmlns:* attributes, descriptions with a language.
+    let m = "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Description language=\"en\">md</Description>\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n";
+    let x = "xmlns=\"http://www.smpte-ra.org/ns/2136-1/2024\"";
+    for (label, attrs, body) in [
+        (
+            "an Id and descriptions with a language",
+            format!("{x} xmlns:a=\"urn:a\" name=\"n\""),
+            format!(
+                "    <Id>urn:uuid:9d768121-0cf9-40a3-a8e3-7b49f79858a7</Id>\n\
+                 \x20   <Description language=\"en\">e</Description>\n\
+                 \x20   <Description>  spaced  </Description>\n\
+                 \x20   <InputDescriptor language=\"fr\">i</InputDescriptor>\n\
+                 \x20   <OutputDescriptor language=\"de\">o</OutputDescriptor>\n\
+                 \x20   <OutputDescriptor/>\n{m}"
+            ),
+        ),
+        (
+            "an Id that isn't SMPTE",
+            format!("id=\"a\" {x}"),
+            format!("    <Id>abc</Id>\n{m}"),
+        ),
+        (
+            "an Id in an operator",
+            "id=\"a\" compCLFversion=\"3\"".to_owned(),
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Id>op id</Id>\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n"
+                .to_owned(),
+        ),
+    ] {
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <ProcessList {attrs}>\n{body}</ProcessList>\n"
+        );
+        let dir = write_files(&[file("smpte.clf", text.into_bytes())]);
+        for format in [CTF, CLF] {
+            for dir_ in [Forward, Inverse] {
+                cases.push(path_case(label, &format!("{dir}/smpte.clf"), dir_, format));
+            }
+        }
+    }
+    for src in [
+        "clf/bit_depth_identity.clf",
+        "clf/smpte_only/namespaces.clf",
+        "clf/smpte_only/illegal/id_bad_value.clf",
+        "clf/pre-smpte_only/process_list_v3_namespace.clf",
+    ] {
+        for dir in [Forward, Inverse] {
+            for format in [CTF, CLF] {
+                cases.push(processor_case(src, dir, format));
+            }
         }
     }
     check_writes(&cases);

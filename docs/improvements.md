@@ -2948,6 +2948,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** set `info2.bake_capabilities`.
 - **Status:** matched in `p4-ctf-read-1` (`crates/ocio/src/fileformats/file_format_ctf.rs`,
   `format_info`).
+- **2.6.0** (`ocio26-clf`): upstream sets the CTF info's bake capabilities
+  (`fileformats/FileFormatCTF.cpp:156-188` @ v2.6.0), and the port does too. Still no one
+  notices: the baker reads the first info only (`Baker.cpp:249-251` @ v2.6.0).
 
 ### I-181. A CTF LUT's raw halfs outside [0, 65536) keep the low 16 bits of their `int`
 
@@ -3999,6 +4002,68 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `ocio26-deps` (chunk 7b, `crates/ocio/src/minizip/mz_os.rs`), with
   the target read in safe Rust (deviation D-22); `crates/ocio/tests/ocioz_extract_oracle.rs`,
   `prepared_links` (Windows).
+
+### I-1030. A CLF description's `language` is read from its first attribute's name
+
+- **Upstream:** `CTFReaderDescElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:859-879` @
+  v2.6.0), which reads the ProcessList's, an operator's and a CDL's Description,
+  InputDescriptor, OutputDescriptor, InputDescription and ViewingDescription, walks the
+  attributes with `i` but compares `*atts`, the first attribute's name, with `language` at
+  every step. When the first attribute is `language`, every attribute's value is taken as the
+  language in turn: the last one's wins (`language="en" a="x"` reads as language `x`), and an
+  empty value of any later attribute fails with "Attribute 'language' does not have a value.".
+  When the first attribute is another one, a `language` after it is ignored.
+- **Who notices:** SMPTE ST 2136-1 files whose descriptions carry another attribute beside
+  `language`: the language is lost or replaced in the processor's metadata and in a file
+  written from it.
+- **A fix:** compare `atts[i]`.
+- **Status:** ported as upstream in `ocio26-clf` (`crates/ocio/src/fileformats/ctf/
+  ctf_reader_helper.rs`, `CtfReaderDescElt`); checked against the wheel
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`, `smpte_files_read_as_in_the_wheel`: "a
+  language as the second attribute", "a language and another attribute", "a language, then an
+  empty attribute").
+
+### I-1031. A CLF Info element with a namespace prefix can't be closed
+
+- **Upstream:** the CTF reader strips an element name's namespace prefix (past its last
+  `:`) in the start and end handlers, except inside an Info element, whose children keep
+  their prefixes (`m_keepNamespaces`, `fileformats/FileFormatCTF.cpp:552-558, 867-872,
+  1105-1111, 1167-1171` @ v2.6.0). The Info's own start tag is stripped before the counter
+  goes up, so `<c:Info>` opens an element named `Info`; its end tag is read with the counter
+  still up, so `</c:Info>` keeps its prefix, doesn't match, and the parse fails with "Tag
+  'c:Info' is missing.". An empty `<c:Info/>` fails the same way.
+- **Who notices:** CLF files that put every element in a prefixed namespace, as
+  `clf/smpte_only/namespaces.clf` does, and also have an Info.
+- **A fix:** decrement the counter before stripping the end tag's name when the element on
+  top of the stack is the Info, or strip the Info's end tag always.
+- **Status:** ported as upstream in `ocio26-clf` (`crates/ocio/src/fileformats/
+  file_format_ctf.rs`, `strip_namespace`); checked against the wheel
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`, `smpte_files_read_as_in_the_wheel`: "a
+  prefixed Info", "an empty prefixed Info").
+
+### I-1032. A CLF Id element is read under any element
+
+- **Upstream:** the CTF reader makes a `CTFReaderIdElt` for an `Id` (ignoring case) under any
+  container (`SupportedElement(name, pElt, TAG_ID, "", ...)`, `fileformats/FileFormatCTF.cpp:
+  787-794` @ v2.6.0), and its end appends it to its parent's metadata
+  (`CTFReaderIdElt::end`, `fileformats/ctf/CTFReaderHelper.cpp:302-318`), as the SMPTE
+  ProcessList's Id. Under an operator it becomes an `Id` child of the op's metadata, which no
+  writer writes back; under a CDL's SOPNode or SatNode the node renames it
+  (`XmlReaderSOPNodeBaseElt::appendMetadata`, `XmlReaderSatNodeBaseElt::appendMetadata`,
+  `xmlutils/XMLReaderHelper.h:396-401, 456-461`) into an `SOPDescription` or
+  `SATDescription`, which a CTF or CLF writes back as a Description of that node. Each one
+  that isn't a SMPTE Id is also logged as "is not a SMPTE ST 2136-1 compliant Id value.".
+  2.5.2 logged such an `Id` as an unknown element and dropped it.
+- **Who notices:** files with an `Id` element inside an operator (no SMPTE schema puts one
+  there): a CDL node's Id turns into a description in the processor's metadata and in files
+  written from it.
+- **A fix:** accept the Id element under the ProcessList only, as the Info.
+- **Status:** ported as upstream in `ocio26-clf` (`crates/ocio/src/fileformats/
+  file_format_ctf.rs`, `CtfReaderIdElt`); checked against the wheel
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`, `smpte_files_read_as_in_the_wheel` and
+  `smpte_files_log_as_in_the_wheel`: "an Id in an operator", "an Id in a SOPNode and a
+  SatNode"; `file_format_ctf_write_oracle.rs`, `smpte_metadata_writes_as_in_the_wheel`: "an
+  Id in an operator").
 
 ## App helpers
 
