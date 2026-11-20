@@ -3848,7 +3848,7 @@ fn remove_color_space() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(Config, display_view)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Config, display_view)` @ v2.6.0.
 #[test]
 fn display_view() {
     use crate::view_transform::ViewTransform;

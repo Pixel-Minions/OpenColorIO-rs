@@ -3098,7 +3098,7 @@ fn vt_from_ref_builtin_style(config: &Config, name: &str) -> &'static [u8] {
     bi.style()
 }
 
-/// Port of `OCIO_ADD_TEST(MergeConfigs, view_transforms_section)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(MergeConfigs, view_transforms_section)` @ v2.6.0.
 #[test]
 fn view_transforms_section() {
     let base_config = get_base_config().unwrap();
@@ -3453,7 +3453,7 @@ fn view_transforms_section() {
         const PREFIX: &str =
             "The Input config contains a value that would override the Base config: ";
 
-        // Test that an error is thrown when the the input values are different.
+        // Test that an error is thrown when the input values are different.
         {
             check_for_log_or_exception(
                 LogType::Error,
