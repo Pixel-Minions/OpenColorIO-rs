@@ -385,6 +385,8 @@ const fn divide_by_pow10_info(n: i32) -> (u64, u32) {
 /// most `10^(big_n + 1)`.
 ///
 /// Port of `div::check_divisibility_and_divide_by_pow10<N, UInt>(n)` (dragonbox.h:1186-1204).
+// `UintFast32` is already `u64` on Linux.
+#[allow(clippy::unnecessary_cast)]
 fn check_divisibility_and_divide_by_pow10(big_n: i32, n: u64) -> (bool, u64) {
     debug_assert!(n <= compute_power(big_n + 1, 10));
     let (magic_number, shift_amount) = divide_by_pow10_info(big_n);
