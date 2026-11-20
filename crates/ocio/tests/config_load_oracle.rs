@@ -557,10 +557,20 @@ fn dump_probes(c: &Config, dump: &Value) -> Vec<String> {
                 );
             }
             by_probe(display, &view, &entry["by_probe"], compare);
-            if let Some(by_display) = entry.get("by_display") {
-                for d in by_display.as_array().expect("by_display") {
-                    by_probe(&bytes(&d[0]), &view, &d[1], compare);
+            // A display's view has its by_display list, a shared view's entry (display "")
+            // none: a dump without it fails rather than probing less.
+            match (display.is_empty(), entry.get("by_display")) {
+                (false, Some(by_display)) => {
+                    for d in by_display.as_array().expect("by_display") {
+                        by_probe(&bytes(&d[0]), &view, &d[1], compare);
+                    }
                 }
+                (true, None) => {}
+                (_, by_display) => panic!(
+                    "the dump's view {:?} of display {:?} has by_display {by_display:?}",
+                    String::from_utf8_lossy(&view),
+                    String::from_utf8_lossy(display)
+                ),
             }
         };
     let mut probed = 0;
