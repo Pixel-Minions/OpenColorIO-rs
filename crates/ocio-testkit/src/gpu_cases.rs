@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 
 /// One `OCIO_ADD_GPU_TEST(MatrixOps, ...)`: a `MatrixTransform` with a direction, and a
 /// matrix and offsets when the test sets them (`AddMatrixTest`,
-/// tests/gpu/MatrixOp_test.cpp:16-35 @ v2.5.2).
+/// tests/gpu/MatrixOp_test.cpp:17-36 @ v2.6.0).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MatrixCase {
     /// The test's name.
@@ -63,17 +63,17 @@ impl MatrixCase {
 /// in 2.5.2).
 const MATRIX_EPSILON: f32 = 1e-6;
 
-/// The matrix the tests share (tests/gpu/MatrixOp_test.cpp:40-43 @ v2.5.2).
+/// The matrix the tests share (tests/gpu/MatrixOp_test.cpp:41-44 @ v2.6.0).
 const MATRIX: [f64; 16] = [
     1.1, 0.2, 0.3, 0.4, 0.5, 1.6, 0.7, 0.8, 0.2, 0.1, 1.1, 0.2, 0.3, 0.4, 0.5, 1.6,
 ];
 
-/// The scale the tests share (tests/gpu/MatrixOp_test.cpp:51-54 @ v2.5.2).
+/// The scale the tests share (tests/gpu/MatrixOp_test.cpp:52-55 @ v2.6.0).
 const SCALE: [f64; 16] = [
     1.0, 0.0, 0.0, 0.0, 0.0, -0.3, 0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 0.0, 1.0,
 ];
 
-/// The `MatrixOps` GPU tests (tests/gpu/MatrixOp_test.cpp:38-145 @ v2.5.2), in the file's
+/// The `MatrixOps` GPU tests (tests/gpu/MatrixOp_test.cpp:39-146 @ v2.6.0), in the file's
 /// order.
 pub fn matrix_cases() -> Vec<MatrixCase> {
     let case = |name, inverse, matrix, offset, generic: bool| MatrixCase {
@@ -1147,8 +1147,33 @@ pub fn log_cases() -> Vec<LogCase> {
 mod tests {
     use super::*;
 
+    /// Every `MatrixOps` case's error threshold is the `g_epsilon` of the pinned upstream test
+    /// file (tests/gpu/MatrixOp_test.cpp:13 @ v2.6.0), read from the submodule.
+    #[test]
+    fn matrix_threshold_is_upstreams_g_epsilon() {
+        let path = crate::paths::upstream_dir().join("tests/gpu/MatrixOp_test.cpp");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = text
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("const float g_epsilon = "))
+            .collect();
+        assert_eq!(lines.len(), 1, "{}", path.display());
+        let literal = lines[0].strip_suffix("f;").expect("a float literal");
+        let g_epsilon: f32 = literal.parse().unwrap();
+        let cases = matrix_cases();
+        assert_eq!(cases.len(), 10);
+        for case in cases {
+            assert_eq!(
+                case.error_threshold.to_bits(),
+                g_epsilon.to_bits(),
+                "{}",
+                case.name
+            );
+        }
+    }
+
     /// Each of upstream's ten tests, in the file's order, builds the spec `AddMatrixTest`
-    /// builds from its arguments (tests/gpu/MatrixOp_test.cpp:38-145 @ v2.5.2): its name, its
+    /// builds from its arguments (tests/gpu/MatrixOp_test.cpp:39-146 @ v2.6.0): its name, its
     /// direction, its matrix and offsets when it passes them, and the generic shader (not the
     /// legacy one) for the last two only.
     #[test]

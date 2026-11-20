@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! `tests/gpu/MatrixOp_test.cpp` @ v2.5.2: all ten cases, including eight legacy.
+//! `tests/gpu/MatrixOp_test.cpp` @ v2.6.0: all ten cases, including eight legacy.
 //! Wheel CPU expectations are one uncached batch; shaders are actual ordinary or
 //! native-legacy wheel outputs, rendered bit-for-bit on the same GL context.
 #![cfg(any(target_os = "linux", feature = "shader-corpus"))]
@@ -47,7 +47,7 @@ fn references() -> &'static [ReferenceRun] {
     })
 }
 
-/// Port of AddMatrixTest (`MatrixOp_test.cpp:16-35` @ v2.5.2).
+/// Port of AddMatrixTest (`MatrixOp_test.cpp:17-36` @ v2.6.0).
 fn run_case(index: usize) {
     let cases = matrix_cases();
     let case = cases[index];
@@ -77,52 +77,52 @@ fn run_case(index: usize) {
     );
 }
 
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix)` @ v2.6.0.
 #[test]
 fn matrix() {
     run_case(0);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, scale)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, scale)` @ v2.6.0.
 #[test]
 fn scale() {
     run_case(1);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, offset)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, offset)` @ v2.6.0.
 #[test]
 fn offset() {
     run_case(2);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_offset)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_offset)` @ v2.6.0.
 #[test]
 fn matrix_offset() {
     run_case(3);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_inverse)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_inverse)` @ v2.6.0.
 #[test]
 fn matrix_inverse() {
     run_case(4);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, scale_inverse)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, scale_inverse)` @ v2.6.0.
 #[test]
 fn scale_inverse() {
     run_case(5);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, offset_inverse)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, offset_inverse)` @ v2.6.0.
 #[test]
 fn offset_inverse() {
     run_case(6);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_offset_inverse)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_offset_inverse)` @ v2.6.0.
 #[test]
 fn matrix_offset_inverse() {
     run_case(7);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_offset_generic_shader)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_offset_generic_shader)` @ v2.6.0.
 #[test]
 fn matrix_offset_generic_shader() {
     run_case(8);
 }
-/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_offset_inverse_generic_shader)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, matrix_offset_inverse_generic_shader)` @ v2.6.0.
 #[test]
 fn matrix_offset_inverse_generic_shader() {
     run_case(9);
