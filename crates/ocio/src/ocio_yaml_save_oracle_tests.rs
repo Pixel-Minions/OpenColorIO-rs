@@ -258,9 +258,22 @@ fn transforms_save_as_in_the_wheel() {
 
 /// The fixed functions: their styles, parameters, and the warning saving the experimental
 /// ACES 2 styles logs (version 2.5: the config refuses the styles of later versions in older
-/// ones).
+/// ones). Version 2.6 adds ACES2_RGB_TO_HMJ, which saves without that warning: the saver's
+/// list of experimental styles doesn't name it (OCIOYaml.cpp:1509-1517 @ v2.6.0). JMh, which
+/// it names, is saved at 2.6 too, so the version logs the warning where upstream does.
 #[test]
 fn fixed_functions_save_as_in_the_wheel() {
+    check_save_v(
+        "2.6",
+        &[
+            "!<FixedFunctionTransform> {style: ACES2_RGB_TO_HMJ, params: [0.7347, 0.2653, 0, 1, \
+             0.0001, -0.077, 0.32168, 0.33767]}",
+            "!<FixedFunctionTransform> {style: ACES2_RGB_TO_HMJ, params: [0.7347, 0.2653, 0, 1, \
+             0.0001, -0.077, 0.32168, 0.33767], direction: inverse}",
+            "!<FixedFunctionTransform> {style: ACES2_RGB_TO_JMh, params: [0.7347, 0.2653, 0, 1, \
+             0.0001, -0.077, 0.32168, 0.33767]}",
+        ],
+    );
     check_save_v(
         "2.5",
         &[

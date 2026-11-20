@@ -783,7 +783,7 @@ path = "src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.h"
 kind = "src"
 target = ["crates/ocio/src/builtinconfigs/builtin_config_registry.rs"]
 status = "done"
-note = "p3-loading 3.10a: BuiltinConfigRegistryImpl and BuiltinConfigData, as BuiltinConfigRegistry. ocio26-config: the declaration of IsReservedConfigName (8, 15-23) ported at v2.6.0. ocio26-config: the declaration of IsReservedConfigName ported."
+note = "p3-loading 3.10a: BuiltinConfigRegistryImpl and BuiltinConfigData, as BuiltinConfigRegistry. ocio26-config: the declaration of IsReservedConfigName (8, 15-23) ported at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/builtinconfigs/CG.cpp.in"
