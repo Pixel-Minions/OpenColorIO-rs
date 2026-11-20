@@ -15,7 +15,8 @@ matrix until step 3 is done.
    packages carry the license files of the crates in `THIRD-PARTY-NOTICES.md`, and
    `cargo xtask wheel-check` holds the wheel to that. For a release that moves the pinned
    OpenColorIO (1.1.0, 2.6.0), `cargo xtask ci --main --no-stale` passes: no ported test is
-   still marked `@ v2.5.2` where its upstream body changed (docs/parity.md, "Stale ports").
+   still marked `@ v2.5.2` where its upstream body or file preamble changed (docs/parity.md,
+   "Stale ports").
 2. **Close the decisions.** The owner has decided the final state of `docs/improvements.md`
    (2026-11-03: every entry stays as it is for 1.0.0), and every exception has its row in
    `docs/deviations.md` or `waivers.toml`. The name and hosting are decided (PLAN.md D6 and D14).

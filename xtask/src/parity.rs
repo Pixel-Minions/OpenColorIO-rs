@@ -665,7 +665,7 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     let _ = writeln!(md, "| Open waivers | {} | | |", waivers.waivers.len());
     let _ = writeln!(
         md,
-        "| Stale ports (marked @ {}, upstream body changed since) | {} | | |",
+        "| Stale ports (marked @ {}, upstream body or file preamble changed since) | {} | | |",
         crate::stale::OLD_MARKER,
         stale.len()
     );
@@ -678,9 +678,9 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     let _ = writeln!(md, "\n## Stale ports\n");
     let _ = writeln!(
         md,
-        "Ported tests still marked `@ {}` whose upstream body changed in the pinned release \
-         (`{}`): each owning card re-ports them `@ v2.6.0`; `cargo xtask ci --no-stale` fails \
-         while any remain.\n",
+        "Ported tests still marked `@ {}` whose upstream body or file preamble changed in the \
+         pinned release (`{}`): each owning card re-ports them `@ v2.6.0`; `cargo xtask ci \
+         --no-stale` fails while any remain.\n",
         crate::stale::OLD_MARKER,
         crate::stale::CHANGED_LIST
     );
@@ -727,8 +727,8 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     std::fs::write(&path, md).map_err(|e| e.to_string())?;
     if !stale.is_empty() {
         println!(
-            "parity: warning: {} ported tests are marked @ {} but their upstream body changed \
-             (docs/parity.md, \"Stale ports\")",
+            "parity: warning: {} ported tests are marked @ {} but their upstream body or file \
+             preamble changed (docs/parity.md, \"Stale ports\")",
             stale.len(),
             crate::stale::OLD_MARKER
         );

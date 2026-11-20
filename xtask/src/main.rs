@@ -90,9 +90,11 @@ Guardrails:
                               guards + fixtures verify + ported tests >= the baseline;
                               --main (main and land commits): docs/ratchet.toml and
                               docs/parity.md are current; --no-stale (the release): no
-                              ported test marked @ v2.5.2 whose upstream body changed
+                              ported test marked @ v2.5.2 whose upstream body or file
+                              preamble changed
   upstream-changed [--check]  write (check) xtask/data/upstream-tests-changed-2.6.0.txt,
-                              the upstream tests whose body changed since v2.5.2
+                              the upstream tests whose body or file preamble changed
+                              since v2.5.2
   The ratchet's baseline is docs/ratchet.toml at <rev> (the base: a PR's base, or where the
   branch left phase0) or in <path>; without either, this checkout's own, which a branch
   could lower.
@@ -278,7 +280,7 @@ fn ci(main: bool, no_stale: bool, base: &Baseline) -> Result<(), String> {
 }
 
 /// `cargo xtask ci --no-stale`: an error while a ported test is marked `@ v2.5.2` though its
-/// upstream body changed in the pinned release (`stale.rs`; the release's step).
+/// upstream body or file preamble changed in the pinned release (`stale.rs`; the release's step).
 fn no_stale_markers() -> Result<(), String> {
     stale::upstream_changed(true)?;
     let markers = parity::versioned_markers()?;
@@ -288,7 +290,7 @@ fn no_stale_markers() -> Result<(), String> {
         return Ok(());
     }
     let mut message = format!(
-        "{} ported tests are marked @ {} but their upstream body changed:",
+        "{} ported tests are marked @ {} but their upstream body or file preamble changed:",
         stale.len(),
         stale::OLD_MARKER
     );

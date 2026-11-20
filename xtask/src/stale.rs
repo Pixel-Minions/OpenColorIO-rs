@@ -2,16 +2,18 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Stale port markers (the 2.6.0 plan's M2, option (b), orchestrator 2026-11-18): a test
-//! ported from 2.5.2 keeps its ` @ v2.5.2.` marker, and still counts, when its upstream body
-//! did not change in 2.6.0. One whose body did change is stale until its card re-ports it
-//! ` @ v2.6.0.`.
+//! ported from 2.5.2 keeps its ` @ v2.5.2.` marker, and still counts, when neither its upstream
+//! body nor its file's preamble changed in 2.6.0. One whose body or preamble did change is stale
+//! until its card re-ports it ` @ v2.6.0.`.
 //!
-//! The upstream tests whose body changed are committed as data
+//! The upstream tests whose body or preamble changed are committed as data
 //! ([`CHANGED_LIST`]), since a checkout's submodule may lack the `v2.5.2` tag:
 //! `cargo xtask upstream-changed` writes the list from the submodule's two tags, and
 //! `--check` checks it (a missing tag skips with a message). A body runs from its macro at the
 //! start of a line to the next such macro, trailing spaces and tabs ignored, as in
-//! docs/ocio-2.6-plan.md's table.
+//! docs/ocio-2.6-plan.md's table. A file's preamble is what comes before its first macro: the
+//! includes, helpers and shared data every test of the file may use, so a change there
+//! charges each of them (a test that moved to another file is charged by its new file's).
 //!
 //! `cargo xtask parity` warns about the stale markers and lists them in docs/parity.md;
 //! `cargo xtask ci --no-stale` (the release's step, docs/release-checklist.md) fails while
@@ -22,9 +24,9 @@ use std::process::Command;
 
 use ocio_testkit::paths;
 
-/// The committed list of the upstream tests whose body differs between [`OLD_TAG`] and
-/// [`NEW_TAG`], relative to the workspace root: one `<suite> <id>` a line (`cpu
-/// OpOptimizers/combine_ops`), sorted, after `#` comment lines.
+/// The committed list of the upstream tests whose body, or whose file's preamble, differs
+/// between [`OLD_TAG`] and [`NEW_TAG`], relative to the workspace root: one `<suite> <id>` a
+/// line (`cpu OpOptimizers/combine_ops`), sorted, after `#` comment lines.
 pub(crate) const CHANGED_LIST: &str = "xtask/data/upstream-tests-changed-2.6.0.txt";
 
 /// The release the stale markers name.
@@ -96,6 +98,34 @@ pub(crate) fn bodies(text: &str) -> BTreeMap<TestId, String> {
     out
 }
 
+/// The preamble of one upstream test file's `text`: the lines before its first macro line,
+/// each without its trailing spaces and tabs, the whole trimmed.
+pub(crate) fn preamble(text: &str) -> String {
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .take_while(|line| macro_at_line_start(line).is_none())
+        .map(|line| line.trim_end_matches([' ', '\t']))
+        .collect();
+    lines.join("\n").trim().to_string()
+}
+
+/// One upstream test file at a tag: its [`preamble`] and its tests' [`bodies`].
+#[derive(Debug, Default)]
+pub(crate) struct TestFile {
+    pub(crate) preamble: String,
+    pub(crate) bodies: BTreeMap<TestId, String>,
+}
+
+impl TestFile {
+    pub(crate) fn parse(text: &str) -> TestFile {
+        TestFile {
+            preamble: preamble(text),
+            bodies: bodies(text),
+        }
+    }
+}
+
 /// `git -C upstream/OpenColorIO <args>`, its stdout; `None` when git fails.
 fn git(args: &[&str]) -> Option<String> {
     let output = Command::new("git")
@@ -110,9 +140,9 @@ fn git(args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// Every test of `tests/cpu` and `tests/gpu` at `tag` and its body; `None` when the submodule
+/// Every test file of `tests/cpu` and `tests/gpu` at `tag`, by path; `None` when the submodule
 /// doesn't have the tag.
-fn tests_at(tag: &str) -> Option<BTreeMap<TestId, String>> {
+fn tests_at(tag: &str) -> Option<BTreeMap<String, TestFile>> {
     git(&[
         "rev-parse",
         "--verify",
@@ -130,27 +160,40 @@ fn tests_at(tag: &str) -> Option<BTreeMap<TestId, String>> {
     let mut out = BTreeMap::new();
     for file in files.lines().filter(|f| f.ends_with(".cpp")) {
         let text = git(&["show", &format!("{tag}:{file}")])?;
-        out.extend(bodies(&text));
+        out.insert(file.to_string(), TestFile::parse(&text));
     }
     Some(out)
 }
 
-/// The tests whose body differs between two releases' tests (new and removed ones aside).
+/// The tests of both releases (new and removed ones aside) whose body differs, or whose file in
+/// `new` has a preamble other than the same file's in `old`.
 pub(crate) fn changed(
-    old: &BTreeMap<TestId, String>,
-    new: &BTreeMap<TestId, String>,
+    old: &BTreeMap<String, TestFile>,
+    new: &BTreeMap<String, TestFile>,
 ) -> BTreeSet<TestId> {
-    new.iter()
-        .filter(|(id, body)| old.get(*id).is_some_and(|b| b != *body))
-        .map(|(id, _)| id.clone())
-        .collect()
+    let old_bodies: BTreeMap<&TestId, &String> =
+        old.values().flat_map(|file| file.bodies.iter()).collect();
+    let mut out = BTreeSet::new();
+    for (path, file) in new {
+        let preamble_changed = old.get(path).is_some_and(|o| o.preamble != file.preamble);
+        for (id, body) in &file.bodies {
+            if old_bodies
+                .get(id)
+                .is_some_and(|b| *b != body || preamble_changed)
+            {
+                out.insert(id.clone());
+            }
+        }
+    }
+    out
 }
 
 /// The text of [`CHANGED_LIST`] for `changed`.
 fn list_text(changed: &BTreeSet<TestId>) -> String {
     let mut text = format!(
-        "# Upstream tests whose body differs between {OLD_TAG} and {NEW_TAG} (trailing spaces\n\
-         # ignored): `cargo xtask upstream-changed` writes this file, `--check` checks it.\n"
+        "# Upstream tests whose body, or whose file's preamble, differs between {OLD_TAG} and\n\
+         # {NEW_TAG} (trailing spaces ignored): `cargo xtask upstream-changed` writes this file,\n\
+         # `--check` checks it.\n"
     );
     for (suite, id) in changed {
         text.push_str(&format!("{suite} {id}\n"));
@@ -267,19 +310,69 @@ mod tests {
         );
     }
 
+    /// One file `a.cpp` of `text`.
+    fn files(text: &str) -> BTreeMap<String, TestFile> {
+        [("a.cpp".to_string(), TestFile::parse(text))].into()
+    }
+
     #[test]
     fn only_changed_bodies_of_tests_in_both_count() {
-        let old = bodies(
-            "OCIO_ADD_TEST(A, same)\n{}\nOCIO_ADD_TEST(A, edit)\n{ 1; }\nOCIO_ADD_TEST(A, gone)\n{}\n",
+        let old = files(
+            "// a\nOCIO_ADD_TEST(A, same)\n{}\nOCIO_ADD_TEST(A, edit)\n{ 1; }\nOCIO_ADD_TEST(A, gone)\n{}\n",
         );
-        let new = bodies(
-            "OCIO_ADD_TEST(A, same)\n{}   \nOCIO_ADD_TEST(A, edit)\n{ 2; }\nOCIO_ADD_TEST(A, new)\n{}\n",
+        let new = files(
+            "// a  \r\nOCIO_ADD_TEST(A, same)\n{}   \nOCIO_ADD_TEST(A, edit)\n{ 2; }\nOCIO_ADD_TEST(A, new)\n{}\n",
         );
         let c = changed(&old, &new);
         assert_eq!(
             c.into_iter().collect::<Vec<_>>(),
             [("cpu".to_string(), "A/edit".to_string())]
         );
+    }
+
+    #[test]
+    fn the_preamble_runs_to_the_first_macro_at_a_line_start() {
+        let text = "// header  \r\n#include <x>\n  OCIO_ADD_TEST(H, i) indented\n\nOCIO_ADD_TEST(A, b)\n{}\n";
+        assert_eq!(
+            preamble(text),
+            "// header\n#include <x>\n  OCIO_ADD_TEST(H, i) indented"
+        );
+        assert_eq!(preamble("OCIO_ADD_GPU_TEST(C, d)\n{}\n"), "");
+    }
+
+    /// A changed preamble charges every test of its file that both releases have, and no test
+    /// of another file; a test that moved is charged by its new file's preamble.
+    #[test]
+    fn a_changed_preamble_charges_every_test_of_its_file() {
+        let old: BTreeMap<String, TestFile> = [
+            (
+                "a.cpp".to_string(),
+                TestFile::parse(
+                    "const float e = 5e-7f;\nOCIO_ADD_TEST(A, x)\n{}\nOCIO_ADD_TEST(A, y)\n{}\n",
+                ),
+            ),
+            (
+                "b.cpp".to_string(),
+                TestFile::parse("// b\nOCIO_ADD_TEST(B, z)\n{}\nOCIO_ADD_TEST(B, moved)\n{}\n"),
+            ),
+        ]
+        .into();
+        let new: BTreeMap<String, TestFile> = [
+            (
+                "a.cpp".to_string(),
+                TestFile::parse("const float e = 1e-6f;\nOCIO_ADD_TEST(A, x)\n{}\nOCIO_ADD_TEST(A, y)\n{}\nOCIO_ADD_TEST(A, new)\n{}\nOCIO_ADD_TEST(B, moved)\n{}\n"),
+            ),
+            ("b.cpp".to_string(), TestFile::parse("// b\nOCIO_ADD_TEST(B, z)\n{}\n")),
+            ("c.cpp".to_string(), TestFile::parse("// new file\nOCIO_ADD_TEST(C, w)\n{}\n")),
+        ]
+        .into();
+        let id = |s: &str| ("cpu".to_string(), s.to_string());
+        assert_eq!(
+            changed(&old, &new).into_iter().collect::<Vec<_>>(),
+            [id("A/x"), id("A/y"), id("B/moved")]
+        );
+        // The same preamble charges nothing.
+        assert!(changed(&old, &old).is_empty());
     }
 
     #[test]
