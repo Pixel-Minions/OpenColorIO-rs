@@ -220,6 +220,28 @@ fn generated_cases() -> Vec<Case> {
             "an empty collection.ccc",
             "<ColorCorrectionCollection/>\n".into(),
         ),
+        // An error, then an unknown element on the same line: the reader stops the parser at
+        // the error (PR #2350), so the element is never seen.
+        (
+            "an error, then an unknown element on its line.cc.cc",
+            "<ColorCorrection id=\"a\"><SOPNode><Slope>1 2</Slope><Offset>0 0 0</Offset>\
+             <Power>1 1 1</Power></SOPNode><Foo/></ColorCorrection>\n"
+                .into(),
+        ),
+        (
+            "an error, then an unknown element on its line.ccc",
+            "<ColorCorrectionCollection><ColorCorrection id=\"a\"><SOPNode><Slope>1 2</Slope>\
+             <Offset>0 0 0</Offset><Power>1 1 1</Power></SOPNode><Foo/></ColorCorrection>\
+             </ColorCorrectionCollection>\n"
+                .into(),
+        ),
+        (
+            "an error, then an unknown element on its line.cdl",
+            "<ColorDecisionList><ColorDecision><ColorCorrection id=\"a\"><SOPNode>\
+             <Slope>1 2</Slope><Offset>0 0 0</Offset><Power>1 1 1</Power></SOPNode><Foo/>\
+             </ColorCorrection></ColorDecision></ColorDecisionList>\n"
+                .into(),
+        ),
         ("text in the collection.ccc", ccc(&format!("text\n{two}"))),
         ("a CC as .ccc.ccc", cc(Some("a"), "1 1 1")),
         ("a CCC as .cc.cc", ccc(&two)),

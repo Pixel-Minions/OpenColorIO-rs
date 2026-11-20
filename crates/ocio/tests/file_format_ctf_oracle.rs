@@ -605,6 +605,21 @@ fn smpte_cases() -> Vec<Case> {
             )
             .as_bytes(),
         ),
+        // The prefixes are stripped again after an Info, which keeps its elements' prefixes.
+        case(
+            "prefixed elements after an Info",
+            "lut.clf",
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <c:ProcessList xmlns:c=\"{SMPTE}\" id=\"a\" compCLFversion=\"3\">\n\
+                 \x20   <Info><c:Copyright>c</c:Copyright></Info>\n\
+                 \x20   <c:Description>d</c:Description>\n\
+                 \x20   <c:Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+                 \x20       <c:Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</c:Array>\n\
+                 \x20   </c:Matrix>\n</c:ProcessList>\n"
+            )
+            .as_bytes(),
+        ),
         case(
             "prefixes of two colons",
             "lut.ctf",
@@ -699,6 +714,11 @@ fn smpte_cases() -> Vec<Case> {
         ),
         clf("an Id that isn't SMPTE", &x, &with("    <Id>abc</Id>\n")),
         clf("an empty Id", &x, &with("    <Id></Id>\n    <Id/>\n")),
+        clf(
+            "an Id, then an empty one",
+            &x,
+            &with("    <Id>urn:uuid:9d768121-0cf9-40a3-a8e3-7b49f79858a7</Id>\n    <Id/>\n"),
+        ),
         clf(
             "two Id",
             &x,

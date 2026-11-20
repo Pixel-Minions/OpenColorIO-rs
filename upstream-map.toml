@@ -936,7 +936,7 @@ note = "p4-readers 4.3e: the reader (the cubic prelut interpolator in each wheel
 path = "src/OpenColorIO/fileformats/FileFormatCTF.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_ctf.rs"]
-status = "partial"
+status = "done"
 note = "p4-ctf-read-1 4.5b: 1-1216 (the format infos, I-180; isLoadableCTF; XMLParserHelper; read); 4.5c: BuildOp, HandleLUTInterpolation, HandleLUT, buildFileOps (1219-1341); 4.5e: the GammaParams, LogParams, SatNode, Saturation, SOPNode and SOP value elements; 4.5f: the IndexMap element; the operators' readers 4.5g-4.5h; p4-after-p5 4.5i: the ECParams, GradingPrimary and GradingTone parameter elements; p4-ctf-read-3 4.6a: write (1555-1590); 4.6d: its second half (1577-1591) apart as write_ops; p4-ctf-bake 4.8d: bake (1343-1553). 2.6.0: changed at v2.6.0 lines 5, 32, 45-52, 158-187, 248, 260-275, 453-456, 458, 460-483, 540, 552-559, 781-790, 796, 870-871, 883, 920, 1074-1097, 1100, 1105-1112, 1167-1172, 1178, 1180-1203, 1229-1231, 1235-1238, 1242-1251, 1317-1321, 1329-1332, 1344-1351, 1479, 1729-1731, 1734-1740, after 1741 (deleted), 1759-1768, 1773: ocio26-clf ported them (the format infos, I-180 fixed upstream; the name spaces stripped outside an Info, I-1031; the Id and description elements; isLoadableCTF's :ProcessList; write's urn:uuid id from the ops' cache ID and its sub-format; the XML handlers' trampolines and Parse's pending exception of PR #2350, 260-275, 453-483, 1074-1097, 1180-1203, 1317-1321, with the end call expat still makes for an element that ends where it starts, U-790)."
 
 [[file]]
@@ -985,7 +985,7 @@ note = "p4-readers 4.2d: the reader and buildFileOps, checked against the wheel 
 path = "src/OpenColorIO/fileformats/FileFormatIridasLook.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_iridas_look.rs"]
-status = "partial"
+status = "done"
 note = "p4-look 4.4f: the XML parser, the hex floats, the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_look_oracle.rs. 2.6.0: changed at v2.6.0 lines 6, 178-191, 263-266, 268-291, 377-398, 464-486, 556-559: ocio26-clf ported them (the handlers' trampolines and Parse's pending exception, PR #2350)."
 
 [[file]]
@@ -1069,7 +1069,7 @@ note = "see FormatMetadata.cpp. 2.6.0: changed at v2.6.0 lines 58-60: ocio26-clf
 path = "src/OpenColorIO/fileformats/cdl/CDLParser.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/cdl/cdl_parser.rs"]
-status = "partial"
+status = "done"
 note = "2.6.0: changed at v2.6.0 lines 4, 161-164, 250-266, 446, 448, 450-471, 481-496, 498-502, 504-505, 515, 517, 519-538, 883, 885-888, 890-893, 895-900, 902-903, 906-909, 914, 916, 918-924, 926-940, after 941 (deleted), 943-956, 964, 966-969, 971-977, 979-982, 984-989, 991-992, 994-995, 997-1005, 1007, 1009, 1017-1031, 1035-1046: ocio26-clf ported them (the handlers' trampolines and parse's pending exception, PR #2350)."
 
 [[file]]
@@ -1139,7 +1139,7 @@ note = "p4-ctf-read-1 4.5a: the element and attribute names. 2.6.0: changed at v
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs", "crates/ocio/src/fileformats/ctf/ctf_writer.rs"]
-status = "partial"
+status = "done"
 note = "p4-ctf-read-1 4.5a (1-505): CTFVersion, CTFReaderTransform, GetElementsValues, fromMetadata, toMetadata; p4-ctf-read-3 4.6a (ctf_writer.rs): GetOpMinimumVersion and GetMinimumVersion (225-403), WriteDescriptions, WriteValue, SetOStream, WriteValues, OpWriter, BitDepthToCLFString, GetValidatedFileBitDepth (509-811), MatrixWriter (2284-2430), TransformWriter (2518-3004); 4.6b: CDLWriter (813-933), GammaWriter and AddGammaParams (1123-1276, Exponent ops written as gammas), LogWriter, AddLogParam, AddLogParams (1896-2037), RangeWriter and WriteTag (2434-2512); 4.6c: Lut1DWriter (2042-2179), Lut3DWriter (2183-2280); 4.6d: FixedFunctionWriter (1053-1119), GradingRGBCurveWriter (1502-1630); p4-after-p5 4.6f: ExposureContrastWriter (937-1050), GradingPrimaryWriter (1280-1499), GradingHueCurveWriter (1634-1772, its writeCurve as GradingRGBCurveWriter::writeCurve), GradingToneWriter (1776-1893). 2.6.0: changed at v2.6.0 lines 5, 8, after 11 (deleted), 42, 44, 46-72, 105-110, after 113 (deleted), 115-117, 127, 316-320, 423, 440, 442, 444, 446, 452, 454-455, 457, after 458 (deleted), 460-466, 469-470, 477, 479, 481, 487-519, 521-523, 526, after 534 (deleted), after 535 (deleted), after 539 (deleted), 541-547, 549-553, 555-579, 593, 595, 601-609, 831, 973, 1000, 1015, 1019, 1023, 2532-2533, 2539, 2544, 2548-2549, 2552, 2570-2578, 2625, 2628, 2642-2643, 2645-2647, 2649-2657, 2659-2660, 2662-2667, 2670-2672, 2676, 2679-2680, 2687-2689, 2691-2706, 2712-2730, 2732-2737, 2739, 2741-2743, 2746, 2748-2750, 2784, 2845-2918, 2928-2929, 2991, 3004, 3018, 3033, 3049, 3063, 3077, 3091, 3115, 3139, 3164, 3170-3190: ocio26-clf ported them (CTFVersion's SMPTE string formats, CTFReaderTransform on its format metadata with fromMetadata and toMetadata, WriteTagStringVec and WriteTagElementVec, TransformWriter's sub-format, SMPTE xmlns, required id, Id element and descriptors; the noClamp Range writing of PR #2349: RangeWriter's noClamp style 2532-2578, GetEquivalentNoClampRange and its constants 2845-2918, writeOps' first and last Matrix 3170-3190; GetOpMinimumVersion's HMJ branch, 316-320)."
 
 [[file]]

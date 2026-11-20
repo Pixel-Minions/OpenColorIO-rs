@@ -2563,7 +2563,7 @@ fn processors_of_exposure_contrast_and_grading_files_write_as_in_the_wheel() {
 /// first or last Matrix that scales and offsets R, G and B like the profile's full-to-narrow
 /// input Range (first) or narrow-to-full output Range (last), within 1e-6, as that Range with
 /// `style="noClamp"`, with the Matrix's metadata and file bit depths. Matrices in the middle,
-/// swapped, near the tolerance, not uniform, with alpha, not diagonal, inverse or NaN, groups
+/// swapped, near the tolerance, not uniform (each channel's scale and offset), with alpha, not diagonal, inverse or NaN, groups
 /// of one op, ranges that clamp, CTF, and the upstream file and files of noClamp ranges with
 /// bit depths and metadata.
 #[test]
@@ -2671,6 +2671,16 @@ fn broadcast_profile_ranges_write_as_in_the_wheel() {
                 "g",
                 [s_in, s_in, s_in, 1.],
                 [o_in, o_in + 1e-5, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "blue's offset differs",
+            vec![diag(
+                "b",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in, o_in + 1e-5, 0.],
                 Forward,
                 f32s,
             )],
