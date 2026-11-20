@@ -289,8 +289,9 @@ fn accessors() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, get_equivalent_noclamp_range)` @ v2.6.0
-/// (`tests/cpu/fileformats/ctf/CTFTransform_tests.cpp`, which includes CTFTransform.cpp).
+/// Port of `OCIO_ADD_TEST(CTFTransform, get_equivalent_noclamp_range)` @ v2.6.0. Upstream's
+/// test is in `tests/cpu/fileformats/ctf/CTFTransform_tests.cpp`, which includes
+/// CTFTransform.cpp.
 #[test]
 fn get_equivalent_noclamp_range() {
     // Integration test is in FileFormatCTF_tests.cpp smpte_broadcast_profile_noclamp_range.
