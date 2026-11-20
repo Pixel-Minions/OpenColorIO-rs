@@ -392,12 +392,12 @@ shared_views:
   - !<View> {name: unused, colorspace: raw}
 displays:
   d:
-    - !<View> {name: v, colorspace: d, aliases: [a1, "@e@a"]}
+    - !<View> {name: v, colorspace: d, aliases: [a1, "@e@a", zed]}
     - !<View> {name: by_alias, colorspace: d_alias}
     - !<View> {name: by_role, colorspace: display_role}
     - !<Views> [sv]
   e:
-    - !<View> {name: w, colorspace: e, aliases: [w_alias, "42"]}
+    - !<View> {name: w, colorspace: e, aliases: [w_alias, "42", not an alias]}
 view_transforms:
   - !<ViewTransform> {name: vt, from_scene_reference: !<MatrixTransform> {}}
 colorspaces:
@@ -466,6 +466,8 @@ display_colorspaces:
             (t(b"A1"), yes.clone()),
             (t(b"\xc3\xa9a"), yes.clone()),
             (t(b"\xc3\xa9A"), yes.clone()),
+            (t(b"zed"), yes.clone()),
+            (t(b"ZED"), yes.clone()),
             (t(b"not an alias"), no.clone()),
         ],
         "{v}"
@@ -480,10 +482,84 @@ display_colorspaces:
             (t(b"A1"), t(b"v"), t(b"d")),
             (t(b"\xc3\xa9a"), t(b"v"), t(b"d")),
             (t(b"\xc3\xa9A"), t(b"v"), t(b"d")),
+            (t(b"zed"), t(b"v"), t(b"d")),
+            (t(b"ZED"), t(b"v"), t(b"d")),
             (t(b"not an alias"), t(b""), t(b"")),
         ],
         "{v}"
     );
+    // The display's probes: its name upper-cased, its color space's alias as it is and
+    // upper-cased (use_display_aliases), the role naming that color space, which
+    // getCanonicalDisplayName refuses, and a name of no display (Config.cpp:4225-4300 @ v2.6.0).
+    let display_probes: Vec<(Vec<u8>, Vec<u8>)> = d["display_probes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (bytes(&p[0]), bytes(&p[1])))
+        .collect();
+    assert_eq!(
+        display_probes,
+        [
+            (t(b"D"), t(b"d")),
+            (t(b"d_alias"), t(b"d")),
+            (t(b"D_ALIAS"), t(b"d")),
+            (t(b"display_role"), t(b"")),
+            (t(b"not a display"), t(b"")),
+        ],
+        "{d}"
+    );
+    // Each view by each of those display names: the names the display resolves to find the
+    // view by its name and aliases; the role and the unknown name find nothing.
+    // [probe, getCanonicalViewName, resolved color space] per probe.
+    type Probes = Vec<(Vec<u8>, Vec<u8>, Vec<u8>)>;
+    let by_display = |view: &Value| -> Vec<(Vec<u8>, Probes)> {
+        view["by_display"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| {
+                let probes = d[1]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|p| (bytes(&p[0]), bytes(&p[1]), bytes(&p[2])))
+                    .collect();
+                (bytes(&d[0]), probes)
+            })
+            .collect()
+    };
+    let v_by_display = by_display(&v);
+    let names: Vec<&[u8]> = v_by_display.iter().map(|(d, _)| d.as_slice()).collect();
+    assert_eq!(
+        names,
+        [
+            &b"D"[..],
+            b"d_alias",
+            b"D_ALIAS",
+            b"display_role",
+            b"not a display"
+        ],
+        "{v}"
+    );
+    for (display, probes) in &v_by_display {
+        let found = !matches!(display.as_slice(), b"display_role" | b"not a display");
+        assert_eq!(probes.len(), by_probe(&v).len(), "{v}");
+        for ((probe, canonical, resolved), (own, own_canonical, own_resolved)) in
+            probes.iter().zip(by_probe(&v))
+        {
+            assert_eq!(probe, &own, "{v}");
+            if found {
+                assert_eq!(
+                    (canonical, resolved),
+                    (&own_canonical, &own_resolved),
+                    "{v}"
+                );
+            } else {
+                assert_eq!((canonical, resolved), (&t(b""), &t(b"")), "{v}");
+            }
+        }
+    }
+    assert_eq!(by_display(&v)[2].1[2], (t(b"a1"), t(b"v"), t(b"d")), "{v}");
     // The color space of a view, by an alias or a role, resolves to its canonical name.
     for (name, cs) in [
         (&b"by_alias"[..], &b"d_alias"[..]),
@@ -512,7 +588,8 @@ display_colorspaces:
         ],
         "{sv}"
     );
-    // The inactive display and its view; an alias without letters is probed once.
+    // The inactive display and its view; an alias without letters is probed once, and one
+    // spelled as the name that ends the probes ends them.
     let e = display_of(b"e");
     let w = view_of(&e["views"], b"w");
     assert_eq!(
@@ -523,17 +600,51 @@ display_colorspaces:
             (t(b"w_alias"), yes.clone()),
             (t(b"W_ALIAS"), yes.clone()),
             (t(b"42"), yes.clone()),
-            (t(b"not an alias"), no.clone()),
+            (t(b"not an alias"), yes.clone()),
+            (t(b"NOT AN ALIAS"), yes.clone()),
         ],
         "{w}"
     );
     assert_eq!(by_probe(&w)[2], (t(b"w_alias"), t(b"w"), t(b"e")), "{w}");
+    let e_probes: Vec<(Vec<u8>, Vec<u8>)> = e["display_probes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (bytes(&p[0]), bytes(&p[1])))
+        .collect();
+    assert_eq!(
+        e_probes,
+        [(t(b"E"), t(b"e")), (t(b"not a display"), t(b""))],
+        "{e}"
+    );
+    assert_eq!(
+        by_display(&w)[0].1[2],
+        (t(b"w_alias"), t(b"w"), t(b"e")),
+        "{w}"
+    );
+    // The shared view by the display color space's alias, upper-cased.
+    let sv_on_d = view_of(&d["views"], b"sv");
+    assert_eq!(
+        by_display(&sv_on_d)[2],
+        (
+            t(b"D_ALIAS"),
+            vec![
+                (t(b"sv"), t(b"sv"), t(b"d")),
+                (t(b"SV"), t(b"SV"), t(b"d")),
+                (t(b"sv_alias"), t(b"sv"), t(b"d")),
+                (t(b"SV_ALIAS"), t(b"sv"), t(b"d")),
+                (t(b"not an alias"), t(b""), t(b"")),
+            ]
+        ),
+        "{sv_on_d}"
+    );
     // The shared views as the config lists them (display ""): the alias lookup finds the view,
     // while the names, which need a display, resolve to nothing.
     let shared = &dump["shared_views"];
     let sv = view_of(shared, b"sv");
     assert_eq!(has(&sv)[2], (t(b"sv_alias"), yes.clone()), "{sv}");
     assert_eq!(by_probe(&sv)[2], (t(b"sv_alias"), t(b""), t(b"")), "{sv}");
+    assert!(sv.get("by_display").is_none(), "{sv}");
     let unused = view_of(shared, b"unused");
     assert_eq!(
         has(&unused),
@@ -552,6 +663,36 @@ display_colorspaces:
         .find(|l| bytes(&l["name"]) == b"display_role")
         .unwrap();
     assert_eq!(bytes(&lookup["getColorSpace"]), b"d", "{lookup}");
+}
+
+/// A view alias the binding can't decode is probed as its bytes, as they are and with their ASCII
+/// letters upper-cased, and found either way (OCIO ignores the case of ASCII letters only).
+#[test]
+fn the_dump_probes_an_undecodable_view_alias() {
+    let config = b"ocio_profile_version: 2.6\nroles: {default: raw}\ncolorspaces:\n  - \
+                   !<ColorSpace> {name: raw}\ndisplays:\n  d:\n    - !<View> {name: v, \
+                   colorspace: raw, aliases: [u\xffv]}\n";
+    let response =
+        call(json!({"config": {"yaml": bytes_arg(config)}, "calls": [{"dump": "config"}]}));
+    let dump = result(&calls(&response)[0]);
+    let view = &dump["displays"][0]["views"][0];
+    let probes: Vec<(Vec<u8>, Value)> = view["hasDisplayViewAlias"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (bytes(&p[0]), p[1].clone()))
+        .collect();
+    assert_eq!(
+        probes,
+        [
+            (b"v".to_vec(), json!(false)),
+            (b"V".to_vec(), json!(false)),
+            (b"u\xffv".to_vec(), json!(true)),
+            (b"U\xffV".to_vec(), json!(true)),
+            (b"not an alias".to_vec(), json!(false)),
+        ],
+        "{view}"
+    );
 }
 
 /// A config whose names the binding can't decode dumps whole: the names come back as their
