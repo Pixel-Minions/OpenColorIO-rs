@@ -202,6 +202,24 @@ fn generated_cases() -> Vec<Case> {
             "an unknown element.ccc",
             ccc(&format!("<Foo/>\n{}", cc(Some("a"), "1 1 1"))),
         ),
+        // Elements that end where they start (OCIO 2.6.0 makes the end call of one whose
+        // start throws, PR #2350).
+        (
+            "an empty color correction.ccc",
+            ccc("<ColorCorrection id=\"a\"/>\n"),
+        ),
+        (
+            "an empty SOPNode.ccc",
+            ccc("<ColorCorrection id=\"a\"><SOPNode/></ColorCorrection>\n"),
+        ),
+        (
+            "an empty slope.cc.cc",
+            "<ColorCorrection id=\"a\"><SOPNode><Slope/></SOPNode></ColorCorrection>\n".into(),
+        ),
+        (
+            "an empty collection.ccc",
+            "<ColorCorrectionCollection/>\n".into(),
+        ),
         ("text in the collection.ccc", ccc(&format!("text\n{two}"))),
         ("a CC as .ccc.ccc", cc(Some("a"), "1 1 1")),
         ("a CCC as .cc.cc", ccc(&two)),

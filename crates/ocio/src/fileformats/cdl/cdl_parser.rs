@@ -14,7 +14,9 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use ocio_formats::expat::xmlparse::{ParseError, Parser, XmlError, XmlStatus, xml_error_string};
+use ocio_formats::expat::xmlparse::{
+    ParseError, Parser, ParserHandle, XmlError, XmlStatus, xml_error_string,
+};
 use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     ElementRcPtr, XmlReaderDescriptionElt, XmlReaderDummyElt, XmlReaderElementStack,
     XmlReaderSaturationElt, XmlReaderSopValueElt,
@@ -64,7 +66,7 @@ enum Schema {
 
 /// The data members of `CDLParser::Impl` but the expat parser.
 ///
-/// Port of `CDLParser::Impl` (CDLParser.cpp:17-160 @ v2.5.2).
+/// Port of `CDLParser::Impl` (CDLParser.cpp:18-165 @ v2.6.0).
 #[derive(Debug)]
 struct State {
     /// `m_elms`.
@@ -79,6 +81,9 @@ struct State {
     is_cc: bool,
     /// `m_isCCC`.
     is_ccc: bool,
+    /// `m_pendingException`: the exception of a handler, deferred until the parse call
+    /// returns.
+    pending_exception: Option<Exception>,
 }
 
 type StateRc = Rc<RefCell<State>>;
@@ -498,10 +503,30 @@ fn handle_unknown_start_element(state: &mut State, name: &[u8]) -> bool {
     true
 }
 
+/// What the handlers do with an exception, in their `catch (...)`: they keep the first one and
+/// stop the parser, so that it doesn't escape into expat's C call stack (XML_ParserFree's
+/// isCalledFromInsideHandler guard). For a self-closing element, expat may still invoke the
+/// matching EndElementHandler before it honors XML_StopParser, and that call can itself
+/// throw: that secondary exception is dropped.
+///
+/// Port of the `catch (...)` blocks of `CDLParser::Impl::StartElementHandlerCDL`,
+/// `StartElementHandlerCCC`, `StartElementHandlerCC`, `EndElementHandler` and
+/// `CharacterDataHandler` (CDLParser.cpp:462-473, 497-507, 529-540, 945-956, 1035-1046 @
+/// v2.6.0).
+fn keep_first_exception(state: &StateRc, parser: &ParserHandle, result: Result<()>) {
+    if let Err(e) = result {
+        let mut st = state.borrow_mut();
+        if st.pending_exception.is_none() {
+            st.pending_exception = Some(e);
+            parser.stop_parser();
+        }
+    }
+}
+
 /// Start the parsing of one element in `schema`.
 ///
-/// Port of `CDLParser::Impl::StartElementHandlerCDL`, `StartElementHandlerCCC` and
-/// `StartElementHandlerCC` (CDLParser.cpp:423-478 @ v2.5.2). `IsValidStartElement`
+/// Port of the `try` blocks of `CDLParser::Impl::StartElementHandlerCDL`,
+/// `StartElementHandlerCCC` and `StartElementHandlerCC` (CDLParser.cpp:441-541 @ v2.6.0). `IsValidStartElement`
 /// (CDLParser.cpp:480-494) checks a null or empty name, which expat never gives.
 fn start_element_handler(
     state: &StateRc,
@@ -548,7 +573,8 @@ fn start_element_handler(
 
 /// End the parsing of one element.
 ///
-/// Port of `CDLParser::Impl::EndElementHandler` (CDLParser.cpp:817-879 @ v2.5.2).
+/// Port of the `try` block of `CDLParser::Impl::EndElementHandler` (CDLParser.cpp:880-944 @
+/// v2.6.0).
 fn end_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
     let elt = {
         let mut state = state.borrow_mut();
@@ -612,7 +638,8 @@ fn end_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
 
 /// Handle of strings within an element.
 ///
-/// Port of `CDLParser::Impl::CharacterDataHandler` (CDLParser.cpp:881-954 @ v2.5.2).
+/// Port of the `try` block of `CDLParser::Impl::CharacterDataHandler` (CDLParser.cpp:959-1034
+/// @ v2.6.0).
 fn character_data_handler(state: &StateRc, s: &[u8]) -> Result<()> {
     let len = s.len();
     if len == 0 {
@@ -710,6 +737,7 @@ impl CdlParser {
                 file_name: xml_file.to_vec(),
                 is_cc: false,
                 is_ccc: false,
+                pending_exception: None,
             })),
             parser: Parser::new(),
         }
@@ -759,29 +787,49 @@ impl CdlParser {
             return Err(self.state.borrow().throw_message(b"Missing CDL tag"));
         };
 
-        let state = self.state.clone();
+        let (data_state, data_parser) = (self.state.clone(), self.parser.handle());
         self.parser
-            .set_character_data_handler(Some(Box::new(move |s| character_data_handler(&state, s))));
-        let start_state = self.state.clone();
-        let end_state = self.state.clone();
+            .set_character_data_handler(Some(Box::new(move |s| {
+                let result = character_data_handler(&data_state, s);
+                keep_first_exception(&data_state, &data_parser, result);
+                Ok(())
+            })));
+        let (start_state, start_parser) = (self.state.clone(), self.parser.handle());
+        let (end_state, end_parser) = (self.state.clone(), self.parser.handle());
         self.parser.set_element_handler(
             Some(Box::new(move |name, atts| {
-                start_element_handler(&start_state, schema, name, atts)
+                let result = start_element_handler(&start_state, schema, name, atts);
+                keep_first_exception(&start_state, &start_parser, result);
+                Ok(())
             })),
-            Some(Box::new(move |name| end_element_handler(&end_state, name))),
+            Some(Box::new(move |name| {
+                let result = end_element_handler(&end_state, name);
+                keep_first_exception(&end_state, &end_parser, result);
+                Ok(())
+            })),
         );
         Ok(())
     }
 
     /// Parse a line.
     ///
-    /// Port of `CDLParser::Impl::parse(const std::string &, bool)` (CDLParser.cpp:241-279 @
-    /// v2.5.2).
+    /// Port of `CDLParser::Impl::parse(const std::string &, bool)` (CDLParser.cpp:246-297 @
+    /// v2.6.0).
     fn parse_line(&mut self, buffer: &[u8], last_line: bool) -> Result<()> {
         let status = match self.parser.parse(buffer, last_line) {
             Ok(status) => status,
             Err(ParseError::Handler(e)) => return Err(e),
         };
+
+        // A handler may have thrown a C++ exception. Rethrowing it here, rather than letting it
+        // escape the expat callback directly, keeps expat's own bookkeeping (see
+        // XML_ParserFree's isCalledFromInsideHandler guard) consistent; otherwise
+        // XML_ParserFree silently leaks the parser.
+        let pending_exception = self.state.borrow_mut().pending_exception.take();
+        if let Some(pending_exception) = pending_exception {
+            return Err(pending_exception);
+        }
+
         if status == XmlStatus::Error {
             let expat_error_code = self.parser.error_code();
             let state = self.state.borrow();

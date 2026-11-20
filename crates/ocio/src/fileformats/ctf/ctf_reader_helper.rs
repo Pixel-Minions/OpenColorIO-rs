@@ -2848,7 +2848,19 @@ impl CtfReaderOpElt {
     ///
     /// Port of `CTFReaderGradingRGBCurveElt::end` (CTFReaderHelper.cpp:2642-2650 @ v2.5.2),
     /// after `CTFReaderOpElt::end`.
+    ///
+    /// Since 2.6.0 expat makes the end call of an element that ends where it starts
+    /// (`<GradingRGBCurve/>`) after its start threw; where the start threw before it made the
+    /// curves (the style missing or invalid), upstream's `setValue` dereferences a null
+    /// pointer and the wheels crash (U-790). The port fails instead: the parser drops this
+    /// error and reports the start's.
     fn grading_rgb_curve_end(&mut self) -> Result<()> {
+        if self.loading_rgb_curve.is_none() {
+            return Err(Exception::new(
+                "GradingRGBCurve: the curves can't be set, as the element's start failed \
+                 (upstream dereferences a null pointer).",
+            ));
+        }
         // Set the loaded data.
         let loading = self.get_loading_rgb_curve_mut().clone();
         let curve = self.grading_rgb_curve_mut();
@@ -3087,13 +3099,17 @@ impl CtfReaderOpElt {
     /// The loaded curves set (which validates them), then validated.
     ///
     /// Port of `CTFReaderGradingHueCurveElt::end` (CTFReaderHelper.cpp:2721-2729 @ v2.5.2),
-    /// after `CTFReaderOpElt::end`.
+    /// after `CTFReaderOpElt::end`. Where the start threw before it made the curves, upstream
+    /// dereferences a null pointer; the port fails instead (U-790, see
+    /// `grading_rgb_curve_end`).
     fn grading_hue_curve_end(&mut self) -> Result<()> {
         // Set the loaded data.
-        let loading = self
-            .loading_hue_curve
-            .clone()
-            .expect("the GradingHueCurve's start set its curves");
+        let Some(loading) = self.loading_hue_curve.clone() else {
+            return Err(Exception::new(
+                "GradingHueCurve: the curves can't be set, as the element's start failed \
+                 (upstream dereferences a null pointer).",
+            ));
+        };
         let curve = self.grading_hue_curve_mut();
         curve.set_value(&loading)?;
         // Validate the end result.

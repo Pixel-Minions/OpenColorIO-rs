@@ -19,7 +19,9 @@ use std::ffi::c_ulong;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use ocio_formats::expat::xmlparse::{ParseError, Parser, XmlError, XmlStatus, xml_error_string};
+use ocio_formats::expat::xmlparse::{
+    ParseError, Parser, ParserHandle, XmlError, XmlStatus, xml_error_string,
+};
 use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     ElementRcPtr, XmlReaderDescriptionElt, XmlReaderDummyElt, XmlReaderElementStack,
     XmlReaderPlainElt, XmlReaderSaturationElt, XmlReaderSopValueElt,
@@ -747,6 +749,9 @@ struct State {
     transform: Option<CtfReaderTransformRc>,
     /// `m_keepNamespaces`: if >0, name spaces will be preserved (inside an Info element).
     keep_namespaces: i32,
+    /// `m_pendingException`: the exception of a handler, deferred until the parse call
+    /// returns.
+    pending_exception: Option<Exception>,
 }
 
 type StateRc = Rc<RefCell<State>>;
@@ -1419,8 +1424,10 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
 /// End the parsing of one element.
 ///
 /// Port of `XMLParserHelper::EndElementHandlerImpl` (FileFormatCTF.cpp:1096-1174 @ v2.6.0).
-/// The stack is never empty here (each start pushed an element); upstream's `back` of an
-/// empty one would be undefined.
+/// The stack is never empty here: each start pushed an element, or (2.6.0: expat makes the
+/// end call of a self-closing element after its start threw) threw where the stack already
+/// held the ProcessList or the root's dummy element; upstream's `back` of an empty one would
+/// be undefined.
 fn end_element_handler(state: &StateRc, name_full: &[u8]) -> Result<()> {
     let elt = {
         let mut st = state.borrow_mut();
@@ -1576,9 +1583,30 @@ fn character_data_handler(state: &StateRc, s: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// What the handlers registered with expat do with the result of a handler: they keep the
+/// first exception and stop the parser, so that it doesn't escape into expat's C call stack
+/// (which keeps expat's handler-depth bookkeeping consistent: XML_ParserFree's
+/// isCalledFromInsideHandler guard, which otherwise leaks the parser). For a self-closing
+/// element, expat may still invoke the matching EndElementHandler before it honors
+/// XML_StopParser, and that call can itself throw (since the element was never pushed onto
+/// m_elms): that secondary exception is dropped.
+///
+/// Port of the trampolines `XMLParserHelper::StartElementHandler`,
+/// `XMLParserHelper::EndElementHandler` and `XMLParserHelper::CharacterDataHandler`
+/// (FileFormatCTF.cpp:457-479, 1073-1094, 1177-1199 @ v2.6.0).
+fn keep_first_exception(state: &StateRc, parser: &ParserHandle, result: Result<()>) {
+    if let Err(e) = result {
+        let mut st = state.borrow_mut();
+        if st.pending_exception.is_none() {
+            st.pending_exception = Some(e);
+            parser.stop_parser();
+        }
+    }
+}
+
 /// The CTF/CLF parser: a file's ProcessList, line by line through expat.
 ///
-/// Port of `XMLParserHelper` (FileFormatCTF.cpp:172-1164 @ v2.5.2).
+/// Port of `XMLParserHelper` (FileFormatCTF.cpp:190-1323 @ v2.6.0).
 struct XmlParserHelper {
     state: StateRc,
     /// `m_parser`.
@@ -1588,7 +1616,7 @@ struct XmlParserHelper {
 impl XmlParserHelper {
     /// A parser of the file `file_name`, a CLF if its extension is `.clf` (ignoring case).
     ///
-    /// Port of `XMLParserHelper::XMLParserHelper` (FileFormatCTF.cpp:178-189 @ v2.5.2).
+    /// Port of `XMLParserHelper::XMLParserHelper` (FileFormatCTF.cpp:196-207 @ v2.6.0).
     fn new(file_name: &[u8]) -> XmlParserHelper {
         let (_root, extension) = os_path::splitext(file_name);
         let state = Rc::new(RefCell::new(State {
@@ -1598,19 +1626,28 @@ impl XmlParserHelper {
             elms: XmlReaderElementStack::new(),
             transform: None,
             keep_namespaces: 0,
+            pending_exception: None,
         }));
         let mut parser = Parser::new();
-        let start_state = state.clone();
-        let end_state = state.clone();
+        let (start_state, start_parser) = (state.clone(), parser.handle());
+        let (end_state, end_parser) = (state.clone(), parser.handle());
         parser.set_element_handler(
             Some(Box::new(move |name, atts| {
-                start_element_handler(&start_state, name, atts)
+                let result = start_element_handler(&start_state, name, atts);
+                keep_first_exception(&start_state, &start_parser, result);
+                Ok(())
             })),
-            Some(Box::new(move |name| end_element_handler(&end_state, name))),
+            Some(Box::new(move |name| {
+                let result = end_element_handler(&end_state, name);
+                keep_first_exception(&end_state, &end_parser, result);
+                Ok(())
+            })),
         );
-        let data_state = state.clone();
+        let (data_state, data_parser) = (state.clone(), parser.handle());
         parser.set_character_data_handler(Some(Box::new(move |s| {
-            character_data_handler(&data_state, s)
+            let result = character_data_handler(&data_state, s);
+            keep_first_exception(&data_state, &data_parser, result);
+            Ok(())
         })));
         XmlParserHelper { state, parser }
     }
@@ -1618,8 +1655,8 @@ impl XmlParserHelper {
     /// Parses the stream, a line at a time, then checks every element closed and the
     /// transform has an operator.
     ///
-    /// Port of `XMLParserHelper::Parse(std::istream &)` (FileFormatCTF.cpp:196-236 @
-    /// v2.5.2).
+    /// Port of `XMLParserHelper::Parse(std::istream &)` (FileFormatCTF.cpp:214-254 @
+    /// v2.6.0).
     fn parse(&mut self, istream: &mut InputStream) -> Result<()> {
         let mut line = Vec::new();
         self.state.borrow_mut().line_number = 0;
@@ -1655,13 +1692,23 @@ impl XmlParserHelper {
 
     /// Parses a line.
     ///
-    /// Port of `XMLParserHelper::Parse(const std::string &, bool)` (FileFormatCTF.cpp:238-274
-    /// @ v2.5.2).
+    /// Port of `XMLParserHelper::Parse(const std::string &, bool)` (FileFormatCTF.cpp:256-305
+    /// @ v2.6.0).
     fn parse_line(&mut self, buffer: &[u8], last_line: bool) -> Result<()> {
         let status = match self.parser.parse(buffer, last_line) {
             Ok(status) => status,
             Err(ParseError::Handler(e)) => return Err(e),
         };
+
+        // A handler may have thrown a C++ exception. Rethrowing it here, rather than letting it
+        // escape the expat callback directly, keeps expat's own bookkeeping (see
+        // XML_ParserFree's isCalledFromInsideHandler guard) consistent; otherwise
+        // XML_ParserFree silently leaks the parser.
+        let pending_exception = self.state.borrow_mut().pending_exception.take();
+        if let Some(pending_exception) = pending_exception {
+            return Err(pending_exception);
+        }
+
         if status == XmlStatus::Error {
             let expat_error_code = self.parser.error_code();
             let st = self.state.borrow();

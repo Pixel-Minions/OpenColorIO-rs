@@ -208,6 +208,20 @@ fn generated_cases() -> Vec<Case> {
     add("no size and no data", root(&["<LUT>", "</LUT>"]));
     add("no LUT", root(&["<shaders/>"]));
     add("an empty look", "<look/>\n".into());
+    // Elements that end where they start, whose start throws: expat still makes their end
+    // call (OCIO 2.6.0, PR #2350).
+    add(
+        "a look in a look that ends where it starts",
+        root(&["<look/>"]),
+    );
+    add(
+        "a root of another name that ends where it starts",
+        "<foo/>\n".into(),
+    );
+    add(
+        "a look in a LUT that ends where it starts",
+        root(&["<LUT>", "<look/>", "</LUT>"]),
+    );
 
     // The data.
     add(

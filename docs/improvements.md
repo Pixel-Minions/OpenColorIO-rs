@@ -7207,6 +7207,33 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `:` and a 300-character name alike as missing; other errors of the check (access denied, a
   sharing violation) were not probed, and the port reports them as the missing file too.
 
+### U-790. A CTF curve operator that ends where it starts, whose start fails, sets null curves
+
+- **Upstream:** since 2.6.0 the CTF reader's expat handlers keep a handler's exception and
+  stop the parser (`XMLParserHelper::StartElementHandler`,
+  src/OpenColorIO/fileformats/FileFormatCTF.cpp:457-479 @ v2.6.0, PR #2350). For an element
+  that ends where it starts (`<GradingRGBCurve .../>`) expat still makes the element's end
+  call before it honors the stop, and the end handler calls the element's `end()`. When
+  `CTFReaderGradingRGBCurveElt::start` or `CTFReaderGradingHueCurveElt::start` threw before
+  it made the loading curves (the `style` attribute missing or invalid, or the operator's own
+  `start` refusing a bit depth), `m_loadingRGBCurve` or `m_loadingHueCurve` is still null and
+  `end()` passes it to the op data's `setValue`, which dereferences it
+  (fileformats/ctf/CTFReaderHelper.cpp:2685-2743, 2764-2822 @ v2.6.0;
+  DynamicProperty.cpp:216-223, 315-322). Both wheels crash, Windows with an access violation
+  and Linux with SIGSEGV (probed 2026-11-20 with the attribute sets of the test below,
+  GradingRGBCurve in CTF 2 and 2.6, GradingHueCurve in CTF 2.5 (Windows) and 2.6); 2.5.2
+  stopped at the start's exception and never made that end call.
+- **Who notices:** applications reading a malformed CTF file (a CLF doesn't take these
+  operators): the process dies instead of getting the reader's error.
+- **A fix:** check the loading curves in `end()`, or make them in the constructors.
+- **Status:** the port fails where upstream dereferences the null curves (the owner's general
+  rule, `docs/deviations.md`): its `end()` returns an error, which the parser drops as it
+  drops any error after the first, so the read fails with the start's error, as the wheel's
+  read of the same element closed by an end tag does. In `ocio26-clf`
+  (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`, `grading_rgb_curve_end` and
+  `grading_hue_curve_end`); `curves_whose_start_fails_fail_as_with_an_end_tag`
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`).
+
 ### I-542. CPU/GPU special-value differences in the llvmpipe harness
 
 - **Upstream:** OglApp::initImage selects GL_LINEAR (`oglapp.cpp:65-66 @ v2.5.2`).

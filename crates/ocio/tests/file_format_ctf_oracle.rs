@@ -5867,3 +5867,373 @@ fn grading_hue_curve_files_read_as_in_the_wheel() {
 fn grading_hue_curve_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&op_cases_i_ghc());
 }
+
+/// The operators of a ProcessList: the attributes that make each one's start succeed, and the
+/// paths to the elements under it (the tags each parent supports,
+/// FileFormatCTF.cpp:626-1040 @ v2.6.0).
+const STOPPED_OPS: &[(&str, &str, &[&str])] = &[
+    ("ACES", "style=\"Surround\"", &["ACESParams", "Description"]),
+    (
+        "ASC_CDL",
+        "style=\"Fwd\"",
+        &[
+            "SOPNode",
+            "SOPNode/Slope",
+            "SOPNode/Offset",
+            "SOPNode/Power",
+            "SatNode",
+            "SATNode",
+            "SatNode/Saturation",
+            "InputDescription",
+            "ViewingDescription",
+            "Description",
+        ],
+    ),
+    (
+        "ExposureContrast",
+        "style=\"linear\"",
+        &["ECParams", "DynamicParameter", "Description"],
+    ),
+    ("FixedFunction", "style=\"RGB_TO_HSV\"", &["Description"]),
+    ("Function", "style=\"RGB_TO_HSV\"", &["Description"]),
+    (
+        "Gamma",
+        "style=\"basicFwd\"",
+        &["GammaParams", "Description"],
+    ),
+    (
+        "Exponent",
+        "style=\"basicFwd\"",
+        &["ExponentParams", "Description"],
+    ),
+    (
+        "GradingPrimary",
+        "style=\"log\"",
+        &[
+            "Brightness",
+            "Clamp",
+            "Contrast",
+            "Exposure",
+            "Gain",
+            "Gamma",
+            "Lift",
+            "Offset",
+            "Pivot",
+            "Saturation",
+            "DynamicParameter",
+        ],
+    ),
+    (
+        "GradingRGBCurve",
+        "style=\"log\"",
+        &[
+            "Red",
+            "Green",
+            "Blue",
+            "Master",
+            "Red/ControlPoints",
+            "Red/Slopes",
+            "DynamicParameter",
+        ],
+    ),
+    (
+        "GradingHueCurve",
+        "style=\"log\"",
+        &[
+            "HueHue",
+            "HueSat",
+            "HueLum",
+            "LumSat",
+            "SatSat",
+            "LumLum",
+            "SatLum",
+            "HueFx",
+            "HueHue/ControlPoints",
+            "HueHue/Slopes",
+            "DynamicParameter",
+        ],
+    ),
+    (
+        "GradingTone",
+        "style=\"log\"",
+        &[
+            "Blacks",
+            "Shadows",
+            "Midtones",
+            "Highlights",
+            "Whites",
+            "SContrast",
+            "DynamicParameter",
+        ],
+    ),
+    ("InverseLUT1D", "", &["Array", "IndexMap"]),
+    ("InverseLUT3D", "", &["Array", "IndexMap"]),
+    ("Log", "style=\"log10\"", &["LogParams", "Description"]),
+    ("LUT1D", "", &["Array", "IndexMap", "Description"]),
+    ("LUT3D", "", &["Array", "IndexMap"]),
+    ("Matrix", "", &["Array", "Description"]),
+    (
+        "Range",
+        "",
+        &["minInValue", "maxInValue", "minOutValue", "maxOutValue"],
+    ),
+    ("Reference", "path=\"x.ctf\"", &["Description"]),
+];
+
+/// The elements a ProcessList holds besides its operators.
+const STOPPED_METADATA: &[&str] = &[
+    "Info",
+    "Description",
+    "InputDescriptor",
+    "OutputDescriptor",
+    "Id",
+    "ProcessList",
+    "Unknown",
+];
+
+/// The attributes of the CTF 2 ProcessList.
+const CTF_2: &str = "id=\"a\" version=\"2\"";
+
+/// The attributes of the ProcessList of the latest CTF, 2.6, which reads every operator.
+const CTF_2_6: &str = "id=\"a\" version=\"2.6\"";
+
+/// The curve operators whose start can fail before it makes the curves their end sets
+/// (U-790), and the ProcessLists that read them.
+const CURVE_OPS: &[(&str, &str)] = &[
+    ("GradingRGBCurve", CTF_2),
+    ("GradingRGBCurve", CTF_2_6),
+    ("GradingHueCurve", CTF_2_6),
+];
+
+/// The attributes of a curve operator whose start fails before it makes the curves the end
+/// sets (U-790).
+const CURVE_START_FAILS: &[&str] = &[
+    "",
+    "inBitDepth=\"32f\" outBitDepth=\"32f\" bogus=\"1\"",
+    "inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"nope\"",
+    "inBitDepth=\"x\" outBitDepth=\"32f\" style=\"log\"",
+];
+
+/// Elements that end where they start (`<Tag/>`), whose start throws: expat still makes
+/// their end call before it honors the stop (OCIO 2.6.0, PR #2350), so the side effects of
+/// that end happen and its own error is dropped. Every operator and every element under one,
+/// with no attributes, with an unknown one, and (operators) with an unknown style, in CTF
+/// 2.6, CLF 3 and SMPTE CLF; roots that end where they start; and an IndexMap that fails in
+/// each version. The curve operators of [`CURVE_START_FAILS`] crash the wheels (U-790):
+/// [`curves_whose_start_fails_fail_as_with_an_end_tag`] checks them.
+fn stopped_parse_cases() -> Vec<Case> {
+    const SMPTE: &str = "xmlns=\"http://www.smpte-ra.org/ns/2136-1/2024\"";
+    let depths = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let smpte_attrs = format!("id=\"urn:uuid:a\" {SMPTE}");
+    let versions = [
+        ("CTF 2.6", "lut.ctf", CTF_2_6),
+        ("CLF 3", "lut.clf", "id=\"a\" compCLFversion=\"3\""),
+        ("SMPTE CLF", "lut.clf", smpte_attrs.as_str()),
+    ];
+    let mut cases = Vec::new();
+    for (version, name, attrs) in &versions {
+        let mut add = |label: String, body: String| {
+            cases.push(case(
+                &format!("{label} in {version}"),
+                name,
+                pl(attrs, &body).as_bytes(),
+            ));
+        };
+        for (op, valid, children) in STOPPED_OPS {
+            for op_attrs in [
+                String::new(),
+                format!("{depths} bogus=\"1\""),
+                format!("{depths} style=\"nope\""),
+            ] {
+                if CURVE_OPS.contains(&(*op, *attrs))
+                    && CURVE_START_FAILS.contains(&op_attrs.as_str())
+                {
+                    continue;
+                }
+                add(
+                    format!("<{op} {op_attrs}/>"),
+                    format!("    <{op} {op_attrs}/>\n"),
+                );
+            }
+            for path in *children {
+                let tags: Vec<&str> = path.split('/').collect();
+                let (leaf, parents) = tags.split_last().unwrap();
+                for leaf_attrs in ["", " bogus=\"1\"", " dim=\"x\""] {
+                    let mut body = format!("<{leaf}{leaf_attrs}/>");
+                    for parent in parents.iter().rev() {
+                        body = format!("<{parent}>{body}</{parent}>");
+                    }
+                    add(
+                        format!("<{op} {valid}><{path}{leaf_attrs}/>"),
+                        format!("    <{op} {depths} {valid}>{body}</{op}>\n"),
+                    );
+                }
+            }
+        }
+        for tag in STOPPED_METADATA {
+            for leaf_attrs in ["", " bogus=\"1\""] {
+                add(
+                    format!("<{tag}{leaf_attrs}/>"),
+                    format!("    <{tag}{leaf_attrs}/>\n"),
+                );
+            }
+        }
+    }
+
+    // Roots that end where they start.
+    for (name, root) in [
+        ("lut.ctf", "<ProcessList/>"),
+        ("lut.ctf", "<ProcessList version=\"2\"/>"),
+        ("lut.clf", "<ProcessList/>"),
+        ("lut.clf", "<ProcessList compCLFversion=\"3\" bogus=\"1\"/>"),
+        ("lut.clf", "<ProcessList SMPTE/>"),
+        ("lut.ctf", "<Matrix/>"),
+        ("lut.ctf", "<Unknown/>"),
+    ] {
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{}\n",
+            root.replace("SMPTE", SMPTE)
+        );
+        cases.push(case(&format!("{root} in {name}"), name, text.as_bytes()));
+    }
+
+    // An IndexMap that fails in each version: without a dimension its start throws after
+    // the push, and its end logs that the element isn't valid since CLF 3 or CTF 2.
+    let lut1 = |im: &str| {
+        format!(
+            "    <LUT1D inBitDepth=\"10i\" outBitDepth=\"10i\">{im}\
+             <Array dim=\"2 1\">0 1023</Array></LUT1D>\n"
+        )
+    };
+    for (version, name, attrs) in [
+        ("CTF 1.3", "lut.ctf", "id=\"a\" version=\"1.3\""),
+        ("CTF 1.7", "lut.ctf", "id=\"a\" version=\"1.7\""),
+        ("CTF 2", "lut.ctf", CTF_2),
+        ("CLF 2", "lut.clf", "id=\"a\" compCLFversion=\"2\""),
+        ("CLF 3", "lut.clf", "id=\"a\" compCLFversion=\"3\""),
+    ] {
+        for im in [
+            "<IndexMap/>",
+            "<IndexMap dim=\"x\"/>",
+            "<IndexMap dim=\"2\"/>",
+            "<IndexMap></IndexMap>",
+        ] {
+            cases.push(case(
+                &format!("{im} in {version}"),
+                name,
+                pl(attrs, &lut1(im)).as_bytes(),
+            ));
+        }
+    }
+    cases
+}
+
+/// The reads of elements that end where they start, whose start throws.
+#[test]
+fn stopped_parses_read_as_in_the_wheel() {
+    check_processors(&stopped_parse_cases());
+}
+
+/// The warnings of elements that end where they start, whose start throws: the end call
+/// expat still makes logs as in the wheel.
+#[test]
+fn stopped_parses_log_as_in_the_wheel() {
+    let cases = stopped_parse_cases();
+    let wheel = cdl_common::check_logs(&cases);
+
+    // Coverage: the end call of an empty IndexMap without a dimension in CLF 3 logs in the
+    // wheel (the messages are the wheel's, checked above).
+    let label = "<IndexMap/> in CLF 3";
+    let logged: Vec<&Vec<String>> = cases
+        .iter()
+        .zip(&wheel)
+        .filter(|(c, _)| c.label == label)
+        .map(|(_, log)| log)
+        .collect();
+    assert_eq!(logged.len(), 1, "{label}");
+    assert!(
+        logged[0].iter().any(|m| m.contains("IndexMap")),
+        "{label}: {logged:?}"
+    );
+}
+
+/// A GradingRGBCurve or GradingHueCurve that ends where it starts, whose start fails before
+/// it makes the curves: the end call that 2.6.0 makes sets null curves, which crashes the
+/// wheels (U-790); the port fails as the wheel fails for the same element closed by an end
+/// tag, where no end call follows the failed start: the start's error.
+#[test]
+fn curves_whose_start_fails_fail_as_with_an_end_tag() {
+    use ocio_testkit::Oracle;
+    use ocio_testkit::oracle::BatchCall;
+    use ocio_testkit::processor_ops::{ProcessorOpsReply, ProcessorOpsRequest};
+
+    // Per operator, version and attribute set: the file the port reads (`<Op .../>`) and the
+    // one the wheel reads (`<Op ...></Op>`), each `lut.ctf` in a directory of its own.
+    let pairs: Vec<(String, String, String)> = CURVE_OPS
+        .iter()
+        .flat_map(|&(op, version)| {
+            CURVE_START_FAILS.iter().map(move |attrs| {
+                let path = |end: &str| {
+                    let text = pl(version, &format!("    <{op} {attrs}{end}\n"));
+                    let dir = write_files(&[file("lut.ctf", text.as_bytes())]);
+                    format!("{dir}/lut.ctf")
+                };
+                (
+                    format!("<{op} {attrs}/> in <ProcessList {version}>"),
+                    path("/>"),
+                    path(&format!("></{op}>")),
+                )
+            })
+        })
+        .collect();
+    assert_eq!(pairs.len(), 12);
+    let requests: Vec<ProcessorOpsRequest> = pairs
+        .iter()
+        .map(|(_, _, wheel_path)| {
+            let mut request = ProcessorOpsRequest::new(serde_json::json!({
+                "transform": {"class": "FileTransform", "calls": [["setSrc", wheel_path]]},
+                "direction": "TRANSFORM_DIR_FORWARD",
+            }));
+            request.optimization = Some(serde_json::json!("OPTIMIZATION_NONE"));
+            request
+        })
+        .collect();
+    let calls: Vec<BatchCall<'_>> = requests.iter().map(|r| r.call()).collect();
+    let replies = Oracle::get().batch(&calls, true);
+
+    let mut failures = Vec::new();
+    for ((attrs, port_path, wheel_path), reply) in pairs.iter().zip(replies) {
+        let reply = ProcessorOpsReply::from_response(reply.unwrap_or_else(|e| panic!("{e}")));
+        let raised = reply
+            .raised()
+            .unwrap_or_else(|| panic!("{attrs}: the wheel fails: {}", reply.result));
+        assert_eq!(raised.stage, "processor", "{attrs}");
+        assert!(
+            raised.message.contains("At line 3: "),
+            "{attrs}: {raised:?}"
+        );
+        // The paths in the message, in either spelling of the separator.
+        let mut expected = raised.message.clone();
+        for (from, to) in [
+            (wheel_path.clone(), port_path.clone()),
+            (wheel_path.replace('/', "\\"), port_path.replace('/', "\\")),
+        ] {
+            expected = expected.replace(&from, &to);
+        }
+        let mut transform = ocio::FileTransform::new();
+        transform.set_src(port_path);
+        let transform: ocio::Transform = transform.into();
+        let port = Config::create_raw()
+            .unwrap()
+            .processor_in_direction(&transform, TransformDirection::Forward);
+        match port {
+            Ok(_) => failures.push(format!("{attrs}: the port reads it")),
+            Err(e) if e.message() != expected => failures.push(format!(
+                "{attrs}:\n  wheel (end tag) {expected:?}\n  port            {:?}",
+                e.message()
+            )),
+            Err(_) => {}
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
