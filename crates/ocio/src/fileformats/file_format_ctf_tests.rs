@@ -959,6 +959,87 @@ fn smpte_all_metadata() {
     }
 }
 
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, smpte_broadcast_profile_noclamp_range)` @ v2.6.0.
+#[test]
+fn smpte_broadcast_profile_noclamp_range() {
+    // Tests of the low-level GetEquivalentNoClampRange are in CTFTransform_tests.cpp.
+
+    // The file starts and ends with a Range using the noClamp style, which OCIO reads in as an
+    // equivalent Matrix (a Range always clamps in OCIO, see RangeOpData::convertToMatrix).
+    // When writing CLF, a Matrix at the start or end of the op list that is equivalent to this
+    // specific noClamp Range must be written back out as that Range rather than as a Matrix.
+    let ctf_file = "clf/smpte_only/broadcast_profile_lut33.clf";
+
+    let cached_file = load_clf_file(ctf_file).expect("OCIO_CHECK_NO_THROW");
+
+    // On read, the noClamp Range ops are converted to Matrix ops.
+    let op_list = cached_file.transform.get_op_data_vec();
+    assert_eq!(op_list.len(), 3, "OCIO_REQUIRE_EQUAL");
+    assert_eq!(op_list[0].get_type(), OpDataType::Matrix);
+    assert_eq!(op_list[1].get_type(), OpDataType::Lut3D);
+    assert_eq!(op_list[2].get_type(), OpDataType::Matrix);
+
+    let mat0 = as_matrix(&op_list[0]);
+    let mat2 = as_matrix(&op_list[2]);
+
+    // Write the file back out as CLF.
+
+    let processor = get_file_transform_processor(ctf_file).expect("OCIO_CHECK_NO_THROW");
+
+    let mut oss = Vec::new();
+    let group = processor.create_group_transform().unwrap();
+    let config = Config::create_raw().unwrap();
+    group
+        .write(&config, b"Academy/ASC Common LUT Format", &mut oss)
+        .expect("OCIO_CHECK_NO_THROW");
+    let clf_string = std::str::from_utf8(&oss).unwrap();
+
+    // Count how many times sub appears in str.
+    let count_occurrences = |str: &str, sub: &str| -> usize {
+        let mut count = 0;
+        let mut pos = 0;
+        while let Some(found) = str[pos..].find(sub) {
+            count += 1;
+            pos += found + sub.len();
+        }
+        count
+    };
+
+    // The Matrix ops at the start and end must have been written as noClamp Range ops rather
+    // than as Matrix ops. The LUT3D in between is untouched.
+    assert_eq!(count_occurrences(clf_string, "<Matrix"), 0);
+    assert_eq!(count_occurrences(clf_string, "<Range"), 2);
+    assert_eq!(count_occurrences(clf_string, "style=\"noClamp\""), 2);
+    assert_eq!(count_occurrences(clf_string, "<LUT3D"), 1);
+
+    // Reading the written file back should reproduce the original Matrix ops (within
+    // floating-point precision), confirming the round trip is lossless.
+    let cached_file2 = parse_string(clf_string).expect("OCIO_CHECK_NO_THROW");
+
+    let op_list2 = cached_file2.transform.get_op_data_vec();
+    assert_eq!(op_list2.len(), 3, "OCIO_REQUIRE_EQUAL");
+    assert_eq!(op_list2[0].get_type(), OpDataType::Matrix);
+    assert_eq!(op_list2[1].get_type(), OpDataType::Lut3D);
+    assert_eq!(op_list2[2].get_type(), OpDataType::Matrix);
+
+    let mat0b = as_matrix(&op_list2[0]);
+    let mat2b = as_matrix(&op_list2[2]);
+
+    let error = 1e-9;
+    check_close(mat0b.get_array_value(0), mat0.get_array_value(0), error);
+    check_close(
+        mat0b.get_offset_value(0).unwrap(),
+        mat0.get_offset_value(0).unwrap(),
+        error,
+    );
+    check_close(mat2b.get_array_value(0), mat2.get_array_value(0), error);
+    check_close(
+        mat2b.get_offset_value(0).unwrap(),
+        mat2.get_offset_value(0).unwrap(),
+        error,
+    );
+}
+
 /// Port of `OCIO_ADD_TEST(FileFormatCTF, smpte_namespaces)` @ v2.6.0.
 #[test]
 fn smpte_namespaces() {

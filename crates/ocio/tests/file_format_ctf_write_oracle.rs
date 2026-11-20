@@ -2556,3 +2556,317 @@ fn processors_of_exposure_contrast_and_grading_files_write_as_in_the_wheel() {
     assert_eq!(cases.len(), 30);
     check_writes(&cases);
 }
+
+/// The SMPTE CLF Broadcast Profile's noClamp Ranges (OCIO 2.6.0, PR #2349): a CLF writes a
+/// first or last Matrix that scales and offsets R, G and B like the profile's full-to-narrow
+/// input Range (first) or narrow-to-full output Range (last), within 1e-6, as that Range with
+/// `style="noClamp"`, with the Matrix's metadata and file bit depths. Matrices in the middle,
+/// swapped, near the tolerance, not uniform, with alpha, not diagonal, inverse or NaN, groups
+/// of one op, ranges that clamp, CTF, and the upstream file and files of noClamp ranges with
+/// bit depths and metadata.
+#[test]
+fn broadcast_profile_ranges_write_as_in_the_wheel() {
+    // The probe values: the profile's 10-bit full/narrow bounds, as upstream's file has them.
+    let lo = 64. / 1023.;
+    let hi = 940. / 1023.;
+    let s_in = hi - lo;
+    let o_in = lo;
+    let s_out = 1.0 / s_in;
+    let o_out = -lo * s_out;
+    let f32s = (BitDepth::F32, BitDepth::F32);
+    let u10 = (BitDepth::Uint10, BitDepth::Uint10);
+    let diag = |label: &str, s: [f64; 4], o: [f64; 4], dir, depths| {
+        let m = [
+            s[0], 0., 0., 0., 0., s[1], 0., 0., 0., 0., s[2], 0., 0., 0., 0., s[3],
+        ];
+        matrix(label, m, o, dir, depths)
+    };
+    let input = |depths| {
+        diag(
+            "in",
+            [s_in, s_in, s_in, 1.],
+            [o_in, o_in, o_in, 0.],
+            Forward,
+            depths,
+        )
+    };
+    let output = |depths| {
+        diag(
+            "out",
+            [s_out, s_out, s_out, 1.],
+            [o_out, o_out, o_out, 0.],
+            Forward,
+            depths,
+        )
+    };
+    let near = |ds: f64, d_off: f64| {
+        let s = s_in + ds;
+        let o = o_in + d_off;
+        diag("near", [s, s, s, 1.], [o, o, o, 0.], Forward, f32s)
+    };
+    let mid = matrix_cases()[1].clone();
+    let bounded = |label: &str, b: [f64; 4], style| range(label, b.map(Some), style, f32s, Forward);
+    let nc_in = bounded("noClamp input", [0., 1., lo, hi], RangeStyle::NoClamp);
+    let nc_out = bounded("noClamp output", [lo, hi, 0., 1.], RangeStyle::NoClamp);
+    let clamp_in = bounded("clamping input", [0., 1., lo, hi], RangeStyle::Clamp);
+    let clamp_out = bounded("clamping output", [lo, hi, 0., 1.], RangeStyle::Clamp);
+    let mut off_diagonal = [
+        s_in, 0., 0., 0., 0., s_in, 0., 0., 0., 0., s_in, 0., 0., 0., 0., 1.,
+    ];
+    off_diagonal[1] = 0.01;
+    let groups: Vec<(&str, Vec<Case>)> = vec![
+        ("the input matrix alone", vec![input(f32s)]),
+        ("the output matrix alone", vec![output(f32s)]),
+        (
+            "input, 3x3, output",
+            vec![input(f32s), mid.clone(), output(f32s)],
+        ),
+        ("input then output", vec![input(f32s), output(f32s)]),
+        ("output then input", vec![output(f32s), input(f32s)]),
+        ("input twice", vec![input(f32s), input(f32s)]),
+        (
+            "the input matrix between 3x3s",
+            vec![mid.clone(), input(f32s), mid.clone()],
+        ),
+        (
+            "noClamp ranges around a 3x3",
+            vec![nc_in.clone(), mid.clone(), nc_out.clone()],
+        ),
+        (
+            "clamping ranges around a 3x3",
+            vec![clamp_in, mid.clone(), clamp_out],
+        ),
+        ("the noClamp output range alone", vec![nc_out]),
+        ("the noClamp input range alone", vec![nc_in]),
+        ("within the tolerance", vec![near(1e-7, -1e-7)]),
+        ("just inside the tolerance", vec![near(9.9e-7, -9.9e-7)]),
+        ("the scale just outside", vec![near(1.1e-6, 0.)]),
+        ("the offset just outside", vec![near(0., -1.1e-6)]),
+        ("far outside", vec![near(1e-3, 0.)]),
+        (
+            "green's scale differs within the tolerance",
+            vec![diag(
+                "g",
+                [s_in, s_in + 5e-7, s_in, 1.],
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "blue's scale differs",
+            vec![diag(
+                "b",
+                [s_in, s_in, s_in + 1e-5, 1.],
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "green's offset differs",
+            vec![diag(
+                "g",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in + 1e-5, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "blue's offset differs within the tolerance",
+            vec![diag(
+                "b",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in, o_in - 5e-7, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "an alpha offset",
+            vec![diag(
+                "a",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in, o_in, 0.1],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "an alpha scale",
+            vec![diag(
+                "a",
+                [s_in, s_in, s_in, 0.5],
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "an off-diagonal value",
+            vec![matrix(
+                "off",
+                off_diagonal,
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "the input matrix inverted",
+            vec![diag(
+                "inv",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in, o_in, 0.],
+                Inverse,
+                f32s,
+            )],
+        ),
+        (
+            "the output matrix inverted, last",
+            vec![
+                mid.clone(),
+                diag(
+                    "inv",
+                    [s_out, s_out, s_out, 1.],
+                    [o_out, o_out, o_out, 0.],
+                    Inverse,
+                    f32s,
+                ),
+            ],
+        ),
+        (
+            "a NaN scale",
+            vec![diag(
+                "nan",
+                [f64::NAN, f64::NAN, f64::NAN, 1.],
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        ("10-bit depths", vec![input(u10), mid.clone(), output(u10)]),
+        (
+            "mixed depths",
+            vec![
+                input((BitDepth::Uint10, BitDepth::F16)),
+                mid.clone(),
+                output((BitDepth::Uint12, BitDepth::Uint8)),
+            ],
+        ),
+        (
+            "a 10-bit op after the input",
+            vec![input(f32s), matrix("m10", IDENTITY, [0.; 4], Forward, u10)],
+        ),
+        (
+            "a 14-bit output depth",
+            vec![input((BitDepth::F32, BitDepth::Uint14))],
+        ),
+        (
+            "a 14-bit input depth",
+            vec![input((BitDepth::Uint14, BitDepth::F32))],
+        ),
+        (
+            "a 32-bit output depth, last",
+            vec![mid.clone(), output((BitDepth::F32, BitDepth::Uint32))],
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (label, children) in &groups {
+        for format in [CTF, CLF] {
+            cases.push(group_case(label, children, &[], format));
+        }
+    }
+
+    // Files of noClamp ranges: ranges with bit depths and metadata, ranges of other bounds,
+    // and upstream's file.
+    let lut = "    <LUT1D inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+               \x20       <Array dim=\"2 1\">0 1</Array>\n    </LUT1D>\n";
+    let x = "xmlns=\"http://www.smpte-ra.org/ns/2136-1/2024\" compCLFversion=\"ST2136-1:2024\"";
+    for (label, first, last) in [
+        (
+            "10-bit noClamp ranges with metadata",
+            "    <Range id=\"r1\" name=\"in\" inBitDepth=\"10i\" outBitDepth=\"10i\" \
+             style=\"noClamp\">\n\
+             \x20       <Description>Input Scaling</Description>\n\
+             \x20       <Description language=\"fr\">entree</Description>\n\
+             \x20       <minInValue>0</minInValue>\n\
+             \x20       <maxInValue>1023</maxInValue>\n\
+             \x20       <minOutValue>64</minOutValue>\n\
+             \x20       <maxOutValue>940</maxOutValue>\n\
+             \x20   </Range>\n",
+            "    <Range id=\"r2\" inBitDepth=\"10i\" outBitDepth=\"12i\" style=\"noClamp\">\n\
+             \x20       <minInValue>64</minInValue>\n\
+             \x20       <maxInValue>940</maxInValue>\n\
+             \x20       <minOutValue>0</minOutValue>\n\
+             \x20       <maxOutValue>4095</maxOutValue>\n\
+             \x20   </Range>\n",
+        ),
+        (
+            "noClamp ranges of other bounds",
+            "    <Range inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"noClamp\">\n\
+             \x20       <minInValue>0</minInValue>\n\
+             \x20       <maxInValue>1</maxInValue>\n\
+             \x20       <minOutValue>0.0625</minOutValue>\n\
+             \x20       <maxOutValue>0.9375</maxOutValue>\n\
+             \x20   </Range>\n",
+            "    <Range inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"noClamp\">\n\
+             \x20       <minInValue>0.0625</minInValue>\n\
+             \x20       <maxInValue>0.9375</maxInValue>\n\
+             \x20       <minOutValue>0</minOutValue>\n\
+             \x20       <maxOutValue>1</maxOutValue>\n\
+             \x20   </Range>\n",
+        ),
+    ] {
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <ProcessList id=\"a\" {x}>\n{first}{lut}{last}</ProcessList>\n"
+        );
+        let dir = write_files(&[file("noclamp.clf", text.into_bytes())]);
+        for format in [CTF, CLF] {
+            for dir_ in [Forward, Inverse] {
+                cases.push(path_case(
+                    label,
+                    &format!("{dir}/noclamp.clf"),
+                    dir_,
+                    format,
+                ));
+            }
+        }
+    }
+    for dir in [Forward, Inverse] {
+        for format in [CTF, CLF] {
+            cases.push(processor_case(
+                "clf/smpte_only/broadcast_profile_lut33.clf",
+                dir,
+                format,
+            ));
+        }
+    }
+    check_writes(&cases);
+
+    // Coverage: the texts are the wheel's (checked above); some CLF writes hold noClamp
+    // Ranges and others don't.
+    let raw = Config::create_raw().unwrap();
+    let no_clamp = cases
+        .iter()
+        .filter(|c| c.request["format"] == CLF)
+        .filter_map(|c| {
+            let mut written = Vec::new();
+            let group = c.port.as_ref().ok()?;
+            group.write(&raw, CLF, &mut written).ok()?;
+            Some(
+                String::from_utf8_lossy(&written)
+                    .matches("style=\"noClamp\"")
+                    .count(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        no_clamp.iter().filter(|&&n| n == 2).count() >= 6
+            && no_clamp.iter().filter(|&&n| n == 1).count() >= 6
+            && no_clamp.iter().filter(|&&n| n == 0).count() >= 10,
+        "{no_clamp:?}"
+    );
+}

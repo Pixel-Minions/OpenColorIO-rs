@@ -30,6 +30,7 @@ use ocio_ops::format_metadata::{
     METADATA_OUTPUT_DESCRIPTOR,
 };
 use ocio_ops::imath_half::float_to_half;
+use ocio_ops::math_utils::equal_with_abs_error;
 use ocio_ops::op_data::{OpData, OpDataRcPtr, OpDataType, get_type_name};
 use ocio_ops::open_color_types::{
     BitDepth, GradingStyle, HsyTransformStyle, HueCurveType, Lut1DHueAdjust, RgbCurveType,
@@ -58,6 +59,7 @@ use ocio_ops::ops::log::log_utils::{
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use ocio_ops::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
+use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_ops::utils::string_utils::{c_str, starts_with};
 use ocio_ops::{Exception, Result};
 
@@ -1760,19 +1762,22 @@ impl OpWriter for LogWriter<'_> {
     }
 }
 
-/// The writer of a Range: its bounds, scaled to the file bit depths.
+/// The writer of a Range: its bounds, scaled to the file bit depths, and the noClamp style
+/// when asked for.
 ///
-/// Port of `RangeWriter` (CTFTransform.cpp:2434-2512 @ v2.5.2).
+/// Port of `RangeWriter` (CTFTransform.cpp:2525-2617 @ v2.6.0).
 struct RangeWriter<'a> {
     /// `m_range`.
     range: &'a OpData,
+    /// `m_noClamp`.
+    no_clamp: bool,
     in_bit_depth: BitDepth,
     out_bit_depth: BitDepth,
 }
 
 /// Writes `<tag> value </tag>`.
 ///
-/// Port of `WriteTag` (CTFTransform.cpp:2474-2480 @ v2.5.2).
+/// Port of `WriteTag` (CTFTransform.cpp:2579-2585 @ v2.6.0).
 fn write_tag(fmt: &mut XmlFormatter<'_>, tag: &[u8], value: f64) {
     let content = [b" ".as_slice(), &double_string(value), b" "].concat();
     fmt.write_content_tag(tag, &content);
@@ -1792,7 +1797,18 @@ impl OpWriter for RangeWriter<'_> {
         self.out_bit_depth
     }
 
-    /// Port of `RangeWriter::writeContent` (CTFTransform.cpp:2482-2512 @ v2.5.2).
+    /// The op's attributes, then `style="noClamp"` for a noClamp Range.
+    ///
+    /// Port of `RangeWriter::getAttributes` (CTFTransform.cpp:2570-2577 @ v2.6.0).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+        if self.no_clamp {
+            attributes.push((ATTR_STYLE.to_vec(), b"noClamp".to_vec()));
+        }
+        Ok(())
+    }
+
+    /// Port of `RangeWriter::writeContent` (CTFTransform.cpp:2587-2615 @ v2.6.0).
     fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
         let OpData::Range(range) = self.range else {
             unreachable!("a Range writer writes a Range");
@@ -2249,6 +2265,118 @@ fn get_input_file_bd(op: &OpData) -> Result<BitDepth> {
     }
 }
 
+// A Range with the noClamp style is read in as an equivalent Matrix since a RangeOpData
+// always clamps (see RangeOpData::convertToMatrix). The SMPTE standard ST2136-10, the CLF
+// Broadcast Profile, relies on writing that exact noClamp Range back out rather than a
+// Matrix. Since a Matrix's scale & offset alone can't tell us what minIn/maxIn/minOut/maxOut
+// bounds the original Range used, we only recognize this one specific, fixed transform (and
+// its exact inverse) rather than attempting a general reconstruction.
+//
+// Port of the constants of CTFTransform.cpp:2845-2867 @ v2.6.0.
+
+/// The minOutValue used by the SMPTE CLF Broadcast Profile signal-range brackets: a 10-bit
+/// full-to-narrow range conversion on input and narrow-to-full on output (see
+/// tests/data/files/clf/smpte_only/broadcast_profile_lut33.clf).
+pub(crate) const NOCLAMP_RANGE_MIN_OUT_VALUE: f64 = 64. / 1023.; // 0.06256109481915934
+/// The maxOutValue of the Broadcast Profile's brackets.
+pub(crate) const NOCLAMP_RANGE_MAX_OUT_VALUE: f64 = 940. / 1023.; // 0.91886608015640270
+
+/// Equivalent uniform scale (out = in * scale + offset) for the "input" Range
+/// (minInValue=0, maxInValue=1, minOutValue/maxOutValue as above).
+pub(crate) const NOCLAMP_INPUT_RANGE_SCALE: f64 =
+    NOCLAMP_RANGE_MAX_OUT_VALUE - NOCLAMP_RANGE_MIN_OUT_VALUE;
+/// The input Range's equivalent offset.
+pub(crate) const NOCLAMP_INPUT_RANGE_OFFSET: f64 = NOCLAMP_RANGE_MIN_OUT_VALUE;
+/// The scale of the "output" Range, the input one's exact algebraic inverse
+/// (minInValue/maxInValue as above, minOutValue=0, maxOutValue=1).
+pub(crate) const NOCLAMP_OUTPUT_RANGE_SCALE: f64 = 1.0 / NOCLAMP_INPUT_RANGE_SCALE;
+/// The output Range's offset.
+pub(crate) const NOCLAMP_OUTPUT_RANGE_OFFSET: f64 =
+    -NOCLAMP_RANGE_MIN_OUT_VALUE * NOCLAMP_OUTPUT_RANGE_SCALE;
+
+/// The tolerance of the comparisons with the Broadcast Profile's scales and offsets.
+const NOCLAMP_RANGE_TOLERANCE: f64 = 1e-6;
+
+/// The equivalent noClamp Range for `mat_src` if, and only if, it is a forward, diagonal
+/// matrix applying the same scale & offset to R, G, and B as the fixed Range used by the SMPTE
+/// CLF Broadcast Profile (`is_input_range` selects which one of the pair, the input-side or
+/// the output-side, to compare against), with the matrix's metadata and file bit depths;
+/// `None` otherwise, leaving the Matrix to be written as-is.
+///
+/// Port of `GetEquivalentNoClampRange` (CTFTransform.cpp:2874-2917 @ v2.6.0).
+pub(crate) fn get_equivalent_no_clamp_range(
+    mat_src: &MatrixOpData,
+    is_input_range: bool,
+) -> Result<Option<RangeOpData>> {
+    if mat_src.get_direction() != TransformDirection::Forward
+        || mat_src.has_alpha()?
+        || !mat_src.is_diagonal()
+    {
+        return Ok(None);
+    }
+
+    // Matrix must scale R, G, and B by the same amount.
+    let scale = mat_src.get_array_value(0);
+    if !equal_with_abs_error(scale, mat_src.get_array_value(5), NOCLAMP_RANGE_TOLERANCE)
+        || !equal_with_abs_error(scale, mat_src.get_array_value(10), NOCLAMP_RANGE_TOLERANCE)
+    {
+        return Ok(None);
+    }
+
+    // Matrix must offset R, G, and B by the same amount.
+    let offset = mat_src.get_offset_value(0)?;
+    if !equal_with_abs_error(
+        offset,
+        mat_src.get_offset_value(1)?,
+        NOCLAMP_RANGE_TOLERANCE,
+    ) || !equal_with_abs_error(
+        offset,
+        mat_src.get_offset_value(2)?,
+        NOCLAMP_RANGE_TOLERANCE,
+    ) {
+        return Ok(None);
+    }
+
+    let target_scale = if is_input_range {
+        NOCLAMP_INPUT_RANGE_SCALE
+    } else {
+        NOCLAMP_OUTPUT_RANGE_SCALE
+    };
+    let target_offset = if is_input_range {
+        NOCLAMP_INPUT_RANGE_OFFSET
+    } else {
+        NOCLAMP_OUTPUT_RANGE_OFFSET
+    };
+
+    if !equal_with_abs_error(scale, target_scale, NOCLAMP_RANGE_TOLERANCE)
+        || !equal_with_abs_error(offset, target_offset, NOCLAMP_RANGE_TOLERANCE)
+    {
+        return Ok(None);
+    }
+
+    let mut range = if is_input_range {
+        RangeOpData::with_values(
+            0.,
+            1.,
+            NOCLAMP_RANGE_MIN_OUT_VALUE,
+            NOCLAMP_RANGE_MAX_OUT_VALUE,
+        )?
+    } else {
+        RangeOpData::with_values(
+            NOCLAMP_RANGE_MIN_OUT_VALUE,
+            NOCLAMP_RANGE_MAX_OUT_VALUE,
+            0.,
+            1.,
+        )?
+    };
+
+    *range.get_format_metadata_mut() = mat_src.get_format_metadata().clone();
+    range.set_file_input_bit_depth(mat_src.get_file_input_bit_depth());
+    range.set_file_output_bit_depth(mat_src.get_file_output_bit_depth());
+
+    Ok(Some(range))
+}
+
 /// The kind of ProcessList a [`TransformWriter`] writes.
 ///
 /// Port of `TransformWriter::SubFormat` (CTFTransform.h:258-263 @ v2.6.0).
@@ -2530,27 +2658,59 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::Matrix(mat_src) => {
-                        if is_clf && mat_src.has_alpha()? {
-                            return Err(throw_write_op("Matrix with alpha component"));
+                        // `break` out of the switch once the noClamp Range is written.
+                        let mut written_as_range = false;
+                        if is_clf {
+                            if mat_src.has_alpha()? {
+                                return Err(throw_write_op("Matrix with alpha component"));
+                            }
+
+                            // SMPTE CLF Broadcast Profile requires writing a noClamp Range at
+                            // the start or end of a CLF when it is equivalent to a specific
+                            // full/narrow scale and offset value. Only op[0] and the last op
+                            // qualify.
+                            if i == 0 || i == num_ops - 1 {
+                                let is_input_range = i == 0;
+                                if let Some(range) =
+                                    get_equivalent_no_clamp_range(mat_src, is_input_range)?
+                                {
+                                    out_bd = get_validated_file_bit_depth(
+                                        range.get_file_output_bit_depth(),
+                                        OpDataType::Range,
+                                    )?;
+
+                                    let range = OpData::Range(range);
+                                    let op_writer = RangeWriter {
+                                        range: &range,
+                                        no_clamp: true,
+                                        in_bit_depth: in_bd,
+                                        out_bit_depth: out_bd,
+                                    };
+                                    op_writer.write(formatter)?;
+                                    written_as_range = true;
+                                }
+                            }
                         }
 
-                        out_bd = get_validated_file_bit_depth(
-                            mat_src.get_file_output_bit_depth(),
-                            op_type,
-                        )?;
-                        // inBD has already been set at previous iteration. inBD can be:
-                        // - This op input file bit-depth if previous op does not define an
-                        //   output file bit-depth.
-                        // - Previous op output file bit-depth if previous op is a LUT, a
-                        //   Matrix or a Range.
+                        if !written_as_range {
+                            out_bd = get_validated_file_bit_depth(
+                                mat_src.get_file_output_bit_depth(),
+                                op_type,
+                            )?;
+                            // inBD has already been set at previous iteration. inBD can be:
+                            // - This op input file bit-depth if previous op does not define an
+                            //   output file bit-depth.
+                            // - Previous op output file bit-depth if previous op is a LUT, a
+                            //   Matrix or a Range.
 
-                        let op_writer = MatrixWriter {
-                            version: version.clone(),
-                            matrix: op,
-                            in_bit_depth: in_bd,
-                            out_bit_depth: out_bd,
-                        };
-                        op_writer.write(formatter)?;
+                            let op_writer = MatrixWriter {
+                                version: version.clone(),
+                                matrix: op,
+                                in_bit_depth: in_bd,
+                                out_bit_depth: out_bd,
+                            };
+                            op_writer.write(formatter)?;
+                        }
                     }
                     OpData::Range(range_src) => {
                         out_bd = get_validated_file_bit_depth(
@@ -2561,6 +2721,7 @@ impl<'t> TransformWriter<'t> {
 
                         let op_writer = RangeWriter {
                             range: op,
+                            no_clamp: false,
                             in_bit_depth: in_bd,
                             out_bit_depth: out_bd,
                         };

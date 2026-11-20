@@ -2,11 +2,19 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/fileformats/ctf/CTFTransform_tests.cpp` @ v2.6.0, its reader's tests
-//! (`read_version`, `version_write`, `accessors`).
+//! (`read_version`, `version_write`, `accessors`) and its writer's `get_equivalent_noclamp_range`.
 
+use ocio_ops::format_metadata::METADATA_DESCRIPTION;
 use ocio_ops::op_data::OpData;
+use ocio_ops::open_color_types::{BitDepth, TransformDirection};
 use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
-use ocio_testkit::upstream::{check_equal, check_throw_what};
+use ocio_testkit::upstream::{check_close, check_equal, check_throw_what};
+
+use crate::fileformats::ctf::ctf_writer::{
+    NOCLAMP_INPUT_RANGE_OFFSET, NOCLAMP_INPUT_RANGE_SCALE, NOCLAMP_OUTPUT_RANGE_OFFSET,
+    NOCLAMP_OUTPUT_RANGE_SCALE, NOCLAMP_RANGE_MAX_OUT_VALUE, NOCLAMP_RANGE_MIN_OUT_VALUE,
+    get_equivalent_no_clamp_range,
+};
 
 use super::*;
 
@@ -277,6 +285,167 @@ fn accessors() {
         check_equal(
             child(6).get_attribute_value_by_name(Some(b"language")),
             b"tr".as_slice(),
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, get_equivalent_noclamp_range)` @ v2.6.0
+/// (`tests/cpu/fileformats/ctf/CTFTransform_tests.cpp`, which includes CTFTransform.cpp).
+#[test]
+fn get_equivalent_noclamp_range() {
+    // Integration test is in FileFormatCTF_tests.cpp smpte_broadcast_profile_noclamp_range.
+
+    // GetEquivalentNoClampRange only recognizes a forward, diagonal Matrix whose scale and
+    // offset (applied uniformly to R, G, and B) exactly match (within tolerance) the fixed
+    // input-side or output-side Range used by the SMPTE CLF Broadcast Profile (see
+    // tests/data/files/clf/smpte_only/broadcast_profile_lut33.clf). Anything else must return
+    // null so the Matrix is written as-is.
+
+    let create_diag_matrix = |scale: f64, offset: f64, dir: TransformDirection| {
+        let mut mat = MatrixOpData::new();
+        mat.set_array_value(0, scale);
+        mat.set_array_value(5, scale);
+        mat.set_array_value(10, scale);
+        mat.set_offset_value(0, offset).unwrap();
+        mat.set_offset_value(1, offset).unwrap();
+        mat.set_offset_value(2, offset).unwrap();
+        mat.set_direction(dir);
+        mat
+    };
+    let fwd = TransformDirection::Forward;
+    let equivalent = |mat: &MatrixOpData, is_input: bool| {
+        get_equivalent_no_clamp_range(mat, is_input).expect("OCIO_CHECK_NO_THROW")
+    };
+
+    // Matches the "input" Range (minInValue=0, maxInValue=1) but not the "output" one.
+    {
+        let mat = create_diag_matrix(NOCLAMP_INPUT_RANGE_SCALE, NOCLAMP_INPUT_RANGE_OFFSET, fwd);
+
+        let range = equivalent(&mat, true).expect("OCIO_REQUIRE_ASSERT");
+        check_equal(range.get_min_in_value(), 0.);
+        check_equal(range.get_max_in_value(), 1.);
+        check_close(
+            range.get_min_out_value(),
+            NOCLAMP_RANGE_MIN_OUT_VALUE,
+            1e-12,
+        );
+        check_close(
+            range.get_max_out_value(),
+            NOCLAMP_RANGE_MAX_OUT_VALUE,
+            1e-12,
+        );
+
+        assert!(equivalent(&mat, false).is_none());
+    }
+
+    // Matches the "output" Range (minOutValue=0, maxOutValue=1) but not the "input" one.
+    {
+        let mat = create_diag_matrix(NOCLAMP_OUTPUT_RANGE_SCALE, NOCLAMP_OUTPUT_RANGE_OFFSET, fwd);
+
+        let range = equivalent(&mat, false).expect("OCIO_REQUIRE_ASSERT");
+        check_close(range.get_min_in_value(), NOCLAMP_RANGE_MIN_OUT_VALUE, 1e-12);
+        check_close(range.get_max_in_value(), NOCLAMP_RANGE_MAX_OUT_VALUE, 1e-12);
+        check_equal(range.get_min_out_value(), 0.);
+        check_equal(range.get_max_out_value(), 1.);
+
+        assert!(equivalent(&mat, true).is_none());
+    }
+
+    // Scale/offset within tolerance of the target still match.
+    {
+        let mat = create_diag_matrix(
+            NOCLAMP_INPUT_RANGE_SCALE + 1e-7,
+            NOCLAMP_INPUT_RANGE_OFFSET - 1e-7,
+            fwd,
+        );
+        assert!(equivalent(&mat, true).is_some());
+    }
+
+    // Scale/offset outside tolerance of the target do not match.
+    {
+        let mat = create_diag_matrix(
+            NOCLAMP_INPUT_RANGE_SCALE + 1e-3,
+            NOCLAMP_INPUT_RANGE_OFFSET,
+            fwd,
+        );
+        assert!(equivalent(&mat, true).is_none());
+    }
+
+    // An unrelated diagonal matrix (identity) never matches.
+    {
+        let mat = MatrixOpData::new();
+        assert!(equivalent(&mat, true).is_none());
+        assert!(equivalent(&mat, false).is_none());
+    }
+
+    // An inverse-direction Matrix never matches, even with the right scale/offset.
+    {
+        let mat = create_diag_matrix(
+            NOCLAMP_INPUT_RANGE_SCALE,
+            NOCLAMP_INPUT_RANGE_OFFSET,
+            TransformDirection::Inverse,
+        );
+        assert!(equivalent(&mat, true).is_none());
+    }
+
+    // A non-diagonal matrix never matches, even with the right values on the diagonal.
+    {
+        let mut mat =
+            create_diag_matrix(NOCLAMP_INPUT_RANGE_SCALE, NOCLAMP_INPUT_RANGE_OFFSET, fwd);
+        mat.set_array_value(1, 0.01);
+        assert!(equivalent(&mat, true).is_none());
+    }
+
+    // Non-uniform scale across R, G, and B never matches.
+    {
+        let mut mat =
+            create_diag_matrix(NOCLAMP_INPUT_RANGE_SCALE, NOCLAMP_INPUT_RANGE_OFFSET, fwd);
+        mat.set_array_value(5, NOCLAMP_INPUT_RANGE_SCALE + 0.01);
+        assert!(equivalent(&mat, true).is_none());
+    }
+
+    // Non-uniform offset across R, G, and B never matches.
+    {
+        let mut mat =
+            create_diag_matrix(NOCLAMP_INPUT_RANGE_SCALE, NOCLAMP_INPUT_RANGE_OFFSET, fwd);
+        mat.set_offset_value(1, NOCLAMP_INPUT_RANGE_OFFSET + 0.01)
+            .unwrap();
+        assert!(equivalent(&mat, true).is_none());
+    }
+
+    // A Matrix with an alpha component never matches, even with matching R/G/B scale/offset.
+    {
+        let mut mat =
+            create_diag_matrix(NOCLAMP_INPUT_RANGE_SCALE, NOCLAMP_INPUT_RANGE_OFFSET, fwd);
+        mat.set_offset_value(3, 0.1).unwrap();
+        assert!(equivalent(&mat, true).is_none());
+    }
+
+    // FormatMetadata and file bit-depths are carried over onto the returned Range.
+    {
+        let mut mat =
+            create_diag_matrix(NOCLAMP_INPUT_RANGE_SCALE, NOCLAMP_INPUT_RANGE_OFFSET, fwd);
+        mat.get_format_metadata_mut()
+            .add_child_element(Some(METADATA_DESCRIPTION), Some(b"My Description"))
+            .unwrap();
+        mat.set_file_input_bit_depth(BitDepth::Uint10);
+        mat.set_file_output_bit_depth(BitDepth::Uint12);
+
+        let range = equivalent(&mat, true).expect("OCIO_REQUIRE_ASSERT");
+        check_equal(range.get_file_input_bit_depth(), BitDepth::Uint10);
+        check_equal(range.get_file_output_bit_depth(), BitDepth::Uint12);
+        assert_eq!(
+            range.get_format_metadata().get_num_children_elements(),
+            1,
+            "OCIO_REQUIRE_EQUAL"
+        );
+        check_equal(
+            range
+                .get_format_metadata()
+                .get_child_element(0)
+                .unwrap()
+                .get_element_value(),
+            b"My Description".as_slice(),
         );
     }
 }
