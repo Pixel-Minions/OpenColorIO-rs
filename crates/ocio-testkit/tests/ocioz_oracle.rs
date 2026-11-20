@@ -744,8 +744,9 @@ fn prepare_lists_that_could_leave_are_refused() {
 /// the reason: on Windows a component that ends with a dot or a space, or holds `~` (an 8.3
 /// name), which the system takes for another name (a junction `k` reached as `k.` or by its
 /// short name); and, after the items are made, any link that doesn't lead, as the system
-/// resolves it, to a path inside the request's directory: on Linux a link checked before a
-/// link it goes through was made (`l` to `a/b/x/../../../`,
+/// resolves it, to a path strictly under the request's directory: one to the directory itself
+/// (a junction to `.` or `side/..`, a link to `.` or `..` from `extracted`), one to nothing, and on
+/// Linux a link checked before a link it goes through was made (`l` to `a/b/x/../../../`,
 /// then `a/b/x` to `../../../`). A junction's target is normalized (`./side`) before it is
 /// made, and leads where it says.
 #[test]
@@ -775,11 +776,36 @@ fn prepare_lists_the_system_resolves_otherwise_are_refused() {
                    {"path": r"j\d", "kind": "dir"}]),
             "goes through a link",
         ));
+        // A junction must lead strictly under the request's directory, not to it.
+        cases.push((
+            json!([{"path": "j", "kind": "junction", "target": "."}]),
+            out,
+        ));
+        cases.push((
+            json!([{"path": "side", "kind": "dir"},
+                   {"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/j", "kind": "junction", "target": "side/.."}]),
+            out,
+        ));
     } else {
         cases.push((
             json!([{"path": "extracted/a/b", "kind": "dir"},
                    {"path": "extracted/l", "kind": "symlink", "target": "a/b/x/../../../"},
                    {"path": "extracted/a/b/x", "kind": "symlink", "target": "../../../"}]),
+            out,
+        ));
+        // A link must lead strictly under the request's directory, not to it, and to something.
+        cases.push((
+            json!([{"path": "l", "kind": "symlink", "target": "."}]),
+            out,
+        ));
+        cases.push((
+            json!([{"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/l", "kind": "symlink", "target": ".."}]),
+            out,
+        ));
+        cases.push((
+            json!([{"path": "l", "kind": "symlink", "target": "missing"}]),
             out,
         ));
     }
