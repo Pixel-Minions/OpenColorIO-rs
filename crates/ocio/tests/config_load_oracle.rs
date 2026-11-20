@@ -401,8 +401,7 @@ fn getters(c: &Config) -> Vec<Getter> {
             args.clone(),
             s(c.display_view_description(display, view)),
         ));
-        // The view's aliases (2.6), and the alias lookup: each alias, upper-cased (it ignores
-        // case), and one it doesn't have.
+        // The view's aliases (2.6).
         let aliases: Vec<Vec<u8>> = (0..c.num_display_view_aliases(display, view))
             .map(|i| c.display_view_alias(display, view, i).to_vec())
             .collect();
@@ -411,7 +410,8 @@ fn getters(c: &Config) -> Vec<Getter> {
             args.clone(),
             list(aliases.iter().cloned()),
         ));
-        // The names the display and view resolve to (2.6), by the view's name and each alias.
+        // The names the display and view resolve to (2.6). The probes by other names of the
+        // view and of its display come from the wheel's dump of the config (`dump_probes`).
         out.push(g(
             "getCanonicalViewName",
             args.clone(),
@@ -422,41 +422,6 @@ fn getters(c: &Config) -> Vec<Getter> {
             args.clone(),
             s(c.resolved_display_view_color_space_name(display, view)),
         ));
-        // The view's name upper-cased: found ignoring case, and kept as the caller spells it.
-        let upper = view.to_ascii_uppercase();
-        out.push(g(
-            "getCanonicalViewName",
-            vec![s(display), s(&upper)],
-            s(c.canonical_view_name(display, &upper)),
-        ));
-        for alias in &aliases {
-            let alias_args = vec![s(display), s(alias)];
-            out.push(g(
-                "getCanonicalViewName",
-                alias_args.clone(),
-                s(c.canonical_view_name(display, alias)),
-            ));
-            out.push(g(
-                "getResolvedDisplayViewColorSpaceName",
-                alias_args,
-                s(c.resolved_display_view_color_space_name(display, alias)),
-            ));
-        }
-        let mut probes: Vec<Vec<u8>> = Vec::new();
-        for alias in &aliases {
-            probes.push(alias.clone());
-            probes.push(alias.to_ascii_uppercase());
-        }
-        probes.push(b"not an alias".to_vec());
-        for alias in probes {
-            let mut alias_args = args.clone();
-            alias_args.push(s(&alias));
-            out.push(g(
-                "hasDisplayViewAlias",
-                alias_args,
-                json!(c.has_display_view_alias(display, view, &alias)),
-            ));
-        }
     };
     for i in 0..c.num_displays_all() {
         let display = c.display_all(i).to_vec();
@@ -524,6 +489,138 @@ fn normalized(call: &Value) -> Value {
     }
 }
 
+/// A value of the wheel's dump as the port writes it: a string the binding couldn't decode as
+/// its bytes.
+fn dumped(value: &Value) -> Value {
+    match value.get("undecodable") {
+        Some(h) => json!({"bytes": h}),
+        None => value.clone(),
+    }
+}
+
+/// The port's answers to the 2.6 display and view probes of the wheel's dump of the config
+/// (`dump_config`, oracle/ocio_oracle/config_api.py): each display's `display_probes`
+/// (`getCanonicalDisplayName`), and each view's `hasDisplayViewAlias`, `by_probe` and
+/// `by_display` (`getCanonicalViewName` and `getResolvedDisplayViewColorSpaceName` of each
+/// probe, by the display and by each of its display probes), the shared views' with display
+/// "". Returns the differences.
+fn dump_probes(c: &Config, dump: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut compare = |what: String, wheel: &Value, port: Value| {
+        if dumped(wheel) != port {
+            out.push(format!("{what}\n  wheel {wheel}\n  port  {port}"));
+        }
+    };
+    let by_probe = |display: &[u8],
+                    view: &[u8],
+                    probes: &Value,
+                    compare: &mut dyn FnMut(String, &Value, Value)| {
+        for p in probes.as_array().expect("probes") {
+            let probe = bytes(&p[0]);
+            let at = |name: &str| {
+                format!(
+                    "{name}({:?}, {:?}) (view {:?})",
+                    String::from_utf8_lossy(display),
+                    String::from_utf8_lossy(&probe),
+                    String::from_utf8_lossy(view)
+                )
+            };
+            compare(
+                at("getCanonicalViewName"),
+                &p[1],
+                s(c.canonical_view_name(display, &probe)),
+            );
+            compare(
+                at("getResolvedDisplayViewColorSpaceName"),
+                &p[2],
+                s(c.resolved_display_view_color_space_name(display, &probe)),
+            );
+        }
+    };
+    let view_probes =
+        |display: &[u8], entry: &Value, compare: &mut dyn FnMut(String, &Value, Value)| {
+            let view = bytes(&entry["view"]);
+            for p in entry["hasDisplayViewAlias"]
+                .as_array()
+                .expect("hasDisplayViewAlias")
+            {
+                let probe = bytes(&p[0]);
+                compare(
+                    format!(
+                        "hasDisplayViewAlias({:?}, {:?}, {:?})",
+                        String::from_utf8_lossy(display),
+                        String::from_utf8_lossy(&view),
+                        String::from_utf8_lossy(&probe)
+                    ),
+                    &p[1],
+                    json!(c.has_display_view_alias(display, &view, &probe)),
+                );
+            }
+            by_probe(display, &view, &entry["by_probe"], compare);
+            if let Some(by_display) = entry.get("by_display") {
+                for d in by_display.as_array().expect("by_display") {
+                    by_probe(&bytes(&d[0]), &view, &d[1], compare);
+                }
+            }
+        };
+    let mut probed = 0;
+    for display in dump["displays"].as_array().expect("displays") {
+        let name = bytes(&display["display"]);
+        for p in display["display_probes"]
+            .as_array()
+            .expect("display_probes")
+        {
+            let probe = bytes(&p[0]);
+            compare(
+                format!(
+                    "getCanonicalDisplayName({:?})",
+                    String::from_utf8_lossy(&probe)
+                ),
+                &p[1],
+                s(c.canonical_display_name(&probe)),
+            );
+        }
+        for view in display["views"].as_array().expect("views") {
+            view_probes(&name, view, &mut compare);
+            probed += 1;
+        }
+    }
+    for view in dump["shared_views"].as_array().expect("shared_views") {
+        view_probes(b"", view, &mut compare);
+        probed += 1;
+    }
+    // Every view of the port's config was probed: the dump lists each display's views of both
+    // types and its active ones (each once), and the shared views.
+    let port_views: usize = (0..c.num_displays_all())
+        .map(|i| {
+            let display = c.display_all(i).to_vec();
+            let mut views: Vec<Vec<u8>> = Vec::new();
+            for t in [ViewType::Shared, ViewType::DisplayDefined] {
+                for j in 0..c.num_views_of_type(t, &display) {
+                    let v = c.view_of_type(t, &display, j).to_vec();
+                    if !views.contains(&v) {
+                        views.push(v);
+                    }
+                }
+            }
+            for j in 0..c.num_views(&display) {
+                let v = c.view(&display, j).to_vec();
+                if !views.contains(&v) {
+                    views.push(v);
+                }
+            }
+            views.len()
+        })
+        .sum::<usize>()
+        + c.num_views_of_type(ViewType::Shared, b"") as usize;
+    compare(
+        "the views the dump probes".to_string(),
+        &json!(probed),
+        json!(port_views),
+    );
+    out
+}
+
 /// Checks each config against the wheel, both reading an empty environment; panics listing
 /// every difference.
 fn check(cases: &[(&str, Vec<u8>)]) {
@@ -549,7 +646,7 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
         .iter()
         .zip(&port_getters)
         .map(|((_, text), getters)| {
-            let calls: Vec<Value> = getters
+            let mut calls: Vec<Value> = getters
                 .iter()
                 .map(|(name, args, _)| {
                     if name == "getCurrentContext" {
@@ -561,6 +658,11 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
                     }
                 })
                 .collect();
+            // Last, so that the getters' calls keep and log what they did before it: the
+            // wheel's dump of the config, whose view probes the port answers too.
+            if !getters.is_empty() {
+                calls.push(json!({"dump": "config"}));
+            }
             BatchCall {
                 cmd: "config_calls",
                 args: json!({"config": {"yaml": {"bytes": hex(text)}}, "calls": calls,
@@ -609,7 +711,7 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
                     ));
                 }
             }
-            Ok(_) => {
+            Ok(port_config) => {
                 if !config.is_null() {
                     failures.push(format!("{label}: the wheel fails: {config}"));
                     continue;
@@ -630,6 +732,13 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
                         ));
                     }
                 }
+                assert_eq!(results.len(), port_getters_of.len() + 1, "{label}");
+                let dump = &results[port_getters_of.len()]["result"];
+                failures.extend(
+                    dump_probes(port_config, dump)
+                        .into_iter()
+                        .map(|d| format!("{label}: {d}")),
+                );
             }
         }
     }
