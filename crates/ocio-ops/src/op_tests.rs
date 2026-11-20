@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the op list: upstream's `Op`, `OpData`, `OpRcPtrVec` and `FinalizeOpVec` tests
-//! (tests/cpu/Op_tests.cpp @ v2.5.2). The tests that aren't upstream's use the no-ops.
+//! (tests/cpu/Op_tests.cpp @ v2.6.0). The tests that aren't upstream's use the no-ops.
 
 use std::sync::Arc;
 
@@ -63,8 +63,8 @@ fn cpu_op_has_no_dynamic_property_by_default() {
         assert!(!renderer.is_dynamic());
         for type_ in ALL_DYNAMIC_TYPES {
             assert!(!renderer.has_dynamic_property(type_));
-            // The message of Op::getDynamicProperty, which tests/cpu/Op_tests.cpp:271-272 @
-            // v2.5.2 checks; OpCPU's is the same.
+            // The message of Op::getDynamicProperty, which tests/cpu/Op_tests.cpp:274-275 @
+            // v2.6.0 checks; OpCPU's is the same.
             ocio_testkit::upstream::check_throw_what(
                 renderer.get_dynamic_property(type_),
                 "does not implement dynamic property",
@@ -209,7 +209,7 @@ fn no_dynamic_property_in_a_list_of_no_ops() {
     assert!(!ops.is_dynamic());
     for type_ in ALL_DYNAMIC_TYPES {
         assert!(!ops.has_dynamic_property(type_));
-        // tests/cpu/Op_tests.cpp:435-437 @ v2.5.2.
+        // tests/cpu/Op_tests.cpp:438-440 @ v2.6.0.
         ocio_testkit::upstream::check_throw_what(
             ops.get_dynamic_property(type_),
             "Cannot find dynamic property.",
@@ -324,7 +324,7 @@ fn reference_data_makes_no_op() {
     assert!(result.is_empty());
 }
 
-/// Port of `OCIO_ADD_TEST(OpRcPtrVec, is_noop)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, is_noop)` @ v2.6.0.
 #[test]
 fn op_vec_is_noop() {
     use crate::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
@@ -363,7 +363,7 @@ fn op_vec_is_noop() {
     assert!(!ops.is_no_op().unwrap());
 }
 
-/// Port of `OCIO_ADD_TEST(OpRcPtrVec, channel_crosstalk)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, channel_crosstalk)` @ v2.6.0.
 #[test]
 fn channel_crosstalk() {
     let mut ops = OpVec::new();
@@ -381,7 +381,7 @@ fn channel_crosstalk() {
     assert!(ops.has_channel_crosstalk());
 }
 
-/// Port of `OCIO_ADD_TEST(OpRcPtrVec, serialize)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, serialize)` @ v2.6.0.
 #[test]
 fn serialize() {
     // The test validates that SerializeOpVec() does not throw.
@@ -419,14 +419,14 @@ fn move_semantics() {
     assert_eq!(ops3[0].get_info(), "<MatrixOffsetOp>");
 }
 
-/// Port of `Apply` (tests/cpu/Op_tests.cpp:14-20 @ v2.5.2).
+/// Port of `Apply` (tests/cpu/Op_tests.cpp:17-23 @ v2.6.0).
 fn apply(ops: &OpVec, source: &mut [f32]) {
     for op in ops.iter() {
         op.apply(source).unwrap();
     }
 }
 
-/// Port of `OCIO_ADD_TEST(FinalizeOpVec, optimize_combine)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FinalizeOpVec, optimize_combine)` @ v2.6.0.
 #[test]
 fn optimize_combine() {
     use ocio_testkit::upstream::check_close;
@@ -688,7 +688,7 @@ fn matrix_mut(op: &mut OpData) -> &mut MatrixOpData {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(OpData, equality)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpData, equality)` @ v2.6.0.
 ///
 /// Upstream's `operator==` takes an `OpData` on its right and dispatches on its left, so each
 /// comparison here is one of `OpData`s. Upstream's `op2` is `mat2` through the `OpData` base,
@@ -735,7 +735,7 @@ fn equality() {
     assert!(!(op2 == mat1));
 }
 
-/// Port of `OCIO_ADD_TEST(OpRcPtrVec, erase_insert)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, erase_insert)` @ v2.6.0.
 #[test]
 fn erase_insert() {
     let mut ops = OpVec::new();
@@ -803,7 +803,7 @@ fn erase_insert() {
     assert_eq!(ops2[3].get_info(), "<RangeOp>");
 }
 
-/// Port of `OCIO_ADD_TEST(OpRcPtrVec, clone_invert)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, clone_invert)` @ v2.6.0.
 #[test]
 fn clone_invert() {
     let mut ops = OpVec::new();
