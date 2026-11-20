@@ -787,6 +787,27 @@ fn prepare_lists_the_system_resolves_otherwise_are_refused() {
                    {"path": "extracted/j", "kind": "junction", "target": "side/.."}]),
             out,
         ));
+        // Where this process can make links: a symbolic link to nothing (as a file link and
+        // as a directory link), to the request's directory itself, or to it from extracted.
+        if can_make_links() {
+            cases.push((
+                json!([{"path": "l", "kind": "symlink", "target": "missing"}]),
+                out,
+            ));
+            cases.push((
+                json!([{"path": "l", "kind": "symlink", "target": "."}]),
+                out,
+            ));
+            cases.push((
+                json!([{"path": "extracted", "kind": "dir"},
+                       {"path": "extracted/l", "kind": "symlink", "target": r"..\"}]),
+                out,
+            ));
+            cases.push((
+                json!([{"path": "l", "kind": "symlink", "target": r"missing\"}]),
+                out,
+            ));
+        }
     } else {
         cases.push((
             json!([{"path": "extracted/a/b", "kind": "dir"},
