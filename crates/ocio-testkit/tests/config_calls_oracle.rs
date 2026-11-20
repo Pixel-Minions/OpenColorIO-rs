@@ -292,8 +292,9 @@ fn the_dump_reaches_every_getter() {
 }
 
 /// The 2.6 display and view getters of the dump: a view's aliases as the config gives them,
-/// each looked up as it is and upper-cased, the names a display and a view resolve to, a
-/// display's description, and the lookups of a display color space's alias.
+/// the view's name and each alias looked up as it is and upper-cased, then a name that is no
+/// alias, the names a display and a view resolve to, a display's description, and the lookups of
+/// a display color space's alias.
 #[test]
 fn the_dump_reaches_the_aliases() {
     let config = b"ocio_profile_version: 2.6\nroles: {default: raw}\nuse_display_aliases: true\n\
@@ -337,10 +338,13 @@ fn the_dump_reaches_the_aliases() {
     assert_eq!(
         probes,
         [
+            (b"v".to_vec(), json!(false)),
+            (b"V".to_vec(), json!(false)),
             (b"a1".to_vec(), json!(true)),
             (b"A1".to_vec(), json!(true)),
             (b"a2".to_vec(), json!(true)),
-            (b"A2".to_vec(), json!(true))
+            (b"A2".to_vec(), json!(true)),
+            (b"not an alias".to_vec(), json!(false))
         ],
         "{view}"
     );
@@ -363,6 +367,191 @@ fn the_dump_reaches_the_aliases() {
         b"the display",
         "{lookup}"
     );
+}
+
+/// The view probes of the dump on a config with more kinds of view: views whose color space is
+/// an alias or a role (`getResolvedDisplayViewColorSpaceName` gives the canonical name), a shared
+/// view with a view transform and `<USE_DISPLAY_NAME>`, a role naming a display color space, an
+/// inactive display and view, and a shared view no display uses. Each probe is the view's name
+/// or an alias, as it is and with its ASCII letters upper-cased (a non-ASCII letter stays as
+/// it is, as OCIO compares only ASCII letters ignoring case), each once, then a name that is no
+/// alias; `by_probe` resolves each by display (`getCanonicalViewName`, Config.cpp:4382-4419
+/// @ v2.6.0; `getResolvedDisplayViewColorSpaceName`, Config.cpp:4304-4339 @ v2.6.0).
+#[test]
+fn the_dump_probes_each_kind_of_view() {
+    // `@e@` stands for a non-ASCII letter, U+00E9.
+    let config = r#"ocio_profile_version: 2.6
+roles:
+  default: raw
+  display_role: d
+use_display_aliases: true
+active_displays: [d]
+active_views: [v, by_alias, by_role, sv]
+shared_views:
+  - !<View> {name: sv, view_transform: vt, display_colorspace: <USE_DISPLAY_NAME>, aliases: [sv_alias]}
+  - !<View> {name: unused, colorspace: raw}
+displays:
+  d:
+    - !<View> {name: v, colorspace: d, aliases: [a1, "@e@a"]}
+    - !<View> {name: by_alias, colorspace: d_alias}
+    - !<View> {name: by_role, colorspace: display_role}
+    - !<Views> [sv]
+  e:
+    - !<View> {name: w, colorspace: e, aliases: [w_alias, "42"]}
+view_transforms:
+  - !<ViewTransform> {name: vt, from_scene_reference: !<MatrixTransform> {}}
+colorspaces:
+  - !<ColorSpace> {name: raw, isdata: true}
+display_colorspaces:
+  - !<ColorSpace> {name: d, aliases: [d_alias]}
+  - !<ColorSpace> {name: e}
+"#
+    .replace("@e@", "\u{e9}");
+    let response = call(
+        json!({"config": {"yaml": bytes_arg(config.as_bytes())}, "calls": [{"dump": "config"}]}),
+    );
+    let dump = result(&calls(&response)[0]);
+    // validate() refuses a role as a view's color space (Config.cpp's display checks); the
+    // getters still answer.
+    assert!(
+        dump["validate"]["exception"].is_object(),
+        "{}",
+        dump["validate"]
+    );
+    let view_of = |list: &Value, name: &[u8]| -> Value {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .find(|v| bytes(&v["view"]) == name)
+            .unwrap_or_else(|| panic!("no view {:?}: {list}", String::from_utf8_lossy(name)))
+            .clone()
+    };
+    let display_of = |name: &[u8]| -> Value {
+        dump["displays"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| bytes(&d["display"]) == name)
+            .unwrap_or_else(|| panic!("no display {:?}", String::from_utf8_lossy(name)))
+            .clone()
+    };
+    // [probe, hasDisplayViewAlias] and [probe, getCanonicalViewName, resolved color space].
+    let has = |view: &Value| -> Vec<(Vec<u8>, Value)> {
+        view["hasDisplayViewAlias"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (bytes(&p[0]), p[1].clone()))
+            .collect()
+    };
+    let by_probe = |view: &Value| -> Vec<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+        view["by_probe"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| (bytes(&p[0]), bytes(&p[1]), bytes(&p[2])))
+            .collect()
+    };
+    let t = |s: &[u8]| s.to_vec();
+    let (yes, no) = (json!(true), json!(false));
+
+    let d = display_of(b"d");
+    let v = view_of(&d["views"], b"v");
+    assert_eq!(
+        has(&v),
+        [
+            (t(b"v"), no.clone()),
+            (t(b"V"), no.clone()),
+            (t(b"a1"), yes.clone()),
+            (t(b"A1"), yes.clone()),
+            (t(b"\xc3\xa9a"), yes.clone()),
+            (t(b"\xc3\xa9A"), yes.clone()),
+            (t(b"not an alias"), no.clone()),
+        ],
+        "{v}"
+    );
+    // A view's own name resolves to itself as the caller spells it; an alias to the view's name.
+    assert_eq!(
+        by_probe(&v),
+        [
+            (t(b"v"), t(b"v"), t(b"d")),
+            (t(b"V"), t(b"V"), t(b"d")),
+            (t(b"a1"), t(b"v"), t(b"d")),
+            (t(b"A1"), t(b"v"), t(b"d")),
+            (t(b"\xc3\xa9a"), t(b"v"), t(b"d")),
+            (t(b"\xc3\xa9A"), t(b"v"), t(b"d")),
+            (t(b"not an alias"), t(b""), t(b"")),
+        ],
+        "{v}"
+    );
+    // The color space of a view, by an alias or a role, resolves to its canonical name.
+    for (name, cs) in [
+        (&b"by_alias"[..], &b"d_alias"[..]),
+        (b"by_role", b"display_role"),
+    ] {
+        let view = view_of(&d["views"], name);
+        assert_eq!(bytes(&view["getDisplayViewColorSpaceName"]), cs, "{view}");
+        assert_eq!(
+            bytes(&view["getResolvedDisplayViewColorSpaceName"]),
+            b"d",
+            "{view}"
+        );
+        assert_eq!(by_probe(&view).last().unwrap().0, b"not an alias", "{view}");
+    }
+    // The shared view: its display color space is the display's, found by its alias too.
+    let sv = view_of(&d["views"], b"sv");
+    assert_eq!(sv["isViewShared"], yes, "{sv}");
+    assert_eq!(
+        by_probe(&sv),
+        [
+            (t(b"sv"), t(b"sv"), t(b"d")),
+            (t(b"SV"), t(b"SV"), t(b"d")),
+            (t(b"sv_alias"), t(b"sv"), t(b"d")),
+            (t(b"SV_ALIAS"), t(b"sv"), t(b"d")),
+            (t(b"not an alias"), t(b""), t(b"")),
+        ],
+        "{sv}"
+    );
+    // The inactive display and its view; an alias without letters is probed once.
+    let e = display_of(b"e");
+    let w = view_of(&e["views"], b"w");
+    assert_eq!(
+        has(&w),
+        [
+            (t(b"w"), no.clone()),
+            (t(b"W"), no.clone()),
+            (t(b"w_alias"), yes.clone()),
+            (t(b"W_ALIAS"), yes.clone()),
+            (t(b"42"), yes.clone()),
+            (t(b"not an alias"), no.clone()),
+        ],
+        "{w}"
+    );
+    assert_eq!(by_probe(&w)[2], (t(b"w_alias"), t(b"w"), t(b"e")), "{w}");
+    // The shared views as the config lists them (display ""): the alias lookup finds the view,
+    // while the names, which need a display, resolve to nothing.
+    let shared = &dump["shared_views"];
+    let sv = view_of(shared, b"sv");
+    assert_eq!(has(&sv)[2], (t(b"sv_alias"), yes.clone()), "{sv}");
+    assert_eq!(by_probe(&sv)[2], (t(b"sv_alias"), t(b""), t(b"")), "{sv}");
+    let unused = view_of(shared, b"unused");
+    assert_eq!(
+        has(&unused),
+        [
+            (t(b"unused"), no.clone()),
+            (t(b"UNUSED"), no.clone()),
+            (t(b"not an alias"), no)
+        ],
+        "{unused}"
+    );
+    // The role naming a display color space is looked up as one.
+    let lookup = dump["lookups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| bytes(&l["name"]) == b"display_role")
+        .unwrap();
+    assert_eq!(bytes(&lookup["getColorSpace"]), b"d", "{lookup}");
 }
 
 /// A config whose names the binding can't decode dumps whole: the names come back as their

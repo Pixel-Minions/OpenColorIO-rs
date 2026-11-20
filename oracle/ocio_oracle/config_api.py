@@ -672,6 +672,18 @@ def dump_object(obj):
     return out
 
 
+# The name the dump's view probes end with: one meant to be no view's alias.
+NOT_A_VIEW_ALIAS = "not an alias"
+
+_ASCII_UPPER = {c: c - 32 for c in range(ord("a"), ord("z") + 1)}
+
+
+def _ascii_upper(name):
+    """`name` (text, or bytes the binding couldn't decode) with its ASCII letters upper-cased
+    and every other character as it is."""
+    return name.upper() if isinstance(name, bytes) else name.translate(_ASCII_UPPER)
+
+
 def dump_config(config):
     """Everything a config holds, through every getter, in this order (each value as value_out
     writes it, or {"exception": ...} or {"undecodable": hex} where the getter raised or its text
@@ -717,8 +729,12 @@ def dump_config(config):
       not_dumped    the get*/is*/has* methods the dump never calls
     The view getters: {"view", "hasView", "isViewShared", getDisplayView{TransformName,
     ColorSpaceName,Looks,Rule,Description}, and OCIO 2.6's "getDisplayViewAliases",
-    "hasDisplayViewAlias": per alias of those, as it is and upper-cased, [alias, the lookup],
-    "getCanonicalViewName" and "getResolvedDisplayViewColorSpaceName"}."""
+    "hasDisplayViewAlias": per probe [probe, hasDisplayViewAlias(display, view, probe)],
+    "getCanonicalViewName" and "getResolvedDisplayViewColorSpaceName" of the view, and
+    "by_probe": per probe [probe, getCanonicalViewName(display, probe),
+    getResolvedDisplayViewColorSpaceName(display, probe)]}. The probes: the view's name and each
+    of its aliases, as it is and with its ASCII letters upper-cased, then NOT_A_VIEW_ALIAS;
+    each once, in that order."""
     out = {"class": "Config"}
     getters, _ = _getters(config, skip=("getColorSpaces", "getLooks", "getViewTransforms",
                                         "getNamedTransforms"))
@@ -805,18 +821,28 @@ def dump_config(config):
         for what in ("TransformName", "ColorSpaceName", "Looks", "Rule", "Description"):
             entry[f"getDisplayView{what}"] = attempt(getattr(config, f"getDisplayView{what}"),
                                                      display, view)
-        # OCIO 2.6: the view's aliases, each looked up as it is and upper-cased (the lookup
-        # ignores case), and the names the display and view resolve to.
+        # OCIO 2.6: the view's aliases, and the names the display and view resolve to. The
+        # probes: the view's name and each alias, as they are and with their ASCII letters
+        # upper-cased (OCIO compares names ignoring the case of ASCII letters only), then a name
+        # that is no alias; each once, in that order.
         entry["getDisplayViewAliases"] = attempt(config.getDisplayViewAliases, display, view)
         probes = []
-        for alias in raw_strings(lambda: config.getDisplayViewAliases(display, view)):
-            probes += [alias, alias.upper()]
+        for name in [view] + raw_strings(lambda: config.getDisplayViewAliases(display, view)):
+            for probe in (name, _ascii_upper(name)):
+                if probe not in probes:
+                    probes.append(probe)
+        if NOT_A_VIEW_ALIAS not in probes:
+            probes.append(NOT_A_VIEW_ALIAS)
         entry["hasDisplayViewAlias"] = [
             [value_out(a), attempt(config.hasDisplayViewAlias, display, view, a)]
             for a in probes]
         entry["getCanonicalViewName"] = attempt(config.getCanonicalViewName, display, view)
         entry["getResolvedDisplayViewColorSpaceName"] = attempt(
             config.getResolvedDisplayViewColorSpaceName, display, view)
+        entry["by_probe"] = [
+            [value_out(a), attempt(config.getCanonicalViewName, display, a),
+             attempt(config.getResolvedDisplayViewColorSpaceName, display, a)]
+            for a in probes]
         return entry
 
     displays = []
