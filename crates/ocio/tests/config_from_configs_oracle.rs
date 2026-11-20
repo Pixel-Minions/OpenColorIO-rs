@@ -798,7 +798,13 @@ fn processors_between_generated_configs_match_the_wheel() {
         "Could not find destination interchange color space",
         "Could not find source color space",
         "Could not find destination color space",
-        "display color space not found.",
+        // The view `missing` (colorspace: no_such_space). 2.6.0 builds the display and view's
+        // processor (Config.cpp:5744 @ v2.6.0) before it looks up the view's color space
+        // (5755), so BuildDisplayOps refuses it first (DisplayViewTransform.cpp:425-432 @
+        // v2.6.0), where 2.5.2 gave "display color space not found." (Config.cpp:5126-5133
+        // @ v2.5.2).
+        "DisplayViewTransform error. Cannot find color space or named transform with name \
+         'no_such_space'.",
     ] {
         assert!(
             r.messages.iter().any(|m| m.contains(message)),
