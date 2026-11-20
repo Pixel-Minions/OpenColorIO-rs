@@ -3513,8 +3513,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   entry's hashes pass `INT32_MAX` (`mz_zip_rw.c:278, 505, 545`), and a short field then
   overflows the `int`: undefined behaviour, which both wheels resolve the same way, wrapping
   it to a negative limit and ending the search (`MZ_EXIST_ERROR`): Linux `sub ebx, eax; js`
-  (`libOpenColorIO.so` 0x5f81f2), Windows `add edi, ecx; js` (`OpenColorIO_2_5.dll`
-  0x180340248).
+  (`libOpenColorIO.so` 0x61bec2), Windows `add edi, ecx; js` (`OpenColorIO_2_6.dll`
+  0x18034d8f8); the same code as the 2.5.2 libraries' (0x5f81f2, `OpenColorIO_2_5.dll`
+  0x180340248), `tools/wheel-inspect`.
 - **Who notices:** applications reading archives whose zipped central directory entry has a
   short extra field before its `CDCD` field.
 - **A fix:** compute the limit in 64 bits, or refuse a field shorter than its header.
@@ -3535,8 +3536,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `mz_zip_recover_cd` seeks past an entry by its local header's size, and a zip64 size near
   `INT64_MAX` makes the sum overflow the 64-bit position: undefined
   behaviour, which both wheels resolve the same way, wrapping it (Linux
-  `add qword ptr [rdi + 0x10038], r12` at `libOpenColorIO.so` 0x5f6894, Windows
-  `add qword ptr [rbx + 0x10038], rdi` at `OpenColorIO_2_5.dll` 0x18033d179).
+  `add qword ptr [rdi + 0x10038], r12` at `libOpenColorIO.so` 0x61a514, Windows
+  `add qword ptr [rbx + 0x10038], rdi` at `OpenColorIO_2_6.dll` 0x18034a819; the same code as
+  the 2.5.2 libraries', at 0x5f6894 and `OpenColorIO_2_5.dll` 0x18033d179, `tools/wheel-inspect`).
 - **Who notices:** applications reading damaged archives that minizip-ng recovers.
 - **A fix:** check the seek's result, and the sum for overflow.
 - **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_strm.rs`, the buffered
