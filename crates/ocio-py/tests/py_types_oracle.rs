@@ -125,7 +125,7 @@ fn the_module_names_are_the_wheels_in_its_order() {
     let theirs: Vec<String> = wheel_members().iter().map(entry_name).collect();
     let ours: Vec<String> = port_members().iter().map(entry_name).collect();
     assert_eq!(ours, theirs);
-    // bindPyTypes' names are all there: 63 classes, 31 enums, 34 string constants.
+    // bindPyTypes' names are all there: 63 classes, 32 enums, 34 string constants.
     for n in [
         "Baker",
         "ConfigMerger",
@@ -228,10 +228,12 @@ fn the_module_members_report_as_the_wheels() {
     assert_eq!(complete, COMPLETE.len());
     assert_eq!(own, OWN_CLASSES.len());
     assert_eq!(partial, PARTIAL.len());
-    assert_eq!(enums, 31);
-    // The constants, the exported values and the functions of bindPyTypes and
-    // PyOpenColorIO.cpp.
-    assert!(others >= 34 + 31 + 32, "{others}");
+    // The 32 `py::enum_` of bindPyTypes (src/bindings/python/PyTypes.cpp:292-870 @ v2.6.0;
+    // 2.6.0's 32nd is ConfigCompatibility, lines 864-870).
+    assert_eq!(enums, 32);
+    // The constants, the exported values (at least one per enum) and the functions of
+    // bindPyTypes and PyOpenColorIO.cpp.
+    assert!(others >= 34 + 32 + 32, "{others}");
     // No declared class is bound in part: each card binds its classes completely.
     assert_eq!(bound, 0);
 }
