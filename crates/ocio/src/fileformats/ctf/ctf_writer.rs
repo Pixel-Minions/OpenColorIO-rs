@@ -97,7 +97,8 @@ use super::ctf_transform::{
     CTF_PROCESS_LIST_VERSION_1_3, CTF_PROCESS_LIST_VERSION_1_4, CTF_PROCESS_LIST_VERSION_1_5,
     CTF_PROCESS_LIST_VERSION_1_6, CTF_PROCESS_LIST_VERSION_1_7, CTF_PROCESS_LIST_VERSION_2_0,
     CTF_PROCESS_LIST_VERSION_2_1, CTF_PROCESS_LIST_VERSION_2_4, CTF_PROCESS_LIST_VERSION_2_5,
-    CtfReaderTransform, CtfVersion, SMPTE_XMLNS_URL, get_elements_values,
+    CTF_PROCESS_LIST_VERSION_2_6, CtfReaderTransform, CtfVersion, SMPTE_XMLNS_URL,
+    get_elements_values,
 };
 
 /// The precision of the doubles the writer formats (CTFTransform.cpp:39 @ v2.5.2).
@@ -105,7 +106,7 @@ const DOUBLE_PRECISION: i64 = 15;
 
 /// The lowest CTF version that can hold `op`.
 ///
-/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:225-384 @ v2.5.2). Upstream's default,
+/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:256-419 @ v2.6.0). Upstream's default,
 /// `CTF_PROCESS_LIST_VERSION`, is for none of the types the port has.
 fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
     use FixedFunctionOpStyle as F;
@@ -144,6 +145,8 @@ fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
             | F::HsyLinToRgb
             | F::RgbToHsyVid
             | F::HsyVidToRgb => CTF_PROCESS_LIST_VERSION_2_5,
+            // CTFTransform.cpp:316-320 @ v2.6.0.
+            F::AcesRgbToHmj20 | F::AcesHmjToRgb20 => CTF_PROCESS_LIST_VERSION_2_6,
             _ => CTF_PROCESS_LIST_VERSION_2_0,
         },
         OpData::GradingPrimary(_)

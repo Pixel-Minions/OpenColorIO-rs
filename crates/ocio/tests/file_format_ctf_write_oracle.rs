@@ -1705,7 +1705,8 @@ fn processors_of_lut_files_write_as_in_the_wheel() {
 
 /// Valid parameters of each FixedFunction style that takes some: upstream's test values
 /// (tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp:71, 169, 219-220, 270-271,
-/// FixedFunctionOpCPU_tests.cpp:564-569, 773, 866 @ v2.5.2), as
+/// FixedFunctionOpCPU_tests.cpp:564-569, 773, 866 @ v2.5.2; HMJ's from
+/// tests/cpu/fileformats/FileFormatCTF_tests.cpp:7214 @ v2.6.0), as
 /// `tests/fixed_function_transform_oracle.rs` takes them.
 fn ff_valid_params(style: FixedFunctionStyle) -> Vec<f64> {
     use FixedFunctionStyle::*;
@@ -1730,7 +1731,7 @@ fn ff_valid_params(style: FixedFunctionStyle) -> Vec<f64> {
         AcesOutputTransform20 | AcesGamutCompress20 => vec![
             100.0, 0.6400, 0.3300, 0.3000, 0.6000, 0.1500, 0.0600, 0.3127, 0.3290,
         ],
-        AcesRgbToJmh20 => vec![
+        AcesRgbToJmh20 | AcesRgbToHmj20 => vec![
             0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
         ],
         AcesTonescaleCompress20 => vec![1000.0],
@@ -1739,7 +1740,7 @@ fn ff_valid_params(style: FixedFunctionStyle) -> Vec<f64> {
 }
 
 /// Every FixedFunction style.
-const FF_STYLES: [FixedFunctionStyle; 23] = {
+const FF_STYLES: [FixedFunctionStyle; 24] = {
     use FixedFunctionStyle::*;
     [
         AcesRedMod03,
@@ -1765,6 +1766,7 @@ const FF_STYLES: [FixedFunctionStyle; 23] = {
         RgbToHsyLin,
         RgbToHsyLog,
         RgbToHsyVid,
+        AcesRgbToHmj20,
     ]
 };
 

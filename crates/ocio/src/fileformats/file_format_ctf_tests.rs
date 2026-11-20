@@ -7972,6 +7972,47 @@ fn fixed_function_lin_to_doublelog_ctf() {
     }
 }
 
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_rgb_to_hmj_20_ctf)` @ v2.6.0.
+#[test]
+fn fixed_function_aces_rgb_to_hmj_20_ctf() {
+    let data = [
+        0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+    ];
+    let ff = FixedFunctionTransform::new(FixedFunctionStyle::AcesRgbToHmj20, &data).unwrap();
+
+    let output_transform = write_ff_group(&ff);
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.6" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="RGB_TO_HMJ_20" params="0.7347 0.2653 0 1 0.0001 -0.077 0.32168 0.33767">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_hmj_to_rgb_20_ctf)` @ v2.6.0.
+#[test]
+fn fixed_function_aces_hmj_to_rgb_20_ctf() {
+    let data = [
+        0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+    ];
+    let mut ff = FixedFunctionTransform::new(FixedFunctionStyle::AcesRgbToHmj20, &data).unwrap();
+    ff.set_direction(TransformDirection::Inverse);
+
+    let output_transform = write_ff_group(&ff);
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.6" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="HMJ_TO_RGB_20" params="0.7347 0.2653 0 1 0.0001 -0.077 0.32168 0.33767">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
 /// The CTF of a group whose id is `id`, of `transform`.
 fn write_one(id: &[u8], transform: Transform) -> Vec<u8> {
     let group = group_of(id, transform);
@@ -8803,7 +8844,7 @@ fn validate_fixed_function_style(style: FixedFunctionOpStyle, vers: &str, params
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, ff_load_save_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, ff_load_save_ctf)` @ v2.6.0.
 #[test]
 fn ff_load_save_ctf() {
     use FixedFunctionOpStyle::*;
@@ -8892,6 +8933,16 @@ fn ff_load_save_ctf() {
     validate_fixed_function_style(HsyLinToRgb, "2.5", "");
     validate_fixed_function_style(RgbToHsyVid, "2.5", "");
     validate_fixed_function_style(HsyVidToRgb, "2.5", "");
+    validate_fixed_function_style(
+        AcesRgbToHmj20,
+        "2.6",
+        "0.7347 0.2653 0 1 0.0001 -0.077 0.32168 0.33767",
+    );
+    validate_fixed_function_style(
+        AcesHmjToRgb20,
+        "2.6",
+        "0.7347 0.2653 0 1 0.0001 -0.077 0.32168 0.33767",
+    );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
