@@ -489,8 +489,9 @@ display_colorspaces:
         "{v}"
     );
     // The display's probes: its name upper-cased, its color space's alias as it is and
-    // upper-cased (use_display_aliases), the role naming that color space, which
-    // getCanonicalDisplayName refuses, and a name of no display (Config.cpp:4225-4300 @ v2.6.0).
+    // upper-cased (use_display_aliases), the role naming that color space as it is and
+    // upper-cased, which getCanonicalDisplayName refuses ignoring case, and a name of no
+    // display (Config.cpp:4225-4300 @ v2.6.0).
     let display_probes: Vec<(Vec<u8>, Vec<u8>)> = d["display_probes"]
         .as_array()
         .unwrap()
@@ -504,6 +505,7 @@ display_colorspaces:
             (t(b"d_alias"), t(b"d")),
             (t(b"D_ALIAS"), t(b"d")),
             (t(b"display_role"), t(b"")),
+            (t(b"DISPLAY_ROLE"), t(b"")),
             (t(b"not a display"), t(b"")),
         ],
         "{d}"
@@ -537,12 +539,16 @@ display_colorspaces:
             b"d_alias",
             b"D_ALIAS",
             b"display_role",
+            b"DISPLAY_ROLE",
             b"not a display"
         ],
         "{v}"
     );
     for (display, probes) in &v_by_display {
-        let found = !matches!(display.as_slice(), b"display_role" | b"not a display");
+        let found = !matches!(
+            display.as_slice(),
+            b"display_role" | b"DISPLAY_ROLE" | b"not a display"
+        );
         assert_eq!(probes.len(), by_probe(&v).len(), "{v}");
         for ((probe, canonical, resolved), (own, own_canonical, own_resolved)) in
             probes.iter().zip(by_probe(&v))
@@ -663,6 +669,133 @@ display_colorspaces:
         .find(|l| bytes(&l["name"]) == b"display_role")
         .unwrap();
     assert_eq!(bytes(&lookup["getColorSpace"]), b"d", "{lookup}");
+}
+
+/// `[probe, answer]` pairs of a dump list, as bytes.
+fn probe_pairs(list: &Value) -> Vec<(Vec<u8>, Value)> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (bytes(&p[0]), p[1].clone()))
+        .collect()
+}
+
+/// The display probes of a display named by an alias of its color space (upstream's
+/// aliased_display_name case, Config.cpp:4278-4296 @ v2.6.0): the color space's own name and
+/// its other alias resolve to the display; a role naming the color space by an alias is probed
+/// as it is, upper-cased and lower-cased, and refused ignoring case (`hasRole`); an all
+/// upper-case name is probed lower-cased, for displays and for views.
+#[test]
+fn the_dump_probes_each_name_of_a_display() {
+    let config = r#"ocio_profile_version: 2.6
+roles:
+  default: raw
+  alias_role: dcs_alias
+use_display_aliases: true
+displays:
+  SRGB_DISP:
+    - !<View> {name: v, colorspace: other_dcs, aliases: [a1]}
+  ACES:
+    - !<View> {name: RAW, colorspace: raw, aliases: [RAWZ, MiX]}
+colorspaces:
+  - !<ColorSpace> {name: raw, isdata: true}
+display_colorspaces:
+  - !<ColorSpace> {name: other_dcs, aliases: [SRGB_DISP, dcs_alias]}
+"#;
+    let response = call(
+        json!({"config": {"yaml": bytes_arg(config.as_bytes())}, "calls": [{"dump": "config"}]}),
+    );
+    let dump = result(&calls(&response)[0]);
+    let displays = dump["displays"].as_array().unwrap();
+    assert_eq!(displays.len(), 2, "{}", dump["displays"]);
+    let s = |text: &str| json!({"bytes": hex(text.as_bytes())});
+    let srgb = displays
+        .iter()
+        .find(|d| bytes(&d["display"]) == b"SRGB_DISP")
+        .unwrap();
+    assert_eq!(
+        probe_pairs(&srgb["display_probes"]),
+        [
+            (b"srgb_disp".to_vec(), s("SRGB_DISP")),
+            (b"other_dcs".to_vec(), s("SRGB_DISP")),
+            (b"OTHER_DCS".to_vec(), s("SRGB_DISP")),
+            (b"dcs_alias".to_vec(), s("SRGB_DISP")),
+            (b"DCS_ALIAS".to_vec(), s("SRGB_DISP")),
+            (b"alias_role".to_vec(), s("")),
+            (b"ALIAS_ROLE".to_vec(), s("")),
+            (b"not a display".to_vec(), s("")),
+        ],
+        "{srgb}"
+    );
+    // The view by the color space's own name, upper-cased.
+    let v = &srgb["views"][0];
+    let by_other = v["by_display"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| bytes(&d[0]) == b"OTHER_DCS")
+        .unwrap();
+    assert_eq!(bytes(&by_other[1][2][1]), b"v", "{v}");
+    assert_eq!(bytes(&by_other[1][2][2]), b"other_dcs", "{v}");
+    let aces = displays
+        .iter()
+        .find(|d| bytes(&d["display"]) == b"ACES")
+        .unwrap();
+    assert_eq!(
+        probe_pairs(&aces["display_probes"]),
+        [
+            (b"aces".to_vec(), s("ACES")),
+            (b"not a display".to_vec(), s("")),
+        ],
+        "{aces}"
+    );
+    let raw = &aces["views"][0];
+    assert_eq!(
+        probe_pairs(&raw["hasDisplayViewAlias"]),
+        [
+            (b"RAW".to_vec(), json!(false)),
+            (b"raw".to_vec(), json!(false)),
+            (b"RAWZ".to_vec(), json!(true)),
+            (b"rawz".to_vec(), json!(true)),
+            (b"MiX".to_vec(), json!(true)),
+            (b"MIX".to_vec(), json!(true)),
+            (b"mix".to_vec(), json!(true)),
+            (b"not an alias".to_vec(), json!(false)),
+        ],
+        "{raw}"
+    );
+}
+
+/// A display and its color space named with bytes the binding can't decode: the role naming
+/// that color space is still probed.
+#[test]
+fn the_dump_probes_a_role_of_an_undecodable_display() {
+    let config = b"ocio_profile_version: 2.6\nroles:\n  default: raw\n  r: \"d\xff\"\n\
+                   use_display_aliases: true\ndisplays:\n  \"d\xff\":\n    - !<View> {name: v, \
+                   colorspace: \"d\xff\"}\ncolorspaces:\n  - !<ColorSpace> {name: raw, isdata: \
+                   true}\ndisplay_colorspaces:\n  - !<ColorSpace> {name: \"d\xff\", aliases: [x, Q\xff]}\n";
+    let response =
+        call(json!({"config": {"yaml": bytes_arg(config)}, "calls": [{"dump": "config"}]}));
+    let dump = result(&calls(&response)[0]);
+    let display = &dump["displays"][0];
+    let probes: Vec<Vec<u8>> = probe_pairs(&display["display_probes"])
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(
+        probes,
+        [
+            b"D\xff".to_vec(),
+            b"x".to_vec(),
+            b"X".to_vec(),
+            b"Q\xff".to_vec(),
+            b"q\xff".to_vec(),
+            b"r".to_vec(),
+            b"R".to_vec(),
+            b"not a display".to_vec(),
+        ],
+        "{display}"
+    );
 }
 
 /// A view alias the binding can't decode is probed as its bytes, as they are and with their ASCII

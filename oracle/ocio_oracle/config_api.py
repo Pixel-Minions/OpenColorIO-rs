@@ -679,12 +679,35 @@ NOT_A_VIEW_ALIAS = "not an alias"
 NOT_A_DISPLAY = "not a display"
 
 _ASCII_UPPER = {c: c - 32 for c in range(ord("a"), ord("z") + 1)}
+_ASCII_LOWER = {c: c + 32 for c in range(ord("A"), ord("Z") + 1)}
 
 
 def _ascii_upper(name):
     """`name` (text, or bytes the binding couldn't decode) with its ASCII letters upper-cased
     and every other character as it is."""
     return name.upper() if isinstance(name, bytes) else name.translate(_ASCII_UPPER)
+
+
+def _ascii_lower(name):
+    """`name` (text, or bytes the binding couldn't decode) with its ASCII letters lower-cased
+    and every other character as it is."""
+    return name.lower() if isinstance(name, bytes) else name.translate(_ASCII_LOWER)
+
+
+def _spellings(name):
+    """`name` as it is, with its ASCII letters upper-cased, then lower-cased."""
+    return (name, _ascii_upper(name), _ascii_lower(name))
+
+
+def _name_of(fn):
+    """The name fn() returns, as text or as the bytes the binding couldn't decode; None where
+    the library raised."""
+    try:
+        return fn()
+    except UnicodeDecodeError as exc:
+        return bytes(exc.object)
+    except REPORTED:
+        return None
 
 
 def dump_config(config):
@@ -738,12 +761,12 @@ def dump_config(config):
     getResolvedDisplayViewColorSpaceName(display, probe)], and for a display's view (not a
     shared view's entry) "by_display": per display probe of the display [display probe, the
     by_probe list with that name as the display]}. The probes: the view's name and each of its
-    aliases, as it is and with its ASCII letters upper-cased, then NOT_A_VIEW_ALIAS; each once,
-    in that order. A display's probes (its entry's "display_probes": [display probe,
-    getCanonicalDisplayName(display probe)]): the display's name upper-cased, each alias of the
-    color space getColorSpace(display) finds, as it is and upper-cased, each role whose
-    getRoleColorSpace is that color space's name, then NOT_A_DISPLAY; each once and never the
-    display's own name, in that order."""
+    aliases, then NOT_A_VIEW_ALIAS. A display's probes (its entry's "display_probes": [display
+    probe, getCanonicalDisplayName(display probe)]): the display's name, the name and each alias
+    of the color space getColorSpace(display) finds, and each role whose getRoleColorSpace names
+    that color space (by its name or an alias: getCanonicalName), then NOT_A_DISPLAY, never the
+    display's own name. Each name is probed as it is, with its ASCII letters upper-cased, then
+    lower-cased; each probe once, in that order."""
     out = {"class": "Config"}
     getters, _ = _getters(config, skip=("getColorSpaces", "getLooks", "getViewTransforms",
                                         "getNamedTransforms"))
@@ -833,22 +856,19 @@ def dump_config(config):
         names = [display]
         space_name = None
         if space is not None:
+            space_name = _name_of(space.getName)
+            names.append(space_name)
             names += raw_strings(space.getAliases)
-            try:
-                space_name = space.getName()
-            except UnicodeDecodeError as exc:
-                space_name = bytes(exc.object)
+        for role in roles:
+            named = _name_of(lambda r=role: config.getRoleColorSpace(r))
+            if named is None or space_name is None:
+                continue
+            if _name_of(lambda n=named: config.getCanonicalName(n)) == space_name:
+                names.append(role)
         for name in names:
-            for probe in (name, _ascii_upper(name)):
+            for probe in _spellings(name):
                 if probe not in found:
                     found.append(probe)
-        for role in roles:
-            try:
-                named = config.getRoleColorSpace(role)
-            except (UnicodeDecodeError, *REPORTED):
-                continue
-            if space_name is not None and named == space_name and role not in found:
-                found.append(role)
         if NOT_A_DISPLAY not in found:
             found.append(NOT_A_DISPLAY)
         return [p for p in found if p != display]
@@ -861,12 +881,12 @@ def dump_config(config):
                                                      display, view)
         # OCIO 2.6: the view's aliases, and the names the display and view resolve to. The
         # probes: the view's name and each alias, as they are and with their ASCII letters
-        # upper-cased (OCIO compares names ignoring the case of ASCII letters only), then a name
-        # that is no alias; each once, in that order.
+        # upper-cased, then lower-cased (OCIO compares names ignoring the case of ASCII letters
+        # only), then a name that is no alias; each once, in that order.
         entry["getDisplayViewAliases"] = attempt(config.getDisplayViewAliases, display, view)
         probes = []
         for name in [view] + raw_strings(lambda: config.getDisplayViewAliases(display, view)):
-            for probe in (name, _ascii_upper(name)):
+            for probe in _spellings(name):
                 if probe not in probes:
                     probes.append(probe)
         if NOT_A_VIEW_ALIAS not in probes:
