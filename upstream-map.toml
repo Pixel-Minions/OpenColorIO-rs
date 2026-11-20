@@ -2742,8 +2742,8 @@ note = "build system"
 path = "src/apps/ociocheck/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociocheck.rs"]
-status = "partial"
-note = "2.6.0: changed at v2.6.0 lines 28, 110, 122-123, 663-674; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "ocio26-tools: re-ported at v2.6.0 (the --oconfig help text, -i, -v and the Compatibility section)."
 
 [[file]]
 path = "src/apps/ociochecklut/CMakeLists.txt"
@@ -2890,14 +2890,14 @@ path = "src/apputils/logGuard.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/log_guard.rs"]
 status = "done"
-note = "clear and empty are left out: no ported tool calls them"
+note = "clear is left out: no ported tool calls it. ocio26-tools: empty (ociocheck calls it as of 2.6.0)"
 
 [[file]]
 path = "src/apputils/logGuard.h"
 kind = "app"
 target = ["crates/ocio-tools/src/log_guard.rs"]
 status = "done"
-note = "clear and empty are left out: no ported tool calls them"
+note = "clear is left out: no ported tool calls it. ocio26-tools: empty (ociocheck calls it as of 2.6.0)"
 
 [[file]]
 path = "src/apputils/measure.h"
