@@ -687,6 +687,7 @@ fn probe_pairs(list: &Value) -> Vec<(Vec<u8>, Value)> {
 /// upper-case name is probed lower-cased, for displays and for views.
 #[test]
 fn the_dump_probes_each_name_of_a_display() {
+    // `@E@` stands for a non-ASCII upper-case letter, U+00C9, which lower-casing keeps.
     let config = r#"ocio_profile_version: 2.6
 roles:
   default: raw
@@ -696,12 +697,13 @@ displays:
   SRGB_DISP:
     - !<View> {name: v, colorspace: other_dcs, aliases: [a1]}
   ACES:
-    - !<View> {name: RAW, colorspace: raw, aliases: [RAWZ, MiX]}
+    - !<View> {name: RAW, colorspace: raw, aliases: [RAWZ, MiX, "@E@X"]}
 colorspaces:
   - !<ColorSpace> {name: raw, isdata: true}
 display_colorspaces:
   - !<ColorSpace> {name: other_dcs, aliases: [SRGB_DISP, dcs_alias]}
-"#;
+"#
+    .replace("@E@", "\u{c9}");
     let response = call(
         json!({"config": {"yaml": bytes_arg(config.as_bytes())}, "calls": [{"dump": "config"}]}),
     );
@@ -760,6 +762,8 @@ display_colorspaces:
             (b"MiX".to_vec(), json!(true)),
             (b"MIX".to_vec(), json!(true)),
             (b"mix".to_vec(), json!(true)),
+            (b"\xc3\x89X".to_vec(), json!(true)),
+            (b"\xc3\x89x".to_vec(), json!(true)),
             (b"not an alias".to_vec(), json!(false)),
         ],
         "{raw}"
