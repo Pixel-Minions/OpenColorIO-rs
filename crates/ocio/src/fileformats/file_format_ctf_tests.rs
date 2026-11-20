@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the CLF/CTF reader and writer: `tests/cpu/fileformats/FileFormatCTF_tests.cpp` @
-//! v2.5.2 (WP 4.5b-4.5i, 4.6a-4.6e), each test re-ported at v2.6.0 where its marker says so
-//! (card ocio26-clf).
+//! v2.6.0 (ported at v2.5.2 in WP 4.5b-4.5i and 4.6a-4.6e, re-ported or re-checked at v2.6.0
+//! by card ocio26-clf).
 
 use std::ffi::c_ulong;
 
@@ -99,7 +99,7 @@ fn check_child(md: &FormatMetadataImpl, i: i32, name: &[u8], value: &[u8]) {
     assert_eq!(child.get_element_value(), value, "child {i}'s value");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, missing_file)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, missing_file)` @ v2.6.0.
 #[test]
 fn missing_file() {
     // Test LoadCLFFile helper function with missing file.
@@ -107,7 +107,7 @@ fn missing_file() {
     check_throw_what(load_clf_file(ctf_file), "Error opening test file.");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, wrong_format)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, wrong_format)` @ v2.6.0.
 #[test]
 fn wrong_format() {
     let ctf_file = "logtolin_8to8.lut";
@@ -116,14 +116,14 @@ fn wrong_format() {
     check_throw_what(cached_file, "not a CTF/CLF file.");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, binary_file)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, binary_file)` @ v2.6.0.
 #[test]
 fn binary_file() {
     let ctf_file = "clf/illegal/image_png.clf";
     check_throw_what(load_clf_file(ctf_file), "is not a CTF/CLF file.");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, process_list_invalid_version)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, process_list_invalid_version)` @ v2.6.0.
 #[test]
 fn process_list_invalid_version() {
     let ctf_file = "process_list_invalid_version.ctf";
@@ -152,7 +152,7 @@ fn non_smpte_xmlns() {
     assert_eq!(mat.get_file_output_bit_depth(), BitDepth::F32);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, process_list_higher_version)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, process_list_higher_version)` @ v2.6.0.
 #[test]
 fn process_list_higher_version() {
     let ctf_file = "process_list_higher_version.ctf";
@@ -172,14 +172,14 @@ fn clf_process_list_higher_version() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, process_list_missing)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, process_list_missing)` @ v2.6.0.
 #[test]
 fn process_list_missing() {
     let ctf_file = "clf/illegal/process_list_missing.clf";
     check_throw_what(load_clf_file(ctf_file), "is not a CTF/CLF file.");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_missing)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_missing)` @ v2.6.0.
 #[test]
 fn transform_missing() {
     let ctf_file = "clf/illegal/transform_missing.clf";
@@ -193,7 +193,7 @@ fn transform_missing_id() {
     check_throw_what(load_clf_file(ctf_file), "Required attribute 'id'");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_empty)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_empty)` @ v2.6.0.
 #[test]
 fn transform_empty() {
     let ctf_file = "clf/illegal/transform_empty.clf";
@@ -334,7 +334,7 @@ fn matrix_with_offset() {
     assert_eq!(p_matrix.get_offsets()[2], 3.0);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, matrix_with_offset_1_3)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, matrix_with_offset_1_3)` @ v2.6.0.
 #[test]
 fn matrix_with_offset_1_3() {
     // Matrix 4 4 3 only valid up to version 1.2.
@@ -516,7 +516,7 @@ fn matrix_1_3_alpha_offsets() {
     assert_eq!(offsets[3], 0.4);
 }
 
-/// Port of `CheckIdentity` (FileFormatCTF_tests.cpp:547-563 @ v2.5.2).
+/// Port of `CheckIdentity` (FileFormatCTF_tests.cpp:569-585 @ v2.6.0).
 #[track_caller]
 fn check_identity(ctf: &str) {
     // Load file
@@ -529,7 +529,7 @@ fn check_identity(ctf: &str) {
     assert!(mat.is_identity().unwrap());
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, matrix_identity)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, matrix_identity)` @ v2.6.0.
 #[test]
 fn matrix_identity() {
     // Pre version 1.3 matrix parsing.
@@ -1222,7 +1222,7 @@ fn smpte_higher_ns_version() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, info_element_version_test)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, info_element_version_test)` @ v2.6.0.
 #[test]
 fn info_element_version_test() {
     // VALID - No Version.
@@ -1261,35 +1261,35 @@ fn info_element_version_test() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_element_end_missing)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_element_end_missing)` @ v2.6.0.
 #[test]
 fn transform_element_end_missing() {
     let ctf_file = "clf/illegal/transform_element_end_missing.clf";
     check_throw_what(load_clf_file(ctf_file), "no element found");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, array_missing_values)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, array_missing_values)` @ v2.6.0.
 #[test]
 fn array_missing_values() {
     let ctf_file = "clf/illegal/array_missing_values.clf";
     check_throw_what(load_clf_file(ctf_file), "Expected 3x3 Array values");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, array_bad_value)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, array_bad_value)` @ v2.6.0.
 #[test]
 fn array_bad_value() {
     let ctf_file = "clf/illegal/array_bad_value.clf";
     check_throw_what(load_clf_file(ctf_file), "Illegal values");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, array_bad_dimension)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, array_bad_dimension)` @ v2.6.0.
 #[test]
 fn array_bad_dimension() {
     let ctf_file = "clf/illegal/array_bad_dimension.clf";
     check_throw_what(load_clf_file(ctf_file), "Illegal array dimensions");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, array_too_many_values)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, array_too_many_values)` @ v2.6.0.
 #[test]
 fn array_too_many_values() {
     let ctf_file = "clf/illegal/array_too_many_values.clf";
@@ -1299,28 +1299,28 @@ fn array_too_many_values() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, matrix_end_missing)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, matrix_end_missing)` @ v2.6.0.
 #[test]
 fn matrix_end_missing() {
     let ctf_file = "clf/illegal/matrix_end_missing.clf";
     check_throw_what(load_clf_file(ctf_file), "no closing tag for 'Matrix'");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_bad_outdepth)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_bad_outdepth)` @ v2.6.0.
 #[test]
 fn transform_bad_outdepth() {
     let ctf_file = "clf/illegal/transform_bad_outdepth.clf";
     check_throw_what(load_clf_file(ctf_file), "outBitDepth unknown value");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_end_missing)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_end_missing)` @ v2.6.0.
 #[test]
 fn transform_end_missing() {
     let ctf_file = "clf/illegal/transform_element_end_missing.clf";
     check_throw_what(load_clf_file(ctf_file), "no element found");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_corrupted_tag)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_corrupted_tag)` @ v2.6.0.
 #[test]
 fn transform_corrupted_tag() {
     let ctf_file = "clf/illegal/transform_corrupted_tag.clf";
@@ -1440,7 +1440,7 @@ fn range_test2() {
     assert!(p_r.max_is_empty());
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, range_nonmatching_clamp)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, range_nonmatching_clamp)` @ v2.6.0.
 #[test]
 fn range_nonmatching_clamp() {
     let ctf_file = "clf/illegal/range_nonmatching_clamp.clf";
@@ -1450,7 +1450,7 @@ fn range_nonmatching_clamp() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, range_empty)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, range_empty)` @ v2.6.0.
 #[test]
 fn range_empty() {
     let ctf_file = "clf/illegal/range_empty.clf";
@@ -1460,7 +1460,7 @@ fn range_empty() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, range_bad_noclamp)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, range_bad_noclamp)` @ v2.6.0.
 #[test]
 fn range_bad_noclamp() {
     let ctf_file = "clf/illegal/range_bad_noclamp.clf";
@@ -1470,7 +1470,7 @@ fn range_bad_noclamp() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, range_bad_values)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, range_bad_values)` @ v2.6.0.
 #[test]
 fn range_bad_values() {
     let ctf_file = "clf/illegal/range_bad_values.clf";
@@ -1515,7 +1515,7 @@ fn descriptions(op: &OpData) -> Vec<Vec<u8>> {
     desc
 }
 
-/// Port of `ParseString` (FileFormatCTF_tests.cpp:996-1007 @ v2.5.2).
+/// Port of `ParseString` (FileFormatCTF_tests.cpp:38-49 @ v2.6.0).
 fn parse_string(str: &str) -> Result<LocalCachedFile> {
     let mut ctf = InputStream::from_bytes(str.as_bytes());
 
@@ -1637,7 +1637,7 @@ fn gamma_test4() {
     assert!(!p_g.is_non_channel_dependent());
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_test5)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_test5)` @ v2.6.0.
 #[test]
 fn gamma_test5() {
     // This test is for an old (< 1.5) transform file that contains an invalid GammaParams for
@@ -1811,7 +1811,7 @@ fn gamma_alpha_test5() {
     assert!(!p_g.is_non_channel_dependent());
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_alpha_test6)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_alpha_test6)` @ v2.6.0.
 #[test]
 fn gamma_alpha_test6() {
     // This test is for an new (>= 1.5) transform file that contains an invalid GammaParams
@@ -1820,7 +1820,7 @@ fn gamma_alpha_test6() {
     check_throw_what(load_clf_file(ctf_file), "Missing required offset parameter");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, exponent_bad_value)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, exponent_bad_value)` @ v2.6.0.
 #[test]
 fn exponent_bad_value() {
     // The moncurve style requires a gamma value >= 1.
@@ -1828,7 +1828,7 @@ fn exponent_bad_value() {
     check_throw_what(load_clf_file(ctf_file), "is less than lower bound");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, exponent_bad_param)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, exponent_bad_param)` @ v2.6.0.
 #[test]
 fn exponent_bad_param() {
     // The basic style cannot use offset.
@@ -1976,7 +1976,7 @@ fn exponent_all_styles() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, clf2_exponent_parse)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, clf2_exponent_parse)` @ v2.6.0.
 #[test]
 fn clf2_exponent_parse() {
     let gamma_clf2 = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -2088,21 +2088,21 @@ fn cdl_all_styles() {
     assert_eq!(as_cdl(&op_list[3]).get_style(), CdlOpStyle::NoClampRev);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_slope)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_slope)` @ v2.6.0.
 #[test]
 fn cdl_bad_slope() {
     let ctf_file = "clf/illegal/cdl_bad_slope.clf";
     check_throw_what(load_clf_file(ctf_file), "SOPNode: 3 values required");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_sat)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_sat)` @ v2.6.0.
 #[test]
 fn cdl_bad_sat() {
     let ctf_file = "clf/illegal/cdl_bad_sat.clf";
     check_throw_what(load_clf_file(ctf_file), "SatNode: non-single value");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_power)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_power)` @ v2.6.0.
 #[test]
 fn cdl_bad_power() {
     let ctf_file = "clf/illegal/cdl_bad_power.clf";
@@ -2112,28 +2112,28 @@ fn cdl_bad_power() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_slope)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_slope)` @ v2.6.0.
 #[test]
 fn cdl_missing_slope() {
     let ctf_file = "clf/illegal/cdl_missing_slope.clf";
     check_throw_what(load_clf_file(ctf_file), "Required node 'Slope' is missing");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_offset)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_offset)` @ v2.6.0.
 #[test]
 fn cdl_missing_offset() {
     let ctf_file = "clf/illegal/cdl_missing_offset.clf";
     check_throw_what(load_clf_file(ctf_file), "Required node 'Offset' is missing");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_power)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_power)` @ v2.6.0.
 #[test]
 fn cdl_missing_power() {
     let ctf_file = "clf/illegal/cdl_missing_power.clf";
     check_throw_what(load_clf_file(ctf_file), "Required node 'Power' is missing");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_style)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_style)` @ v2.6.0.
 #[test]
 fn cdl_bad_style() {
     let ctf_file = "clf/illegal/cdl_bad_style.clf";
@@ -2440,7 +2440,7 @@ fn log_lintolog_3chan() {
     check_close(b_param[LIN_SIDE_OFFSET], 0.010970316295, error);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_bad_style)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_bad_style)` @ v2.6.0.
 #[test]
 fn log_bad_style() {
     let file_name = "clf/illegal/log_bad_style.clf";
@@ -2457,7 +2457,7 @@ fn log_bad_version() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_bad_param)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_bad_param)` @ v2.6.0.
 #[test]
 fn log_bad_param() {
     let file_name = "clf/illegal/log_bad_param.clf";
@@ -2467,7 +2467,7 @@ fn log_bad_param() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_missing_breakpnt)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_missing_breakpnt)` @ v2.6.0.
 #[test]
 fn log_missing_breakpnt() {
     let file_name = "clf/illegal/log_missing_breakpnt.clf";
@@ -2515,7 +2515,7 @@ fn log_ocio_params_channels() {
     assert_eq!(b_params[LOG_SIDE_OFFSET], 0.0);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_ocio_params_base_missmatch)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_ocio_params_base_missmatch)` @ v2.6.0.
 #[test]
 fn log_ocio_params_base_missmatch() {
     let strebuf = "<?xml version='1.0' encoding='UTF-8'?>\n\
@@ -2657,7 +2657,7 @@ fn lut_1d() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_hue_adjust_invalid_style)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_hue_adjust_invalid_style)` @ v2.6.0.
 #[test]
 fn lut1d_hue_adjust_invalid_style() {
     let ctf_file = "lut1d_hue_adjust_invalid_style.ctf";
@@ -2690,7 +2690,7 @@ fn lut_3by1d_with_nan_infinity() {
     assert_eq!(values[9], -f32::INFINITY);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_half_domain_set_false)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_half_domain_set_false)` @ v2.6.0.
 #[test]
 fn lut1d_half_domain_set_false() {
     // Should throw an exception because the 'half_domain' tag was found but set to something
@@ -2699,7 +2699,7 @@ fn lut1d_half_domain_set_false() {
     check_throw_what(load_clf_file(ctf_file), "Illegal 'halfDomain' attribute");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_raw_half_set_false)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_raw_half_set_false)` @ v2.6.0.
 #[test]
 fn lut1d_raw_half_set_false() {
     // Should throw an exception because the 'raw_halfs' tag was found but set to something
@@ -2729,7 +2729,7 @@ fn lut1d_half_domain_raw_half_set() {
     assert_eq!(values[12], convert_half_bits_to_float(44629));
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_half_domain_missing_values)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_half_domain_missing_values)` @ v2.6.0.
 #[test]
 fn lut1d_half_domain_missing_values() {
     let ctf_file = "clf/illegal/lut1d_half_domain_missing_values.clf";
@@ -2887,7 +2887,7 @@ fn lut1d_inv_scaling() {
     check_close(a2.get_values()[31743 * 3], 0.84031434f32, error);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, invlut1d_clf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, invlut1d_clf)` @ v2.6.0.
 #[test]
 fn invlut1d_clf() {
     let clf = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -2921,7 +2921,7 @@ fn invlut1d_clf() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test)` @ v2.6.0.
 #[test]
 fn index_map_test() {
     let ctf_file = "indexMap_test.ctf";
@@ -2956,14 +2956,14 @@ fn index_map_test1_clfv2() {
     assert_eq!(p_l.get_file_output_bit_depth(), BitDepth::Uint12);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test3)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test3)` @ v2.6.0.
 #[test]
 fn index_map_test3() {
     let ctf_file = "indexMap_test3.ctf";
     check_throw_what(load_clf_file(ctf_file), "Only one IndexMap allowed per LUT");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test4_clfv2)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test4_clfv2)` @ v2.6.0.
 #[test]
 fn index_map_test4_clfv2() {
     let ctf_file = "indexMap_test4_clfv2.clf";
@@ -2973,21 +2973,21 @@ fn index_map_test4_clfv2() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_missing_inbitdepth)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_missing_inbitdepth)` @ v2.6.0.
 #[test]
 fn transform_missing_inbitdepth() {
     let ctf_file = "clf/illegal/transform_missing_inbitdepth.clf";
     check_throw_what(load_clf_file(ctf_file), "inBitDepth is missing");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_missing_outbitdepth)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_missing_outbitdepth)` @ v2.6.0.
 #[test]
 fn transform_missing_outbitdepth() {
     let ctf_file = "clf/illegal/transform_missing_outbitdepth.clf";
     check_throw_what(load_clf_file(ctf_file), "outBitDepth is missing");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_with_bitdepth_mismatch)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_with_bitdepth_mismatch)` @ v2.6.0.
 #[test]
 fn transform_with_bitdepth_mismatch() {
     // Even though we normalize the bit-depths after reading, any mismatches in the file are
@@ -3105,7 +3105,7 @@ fn lut3d_inv() {
     assert_eq!(values[32], 1350.0f32 / 4095.0f32);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut3d_unequal_size)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut3d_unequal_size)` @ v2.6.0.
 #[test]
 fn lut3d_unequal_size() {
     let file_name = "clf/illegal/lut3d_unequal_size.clf";
@@ -3186,7 +3186,7 @@ fn index_map_test2_clfv2() {
 ///
 /// Port of the tests' use of `LogGuard` with `SetLoggingLevel(LOGGING_LEVEL_WARNING)` and
 /// `StringUtils::SplitByLines(StringUtils::RightTrim(guard.output()))`
-/// (tests/cpu/UnitTestLogUtils.cpp:17-67 @ v2.5.2).
+/// (tests/cpu/UnitTestLogUtils.cpp:17-67 @ v2.6.0).
 fn warning_lines<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
     let (out, log) = crate::test_env::capture_log(|| {
         let level = get_logging_level();
@@ -3535,7 +3535,7 @@ fn unknown_elements() {
     assert_eq!(values[80], 1023.0f32 / 1023.0f32);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, clf3_index_map)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, clf3_index_map)` @ v2.6.0.
 #[test]
 fn clf3_index_map() {
     // Same as previous, but setting compCLFversion=3.0.
@@ -3817,7 +3817,7 @@ fn lut3d_interpolation(config: &Config, file_transform: &FileTransform) -> Inter
     }
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut_interpolation_option)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut_interpolation_option)` @ v2.6.0.
 #[test]
 fn lut_interpolation_option() {
     // Create empty Config to use.
@@ -3946,7 +3946,7 @@ fn load_fixed_function_file() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_version)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_version)` @ v2.6.0.
 #[test]
 fn load_ff_fail_version() {
     let mut strebuf = String::new();
@@ -3963,7 +3963,7 @@ fn load_ff_fail_version() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_params)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_params)` @ v2.6.0.
 #[test]
 fn load_ff_fail_params() {
     let mut strebuf = String::new();
@@ -3980,7 +3980,7 @@ fn load_ff_fail_params() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_style)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_style)` @ v2.6.0.
 #[test]
 fn load_ff_fail_style() {
     let mut strebuf = String::new();
@@ -3994,7 +3994,7 @@ fn load_ff_fail_style() {
     check_throw_what(parse_string(&strebuf), "Unknown FixedFunction style");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_gamma_param)` @ v2.5.2. Upstream's
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_gamma_param)` @ v2.6.0. Upstream's
 /// `LogGuard` is the crate's `test_env::capture_log`.
 #[test]
 fn load_ff_aces_fail_gamma_param() {
@@ -4010,7 +4010,7 @@ fn load_ff_aces_fail_gamma_param() {
     check_throw_what(result, "Missing required parameter");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_gamma_twice)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_gamma_twice)` @ v2.6.0.
 #[test]
 fn load_ff_aces_fail_gamma_twice() {
     let mut strebuf = String::new();
@@ -4025,7 +4025,7 @@ fn load_ff_aces_fail_gamma_twice() {
     check_throw_what(parse_string(&strebuf), "only 1 gamma parameter");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_missing_param)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_missing_param)` @ v2.6.0.
 #[test]
 fn load_ff_aces_fail_missing_param() {
     let mut strebuf = String::new();
@@ -4364,7 +4364,7 @@ fn load_grading_primary_video() {
     assert!(grading_primary3.is_dynamic());
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_grading_primary_errors)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_grading_primary_errors)` @ v2.6.0.
 #[test]
 fn load_grading_primary_errors() {
     // Wrong version.
@@ -4771,7 +4771,7 @@ fn load_grading_huecurves_log() {
     assert_eq!(sl.control_point(2).unwrap().y, 1.1f32);
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_grading_curves_errors)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_grading_curves_errors)` @ v2.6.0.
 #[test]
 fn load_grading_curves_errors() {
     // Wrong version.
@@ -5063,7 +5063,7 @@ fn load_grading_tone() {
     assert!(!grading_tone5.is_dynamic());
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, load_grading_tone_errors)` @ v2.5.2. Upstream's test
+/// Port of `OCIO_ADD_TEST(CTFTransform, load_grading_tone_errors)` @ v2.6.0. Upstream's test
 /// is empty (`// TODO`).
 #[test]
 fn load_grading_tone_errors() {
@@ -5156,7 +5156,7 @@ fn reference_load_path_utf8() {
     assert_eq!(reference.get_alias(), b"");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, reference_load_alias_path)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, reference_load_alias_path)` @ v2.6.0.
 #[test]
 fn reference_load_alias_path() {
     let file_name = "reference_alias_path.ctf";
@@ -5295,7 +5295,7 @@ fn exposure_contrast_no_gamma() {
     assert!(!p_ec.get_gamma_property().is_dynamic());
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, exposure_contrast_failures)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, exposure_contrast_failures)` @ v2.6.0.
 #[test]
 fn exposure_contrast_failures() {
     let ec_bad_style = "exposure_contrast_bad_style.ctf";
@@ -5308,7 +5308,7 @@ fn exposure_contrast_failures() {
     check_throw_what(load_clf_file(ec_missing_param), "exposure missing");
 }
 
-/// Port of `OCIO_ADD_TEST(FileFormatCTF, attribute_float_parse_extra_values)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, attribute_float_parse_extra_values)` @ v2.6.0.
 #[test]
 fn attribute_float_parse_extra_values() {
     // Test attribute float parsing will throw if extra values are present (using E/C for
@@ -5351,7 +5351,7 @@ fn attribute_float_parse_leading_spaces() {
 /// The processor of a file transform of the test file `file_name`, from an empty config.
 ///
 /// Port of `CreateFileTransform` and `GetFileTransformProcessor` (tests/cpu/UnitTestUtils.cpp:
-/// 38-72 @ v2.5.2).
+/// 38-72 @ v2.6.0).
 fn get_file_transform_processor(file_name: &str) -> Result<std::sync::Arc<Processor>> {
     let file_path = format!("{}/{file_name}", get_test_files_dir());
 
@@ -5365,13 +5365,13 @@ fn get_file_transform_processor(file_name: &str) -> Result<std::sync::Arc<Proces
     config.processor(&Transform::File(file_transform))
 }
 
-/// Port of `WriteGroupCTF` (FileFormatCTF_tests.cpp:3795-3799 @ v2.5.2).
+/// Port of `WriteGroupCTF` (FileFormatCTF_tests.cpp:4267-4271 @ v2.6.0).
 fn write_group_ctf(group: &GroupTransform, output_transform: &mut Vec<u8>) -> Result<()> {
     let cfg = Config::create_raw()?;
     group.write(&cfg, FILEFORMAT_CTF, output_transform)
 }
 
-/// Port of `WriteGroupCLF` (FileFormatCTF_tests.cpp:3801-3805 @ v2.5.2).
+/// Port of `WriteGroupCLF` (FileFormatCTF_tests.cpp:4273-4277 @ v2.6.0).
 fn write_group_clf(group: &GroupTransform, output_transform: &mut Vec<u8>) -> Result<()> {
     let cfg = Config::create_raw()?;
     group.write(&cfg, FILEFORMAT_CLF, output_transform)
@@ -5512,7 +5512,7 @@ fn load_edit_save_matrix() {
 
 /// Writes `transform` as the one transform of a group, and reads it back.
 ///
-/// Port of `WriteRead` (FileFormatCTF_tests.cpp:5040-5056 @ v2.5.2).
+/// Port of `WriteRead` (FileFormatCTF_tests.cpp:5517-5533 @ v2.6.0).
 fn write_read(transform: Transform) -> LocalCachedFile {
     try_write_read(transform).unwrap()
 }
@@ -5584,7 +5584,7 @@ fn load_save_matrix() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_matrix_444)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_matrix_444)` @ v2.6.0.
 #[test]
 fn save_matrix_444() {
     let config = Config::new().unwrap();
@@ -5743,7 +5743,7 @@ fn matrix3x3_clf() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_ctf)` @ v2.6.0.
 #[test]
 fn matrix_offset_alpha_ctf() {
     let mut mat = MatrixTransform::new();
@@ -5796,7 +5796,7 @@ fn matrix_offset_alpha_ctf() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_bitdepth_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_bitdepth_ctf)` @ v2.6.0.
 #[test]
 fn matrix_offset_alpha_bitdepth_ctf() {
     let mut mat = MatrixTransform::new();
@@ -5858,7 +5858,7 @@ fn matrix_offset_alpha_bitdepth_ctf() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_inverse_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_inverse_ctf)` @ v2.6.0.
 #[test]
 fn matrix_offset_alpha_inverse_ctf() {
     let mut mat = MatrixTransform::new();
@@ -5906,7 +5906,7 @@ fn matrix_offset_alpha_inverse_ctf() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, no_ops_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, no_ops_ctf)` @ v2.6.0.
 #[test]
 fn no_ops_ctf() {
     let mut group = GroupTransform::new();
@@ -6030,7 +6030,7 @@ fn save_cdl() {
     assert_eq!(val, sat);
 }
 
-/// Port of `TestSaveLog` (FileFormatCTF_tests.cpp:5142-5155 @ v2.5.2).
+/// Port of `TestSaveLog` (FileFormatCTF_tests.cpp:5619-5632 @ v2.6.0).
 #[track_caller]
 fn test_save_log(base: f64) {
     let mut log_t = LogTransform::new();
@@ -6043,7 +6043,7 @@ fn test_save_log(base: f64) {
     assert_eq!(log.base(), base);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_log)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_log)` @ v2.6.0.
 #[test]
 fn save_log() {
     test_save_log(2.0);
@@ -6144,7 +6144,7 @@ fn save_group() {
     as_matrix(&file_ops[1]);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, legacy_cdl)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, legacy_cdl)` @ v2.6.0.
 #[test]
 fn legacy_cdl() {
     // Create empty legacy Config to use.
@@ -6308,7 +6308,7 @@ fn cdl_clf() {
     assert_eq!(cdl_data.get_slope_params().get_rgb()[2], 1.2);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, cdl_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, cdl_ctf)` @ v2.6.0.
 #[test]
 fn cdl_ctf() {
     let mut cdl = CdlTransform::new();
@@ -6343,7 +6343,7 @@ fn cdl_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, range_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, range_ctf)` @ v2.6.0.
 #[test]
 fn range_ctf() {
     // Non-clamping range are converted to matrix.
@@ -6547,7 +6547,7 @@ fn range4_clf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, exponent_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, exponent_ctf)` @ v2.6.0.
 #[test]
 fn exponent_ctf() {
     let mut exp = ExponentWithLinearTransform::new();
@@ -6691,7 +6691,7 @@ fn gamma1_pass_thru_ctf() {
     check_written(expected_clf, &output_transform_clf);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, gamma2_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma2_ctf)` @ v2.6.0.
 #[test]
 fn gamma2_ctf() {
     let mut exp = ExponentWithLinearTransform::new();
@@ -6768,7 +6768,7 @@ fn gamma3_ctf() {
     check_written(expected_clf, &output_transform_clf);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, gamma4_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma4_ctf)` @ v2.6.0.
 #[test]
 fn gamma4_ctf() {
     let mut exp = ExponentTransform::new();
@@ -6795,7 +6795,7 @@ fn gamma4_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, gamma5_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma5_ctf)` @ v2.6.0.
 #[test]
 fn gamma5_ctf() {
     let mut exp = ExponentWithLinearTransform::new();
@@ -6824,7 +6824,7 @@ fn gamma5_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, gamma6_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma6_ctf)` @ v2.6.0.
 #[test]
 fn gamma6_ctf() {
     let mut exp = ExponentTransform::new();
@@ -6850,7 +6850,7 @@ fn gamma6_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, log_lin_to_log_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, log_lin_to_log_ctf)` @ v2.6.0.
 #[test]
 fn log_lin_to_log_ctf() {
     let mut log_t = LogAffineTransform::new();
@@ -6884,7 +6884,7 @@ fn log_lin_to_log_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, log_log_to_lin_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, log_log_to_lin_ctf)` @ v2.6.0.
 #[test]
 fn log_log_to_lin_ctf() {
     let mut log_t = LogAffineTransform::new();
@@ -6910,7 +6910,7 @@ fn log_log_to_lin_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, log_antilog2_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, log_antilog2_ctf)` @ v2.6.0.
 #[test]
 fn log_antilog2_ctf() {
     let mut log_t = LogAffineTransform::new();
@@ -6943,7 +6943,7 @@ fn written_ctf_of_file(file_name: &str) -> String {
     String::from_utf8(output_transform).unwrap()
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_1d_1component)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_1d_1component)` @ v2.6.0.
 #[test]
 fn save_lut_1d_1component() {
     let result = written_ctf_of_file("clf/lut1d_32f_example.clf");
@@ -6951,7 +6951,7 @@ fn save_lut_1d_1component() {
     assert!(result.contains(expected));
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_1d_3components)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_1d_3components)` @ v2.6.0.
 #[test]
 fn save_lut_1d_3components() {
     let result = written_ctf_of_file("lut1d_green.ctf");
@@ -6959,7 +6959,7 @@ fn save_lut_1d_3components() {
     assert!(result.contains(expected));
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_invlut_1d_3components)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_invlut_1d_3components)` @ v2.6.0.
 #[test]
 fn save_invlut_1d_3components() {
     let result = written_ctf_of_file("lut1d_inv.ctf");
@@ -7094,7 +7094,7 @@ fn save_lut1d_f32() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut1d_interpolation)` @ v2.5.2. Its config,
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut1d_interpolation)` @ v2.6.0. Its config,
 /// created and set to version 2, isn't used.
 #[test]
 fn save_lut1d_interpolation() {
@@ -7152,7 +7152,7 @@ fn save_lut1d_interpolation() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_invalid_lut_1d)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_invalid_lut_1d)` @ v2.6.0.
 #[test]
 fn save_invalid_lut_1d() {
     let mut lut_t = Lut1DTransform::new();
@@ -7167,7 +7167,7 @@ fn save_invalid_lut_1d() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_3d)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_3d)` @ v2.6.0.
 #[test]
 fn save_lut_3d() {
     let result = written_ctf_of_file("clf/lut3d_identity_12i_16f.clf");
@@ -7219,7 +7219,7 @@ fn lut1d_clf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_inverse_clf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_inverse_clf)` @ v2.6.0.
 #[test]
 fn lut1d_inverse_clf() {
     let mut lut = Lut1DTransform::new();
@@ -7231,7 +7231,7 @@ fn lut1d_inverse_clf() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_ctf)` @ v2.6.0.
 #[test]
 fn lut1d_ctf() {
     let mut lut = Lut1DTransform::new();
@@ -7253,7 +7253,7 @@ fn lut1d_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_attributes_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_attributes_ctf)` @ v2.6.0.
 #[test]
 fn lut1d_attributes_ctf() {
     let mut lut = Lut1DTransform::new();
@@ -7322,7 +7322,7 @@ fn lut1d_16(one_component: bool) -> Lut1DTransform {
     lut
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_array_16x1_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_array_16x1_ctf)` @ v2.6.0.
 #[test]
 fn lut1d_array_16x1_ctf() {
     let lut = lut1d_16(true);
@@ -7357,7 +7357,7 @@ fn lut1d_array_16x1_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_array_16x3_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_array_16x3_ctf)` @ v2.6.0.
 #[test]
 fn lut1d_array_16x3_ctf() {
     let lut = lut1d_16(false);
@@ -7392,7 +7392,7 @@ fn lut1d_array_16x3_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_10i_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_10i_ctf)` @ v2.6.0.
 #[test]
 fn lut1d_10i_ctf() {
     let mut lut = Lut1DTransform::new();
@@ -7425,7 +7425,7 @@ fn lut1d_10i_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_inverse_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_inverse_ctf)` @ v2.6.0.
 #[test]
 fn lut1d_inverse_ctf() {
     let mut lut = lut1d_16(false);
@@ -7526,7 +7526,7 @@ const LUT3D_3_ARRAY: &str = r#"        <Array dim="3 3 3 3">
         </Array>
 "#;
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_array_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_array_ctf)` @ v2.6.0.
 #[test]
 fn lut3d_array_ctf() {
     let mut lut = Lut3DTransform::new();
@@ -7567,7 +7567,7 @@ fn lut3d_array_ctf() {
     check_written(&expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_inverse_clf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_inverse_clf)` @ v2.6.0.
 #[test]
 fn lut3d_inverse_clf() {
     let mut lut = lut3d_3();
@@ -7580,7 +7580,7 @@ fn lut3d_inverse_clf() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_inverse_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_inverse_ctf)` @ v2.6.0.
 #[test]
 fn lut3d_inverse_ctf() {
     let mut lut = lut3d_3();
@@ -7605,7 +7605,7 @@ fn lut3d_inverse_ctf() {
     check_written(&expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut3d_interpolation)` @ v2.5.2. Its config,
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut3d_interpolation)` @ v2.6.0. Its config,
 /// created and set to version 2, isn't used.
 #[test]
 fn save_lut3d_interpolation() {
@@ -7653,7 +7653,7 @@ fn save_lut3d_interpolation() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, bitdepth_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, bitdepth_ctf)` @ v2.6.0.
 #[test]
 fn bitdepth_ctf() {
     let mut mat = MatrixTransform::new();
@@ -7819,7 +7819,7 @@ fn write_ff_group(ff: &FixedFunctionTransform) -> Vec<u8> {
     output_transform
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_gamut_comp_13_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_gamut_comp_13_ctf)` @ v2.6.0.
 #[test]
 fn fixed_function_aces_gamut_comp_13_ctf() {
     let data = [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
@@ -7837,7 +7837,7 @@ fn fixed_function_aces_gamut_comp_13_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_gamut_comp_13_inverse_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_gamut_comp_13_inverse_ctf)` @ v2.6.0.
 #[test]
 fn fixed_function_aces_gamut_comp_13_inverse_ctf() {
     let data = [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
@@ -7856,7 +7856,7 @@ fn fixed_function_aces_gamut_comp_13_inverse_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_rec2100_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_rec2100_ctf)` @ v2.6.0.
 #[test]
 fn fixed_function_rec2100_ctf() {
     let val = 0.5;
@@ -7874,7 +7874,7 @@ fn fixed_function_rec2100_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_rec2100_inverse_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_rec2100_inverse_ctf)` @ v2.6.0.
 #[test]
 fn fixed_function_rec2100_inverse_ctf() {
     let val = 0.5;
@@ -7893,7 +7893,7 @@ fn fixed_function_rec2100_inverse_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_lin_to_gammalog_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_lin_to_gammalog_ctf)` @ v2.6.0.
 #[test]
 fn fixed_function_lin_to_gammalog_ctf() {
     let vals = [
@@ -7937,7 +7937,7 @@ fn fixed_function_lin_to_gammalog_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_lin_to_doublelog_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_lin_to_doublelog_ctf)` @ v2.6.0.
 #[test]
 fn fixed_function_lin_to_doublelog_ctf() {
     let vals = [
@@ -8021,7 +8021,7 @@ fn write_one(id: &[u8], transform: Transform) -> Vec<u8> {
     output_transform
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_video_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_video_ctf)` @ v2.6.0.
 #[test]
 fn exposure_contrast_video_ctf() {
     let mut ec = ExposureContrastTransform::new();
@@ -8046,7 +8046,7 @@ fn exposure_contrast_video_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_log_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_log_ctf)` @ v2.6.0.
 #[test]
 fn exposure_contrast_log_ctf() {
     let mut ec = ExposureContrastTransform::new();
@@ -8075,7 +8075,7 @@ fn exposure_contrast_log_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_linear_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_linear_ctf)` @ v2.6.0.
 #[test]
 fn exposure_contrast_linear_ctf() {
     let mut ec = ExposureContrastTransform::new();
@@ -8105,7 +8105,7 @@ fn exposure_contrast_linear_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_not_dynamic_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_not_dynamic_ctf)` @ v2.6.0.
 #[test]
 fn exposure_contrast_not_dynamic_ctf() {
     let mut ec = ExposureContrastTransform::new();
@@ -8125,7 +8125,7 @@ fn exposure_contrast_not_dynamic_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_log_params_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, exposure_contrast_log_params_ctf)` @ v2.6.0.
 #[test]
 fn exposure_contrast_log_params_ctf() {
     let mut ec = ExposureContrastTransform::new();
@@ -8156,7 +8156,7 @@ fn exposure_contrast_log_params_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_log_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_log_ctf)` @ v2.6.0.
 #[test]
 fn grading_primary_log_ctf() {
     let mut grading_primary = GradingPrimaryTransform::new(GradingStyle::Log);
@@ -8217,7 +8217,7 @@ fn grading_primary_log_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_lin_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_lin_ctf)` @ v2.6.0.
 #[test]
 fn grading_primary_lin_ctf() {
     let mut grading_primary = GradingPrimaryTransform::new(GradingStyle::Lin);
@@ -8278,7 +8278,7 @@ fn grading_primary_lin_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_video_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_primary_video_ctf)` @ v2.6.0.
 #[test]
 fn grading_primary_video_ctf() {
     let mut grading_primary = GradingPrimaryTransform::new(GradingStyle::Video);
@@ -8340,7 +8340,7 @@ fn grading_primary_video_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_log_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_log_ctf)` @ v2.6.0.
 #[test]
 fn grading_rgbcurve_log_ctf() {
     let mut grading_curves = GradingRgbCurveTransform::new(GradingStyle::Log);
@@ -8413,7 +8413,7 @@ fn grading_rgbcurve_log_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_video_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_video_ctf)` @ v2.6.0.
 #[test]
 fn grading_rgbcurve_video_ctf() {
     let mut grading_curves = GradingRgbCurveTransform::new(GradingStyle::Video);
@@ -8455,7 +8455,7 @@ fn check_written_close(expected: &str, output: &[u8], close: impl Fn(usize) -> b
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_lin_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_rgbcurve_lin_ctf)` @ v2.6.0.
 #[test]
 fn grading_rgbcurve_lin_ctf() {
     let mut grading_curves = GradingRgbCurveTransform::new(GradingStyle::Lin);
@@ -8537,7 +8537,7 @@ fn grading_rgbcurve_lin_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_huecurve_lin_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_huecurve_lin_ctf)` @ v2.6.0.
 #[test]
 fn grading_huecurve_lin_ctf() {
     let mut grading_curves = GradingHueCurveTransform::new(GradingStyle::Lin);
@@ -8619,7 +8619,7 @@ fn grading_huecurve_lin_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_log_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_log_ctf)` @ v2.6.0.
 #[test]
 fn grading_tone_log_ctf() {
     let mut grading_tone = GradingToneTransform::new(GradingStyle::Log);
@@ -8698,7 +8698,7 @@ fn grading_tone_log_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_lin_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_lin_ctf)` @ v2.6.0.
 #[test]
 fn grading_tone_lin_ctf() {
     // Only test the style, sub elements tested with GRADING_LOG.
@@ -8738,7 +8738,7 @@ fn grading_tone_lin_ctf() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_video_ctf)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, grading_tone_video_ctf)` @ v2.6.0.
 #[test]
 fn grading_tone_video_ctf() {
     // Only test the style, sub elements tested with GRADING_LOG.
@@ -8780,7 +8780,7 @@ fn grading_tone_video_ctf() {
 /// Reads a CTF file of one FixedFunction of `style` (and `params`) in the CTF `vers`, then
 /// writes the group of its op's transform: the text read and the text written are the same.
 ///
-/// Port of `ValidateFixedFunctionStyle` (FileFormatCTF_tests.cpp:3807-3866 @ v2.5.2).
+/// Port of `ValidateFixedFunctionStyle` (FileFormatCTF_tests.cpp:4279-4339 @ v2.6.0).
 #[track_caller]
 fn validate_fixed_function_style(style: FixedFunctionOpStyle, vers: &str, params: &str) {
     // Validate the load & save for any FixedFunction style without parameters.
