@@ -2705,7 +2705,7 @@ note = "build system"
 path = "src/apps/ocioarchive/main.cpp"
 kind = "app"
 status = "n/a"
-note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut. 2.6.0 changes it too (line 238); it stays n/a (G8)."
 
 [[file]]
 path = "src/apps/ociobakelut/CMakeLists.txt"
@@ -2755,8 +2755,8 @@ note = "build system"
 path = "src/apps/ociochecklut/main.cpp"
 kind = "app"
 target = ["crates/ocio-tools/src/bin/ociochecklut.rs"]
-status = "partial"
-note = "built without OCIO_GPU_ENABLED, as both wheels are. 2.6.0: changed at v2.6.0 lines 55, 59, 63, 65-66, 101; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "built without OCIO_GPU_ENABLED, as both wheels are. 2.6.0 changed only that code (lines 55, 59, 63, 65-66, 101: OglApp becomes GraphicalApp); ocio26-tools: citations at v2.6.0, nothing else to port."
 
 [[file]]
 path = "src/apps/ocioconvert/CMakeLists.txt"
@@ -2768,7 +2768,7 @@ note = "build system"
 path = "src/apps/ocioconvert/main.cpp"
 kind = "app"
 status = "n/a"
-note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut. 2.6.0 changes it too (docs/ocio-2.6-plan.md phase 6); it stays n/a (G8, orchestrator 2026-11-20)."
 
 [[file]]
 path = "src/apps/ociocpuinfo/CMakeLists.txt"
@@ -2792,7 +2792,7 @@ note = "build system"
 path = "src/apps/ociodisplay/main.cpp"
 kind = "app"
 status = "n/a"
-note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut. 2.6.0 changes it too (docs/ocio-2.6-plan.md phase 6); it stays n/a (G8, orchestrator 2026-11-20)."
 
 [[file]]
 path = "src/apps/ociolutimage/CMakeLists.txt"
@@ -2816,7 +2816,7 @@ note = "build system"
 path = "src/apps/ociomakeclf/main.cpp"
 kind = "app"
 status = "n/a"
-note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut"
+note = "native tool out of scope for 1.0.0 (owner decision 2026-11-01, PLAN.md section 4, G8); the 1.0.0 tools are ociocheck, ociochecklut, ociowrite, ociobakelut. 2.6.0 changes it too (docs/ocio-2.6-plan.md phase 6); it stays n/a (G8, orchestrator 2026-11-20)."
 
 [[file]]
 path = "src/apps/ociomergeconfigs/CMakeLists.txt"
