@@ -3273,8 +3273,8 @@ note = "p6-objects 6.3e"
 path = "src/bindings/python/PyConfig.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_config.rs", "crates/ocio-py/src/py_config_utils.rs"]
-status = "partial"
-note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs. 2.6.0: changed at v2.6.0 lines 42, 69-70, 152-156, 340-344, 360-363, 381-391, 437-439, 441-443, 463-468, 500-511, 528-532, 535-537, 539-541, 1345-1367; not yet re-ported (ocio26 cards). ocio26-config: 42, 69-70, 152-156, 340-343, 360-363, 381-391 (LocateBuiltinColorSpace, py_config_utils.rs), 437-443, 463-468, 500-511, 528-541, 1345-1367 ported (DisplayViewAliasIterator; self_kind.rs lists its methods and getUseDisplayAliases)."
+status = "done"
+note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs. 2.6.0: changed at v2.6.0 lines 42, 69-70, 152-156, 340-344, 360-363, 381-391, 437-439, 441-443, 463-468, 500-511, 528-532, 535-537, 539-541, 1345-1367: ocio26-config ported them all: the iterator DisplayViewAliasIterator (42, 69-70, 152-156, 1345-1367), generateLocalIDForColorSpace and findColorSpaceForID (340-344), getUseDisplayAliases/setUseDisplayAliases (360-363; self_kind.rs lists getUseDisplayAliases), the static LocateBuiltinColorSpace (381-391, in py_config_utils.rs), the aliases keyword of addSharedView and addDisplayView (437-443, 528-541), getCanonicalDisplayName, getDisplayDescription and getCanonicalViewName (463-468), getResolvedDisplayViewColorSpaceName, getDisplayViewAliases and hasDisplayViewAlias (500-511); run by upstream's ConfigTest.py at v2.6.0 through cargo xtask py-suite."
 
 [[file]]
 path = "src/bindings/python/PyConfigIOProxy.cpp"
@@ -3379,15 +3379,15 @@ note = "p6-objects 6.3e"
 path = "src/bindings/python/PyOpenColorIO.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs"]
-status = "partial"
-note = "P70 complete binding registration audit: all binders, module functions/exceptions/constants/metadata and module initialization are registered in the existing binding modules. The original48 required Python modules/384 functions and complete module metadata already run in normal CI; retain the approved D-16 native C++ pointer boundary. 2.6.0: changed at v2.6.0 lines 100; not yet re-ported (ocio26 cards). ocio26-config: 100 (bindPyConfigCompatibilityHelpers) ported."
+status = "done"
+note = "P70 complete binding registration audit: all binders, module functions/exceptions/constants/metadata and module initialization are registered in the existing binding modules. The original48 required Python modules/384 functions and complete module metadata already run in normal CI; retain the approved D-16 native C++ pointer boundary. 2.6.0: changed at v2.6.0 lines 100: ocio26-config ported the call bindPyConfigCompatibilityHelpers(m) in py_open_color_io.rs (apphelpers/py_config_compatibility_helpers.rs); at v2.6.0 the suite has 49 modules and 392 functions, which cargo xtask py-suite runs."
 
 [[file]]
 path = "src/bindings/python/PyOpenColorIO.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs", "crates/ocio-py/src/py_transform.rs", "crates/ocio-py/src/lib.rs"]
-status = "partial"
-note = "P70 complete declaration audit: every binder declaration has its registration, and polymorphic class_name/to_py dispatch covers all supported classes. Existing Rust/Python ownership and D-16 native C++ pointer boundaries remain; the old partial note predated full binding completion. 2.6.0: changed at v2.6.0 lines 59; not yet re-ported (ocio26 cards). ocio26-config: 59 (bindPyConfigCompatibilityHelpers' declaration) ported."
+status = "done"
+note = "P70 complete declaration audit: every binder declaration has its registration, and polymorphic class_name/to_py dispatch covers all supported classes. Existing Rust/Python ownership and D-16 native C++ pointer boundaries remain; the old partial note predated full binding completion. 2.6.0: changed at v2.6.0 lines 59: ocio26-config ported bindPyConfigCompatibilityHelpers' declaration as apphelpers::py_config_compatibility_helpers::bind_py_config_compatibility_helpers, registered from py_open_color_io.rs."
 
 [[file]]
 path = "src/bindings/python/PyPackedImageDesc.cpp"
@@ -3449,8 +3449,8 @@ note = "P70 complete transform-binding declaration audit: base and all23 concret
 path = "src/bindings/python/PyTypes.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_types.rs"]
-status = "partial"
-note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984; not yet re-ported (ocio26 cards). ocio26-config: 864-871 (ConfigCompatibility) ported; 618-619 (HMJ) is ocio26-ops', 984 (METADATA_ID_ELEMENT) ocio26-clf's. ocio26-ops: FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 (618-619) at v2.6.0. ocio26-clf: METADATA_ID_ELEMENT ported."
+status = "done"
+note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984: ocio26-ops added FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 (618-619) to the FixedFunctionStyle enum (value 20, registered after ACES_RGB_TO_JMH_20 as upstream registers it); ocio26-config ported the enum ConfigCompatibility (864-871); ocio26-clf the constant METADATA_ID_ELEMENT (984). All in py_types.rs, run by upstream's ConstantsTest.py and ConfigCompatibilityHelpersTest.py at v2.6.0."
 
 [[file]]
 path = "src/bindings/python/PyUtils.cpp"
