@@ -9,8 +9,10 @@ Matches **OpenColorIO 2.6.0**.
 
 The port moves from OpenColorIO 2.5.2 to 2.6.0 (released 2026-10-01), checked byte by byte
 against the official `opencolorio==2.6.0` wheel on the same OS and CPU, as 1.0.0 was against
-2.5.2. The packages, platforms, Python version and tools are 1.0.0's. The wheel's version is
-`1.1.0`, with `PyOpenColorIO.__version__` `2.6.0`.
+2.5.2. As in 1.0.0: the four packages; Windows x86-64, and Linux x86-64 with glibc 2.34 or newer;
+Python 3.13 only; the four tools; fuzzing still to come; and the speed misses accepted for
+1.0.0, below, which haven't been measured again against 2.6.0. The wheel's version is `1.1.0`,
+with `PyOpenColorIO.__version__` `2.6.0`.
 
 - **Config features.**
   - Display and view aliases (PR #2341): a view's `aliases` and the config's

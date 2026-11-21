@@ -1,7 +1,7 @@
 # Release checklist
 
-The steps to `v1.0.0` (`1.0.0+ocio.2.5.2`), in order. PLAN.md section 3 is what must hold; this
-list only fixes the order.
+The steps to a release, in order: `v1.1.0` (`1.1.0+ocio.2.6.0`) next, as they were for `v1.0.0`
+(`1.0.0+ocio.2.5.2`). PLAN.md section 3 is what must hold; this list only fixes the order.
 
 **The SDE rule (owner decision 2026-11-01, G4).** One full SDE run on the release commit, then a
 rerun of only the affected CPU profiles if needed.
@@ -11,28 +11,31 @@ rerun of only the affected CPU profiles if needed.
 matrix until step 3 is done.
 
 1. **Close the work.** `upstream-map.toml` is closed (`scripts/sde_release_ready.py` passes), and
-   every release item the owner hasn't moved past 1.0.0 has landed, packaging included. The
+   every release item the owner hasn't moved past the release has landed, packaging included. The
    packages carry the license files of the crates in `THIRD-PARTY-NOTICES.md`, and
    `cargo xtask wheel-check` holds the wheel to that. For a release that moves the pinned
    OpenColorIO (1.1.0, 2.6.0), `cargo xtask ci --main --no-stale` passes: no ported test is
    still marked `@ v2.5.2` where its upstream body or file preamble changed (docs/parity.md,
    "Stale ports").
 2. **Close the decisions.** The owner has decided the final state of `docs/improvements.md`
-   (2026-11-03: every entry stays as it is for 1.0.0), and every exception has its row in
+   (for 1.0.0, 2026-11-03: every entry stays as it is; for 1.1.0, the entries added or changed
+   since, listed in the `1.1.0` section of `CHANGELOG.md`), and every exception has its row in
    `docs/deviations.md` or `waivers.toml`. The name and hosting are decided (PLAN.md D6 and D14).
-3. **Make the release commit.** Bump the version to `1.0.0+ocio.2.5.2`, the four crates'
-   `version = "=..."` requirements in `[workspace.dependencies]` to `=1.0.0` with it, and the
-   wheel's to `1.0.0` in `py-wheel/pyproject.toml`: a test of xtask holds the two together. This
+3. **Make the release commit.** Bump the version (`1.1.0+ocio.2.6.0`), the four crates'
+   `version = "=..."` requirements in `[workspace.dependencies]` with it (`=1.1.0`), and the
+   wheel's in `py-wheel/pyproject.toml` (`1.1.0`): a test of xtask holds the two together. This
    commit is the one to be tagged. Check the packages on it:
    `cargo package --offline -p opencolorio-rs-ops -p opencolorio-rs-formats -p opencolorio-rs-gpu -p opencolorio-rs`,
    on Windows and in Rocky Linux 9. Not `--workspace`: that also packages the `publish = false`
    crates, and fails on them.
-4. **Qualify it.** Dispatch the one full SDE run on that commit.
+4. **Qualify it.** Dispatch the one full SDE run on that commit. If GitHub Actions can't run it,
+   run what can be run locally (`scripts/sde.sh`), record it in `docs/verification.md`, and
+   the full run stays open until CI can run it.
 5. **If something fails or changes.** A fix makes a new release commit. Rerun only the CPU profiles
    it affects, and record which commit each profile passed on.
-6. **Tag.** With section 3 holding on the release commit, tag `v1.0.0`. The release note is the
-   `1.0.0` section of `CHANGELOG.md`, which gets its date with the tag. It starts with the OCIO
-   version it matches, and states:
+6. **Tag.** With section 3 holding on the release commit, tag it (`v1.1.0`). The release note is
+   the version's section of `CHANGELOG.md`, which gets its date with the tag. It starts with
+   the OCIO version it matches, and states (a later release may say they are unchanged):
    - Python 3.13 only (D14), on Windows x86-64 and on Linux x86-64 with glibc 2.34 or newer;
    - the four tools shipped (PLAN.md section 4);
    - the accepted speed misses (`docs/cards/phase8.md`);
@@ -55,8 +58,8 @@ artifact, for 30 days. Nothing in this repository publishes it: no workflow has 
 a token, and a test holds that.
 
 - **Version.** PyPI refuses a local segment, so the wheel's version is the workspace's without
-  `+ocio.2.5.2`: `1.0.0` for `1.0.0+ocio.2.5.2` (owner decision 2026-11-02). `Summary` says which
-  OCIO release it matches, and `PyOpenColorIO.__version__` stays that release's, `2.5.2`.
+  `+ocio.X.Y.Z`: `1.1.0` for `1.1.0+ocio.2.6.0` (owner decision 2026-11-02). `Summary` says which
+  OCIO release it matches, and `PyOpenColorIO.__version__` stays that release's, `2.6.0`.
 - **Windows.** `cp313-cp313-win_amd64`.
 - **Linux.** `cp313-cp313-manylinux_2_34_x86_64`, built in the Rocky Linux 9 image. The tag comes
   from all the wheel's binaries, the tools included (`xtask/src/wheel_audit.rs`): glibc 2.34 is the
