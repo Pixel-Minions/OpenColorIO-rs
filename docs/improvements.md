@@ -883,7 +883,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     and so does the optimized processor's cache ID, which hashes them;
   - so do the ones it bakes from CDLTransforms (`powf`), at every one of those input depths:
     an ASC CDL and an inverse no-clamp one (the p1-optimizer verifier's probe of both wheels;
-    at UINT8 the optimized cache ID is 4edb2d4f on Windows and 3210436f on Linux).
+    at UINT8 the optimized cache ID is 4edb2d4f on Windows and 3210436f on Linux; 2.6.0
+    prints a processor's cache ID as a UUID-shaped hash of the same text, `CacheIDHashUUID`,
+    `HashUtils.cpp:31-51`, `Processor.cpp:331-342` @ v2.6.0, which differs as the text does).
 
   Log, LogAffine, ExposureContrast, and the LUT and built-in bakes came out the same on both,
   over 3309 cases (the p1-oracle review's survey). LogCamera did too in that survey, but its
@@ -985,7 +987,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** very long lists of ops that combine one pair per pass; people reading the
   debug log.
 - **A fix:** stop at 80 passes, and log when the cap stops the loop.
-- **Status:** matched in `p1-engine` (1.2d).
+- **Status:** matched in `p1-engine` (1.2d). 2.6.0 fixed the pass count but not the message
+  (below); the port follows 2.6.0 since `ocio26-base` (845f6b78).
+- **2.6.0** (`ocio26-base`): `optimize` counts its passes from 1 (`OpOptimizers.cpp:638-772`
+  @ v2.6.0, PR #2244), so the loop makes at most 80 passes, the cap it names. The message
+  still comes only when `passes == 80` after the loop, and only with debug logging: when the
+  80th pass found nothing left to do, not when the cap stopped the loop. Seen through the
+  2.6.0 wheel with the default optimization (its "Optimized N->M" debug line): lists of 79,
+  80 and 81 Matrix ops keep one op, 82 keep two, 83 three, 84 four and 90 ten, and the
+  message appears at 80 ops only. What is left to fix is the message: log it when the cap
+  stops the loop. `crates/ocio-ops/tests/cpu_processor_oracle.rs`,
+  `the_pass_cap_matches_the_wheel` (79 to 84 and 90 ops: the cache ID and the whole debug
+  log).
 
 ### I-50. A max-only range followed by a min-only one can't be optimized
 
@@ -2230,8 +2243,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`TransformDirectionToString`), and `validate` raises from `Transform::validate`
   (Transform.cpp:30-40 @ v2.6.0) with the C++ class's `typeid` name, which each compiler
   writes its own way, after the class's prefix: "MatrixTransform validation failed: class
-  OpenColorIO_v2_5::MatrixTransformImpl: invalid direction." in the Windows wheel (MSVC), the
-  mangled `N16OpenColorIO_v2_519MatrixTransformImplE` in the Linux one (GCC);
+  OpenColorIO_v2_6::MatrixTransformImpl: invalid direction." in the Windows wheel (MSVC), the
+  mangled `N16OpenColorIO_v2_619MatrixTransformImplE` in the Linux one (GCC);
   `BuiltinTransformImpl` adds no prefix. The classes whose op data keep the direction in a
   style (CDL, exponent, exponent with linear, exposure contrast, fixed function:
   `GammaOpData::setDirection`, "invert when different") flip their direction instead, so
@@ -2963,8 +2976,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`Baker.cpp:249-251`), the CLF one, which has its capabilities, and no other code reads
   them.
 - **A fix:** set `info2.bake_capabilities`.
-- **Status:** matched in `p4-ctf-read-1` (`crates/ocio/src/fileformats/file_format_ctf.rs`,
-  `format_info`).
+- **Status:** fixed upstream in 2.6.0 (below), and the port follows it. For 2.5.2: matched in
+  `p4-ctf-read-1` (`crates/ocio/src/fileformats/file_format_ctf.rs`, `format_info`).
 - **2.6.0** (`ocio26-clf`): upstream sets the CTF info's bake capabilities
   (`fileformats/FileFormatCTF.cpp:156-188` @ v2.6.0), and the port does too. Still no one
   notices: the baker reads the first info only (`Baker.cpp:249-251` @ v2.6.0).
@@ -3898,7 +3911,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p5-huecurve` (5.4b, `crates/ocio-ops/src/ops/gradinghuecurve/
   grading_hue_curve_op_cpu.rs`, `apply_fwd`); the battery
   (`crates/ocio-ops/tests/grading_hue_curve_oracle.rs`) compares them bit for bit on both
-  platforms.
+  platforms. Changed in 2.6.0 (below); the port follows it since `ocio26-base` (cf28013f).
+- **2.6.0** (`ocio26-base`): the video style scales luma by the two gains too (I-274), so
+  this product serves the linear and video styles (`GradingHueCurveOpCPU.cpp:265-267` @
+  v2.6.0). The orders, re-read in the 2.6.0 libraries (`GradingHueCurveFwdOpCPU::apply`,
+  Windows 0x1801d6860, Linux 0x3b54f0; commit cf28013f): MSVC `(lum * hueLumGain) *
+  satLumGain` as before, GCC `(hueLumGain * lum) * satLumGain`, which gives the default NaN
+  as 2.5.2's `satLumGain * (hueLumGain * lum)` did. The log style's luma shift now sums the
+  gains in an order of each compiler's, `satLumGain + hueLumGain` with MSVC and
+  `hueLumGain + satLumGain` with GCC (both the former in 2.5.2): where both gains are NaNs
+  with different bits, the shift, and so the luma (`shift + lum` on both), carries the
+  sat-lum gain's NaN on Windows and the hue-lum gain's on Linux. The reverse renderer's
+  orders are 2.5.2's. The port takes each wheel's order per platform, and the battery
+  compares every style both ways on Windows and Rocky Linux 9.
 
 ### I-274. The video GradingHueCurve's shader scales luma where its CPU renderer shifts it
 
@@ -3913,10 +3938,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   compared between a CPU and a GPU render.
 - **A fix:** shift in the video style on the GPU too, as the CPU does (or scale on both,
   whichever upstream intended).
-- **Status:** matched in `p5-huecurve` (5.4c, `crates/ocio-gpu/src/ops/gradinghuecurve/
+- **Status:** fixed upstream in 2.6.0 (below), and the port follows it since `ocio26-base`
+  (cf28013f). For 2.5.2: matched in `p5-huecurve` (5.4c, `crates/ocio-gpu/src/ops/gradinghuecurve/
   grading_hue_curve_op_gpu.rs`, `add_gc_forward_shader`, `add_gc_inverse_shader`); the shader
   text is checked byte for byte against the wheel
   (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`).
+- **2.6.0** (`ocio26-base`): the CPU renderers shift luma in the log style only and scale
+  it in the linear and video styles (`m_isLog`, `GradingHueCurveOpCPU.cpp:69, 93-101,
+  265-267, 332-335` @ v2.6.0, PR #2336), as the GPU shader does. The port's renderers do
+  the same (`crates/ocio-ops/src/ops/gradinghuecurve/grading_hue_curve_op_cpu.rs`), and the
+  battery (`crates/ocio-ops/tests/grading_hue_curve_oracle.rs`) compares every style both
+  ways with the wheel on both platforms. Nothing is left to fix.
 
 ### I-275. The hue-fx curve's reverse evaluation differs between the GPU and the CPU
 
@@ -3934,10 +3966,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   whose first knot isn't 0, compared between a CPU and a GPU render, for the few hues in that
   window.
 - **A fix:** add `knStart` to `knStartY` in the shader for the hue-fx curve, as the CPU does.
-- **Status:** ported as upstream in `p5-huecurve` (5.4c,
+- **Status:** fixed upstream in 2.6.0 (below), and the port follows it since `ocio26-base`
+  (6b874d62). For 2.5.2: ported as upstream in `p5-huecurve` (5.4c,
   `crates/ocio-gpu/src/ops/gradinghuecurve/grading_hue_curve_op_gpu.rs`, the shader text is
   copied exactly); checked byte for byte against the wheel
   (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`).
+- **2.6.0** (`ocio26-base`): the shader adds `knStart` to `knStartY` for the hue-fx curve,
+  `knStartY = (curveIdx == 7) ? knStartY + knStart : knStartY;`
+  (`GradingBSplineCurve.cpp:1190-1194` @ v2.6.0, PR #2319), as the CPU's `evalCurveRevHue`
+  does (unchanged, at 1405-1409). The port writes the same text
+  (`grading_hue_curve_op_gpu.rs`), checked byte for byte against the wheel
+  (`crates/ocio-gpu/tests/grading_hue_curve_op_gpu_oracle.rs`). Nothing is left to fix.
 
 ### I-291. A version 1 config may hold a GradingHueCurveTransform
 
@@ -4659,7 +4698,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `src/apps/ociobakelut/main.cpp:261, 270 @ v2.5.2` calls `Config::CreateFromFile` and
   `Config::CreateFromEnv` outside `main`'s `try` blocks, so a config that doesn't load is an
   uncaught exception, and `std::terminate` ends the process. On Linux libstdc++ prints `terminate
-  called after throwing an instance of 'OpenColorIO_v2_5::Exception'` and a `what():` line, and the
+  called after throwing an instance of 'OpenColorIO_v2_6::Exception'` and a `what():` line, and the
   process dies of SIGABRT. On Windows nothing is printed and the exit status is `0xC0000409`. What
   `std::cout` still held is lost on both.
 - **Who notices:** anyone who gives `ociobakelut` a missing or broken config.
@@ -5631,7 +5670,15 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `crates/ocio/src/ocio_yaml.rs`, the copy in `crates/ocio/src/transforms/group_transform.rs`).
   Tests: 590 levels load as in the wheel, the wheel loads 591 where the port refuses them, groups
   that hold themselves are refused, and loading, copying, printing, validating, building a CPU
-  processor and dropping 590 levels fit a 1 MiB thread (also at opt-level 0).
+  processor and dropping 590 levels fit a 1 MiB thread (also at opt-level 0). Changed in 2.6.0
+  for processors (below).
+- **2.6.0** (`ocio26-base`): loading is unchanged, but making a processor of nested groups now
+  stops at upstream's own guard (U-58's 2.6.0 bullet): collecting the transform's context
+  variables throws past 32 nested groups (`ContextVariableUtils.cpp:187-204` @ v2.6.0), so the
+  wheel and the port build the processor of 32 levels and refuse 33 and 590 with the same
+  error. Only loading still reaches the 590-group limit.
+  `crates/ocio/src/ocio_yaml_oracle_tests.rs`, `deep_groups_fit_a_small_stack` (the wheel's
+  processors of 32, 33 and 590 levels, and the port's on a 1 MiB thread).
 
 ### U-65. The inverse of a 3D LUT of one entry per side never finishes
 
