@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! GPU shader generation: a port of `GpuShader*.cpp`, `GPUProcessor.cpp` and the ops'
-//! GPU writers from OpenColorIO 2.5.2.
+//! GPU writers from OpenColorIO 2.6.0.
 //!
 //! This crate is a building block of [`opencolorio-rs`](https://crates.io/crates/opencolorio-rs):
 //! use that crate. Its API follows OpenColorIO's internals and may change in minor releases.

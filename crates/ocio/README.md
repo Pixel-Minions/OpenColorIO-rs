@@ -1,8 +1,8 @@
 # opencolorio-rs
 
-A Rust port of [OpenColorIO](https://github.com/AcademySoftwareFoundation/OpenColorIO) 2.5.2:
+A Rust port of [OpenColorIO](https://github.com/AcademySoftwareFoundation/OpenColorIO) 2.6.0:
 configs, transforms, processors and the file formats, with the output of the original checked
-byte for byte against the official `opencolorio==2.5.2` wheel, on Windows x86-64 and Rocky
+byte for byte against the official `opencolorio==2.6.0` wheel, on Windows x86-64 and Rocky
 Linux 9.
 
 The package is `opencolorio-rs`; the library is `ocio`:
@@ -12,7 +12,7 @@ cargo add opencolorio-rs
 ```
 
 ```rust
-let version = ocio::version(); // "2.5.2", the OpenColorIO version this release matches
+let version = ocio::version(); // "2.6.0", the OpenColorIO version this release matches
 ```
 
 `ocio::PORT_VERSION` is this crate's own version; each version's build metadata states the

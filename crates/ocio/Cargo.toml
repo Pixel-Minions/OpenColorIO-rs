@@ -1,6 +1,6 @@
 [package]
 name = "opencolorio-rs"
-description = "OpenColorIO 2.5.2, ported to Rust: configs, transforms, processors"
+description = "OpenColorIO 2.6.0, ported to Rust: configs, transforms, processors"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

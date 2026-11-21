@@ -1,6 +1,6 @@
 # Third-party notices
 
-This package is part of OpenColorIO-rs, a port of OpenColorIO 2.5.2 under BSD-3-Clause (see
+This package is part of OpenColorIO-rs, a port of OpenColorIO 2.6.0 under BSD-3-Clause (see
 [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE)). Its sources also translate code from the projects
 below. The sections are those of the repository's `THIRD-PARTY-NOTICES.md`, which lists every
 project the port takes code from. The crates this package depends on ship their own licenses.

@@ -1,15 +1,15 @@
 # Moving from PyOpenColorIO to the `opencolorio-rs` wheel
 
 The `opencolorio-rs` wheel installs the same Python module as the official `opencolorio` wheel,
-under the same import name, with the port's Rust code behind it. It matches OpenColorIO 2.5.2:
-upstream's 384 Python tests run unmodified against it, installed, on both platforms. Nothing is
-published yet; this page describes 1.0.0.
+under the same import name, with the port's Rust code behind it. It matches OpenColorIO 2.6.0:
+upstream's 392 Python tests run unmodified against it, installed, on both platforms. This page
+describes 1.1.0.
 
 ## What stays the same
 
 - **The import name.** Scripts keep `import PyOpenColorIO as OCIO`, and need no change.
-- **The version.** `PyOpenColorIO.__version__` is `"2.5.2"`, the OpenColorIO release the port
-  matches. The wheel's own version, `1.0.0`, is the port's.
+- **The version.** `PyOpenColorIO.__version__` is `"2.6.0"`, the OpenColorIO release the port
+  matches. The wheel's own version, `1.1.0`, is the port's.
 - **The results.** Pixels, text output, errors and cache IDs are those of the official wheel on
   the same machine, except where `docs/deviations.md` and `waivers.toml` list a difference.
 
@@ -43,7 +43,7 @@ its Python code imports `PyOpenColorIO` from the application and shares the proc
 with the Rust side: caches, the logging level, environment variables and the current config.
 
 The embedding API is `ocio_py::embed`, in the `ocio-py` crate with its `python` feature. That crate
-isn't published on crates.io in 1.0.0, so it comes from the repository as a path dependency.
+isn't published on crates.io in 1.1.0, so it comes from the repository as a path dependency.
 
 ```rust
 // Before the interpreter starts.
