@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/gpu/FixedFunctionOp_test.cpp` @ v2.5.2, 23 ACES2 cases (7.3d).
+//! Port of `tests/gpu/FixedFunctionOp_test.cpp` @ v2.5.2 and v2.6.0 (the cases marked so), 25
+//! ACES2 cases (7.3d).
 //! Original inputs and settings; actual wheel CPU/shader references; no retests.
 #![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
@@ -14,6 +15,233 @@ use ocio_gpu_exec::gpu_unit_test::ReferenceRun;
 use super::{cases, reference};
 
 use cases::{Build, Case, Input};
+
+/// The RGB values of the RGB to JMh and HMJ tests: ACEScg primaries and secondaries scaled by
+/// 4, some OCIO test values, and ColorChecker24 SMPTE 2065-1 2021 values (`g_aces2_rgb_values`,
+/// FixedFunctionOp_test.cpp:783-814 @ v2.6.0).
+const G_ACES2_RGB_VALUES: &[f32] = &[
+    2.781808965,
+    0.179178253,
+    -0.022103530,
+    1.0,
+    3.344523751,
+    3.617862727,
+    -0.006002689,
+    1.0,
+    0.562714786,
+    3.438684474,
+    0.016100841,
+    1.0,
+    1.218191035,
+    3.820821747,
+    4.022103530,
+    1.0,
+    0.655476249,
+    0.382137273,
+    4.006002689,
+    1.0,
+    3.437285214,
+    0.561315526,
+    3.983899159,
+    1.0,
+    0.110000000,
+    0.020000000,
+    0.040000000,
+    0.5,
+    0.710000000,
+    0.510000000,
+    0.810000000,
+    1.0,
+    0.430000000,
+    0.820000000,
+    0.710000000,
+    0.0,
+    0.118770000,
+    0.087090000,
+    0.058950000,
+    1.0,
+    0.400020000,
+    0.319160000,
+    0.237360000,
+    1.0,
+    0.184760000,
+    0.203980000,
+    0.313110000,
+    1.0,
+    0.109010000,
+    0.135110000,
+    0.064930000,
+    1.0,
+    0.266840000,
+    0.246040000,
+    0.409320000,
+    1.0,
+    0.322830000,
+    0.462080000,
+    0.406060000,
+    1.0,
+    0.386050000,
+    0.227430000,
+    0.057770000,
+    1.0,
+    0.138220000,
+    0.130370000,
+    0.337030000,
+    1.0,
+    0.302020000,
+    0.137520000,
+    0.127580000,
+    1.0,
+    0.093100000,
+    0.063470000,
+    0.135250000,
+    1.0,
+    0.348760000,
+    0.436540000,
+    0.106130000,
+    1.0,
+    0.486550000,
+    0.366850000,
+    0.080610000,
+    1.0,
+    0.087320000,
+    0.074430000,
+    0.272740000,
+    1.0,
+    0.153660000,
+    0.256920000,
+    0.090710000,
+    1.0,
+    0.217420000,
+    0.070700000,
+    0.051300000,
+    1.0,
+    0.589190000,
+    0.539430000,
+    0.091570000,
+    1.0,
+    0.309040000,
+    0.148180000,
+    0.274260000,
+    1.0,
+    0.149010000,
+    0.233780000,
+    0.359390000,
+    1.0,
+];
+
+/// The JMh values of `G_ACES2_RGB_VALUES` (`g_aces2_jmh_values`, FixedFunctionOp_test.cpp:
+/// 816-846 @ v2.6.0).
+const G_ACES2_JMH_VALUES: &[f32] = &[
+    107.480636597,
+    206.827301025,
+    25.025110245,
+    1.0,
+    173.194076538,
+    133.330886841,
+    106.183448792,
+    1.0,
+    139.210220337,
+    191.922363281,
+    147.056488037,
+    1.0,
+    157.905166626,
+    111.975311279,
+    192.204727173,
+    1.0,
+    79.229278564,
+    100.424659729,
+    268.442108154,
+    1.0,
+    132.888137817,
+    173.358779907,
+    341.715240479,
+    1.0,
+    26.112514496,
+    42.523605347,
+    4.173158169,
+    0.5,
+    79.190460205,
+    25.002300262,
+    332.159759521,
+    1.0,
+    81.912559509,
+    39.754810333,
+    182.925750732,
+    0.0,
+    33.924663544,
+    12.254567146,
+    38.146659851,
+    1.0,
+    61.332393646,
+    15.169423103,
+    39.841842651,
+    1.0,
+    47.191543579,
+    11.839941978,
+    249.107116699,
+    1.0,
+    37.328300476,
+    13.224150658,
+    128.878036499,
+    1.0,
+    53.465549469,
+    13.121579170,
+    285.658966064,
+    1.0,
+    65.414512634,
+    19.172147751,
+    179.324264526,
+    1.0,
+    55.711513519,
+    37.182041168,
+    50.924011230,
+    1.0,
+    40.020961761,
+    20.762512207,
+    271.008331299,
+    1.0,
+    47.704769135,
+    35.791145325,
+    13.975610733,
+    1.0,
+    30.385913849,
+    14.544739723,
+    317.544281006,
+    1.0,
+    64.222846985,
+    33.487697601,
+    119.145133972,
+    1.0,
+    65.570358276,
+    35.864013672,
+    70.842193604,
+    1.0,
+    31.800464630,
+    23.920211792,
+    273.228973389,
+    1.0,
+    47.950405121,
+    28.027387619,
+    144.154159546,
+    1.0,
+    38.440967560,
+    42.604164124,
+    17.892261505,
+    1.0,
+    75.117736816,
+    40.952045441,
+    90.752044678,
+    1.0,
+    49.311210632,
+    33.812240601,
+    348.832092285,
+    1.0,
+    47.441757202,
+    22.915655136,
+    218.454376221,
+    1.0,
+];
 
 const CASES: &[Case] = &[
     // FixedFunctionOp_test.cpp:309-370 @ v2.5.2.
@@ -480,7 +708,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "668f04116032ccb702310ba930a1f6f601612700755d3b03d33e123e0d70bb9c",
         padded_input_digest: "f962ffeabbdaa8e167e599a94f937be88e0d5e9bcacf36120f6ecb758dfb7c81",
     },
-    // FixedFunctionOp_test.cpp:605-623 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:606-624 @ v2.6.0.
     Case {
         name: "style_aces2_1000nit_p3_rndtrip",
         build: Build::DisplayView {
@@ -492,7 +720,7 @@ const CASES: &[Case] = &[
             edge: 17,
             scale: 0.75183,
         },
-        threshold: 0.012,
+        threshold: 0.014,
         relative: false,
         minimum: 1e-6,
         nan: true,
@@ -530,7 +758,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "cd2ef7177549b2b79bd9fd5279de4f89f664ca48582b2c3e648a1d38c703fd28",
         padded_input_digest: "4df6527d10fdc0869638876eab2f020122584a311fe0858cdfebdb493c8a8caf",
     },
-    // FixedFunctionOp_test.cpp:644-660 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:645-661 @ v2.6.0.
     Case {
         name: "style_aces2_4000nit_p3_rndtrip",
         build: Build::DisplayView {
@@ -542,7 +770,7 @@ const CASES: &[Case] = &[
             edge: 17,
             scale: 0.90257,
         },
-        threshold: 0.018,
+        threshold: 0.019,
         relative: false,
         minimum: 1e-6,
         nan: true,
@@ -580,7 +808,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "7f418aaca0bc4229564a4739d12db3fe5e92b144c073f30b123f44d4eb0a47fd",
         padded_input_digest: "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05",
     },
-    // FixedFunctionOp_test.cpp:681-697 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:682-698 @ v2.6.0.
     Case {
         name: "style_aces2_4000nit_rec2020_rndtrip",
         build: Build::DisplayView {
@@ -592,7 +820,7 @@ const CASES: &[Case] = &[
             edge: 17,
             scale: 0.90257,
         },
-        threshold: 0.03,
+        threshold: 0.034,
         relative: false,
         minimum: 1e-6,
         nan: true,
@@ -680,7 +908,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "7f418aaca0bc4229564a4739d12db3fe5e92b144c073f30b123f44d4eb0a47fd",
         padded_input_digest: "f83f4d2bf73aa90df5a2ab5f76e3900504d15a8ecd5a582ddf503d0d593a1d05",
     },
-    // FixedFunctionOp_test.cpp:756-777 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:757-778 @ v2.6.0.
     Case {
         name: "style_aces2_nan_bug",
         build: Build::DisplayView {
@@ -702,7 +930,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "25265e456d75c70c4270d27fba8a68abcb4f4aba5fbe9dd44c7ab3fa94d4b778",
         padded_input_digest: "b04589158c71c748aabac981a96d68df981d0f1740c2cf8eeea0988a379f9198",
     },
-    // FixedFunctionOp_test.cpp:779-826 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:867-883 @ v2.6.0 (its values in g_aces2_rgb_values, 783-813).
     Case {
         name: "style_aces2_rgb_to_jmh_fwd",
         build: Build::Fixed {
@@ -715,116 +943,7 @@ const CASES: &[Case] = &[
             },
             inverse: false,
         },
-        input: Input::Literal(&[
-            2.781808965,
-            0.179178253,
-            -0.022103530,
-            1.0,
-            3.344523751,
-            3.617862727,
-            -0.006002689,
-            1.0,
-            0.562714786,
-            3.438684474,
-            0.016100841,
-            1.0,
-            1.218191035,
-            3.820821747,
-            4.022103530,
-            1.0,
-            0.655476249,
-            0.382137273,
-            4.006002689,
-            1.0,
-            3.437285214,
-            0.561315526,
-            3.983899159,
-            1.0,
-            0.110000000,
-            0.020000000,
-            0.040000000,
-            0.5,
-            0.710000000,
-            0.510000000,
-            0.810000000,
-            1.0,
-            0.430000000,
-            0.820000000,
-            0.710000000,
-            0.0,
-            0.118770000,
-            0.087090000,
-            0.058950000,
-            1.0,
-            0.400020000,
-            0.319160000,
-            0.237360000,
-            1.0,
-            0.184760000,
-            0.203980000,
-            0.313110000,
-            1.0,
-            0.109010000,
-            0.135110000,
-            0.064930000,
-            1.0,
-            0.266840000,
-            0.246040000,
-            0.409320000,
-            1.0,
-            0.322830000,
-            0.462080000,
-            0.406060000,
-            1.0,
-            0.386050000,
-            0.227430000,
-            0.057770000,
-            1.0,
-            0.138220000,
-            0.130370000,
-            0.337030000,
-            1.0,
-            0.302020000,
-            0.137520000,
-            0.127580000,
-            1.0,
-            0.093100000,
-            0.063470000,
-            0.135250000,
-            1.0,
-            0.348760000,
-            0.436540000,
-            0.106130000,
-            1.0,
-            0.486550000,
-            0.366850000,
-            0.080610000,
-            1.0,
-            0.087320000,
-            0.074430000,
-            0.272740000,
-            1.0,
-            0.153660000,
-            0.256920000,
-            0.090710000,
-            1.0,
-            0.217420000,
-            0.070700000,
-            0.051300000,
-            1.0,
-            0.589190000,
-            0.539430000,
-            0.091570000,
-            1.0,
-            0.309040000,
-            0.148180000,
-            0.274260000,
-            1.0,
-            0.149010000,
-            0.233780000,
-            0.359390000,
-            1.0,
-        ]),
+        input: Input::Literal(G_ACES2_RGB_VALUES),
         threshold: 2e-4,
         relative: false,
         minimum: 1e-6,
@@ -838,7 +957,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "7445eac304174fcbd2c9b14c5fa142ee5bce5fca2160d434e46c8c95cd06d66f",
         padded_input_digest: "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319",
     },
-    // FixedFunctionOp_test.cpp:828-875 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:885-900 @ v2.6.0 (its values in g_aces2_jmh_values, 816-846).
     Case {
         name: "style_aces2_rgb_to_jmh_inv",
         build: Build::Fixed {
@@ -851,117 +970,8 @@ const CASES: &[Case] = &[
             },
             inverse: true,
         },
-        input: Input::Literal(&[
-            107.480636597,
-            206.827301025,
-            25.025110245,
-            1.0,
-            173.194076538,
-            133.330886841,
-            106.183448792,
-            1.0,
-            139.210220337,
-            191.922363281,
-            147.056488037,
-            1.0,
-            157.905166626,
-            111.975311279,
-            192.204727173,
-            1.0,
-            79.229278564,
-            100.424659729,
-            268.442108154,
-            1.0,
-            132.888137817,
-            173.358779907,
-            341.715240479,
-            1.0,
-            26.112514496,
-            42.523605347,
-            4.173158169,
-            0.5,
-            79.190460205,
-            25.002300262,
-            332.159759521,
-            1.0,
-            81.912559509,
-            39.754810333,
-            182.925750732,
-            0.0,
-            33.924663544,
-            12.254567146,
-            38.146659851,
-            1.0,
-            61.332393646,
-            15.169423103,
-            39.841842651,
-            1.0,
-            47.191543579,
-            11.839941978,
-            249.107116699,
-            1.0,
-            37.328300476,
-            13.224150658,
-            128.878036499,
-            1.0,
-            53.465549469,
-            13.121579170,
-            285.658966064,
-            1.0,
-            65.414512634,
-            19.172147751,
-            179.324264526,
-            1.0,
-            55.711513519,
-            37.182041168,
-            50.924011230,
-            1.0,
-            40.020961761,
-            20.762512207,
-            271.008331299,
-            1.0,
-            47.704769135,
-            35.791145325,
-            13.975610733,
-            1.0,
-            30.385913849,
-            14.544739723,
-            317.544281006,
-            1.0,
-            64.222846985,
-            33.487697601,
-            119.145133972,
-            1.0,
-            65.570358276,
-            35.864013672,
-            70.842193604,
-            1.0,
-            31.800464630,
-            23.920211792,
-            273.228973389,
-            1.0,
-            47.950405121,
-            28.027387619,
-            144.154159546,
-            1.0,
-            38.440967560,
-            42.604164124,
-            17.892261505,
-            1.0,
-            75.117736816,
-            40.952045441,
-            90.752044678,
-            1.0,
-            49.311210632,
-            33.812240601,
-            348.832092285,
-            1.0,
-            47.441757202,
-            22.915655136,
-            218.454376221,
-            1.0,
-        ]),
-        threshold: 1e-4,
+        input: Input::Literal(G_ACES2_JMH_VALUES),
+        threshold: 2e-5,
         relative: false,
         minimum: 1e-6,
         nan: true,
@@ -1774,12 +1784,68 @@ const CASES: &[Case] = &[
         raw_input_digest: "acfee4b92933a3da91a4882fe7315863667ad414d33111a2105181c2db475c32",
         padded_input_digest: "1480894101c40b210e345435834762072d0efe960eea6cfcabd2d75306299a2e",
     },
+    // FixedFunctionOp_test.cpp:902-920 @ v2.6.0: the RGB values of style_aces2_rgb_to_jmh_fwd,
+    // the same JMh repacked as [ h/360, M/200, J/100 ].
+    Case {
+        name: "style_aces2_rgb_to_hmj_fwd",
+        build: Build::Fixed {
+            style: FixedFunctionStyle::AcesRgbToHmj20,
+            oracle_style: "FIXED_FUNCTION_ACES_RGB_TO_HMJ_20",
+            params: || {
+                vec![
+                    0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+                ]
+            },
+            inverse: false,
+        },
+        input: Input::Literal(G_ACES2_RGB_VALUES),
+        threshold: 1e-6,
+        relative: false,
+        minimum: 1e-6,
+        nan: true,
+        infinity: true,
+        allow_1d: true,
+        original_entries: 108,
+        width: 27,
+        height: 1,
+        comparison_entries: 108,
+        raw_input_digest: "7445eac304174fcbd2c9b14c5fa142ee5bce5fca2160d434e46c8c95cd06d66f",
+        padded_input_digest: "ea0c5b9b1f4f941505a40467be5cc63b6f282925773ae9d2e4bd3f82b700d319",
+    },
+    // FixedFunctionOp_test.cpp:922-939 @ v2.6.0: the JMh values of style_aces2_rgb_to_jmh_inv
+    // repacked as HMJ (JMhToHMJ).
+    Case {
+        name: "style_aces2_rgb_to_hmj_inv",
+        build: Build::Fixed {
+            style: FixedFunctionStyle::AcesRgbToHmj20,
+            oracle_style: "FIXED_FUNCTION_ACES_RGB_TO_HMJ_20",
+            params: || {
+                vec![
+                    0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+                ]
+            },
+            inverse: true,
+        },
+        input: Input::JmhToHmj(G_ACES2_JMH_VALUES),
+        threshold: 2e-5,
+        relative: false,
+        minimum: 1e-6,
+        nan: true,
+        infinity: true,
+        allow_1d: true,
+        original_entries: 108,
+        width: 27,
+        height: 1,
+        comparison_entries: 108,
+        raw_input_digest: "25762d311e665f7bea7fc1cd43f7e12c98a5ca3f129c39282da6ee41616d0d5e",
+        padded_input_digest: "d79f442da5d045f89296e438650997897a129f42d1f616d395d5a318fca84ab7",
+    },
 ];
 
 fn references() -> &'static [ReferenceRun] {
     static REFERENCES: OnceLock<Vec<ReferenceRun>> = OnceLock::new();
     REFERENCES.get_or_init(|| {
-        assert_eq!(CASES.len(), 23);
+        assert_eq!(CASES.len(), 25);
         let tests: Vec<_> = CASES.iter().map(cases::input_test).collect();
         assert!(
             tests
@@ -1838,7 +1904,7 @@ fn style_aces2_displayp3_rndtrip() {
 fn style_aces2_displayp3_inv() {
     run_case(6, "style_aces2_displayp3_inv");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_1000nit_p3_rndtrip)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_1000nit_p3_rndtrip)` @ v2.6.0.
 #[test]
 fn style_aces2_1000nit_p3_rndtrip() {
     run_case(7, "style_aces2_1000nit_p3_rndtrip");
@@ -1848,7 +1914,7 @@ fn style_aces2_1000nit_p3_rndtrip() {
 fn style_aces2_1000nit_p3_inv() {
     run_case(8, "style_aces2_1000nit_p3_inv");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_4000nit_p3_rndtrip)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_4000nit_p3_rndtrip)` @ v2.6.0.
 #[test]
 fn style_aces2_4000nit_p3_rndtrip() {
     run_case(9, "style_aces2_4000nit_p3_rndtrip");
@@ -1858,7 +1924,7 @@ fn style_aces2_4000nit_p3_rndtrip() {
 fn style_aces2_4000nit_p3_inv() {
     run_case(10, "style_aces2_4000nit_p3_inv");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_4000nit_rec2020_rndtrip)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_4000nit_rec2020_rndtrip)` @ v2.6.0.
 #[test]
 fn style_aces2_4000nit_rec2020_rndtrip() {
     run_case(11, "style_aces2_4000nit_rec2020_rndtrip");
@@ -1878,17 +1944,17 @@ fn style_aces2_d60_4000nit_p3_rndtrip() {
 fn style_aces2_d60_4000nit_p3_inv() {
     run_case(14, "style_aces2_d60_4000nit_p3_inv");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_nan_bug)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_nan_bug)` @ v2.6.0.
 #[test]
 fn style_aces2_nan_bug() {
     run_case(15, "style_aces2_nan_bug");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_jmh_fwd)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_jmh_fwd)` @ v2.6.0.
 #[test]
 fn style_aces2_rgb_to_jmh_fwd() {
     run_case(16, "style_aces2_rgb_to_jmh_fwd");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_jmh_inv)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_jmh_inv)` @ v2.6.0.
 #[test]
 fn style_aces2_rgb_to_jmh_inv() {
     run_case(17, "style_aces2_rgb_to_jmh_inv");
@@ -1917,4 +1983,14 @@ fn style_aces2_gamut_compress_inv() {
 #[test]
 fn style_aces2_gamut_compress_no1dlut() {
     run_case(22, "style_aces2_gamut_compress_no1dlut");
+}
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_hmj_fwd)` @ v2.6.0.
+#[test]
+fn style_aces2_rgb_to_hmj_fwd() {
+    run_case(23, "style_aces2_rgb_to_hmj_fwd");
+}
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces2_rgb_to_hmj_inv)` @ v2.6.0.
+#[test]
+fn style_aces2_rgb_to_hmj_inv() {
+    run_case(24, "style_aces2_rgb_to_hmj_inv");
 }

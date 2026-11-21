@@ -66,7 +66,7 @@ fn odd_direction(sc: &mut Script, obj: usize, validates: bool) {
 }
 
 /// Every fixed-function style, with the parameters each needs.
-const FF_STYLES: [(&str, &[f64]); 23] = [
+const FF_STYLES: [(&str, &[f64]); 24] = [
     ("FIXED_FUNCTION_ACES_RED_MOD_03", &[]),
     ("FIXED_FUNCTION_ACES_RED_MOD_10", &[]),
     ("FIXED_FUNCTION_ACES_GLOW_03", &[]),
@@ -106,6 +106,10 @@ const FF_STYLES: [(&str, &[f64]); 23] = [
     (
         "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20",
         &[100.0, 0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
+    ),
+    (
+        "FIXED_FUNCTION_ACES_RGB_TO_HMJ_20",
+        &[0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
     ),
     ("FIXED_FUNCTION_RGB_TO_HSY_LIN", &[]),
     ("FIXED_FUNCTION_RGB_TO_HSY_LOG", &[]),

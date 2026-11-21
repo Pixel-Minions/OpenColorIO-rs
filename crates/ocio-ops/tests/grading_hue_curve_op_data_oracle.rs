@@ -29,7 +29,7 @@
 //! builds its op from a copy of the transform's data, inverted for an inverse processor
 //! (GradingHueCurveOp.cpp:204-215, 234-245).
 
-use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::hash_utils::cache_id_hash_uuid;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{
     BSplineType, GradingStyle, HsyTransformStyle, HueCurveType, TransformDirection,
@@ -419,7 +419,7 @@ fn cache_ids_and_built_data_are_the_wheels() {
         create_grading_hue_curve_op(&mut ops, data.clone(), TransformDirection::Forward);
         let full = ops.get_cache_id().unwrap();
         assert_eq!(
-            cache_id_hash(&full),
+            cache_id_hash_uuid(&full),
             wheel.cache_id,
             "{case:?}: {}",
             String::from_utf8_lossy(&full)

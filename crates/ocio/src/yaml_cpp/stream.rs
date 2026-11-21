@@ -561,6 +561,9 @@ pub struct Stream<'a> {
     inner: RefCell<Inner<'a>>,
     mark: Mark,
     char_set: CharacterSet,
+    /// `m_lineEndingSymbol` (stream.h:56 @ yaml-cpp-0.9.0): 0 until the first line ending is
+    /// read, then a line feed or a carriage return.
+    line_ending_symbol: u8,
 }
 
 impl<'a> Stream<'a> {
@@ -608,6 +611,7 @@ impl<'a> Stream<'a> {
             }),
             mark: Mark::default(),
             char_set,
+            line_ending_symbol: 0,
         };
         stream.read_ahead_to(0);
         stream
@@ -630,13 +634,36 @@ impl<'a> Stream<'a> {
         inner.input.good() || inner.readahead.front().is_some_and(|&c| c != STREAM_EOF)
     }
 
-    /// `get()` (stream.cpp:262-275): extracts a character and moves the mark past it.
+    /// `get()` (stream.cpp:260-290 @ yaml-cpp-0.9.0): extracts a character and moves the mark
+    /// past it. The first `\n` or `\r` read decides the line ending (`\r\n` and `\n` are `\n`,
+    /// a lone `\r` is `\r`), and only that character starts a new line. Until then the symbol
+    /// is 0, so a NUL byte starts one (I-951).
     pub fn get(&mut self) -> u8 {
         let ch = self.peek();
         self.advance_current();
         self.mark.column = self.mark.column.wrapping_add(1);
 
-        if ch == b'\n' {
+        // if line ending symbol is unknown, set it to the first
+        // encountered line ending.
+        // if line ending '\r' set ending symbol to '\r'
+        // other wise set it to '\n'
+        if self.line_ending_symbol == 0 {
+            if ch == b'\n' {
+                // line ending is '\n'
+                self.line_ending_symbol = b'\n';
+            } else if ch == b'\r' {
+                let ch2 = self.peek();
+                if ch2 == b'\n' {
+                    // line ending is '\r\n'
+                    self.line_ending_symbol = b'\n';
+                } else {
+                    // line ending is '\r'
+                    self.line_ending_symbol = b'\r';
+                }
+            }
+        }
+
+        if ch == self.line_ending_symbol {
             self.mark.column = 0;
             self.mark.line = self.mark.line.wrapping_add(1);
         }

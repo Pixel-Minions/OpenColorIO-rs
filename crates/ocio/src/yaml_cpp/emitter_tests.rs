@@ -79,7 +79,7 @@ fn int_base() {
     expect_emit(&out, "- 1024\n- 0x400\n- 02000");
 }
 
-/// yaml-cpp 0.8.0 `EmitterTest.NumberPrecision`.
+/// yaml-cpp 0.9.0 `EmitterTest.NumberPrecision` (it adds two values to 0.8.0's).
 #[test]
 fn number_precision() {
     let mut out = Emitter::new();
@@ -89,8 +89,40 @@ fn number_precision() {
     out.put(3.1425926f32);
     out.put(53.5893f64);
     out.put(2384626.4338f64);
+    out.put(1999926.4338f64);
+    out.put(9999926.4338f64);
     out.put(EndSeq);
-    expect_emit(&out, "- 3.14\n- 54\n- 2.4e+06");
+    expect_emit(&out, "- 3.14\n- 54\n- 2.4e+06\n- 2e+06\n- 1e+07");
+}
+
+/// yaml-cpp 0.9.0 `EmitterTest.SimpleStdStringScalar`.
+#[test]
+fn simple_std_string_scalar() {
+    let mut out = Emitter::new();
+    out.put(String::from("Hello, std string"));
+    expect_emit(&out, "Hello, std string");
+}
+
+/// yaml-cpp 0.9.0 `EmitterTest.UnterminatedStdStringViewScalar`: the first 5 bytes of
+/// `"HelloUnterminated"` (a `std::string_view` upstream, a byte slice here).
+#[test]
+fn unterminated_std_string_view_scalar() {
+    let mut out = Emitter::new();
+    out.put(&b"HelloUnterminated"[..5]);
+    expect_emit(&out, "Hello");
+}
+
+/// yaml-cpp 0.9.0 `EmitterTest.EmptyFlowSeqInMap`.
+#[test]
+fn empty_flow_seq_in_map() {
+    let mut out = Emitter::new();
+    out.put(BeginMap);
+    out.put(Key).put(Flow).put(BeginSeq).put(EndSeq);
+    out.put(Value).put(1);
+    out.put(Key).put(2);
+    out.put(Value).put(Flow).put(BeginSeq).put(EndSeq);
+    out.put(EndMap);
+    expect_emit(&out, "[]: 1\n2: []");
 }
 
 /// yaml-cpp 0.8.0 `EmitterTest.SimpleSeq`.

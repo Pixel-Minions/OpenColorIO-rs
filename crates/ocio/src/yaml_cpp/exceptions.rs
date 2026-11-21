@@ -64,6 +64,10 @@ pub mod error_msg {
     pub const EOF_IN_SCALAR: &str = "illegal EOF in scalar";
     /// `ErrorMsg::CHAR_IN_SCALAR`
     pub const CHAR_IN_SCALAR: &str = "illegal character in scalar";
+    /// `ErrorMsg::UNEXPECTED_SCALAR` (exceptions.h:51 @ yaml-cpp-0.9.0)
+    pub const UNEXPECTED_SCALAR: &str = "unexpected scalar";
+    /// `ErrorMsg::UNEXPECTED_FLOW` (exceptions.h:52 @ yaml-cpp-0.9.0)
+    pub const UNEXPECTED_FLOW: &str = "plain value cannot start with flow indicator character";
     /// `ErrorMsg::TAB_IN_INDENTATION`
     pub const TAB_IN_INDENTATION: &str = "illegal tab when looking for indentation";
     /// `ErrorMsg::FLOW_END`

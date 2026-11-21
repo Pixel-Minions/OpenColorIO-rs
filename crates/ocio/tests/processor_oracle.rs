@@ -366,7 +366,7 @@ fn port_processor_metadata(
 /// Each group's processor comes from a config of its own, in the wheel (a request per group)
 /// and in the port. A config's processor cache returns the processor it already holds with the
 /// same cache ID (`Config::Impl::getProcessor`), and every processor here has the cache ID
-/// `<NOOP>`, so with one config every group would get the first group's processor. The last
+/// of an empty op list, so with one config every group would get the first group's processor. The last
 /// request pins that fallback on purpose: every group with one config, each getting the first
 /// group's processor, which has no metadata.
 #[test]

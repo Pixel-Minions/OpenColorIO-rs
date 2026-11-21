@@ -180,7 +180,39 @@ pub fn convert_grading_style_and_dir_to_string(
     }
 }
 
-// The element names (CTFReaderUtils.h:22-92 @ v2.5.2).
+/// Whether `id` is a SMPTE ST 2136-1 Id: `urn:uuid:` then hexadecimal digits in groups of
+/// 8, 4, 4, 4 and 12 separated by `-`.
+///
+/// Port of `ValidateSMPTEId` (CTFReaderUtils.cpp:178-189 @ v2.6.0). Upstream matches
+/// `^urn:uuid:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+/// with `std::regex_match` (ECMAScript grammar, no flags): the whole string has to match,
+/// so the anchors add nothing and the pattern is a fixed sequence of 45 bytes, the
+/// literals compared exactly and the classes holding the ASCII hex digits only, which this
+/// checks byte by byte. A byte past ASCII is no hex digit in either runtime (MSVC looks it
+/// up as an unsigned char in a 256-bit set, libstdc++ compares it as a negative `char`).
+/// The string is a `std::string`: a NUL is one more byte, which no class holds.
+pub fn validate_smpte_id(id: &[u8]) -> bool {
+    const PREFIX: &[u8] = b"urn:uuid:";
+    const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
+    let Some(mut rest) = id.strip_prefix(PREFIX) else {
+        return false;
+    };
+    for (i, len) in GROUPS.iter().enumerate() {
+        if i > 0 {
+            match rest.split_first() {
+                Some((b'-', tail)) => rest = tail,
+                _ => return false,
+            }
+        }
+        if rest.len() < *len || !rest[..*len].iter().all(u8::is_ascii_hexdigit) {
+            return false;
+        }
+        rest = &rest[*len..];
+    }
+    rest.is_empty()
+}
+
+// The element names (CTFReaderUtils.h:23-95 @ v2.6.0).
 
 /// `TAG_ACES`.
 pub const TAG_ACES: &[u8] = b"ACES";
@@ -228,6 +260,8 @@ pub const TAG_FUNCTION: &[u8] = b"Function";
 pub const TAG_GAMMA: &[u8] = b"Gamma";
 /// `TAG_GAMMA_PARAMS`.
 pub const TAG_GAMMA_PARAMS: &[u8] = b"GammaParams";
+/// `TAG_ID` (CTFReaderUtils.h:46 @ v2.6.0).
+pub const TAG_ID: &[u8] = b"Id";
 /// `TAG_INDEX_MAP`.
 pub const TAG_INDEX_MAP: &[u8] = b"IndexMap";
 /// `TAG_INFO`.
@@ -373,6 +407,8 @@ pub const ATTR_INTERPOLATION: &[u8] = b"interpolation";
 pub const ATTR_INVERSE_OF: &[u8] = b"inverseOf";
 /// `ATTR_IS_INVERTED`.
 pub const ATTR_IS_INVERTED: &[u8] = b"inverted";
+/// `ATTR_LANGUAGE` (CTFReaderUtils.h:119 @ v2.6.0).
+pub const ATTR_LANGUAGE: &[u8] = b"language";
 /// `ATTR_LINEARSLOPE`.
 pub const ATTR_LINEARSLOPE: &[u8] = b"linearSlope";
 /// `ATTR_LINSIDEBREAK`.

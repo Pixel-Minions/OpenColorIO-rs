@@ -346,13 +346,13 @@ fn version_2_3_validation() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(Builtins, read_write)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Builtins, read_write)` @ v2.6.0.
 /// Source: tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp:104-202.
 #[test]
 fn read_write() {
     let _env = crate::test_env::EnvGuard::new();
     // Original CONFIG_BUILTIN_TRANSFORMS literal, byte for byte.
-    const CONFIG_BUILTIN_TRANSFORMS: &str = r#"ocio_profile_version: 2.4
+    const CONFIG_BUILTIN_TRANSFORMS: &str = r#"ocio_profile_version: 2.6
 
 environment:
   {}

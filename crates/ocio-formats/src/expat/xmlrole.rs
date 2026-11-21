@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from expat 2.7.2 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
-// Ltd and Clark Cooper, Copyright (c) 2001-2025 Expat maintainers); see mod.rs.
+// Ported from expat 2.8.4 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
+// Ltd and Clark Cooper, Copyright (c) 2001-2026 Expat maintainers); see mod.rs.
 
-//! The prolog's state machine: a port of `lib/xmlrole.c` and `xmlrole.h` (expat 2.7.2), built
+//! The prolog's state machine: a port of `lib/xmlrole.c` and `xmlrole.h` (expat 2.8.4), built
 //! with `XML_DTD`. Given the prolog's tokens one by one, it says what role each plays
 //! (`XML_ROLE_*`): the XML declaration, the document type declaration and its internal
 //! subset (entity, attribute list, element and notation declarations), or an error.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 //
-// Ported from minizip-ng 4.0.10 (see `mod.rs` for its notice): an altered version.
+// Ported from minizip-ng 4.2.2 (see `mod.rs` for its notice): an altered version.
 
 //! minizip-ng's streams, as OpenColorIO reads an archive with them: the stream interface
 //! (`mz_strm.c`), the memory stream (`mz_strm_mem.c`), and the stack it opens an archive file
@@ -16,7 +16,7 @@ use ocio_ops::platform::create_input_file_stream;
 
 use super::mz_os::mz_os_file_exists;
 
-/// minizip-ng's results (mz.h:21-47 @ 4.0.10).
+/// minizip-ng's results (mz.h:21-47 @ 4.2.2).
 pub(crate) const MZ_OK: i32 = 0;
 pub(crate) const MZ_STREAM_ERROR: i32 = -1;
 pub(crate) const MZ_BUF_ERROR: i32 = -5;
@@ -35,7 +35,7 @@ pub(crate) const MZ_WRITE_ERROR: i32 = -116;
 #[cfg(windows)]
 pub(crate) const MZ_SYMLINK_ERROR: i32 = -118;
 
-/// `MZ_SEEK_SET`, `MZ_SEEK_CUR` and `MZ_SEEK_END` (mz.h:58-60 @ 4.0.10).
+/// `MZ_SEEK_SET`, `MZ_SEEK_CUR` and `MZ_SEEK_END` (mz.h:59-61 @ 4.2.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Origin {
     Set,
@@ -57,7 +57,7 @@ pub(crate) trait Stream {
 
 /// `mz_stream_seek`'s check of a negative absolute offset, then the stream's seek.
 ///
-/// Port of `mz_stream_seek` (mz_strm.c:223-232 @ 4.0.10).
+/// Port of `mz_stream_seek` (mz_strm.c:226-235 @ 4.2.2).
 pub(crate) fn mz_stream_seek(stream: &mut dyn Stream, offset: i64, origin: Origin) -> i32 {
     if origin == Origin::Set && offset < 0 {
         return MZ_SEEK_ERROR;
@@ -68,7 +68,7 @@ pub(crate) fn mz_stream_seek(stream: &mut dyn Stream, offset: i64, origin: Origi
 /// A little-endian value of `len` bytes, or `MZ_END_OF_STREAM` (`MZ_STREAM_ERROR` where the
 /// stream is in error) when fewer bytes are left.
 ///
-/// Port of `mz_stream_read_value` (mz_strm.c:43-58 @ 4.0.10).
+/// Port of `mz_stream_read_value` (mz_strm.c:43-58 @ 4.2.2).
 fn mz_stream_read_value(stream: &mut dyn Stream, len: usize) -> Result<u64, i32> {
     let mut buf = [0u8; 8];
     if stream.read(&mut buf[..len]) == len as i32 {
@@ -84,33 +84,33 @@ fn mz_stream_read_value(stream: &mut dyn Stream, len: usize) -> Result<u64, i32>
     }
 }
 
-/// Port of `mz_stream_read_uint16` (mz_strm.c:71-80 @ 4.0.10).
+/// Port of `mz_stream_read_uint16` (mz_strm.c:71-80 @ 4.2.2).
 pub(crate) fn mz_stream_read_uint16(stream: &mut dyn Stream) -> Result<u16, i32> {
     mz_stream_read_value(stream, 2).map(|v| v as u16)
 }
 
-/// Port of `mz_stream_read_uint32` (mz_strm.c:82-91 @ 4.0.10).
+/// Port of `mz_stream_read_uint32` (mz_strm.c:82-91 @ 4.2.2).
 pub(crate) fn mz_stream_read_uint32(stream: &mut dyn Stream) -> Result<u32, i32> {
     mz_stream_read_value(stream, 4).map(|v| v as u32)
 }
 
-/// Port of `mz_stream_read_int64` (mz_strm.c:93-95 @ 4.0.10).
+/// Port of `mz_stream_read_int64` (mz_strm.c:93-95 @ 4.2.2).
 pub(crate) fn mz_stream_read_int64(stream: &mut dyn Stream) -> Result<i64, i32> {
     mz_stream_read_value(stream, 8).map(|v| v as i64)
 }
 
-/// Port of `mz_stream_read_uint64` (mz_strm.c:97-99 @ 4.0.10).
+/// Port of `mz_stream_read_uint64` (mz_strm.c:97-99 @ 4.2.2).
 pub(crate) fn mz_stream_read_uint64(stream: &mut dyn Stream) -> Result<u64, i32> {
     mz_stream_read_value(stream, 8)
 }
 
-/// `MZ_STREAM_FIND_SIZE` (mz_strm.c:16 @ 4.0.10).
+/// `MZ_STREAM_FIND_SIZE` (mz_strm.c:16 @ 4.2.2).
 const MZ_STREAM_FIND_SIZE: usize = 1024;
 
 /// Searches forwards from the stream's position, over at most `max_seek` bytes, for `find`:
 /// its position (and the stream left there), or `MZ_EXIST_ERROR`.
 ///
-/// Port of `mz_stream_find` (mz_strm.c:234-292 @ 4.0.10), buffer for buffer.
+/// Port of `mz_stream_find` (mz_strm.c:237-295 @ 4.2.2), buffer for buffer.
 pub(crate) fn mz_stream_find(
     stream: &mut dyn Stream,
     find: &[u8],
@@ -178,7 +178,7 @@ pub(crate) fn mz_stream_find(
 /// Searches backwards from the stream's position, over at most `max_seek` bytes, for `find`:
 /// its position (and the stream left there), or `MZ_EXIST_ERROR`.
 ///
-/// Port of `mz_stream_find_reverse` (mz_strm.c:294-357 @ 4.0.10), buffer for buffer.
+/// Port of `mz_stream_find_reverse` (mz_strm.c:297-360 @ 4.2.2), buffer for buffer.
 pub(crate) fn mz_stream_find_reverse(
     stream: &mut dyn Stream,
     find: &[u8],
@@ -256,7 +256,7 @@ pub(crate) fn mz_stream_find_reverse(
 /// A memory stream opened to grow (`MZ_OPEN_MODE_CREATE`), or over a given buffer: what it
 /// holds up to its limit, and its position.
 ///
-/// Port of `mz_stream_mem` (mz_strm_mem.c @ 4.0.10). Its allocated size only matters where
+/// Port of `mz_stream_mem` (mz_strm_mem.c @ 4.2.2). Its allocated size only matters where
 /// a read past the limit could reach it, which the limit prevents, so the port keeps the
 /// bytes up to the limit; a write past them extends them.
 #[derive(Debug, Default)]
@@ -271,7 +271,7 @@ pub(crate) struct MemStream {
 impl MemStream {
     /// A stream opened with `MZ_OPEN_MODE_CREATE`.
     ///
-    /// Port of `mz_stream_mem_open` (mz_strm_mem.c:71-87 @ 4.0.10).
+    /// Port of `mz_stream_mem_open` (mz_strm_mem.c:71-87 @ 4.2.2).
     pub(crate) fn create() -> MemStream {
         MemStream {
             data: Vec::new(),
@@ -283,7 +283,7 @@ impl MemStream {
     /// A stream reading `buf`, whose limit is its size.
     ///
     /// Port of `mz_stream_mem_set_buffer` with `mz_stream_mem_open` for reading
-    /// (mz_strm_mem.c:199-204, 71-87 @ 4.0.10).
+    /// (mz_strm_mem.c:202-207, 71-87 @ 4.2.2).
     pub(crate) fn over(buf: &[u8]) -> MemStream {
         MemStream {
             data: buf.to_vec(),
@@ -294,7 +294,7 @@ impl MemStream {
 
     /// Sets the limit reads stop at.
     ///
-    /// Port of `mz_stream_mem_set_buffer_limit` (mz_strm_mem.c:228-231 @ 4.0.10).
+    /// Port of `mz_stream_mem_set_buffer_limit` (mz_strm_mem.c:231-234 @ 4.2.2).
     pub(crate) fn set_buffer_limit(&mut self, limit: usize) {
         self.data.resize(limit, 0);
     }
@@ -306,7 +306,7 @@ impl MemStream {
 
     /// Writes `buf` at the position.
     ///
-    /// Port of `mz_stream_mem_write` (mz_strm_mem.c:113-144 @ 4.0.10) for a stream that grows.
+    /// Port of `mz_stream_mem_write` (mz_strm_mem.c:113-144 @ 4.2.2) for a stream that grows.
     pub(crate) fn write(&mut self, buf: &[u8]) -> i32 {
         if buf.is_empty() {
             return 0;
@@ -320,8 +320,8 @@ impl MemStream {
         buf.len() as i32
     }
 
-    /// Port of `mz_stream_write_uint8` (mz_strm.c:133-135, through `mz_stream_write_value`,
-    /// 112-131 @ 4.0.10).
+    /// Port of `mz_stream_write_uint8` (mz_strm.c:136-138, through `mz_stream_write_value`,
+    /// 112-131 @ 4.2.2).
     pub(crate) fn write_uint8(&mut self, value: u8) -> i32 {
         if self.write(&[value]) != 1 {
             return MZ_STREAM_ERROR;
@@ -331,7 +331,7 @@ impl MemStream {
 }
 
 impl Stream for MemStream {
-    /// Port of `mz_stream_mem_read` (mz_strm_mem.c:96-111 @ 4.0.10).
+    /// Port of `mz_stream_mem_read` (mz_strm_mem.c:96-111 @ 4.2.2).
     fn read(&mut self, buf: &mut [u8]) -> i32 {
         let size = buf.len().min(self.data.len().saturating_sub(self.position));
         if size == 0 {
@@ -342,7 +342,7 @@ impl Stream for MemStream {
         size as i32
     }
 
-    /// Port of `mz_stream_mem_seek` (mz_strm_mem.c:151-183 @ 4.0.10).
+    /// Port of `mz_stream_mem_seek` (mz_strm_mem.c:151-186 @ 4.2.2).
     fn seek(&mut self, offset: i64, origin: Origin) -> i32 {
         let new_pos = match origin {
             Origin::Cur => self.position as i64 + offset,
@@ -357,12 +357,12 @@ impl Stream for MemStream {
         MZ_OK
     }
 
-    /// Port of `mz_stream_mem_tell` (mz_strm_mem.c:146-149 @ 4.0.10).
+    /// Port of `mz_stream_mem_tell` (mz_strm_mem.c:146-149 @ 4.2.2).
     fn tell(&mut self) -> i64 {
         self.position as i64
     }
 
-    /// Port of `mz_stream_mem_error` (mz_strm_mem.c:192-197 @ 4.0.10): never an error.
+    /// Port of `mz_stream_mem_error` (mz_strm_mem.c:195-200 @ 4.2.2): never an error.
     fn error(&self) -> i32 {
         MZ_OK
     }
@@ -373,7 +373,7 @@ impl Stream for MemStream {
 /// the largest file the file system holds fails on Linux, as `fseeko`'s `lseek` does: 16 TiB
 /// on ext4). A file that opens but can't be read (a directory on Linux) fails each read.
 ///
-/// Port of the reading of `mz_stream_os` (mz_strm_os_posix.c, mz_strm_os_win32.c @ 4.0.10).
+/// Port of the reading of `mz_stream_os` (mz_strm_os_posix.c, mz_strm_os_win32.c @ 4.2.2).
 /// The file opens as OpenColorIO's own file streams do: through its UTF-16 conversion on
 /// Windows, as the bytes on Linux.
 #[derive(Debug)]
@@ -385,7 +385,7 @@ struct OsFile {
 }
 
 impl OsFile {
-    /// Port of `mz_stream_os_open` for reading (mz_strm_os_posix.c:67-93 @ 4.0.10).
+    /// Port of `mz_stream_os_open` for reading (mz_strm_os_posix.c:71-110 @ 4.2.2).
     fn open(path: &[u8]) -> Option<OsFile> {
         let mut file = create_input_file_stream(path).ok()?;
         let mut data = Vec::new();
@@ -402,7 +402,7 @@ impl OsFile {
         self.data.as_ref().map_or(0, |d| d.len() as i64)
     }
 
-    /// Port of `mz_stream_os_read` (mz_strm_os_posix.c:102-110 @ 4.0.10).
+    /// Port of `mz_stream_os_read` (mz_strm_os_posix.c:119-127 @ 4.2.2).
     fn read(&mut self, buf: &mut [u8]) -> i32 {
         let Some(data) = &self.data else {
             self.error = MZ_READ_ERROR;
@@ -417,8 +417,8 @@ impl OsFile {
         size as i32
     }
 
-    /// Port of `mz_stream_os_seek` (mz_strm_os_posix.c:132-156, mz_strm_os_win32.c:210-243 @
-    /// 4.0.10): a position before the start fails, and so does one the system refuses
+    /// Port of `mz_stream_os_seek` (mz_strm_os_posix.c:149-173, mz_strm_os_win32.c:210-243 @
+    /// 4.2.2): a position before the start fails, and so does one the system refuses
     /// (`fseeko`'s `lseek` past the file system's largest file, `SetFilePointerEx`), which the
     /// port asks the system itself; one past the end is allowed.
     fn seek(&mut self, offset: i64, origin: Origin) -> i32 {
@@ -448,13 +448,13 @@ impl OsFile {
 }
 
 /// The size of the buffered stream's read buffer (`char readbuf[INT16_MAX]`, mz_strm_buf.c:37
-/// @ 4.0.10).
+/// @ 4.2.2).
 const READBUF_SIZE: i32 = i16::MAX as i32;
 
 /// The buffered stream between the split stream and the system's file: what it last read of
 /// the file, where the reader is in it, and the file position it believes is at its end.
 ///
-/// Port of `mz_stream_buffered` (mz_strm_buf.c:34-48 @ 4.0.10) as minizip-ng reads with it: no
+/// Port of `mz_stream_buffered` (mz_strm_buf.c:34-48 @ 4.2.2) as minizip-ng reads with it: no
 /// write buffer (`writebuf_len` stays 0, so the flushes write nothing), and no hit and miss
 /// counts, which only its debug output reads.
 #[derive(Debug)]
@@ -470,7 +470,7 @@ struct Buffered {
 }
 
 impl Buffered {
-    /// Port of `mz_stream_buffered_open` (mz_strm_buf.c:72-77 @ 4.0.10), over the opened file:
+    /// Port of `mz_stream_buffered_open` (mz_strm_buf.c:72-77 @ 4.2.2), over the opened file:
     /// `mz_stream_buffered_reset` (60-70).
     fn open(base: OsFile) -> Buffered {
         Buffered {
@@ -482,7 +482,7 @@ impl Buffered {
         }
     }
 
-    /// Port of `mz_stream_buffered_read` (mz_strm_buf.c:117-183 @ 4.0.10).
+    /// Port of `mz_stream_buffered_read` (mz_strm_buf.c:117-183 @ 4.2.2).
     fn read(&mut self, buf: &mut [u8]) -> i32 {
         let size = buf.len() as i32;
         let mut buf_len = 0usize;
@@ -530,7 +530,7 @@ impl Buffered {
         size - bytes_left_to_read
     }
 
-    /// Port of `mz_stream_buffered_tell` (mz_strm_buf.c:247-261 @ 4.0.10).
+    /// Port of `mz_stream_buffered_tell` (mz_strm_buf.c:247-261 @ 4.2.2).
     fn tell(&mut self) -> i64 {
         let mut position = self.base.position;
         self.position = position;
@@ -540,8 +540,8 @@ impl Buffered {
         position
     }
 
-    /// Port of `mz_stream_buffered_seek` (mz_strm_buf.c:263-332 @ 4.0.10), with `mz_stream_seek`'s
-    /// check of the file's seek (mz_strm.c:223-232).
+    /// Port of `mz_stream_buffered_seek` (mz_strm_buf.c:263-332 @ 4.2.2), with `mz_stream_seek`'s
+    /// check of the file's seek (mz_strm.c:226-235).
     fn seek(&mut self, offset: i64, origin: Origin) -> i32 {
         let mut offset = offset;
         match origin {
@@ -582,14 +582,14 @@ impl Buffered {
     }
 }
 
-/// `MZ_ZIP_MAGIC_DISKHEADER` (mz_strm_split.c:25 @ 4.0.10).
+/// `MZ_ZIP_MAGIC_DISKHEADER` (mz_strm_split.c:25 @ 4.2.2).
 const MZ_ZIP_MAGIC_DISKHEADER: u32 = 0x0807_4b50;
 
 /// The stream OpenColorIO's reader opens an archive file with: a split stream, which reads
 /// the parts of a split archive (`name.z01`, `name.z02`, ...) when an entry or the central
 /// directory says it is on another disk, and the archive file itself otherwise.
 ///
-/// Port of `mz_stream_split` (mz_strm_split.c @ 4.0.10), opened for reading.
+/// Port of `mz_stream_split` (mz_strm_split.c @ 4.2.2), opened for reading.
 #[derive(Debug)]
 pub(crate) struct SplitStream {
     path_cd: Vec<u8>,
@@ -607,7 +607,7 @@ pub(crate) struct SplitStream {
 impl SplitStream {
     /// Opens the archive `path` (a C string).
     ///
-    /// Port of `mz_stream_split_open` (mz_strm_split.c:173-205 @ 4.0.10) for reading.
+    /// Port of `mz_stream_split_open` (mz_strm_split.c:173-205 @ 4.2.2) for reading.
     pub(crate) fn open(path: &[u8]) -> Result<SplitStream, i32> {
         let path_disk_size = path.len() + 10;
         let mut split = SplitStream {
@@ -626,7 +626,7 @@ impl SplitStream {
         }
     }
 
-    /// Port of `mz_stream_split_open_disk` (mz_strm_split.c:64-139 @ 4.0.10) for reading.
+    /// Port of `mz_stream_split_open_disk` (mz_strm_split.c:64-139 @ 4.2.2) for reading.
     fn open_disk(&mut self, number_disk: i32) -> i32 {
         let mut err = MZ_OK;
         // Check if we are reading or writing a disk part or the cd disk
@@ -687,7 +687,7 @@ impl SplitStream {
         err
     }
 
-    /// Port of `mz_stream_split_goto_disk` (mz_strm_split.c:151-171 @ 4.0.10) for reading.
+    /// Port of `mz_stream_split_goto_disk` (mz_strm_split.c:151-171 @ 4.2.2) for reading.
     fn goto_disk(&mut self, number_disk: i32) -> i32 {
         let mut err = MZ_OK;
         if number_disk != self.current_disk || self.base.is_none() {
@@ -703,14 +703,14 @@ impl SplitStream {
 
     /// The disk the operations go to (`MZ_STREAM_PROP_DISK_NUMBER`).
     ///
-    /// Port of `mz_stream_split_get_prop_int64` (mz_strm_split.c:361-377 @ 4.0.10).
+    /// Port of `mz_stream_split_get_prop_int64` (mz_strm_split.c:361-377 @ 4.2.2).
     pub(crate) fn disk_number(&self) -> i64 {
         i64::from(self.number_disk)
     }
 
     /// Sets the disk the next operations go to (`MZ_STREAM_PROP_DISK_NUMBER`).
     ///
-    /// Port of `mz_stream_split_set_prop_int64` (mz_strm_split.c:379-392 @ 4.0.10).
+    /// Port of `mz_stream_split_set_prop_int64` (mz_strm_split.c:379-392 @ 4.2.2).
     pub(crate) fn set_disk_number(&mut self, value: i64) {
         self.number_disk = value as i32;
     }
@@ -718,7 +718,7 @@ impl SplitStream {
 
 impl Stream for SplitStream {
     /// Port of `mz_stream_read` over `mz_stream_split_read` (mz_strm.c:34-41,
-    /// mz_strm_split.c:214-250 @ 4.0.10).
+    /// mz_strm_split.c:214-250 @ 4.2.2).
     fn read(&mut self, buf: &mut [u8]) -> i32 {
         if !self.is_open {
             return MZ_STREAM_ERROR;
@@ -763,7 +763,7 @@ impl Stream for SplitStream {
         size - bytes_left
     }
 
-    /// Port of `mz_stream_split_seek` (mz_strm_split.c:317-345 @ 4.0.10).
+    /// Port of `mz_stream_split_seek` (mz_strm_split.c:317-345 @ 4.2.2).
     fn seek(&mut self, offset: i64, origin: Origin) -> i32 {
         if !self.is_open {
             return MZ_STREAM_ERROR;
@@ -794,7 +794,7 @@ impl Stream for SplitStream {
         }
     }
 
-    /// Port of `mz_stream_split_tell` (mz_strm_split.c:308-315 @ 4.0.10).
+    /// Port of `mz_stream_split_tell` (mz_strm_split.c:308-315 @ 4.2.2).
     fn tell(&mut self) -> i64 {
         if !self.is_open {
             return i64::from(MZ_STREAM_ERROR);
@@ -808,7 +808,7 @@ impl Stream for SplitStream {
             .map_or(i64::from(MZ_STREAM_ERROR), Buffered::tell)
     }
 
-    /// Port of `mz_stream_split_error` (mz_strm_split.c:356-359 @ 4.0.10).
+    /// Port of `mz_stream_split_error` (mz_strm_split.c:356-359 @ 4.2.2).
     fn error(&self) -> i32 {
         // mz_stream_buffered_error: the file's
         self.base.as_ref().map_or(0, |b| b.base.error)

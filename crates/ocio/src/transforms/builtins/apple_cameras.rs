@@ -2,9 +2,9 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The built-in transforms of Apple cameras: a port of
-//! `src/OpenColorIO/transforms/builtins/AppleCameras.cpp` @ v2.5.2, each entry's style and
+//! `src/OpenColorIO/transforms/builtins/AppleCameras.cpp` @ v2.6.0, each entry's style and
 //! description in upstream's order. Apple Log is a half-domain 1D LUT (the wheel is built with
-//! `OCIO_LUT_SUPPORT`), Rec.2020 to ACES a Bradford matrix.
+//! `OCIO_LUT_SUPPORT`), Rec.2020 or Apple Wide Gamut to ACES a Bradford matrix.
 
 use std::sync::Arc;
 
@@ -16,13 +16,23 @@ use ocio_ops::ops::matrix::matrix_op::create_matrix_op_from_array;
 
 use crate::transforms::builtins::builtin_transform_registry::BuiltinTransformRegistry;
 use crate::transforms::builtins::color_matrix_helpers::{
-    AdaptationMethod, aces_ap0, build_conversion_matrix, rec2020,
+    AdaptationMethod, Chromaticities, Primaries, aces_ap0, build_conversion_matrix, rec2020,
 };
 use crate::transforms::builtins::op_helpers::create_half_lut;
 
+/// Apple Wide Gamut primaries from the Apple Log 2 white paper.
+///
+/// Port of `APPLE_WIDE_GAMUT` (AppleCameras.cpp:27-36 @ v2.6.0).
+const APPLE_WIDE_GAMUT: Primaries = Primaries::new(
+    Chromaticities::new(0.725, 0.301),
+    Chromaticities::new(0.221, 0.814),
+    Chromaticities::new(0.068, -0.076),
+    Chromaticities::new(0.3127, 0.3290),
+);
+
 /// Apple Log to linear, as a half-domain 1D LUT.
 ///
-/// Port of `APPLE_LOG::GenerateAppleLogToLinearOps` (AppleCameras.cpp:30-58 @ v2.5.2).
+/// Port of `APPLE_LOG::GenerateAppleLogToLinearOps` (AppleCameras.cpp:41-97 @ v2.6.0).
 fn apple_log_to_linear(ops: &mut OpVec) -> Result<()> {
     const R_0: f64 = -0.05641088;
     const R_T: f64 = 0.01;
@@ -45,11 +55,11 @@ fn apple_log_to_linear(ops: &mut OpVec) -> Result<()> {
     create_half_lut(ops, generate_lut_values)
 }
 
-/// Registers the 2 built-in transforms of Apple cameras.
+/// Registers the 3 built-in transforms of Apple cameras.
 ///
-/// Port of `CAMERA::APPLE::RegisterAll` (AppleCameras.cpp:96-122 @ v2.5.2).
+/// Port of `CAMERA::APPLE::RegisterAll` (AppleCameras.cpp:107-149 @ v2.6.0).
 pub(crate) fn register_all(registry: &mut BuiltinTransformRegistry) {
-    // AppleCameras.cpp:108
+    // AppleCameras.cpp:119
     registry.add_builtin(
         b"APPLE_LOG_to_ACES2065-1",
         Some(b"Convert Apple Log to ACES2065-1"),
@@ -65,7 +75,24 @@ pub(crate) fn register_all(registry: &mut BuiltinTransformRegistry) {
             Ok(())
         }),
     );
-    // AppleCameras.cpp:118
+    // AppleCameras.cpp:135: Apple Log 2 uses the same transfer function as Apple Log, but
+    // with the wider Apple Wide Gamut primaries rather than Rec.2020.
+    registry.add_builtin(
+        b"APPLE_LOG-APPLEWG_to_ACES2065-1",
+        Some(b"Convert Apple Log 2 Apple Wide Gamut to ACES2065-1"),
+        Arc::new(|ops: &mut OpVec| {
+            apple_log_to_linear(ops)?;
+
+            let matrix = build_conversion_matrix(
+                &APPLE_WIDE_GAMUT,
+                &aces_ap0::PRIMARIES,
+                AdaptationMethod::Bradford,
+            )?;
+            create_matrix_op_from_array(ops, &matrix, TransformDirection::Forward);
+            Ok(())
+        }),
+    );
+    // AppleCameras.cpp:145
     registry.add_builtin(
         b"CURVE - APPLE_LOG_to_LINEAR",
         Some(b"Convert Apple Log to linear"),

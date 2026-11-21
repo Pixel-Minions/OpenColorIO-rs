@@ -48,7 +48,7 @@ fn driver_modules() -> Vec<String> {
             (quoted == name).then(|| name.to_string())
         })
         .collect();
-    assert_eq!(modules.len(), 48, "{modules:?}");
+    assert_eq!(modules.len(), 49, "{modules:?}");
     modules
 }
 
@@ -190,7 +190,7 @@ fn upstream_test_functions() -> BTreeSet<String> {
             }
         }
     }
-    assert_eq!(out.len(), 384, "the suite's test functions");
+    assert_eq!(out.len(), 392, "the suite's test functions");
     out
 }
 

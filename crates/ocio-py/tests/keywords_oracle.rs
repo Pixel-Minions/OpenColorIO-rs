@@ -351,6 +351,11 @@ fn instances(sc: &mut Script) -> Vec<(String, usize)> {
             "getViews",
             vec![n("OCIO.VIEW_SHARED"), s("sRGB")],
         ),
+        (
+            "DisplayViewAliasIterator",
+            "getDisplayViewAliases",
+            vec![s("sRGB"), s("raw")],
+        ),
         ("ActiveDisplaysListIterator", "getActiveDisplays", vec![]),
         ("ActiveViewsListIterator", "getActiveViews", vec![]),
         ("LookNameIterator", "getLookNames", vec![]),

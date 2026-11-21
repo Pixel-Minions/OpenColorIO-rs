@@ -4,7 +4,8 @@
 //! The CLF/CTF writer: the ProcessList and its operators as XML.
 //!
 //! Port of the writers of `src/OpenColorIO/fileformats/ctf/CTFTransform.cpp` and
-//! `CTFTransform.h` (@ v2.5.2): the lowest version that fits the ops (`GetOpMinimumVersion`,
+//! `CTFTransform.h` (@ v2.5.2; `TransformWriter` and the description writers @ v2.6.0): the
+//! lowest version that fits the ops (`GetOpMinimumVersion`,
 //! `GetMinimumVersion`), the value formatting (`WriteValue`, `SetOStream`, `WriteValues`),
 //! `OpWriter` and its bit depths, the operators' writers, and `TransformWriter`. Upstream's
 //! writers hold their formatter; here each `write` is given it. The operators' writers came
@@ -16,8 +17,8 @@ use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     METADATA_SAT_DESCRIPTION, METADATA_SOP_DESCRIPTION,
 };
 use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
-    ATTR_ID, ATTR_NAME, TAG_DESCRIPTION, TAG_OFFSET, TAG_POWER, TAG_SATNODE, TAG_SATURATION,
-    TAG_SLOPE, TAG_SOPNODE,
+    ATTR_ID, ATTR_NAME, ATTR_XMLNS, TAG_DESCRIPTION, TAG_OFFSET, TAG_POWER, TAG_SATNODE,
+    TAG_SATURATION, TAG_SLOPE, TAG_SOPNODE,
 };
 use ocio_formats::fileformats::xmlutils::xml_writer_utils::{
     Attributes, XmlElementWriter, XmlFormatter, XmlScopeIndent,
@@ -25,10 +26,11 @@ use ocio_formats::fileformats::xmlutils::xml_writer_utils::{
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::format_metadata::{
-    FormatMetadataImpl, METADATA_DESCRIPTION, METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR,
+    FormatMetadataImpl, METADATA_DESCRIPTION, METADATA_ID_ELEMENT, METADATA_INPUT_DESCRIPTOR,
+    METADATA_OUTPUT_DESCRIPTOR,
 };
-use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::imath_half::float_to_half;
+use ocio_ops::math_utils::equal_with_abs_error;
 use ocio_ops::op_data::{OpData, OpDataRcPtr, OpDataType, get_type_name};
 use ocio_ops::open_color_types::{
     BitDepth, GradingStyle, HsyTransformStyle, HueCurveType, Lut1DHueAdjust, RgbCurveType,
@@ -57,6 +59,8 @@ use ocio_ops::ops::log::log_utils::{
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use ocio_ops::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
+use ocio_ops::ops::range::range_op_data::RangeOpData;
+use ocio_ops::utils::string_utils::{c_str, starts_with};
 use ocio_ops::{Exception, Result};
 
 use super::ctf_reader_utils::{
@@ -86,13 +90,15 @@ use super::ctf_reader_utils::{
     TAG_PRIMARY_SATURATION, TAG_TONE, TAG_TONE_BLACKS, TAG_TONE_HIGHLIGHTS, TAG_TONE_MIDTONES,
     TAG_TONE_SCONTRAST, TAG_TONE_SHADOWS, TAG_TONE_WHITES,
 };
+use super::ctf_reader_utils::{TAG_ID, validate_smpte_id};
 use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
 
 use super::ctf_transform::{
     CTF_PROCESS_LIST_VERSION_1_3, CTF_PROCESS_LIST_VERSION_1_4, CTF_PROCESS_LIST_VERSION_1_5,
     CTF_PROCESS_LIST_VERSION_1_6, CTF_PROCESS_LIST_VERSION_1_7, CTF_PROCESS_LIST_VERSION_2_0,
     CTF_PROCESS_LIST_VERSION_2_1, CTF_PROCESS_LIST_VERSION_2_4, CTF_PROCESS_LIST_VERSION_2_5,
-    CtfReaderTransform, CtfVersion, get_elements_values,
+    CTF_PROCESS_LIST_VERSION_2_6, CtfReaderTransform, CtfVersion, SMPTE_XMLNS_URL,
+    get_elements_values,
 };
 
 /// The precision of the doubles the writer formats (CTFTransform.cpp:39 @ v2.5.2).
@@ -100,7 +106,7 @@ const DOUBLE_PRECISION: i64 = 15;
 
 /// The lowest CTF version that can hold `op`.
 ///
-/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:225-384 @ v2.5.2). Upstream's default,
+/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:256-419 @ v2.6.0). Upstream's default,
 /// `CTF_PROCESS_LIST_VERSION`, is for none of the types the port has.
 fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
     use FixedFunctionOpStyle as F;
@@ -139,6 +145,8 @@ fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
             | F::HsyLinToRgb
             | F::RgbToHsyVid
             | F::HsyVidToRgb => CTF_PROCESS_LIST_VERSION_2_5,
+            // CTFTransform.cpp:316-320 @ v2.6.0.
+            F::AcesRgbToHmj20 | F::AcesHmjToRgb20 => CTF_PROCESS_LIST_VERSION_2_6,
             _ => CTF_PROCESS_LIST_VERSION_2_0,
         },
         OpData::GradingPrimary(_)
@@ -205,9 +213,9 @@ fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
 
 /// The lowest CTF version that can hold every op of `transform`, 1.3 at least.
 ///
-/// Port of `GetMinimumVersion` (CTFTransform.cpp:386-403 @ v2.5.2).
+/// Port of `GetMinimumVersion` (CTFTransform.cpp:421-438 @ v2.6.0).
 fn get_minimum_version(transform: &CtfReaderTransform) -> Result<CtfVersion> {
-    let op_list = transform.get_ops();
+    let op_list = transform.get_op_data_vec();
 
     // Need to specify the minimum version here. Some test transforms have no ops.
     let mut minimum_version = CTF_PROCESS_LIST_VERSION_1_3;
@@ -222,12 +230,25 @@ fn get_minimum_version(transform: &CtfReaderTransform) -> Result<CtfVersion> {
     Ok(minimum_version)
 }
 
-/// Writes each description as a `tag` element.
+/// Writes each string as a `tag` element.
 ///
-/// Port of `WriteDescriptions` (CTFTransform.cpp:511-517 @ v2.5.2).
-fn write_descriptions(fmt: &mut XmlFormatter<'_>, tag: &[u8], descriptions: &[Vec<u8>]) {
-    for it in descriptions {
+/// Port of `WriteTagStringVec` (CTFTransform.cpp:593-599 @ v2.6.0).
+fn write_tag_string_vec(fmt: &mut XmlFormatter<'_>, tag: &[u8], str_vec: &[Vec<u8>]) {
+    for it in str_vec {
         fmt.write_content_tag(tag, it);
+    }
+}
+
+/// Writes the given list of elements along with their attributes.
+///
+/// Port of `WriteTagElementVec` (CTFTransform.cpp:601-608 @ v2.6.0).
+fn write_tag_element_vec(fmt: &mut XmlFormatter<'_>, el_vec: &[FormatMetadataImpl]) {
+    for el in el_vec {
+        fmt.write_content_tag_with(
+            el.get_element_name(),
+            el.get_attributes(),
+            el.get_element_value(),
+        );
     }
 }
 
@@ -508,7 +529,7 @@ trait OpWriter {
             TAG_DESCRIPTION,
             &mut desc,
         );
-        write_descriptions(formatter, TAG_DESCRIPTION, &desc);
+        write_tag_string_vec(formatter, TAG_DESCRIPTION, &desc);
         Ok(())
     }
 
@@ -613,7 +634,7 @@ impl OpWriter for CdlWriter<'_> {
                 METADATA_SOP_DESCRIPTION,
                 &mut desc,
             );
-            write_descriptions(&mut scope_indent, TAG_DESCRIPTION, &desc);
+            write_tag_string_vec(&mut scope_indent, TAG_DESCRIPTION, &desc);
 
             let slope = triple(&mut oss, cdl.get_slope_params().get_rgb());
             scope_indent.write_content_tag(TAG_SLOPE, &slope);
@@ -637,7 +658,7 @@ impl OpWriter for CdlWriter<'_> {
                 METADATA_SAT_DESCRIPTION,
                 &mut desc,
             );
-            write_descriptions(&mut scope_indent, TAG_DESCRIPTION, &desc);
+            write_tag_string_vec(&mut scope_indent, TAG_DESCRIPTION, &desc);
 
             oss.clear_str();
             oss.put_f64(cdl.get_saturation());
@@ -656,13 +677,13 @@ impl OpWriter for CdlWriter<'_> {
         let elements = op.get_format_metadata().get_children_elements();
         let mut desc = Vec::new();
         get_elements_values(elements, METADATA_DESCRIPTION, &mut desc);
-        write_descriptions(formatter, TAG_DESCRIPTION, &desc);
+        write_tag_string_vec(formatter, TAG_DESCRIPTION, &desc);
         desc.clear();
         get_elements_values(elements, METADATA_INPUT_DESCRIPTION, &mut desc);
-        write_descriptions(formatter, METADATA_INPUT_DESCRIPTION, &desc);
+        write_tag_string_vec(formatter, METADATA_INPUT_DESCRIPTION, &desc);
         desc.clear();
         get_elements_values(elements, METADATA_VIEWING_DESCRIPTION, &mut desc);
-        write_descriptions(formatter, METADATA_VIEWING_DESCRIPTION, &desc);
+        write_tag_string_vec(formatter, METADATA_VIEWING_DESCRIPTION, &desc);
         Ok(())
     }
 }
@@ -1744,19 +1765,22 @@ impl OpWriter for LogWriter<'_> {
     }
 }
 
-/// The writer of a Range: its bounds, scaled to the file bit depths.
+/// The writer of a Range: its bounds, scaled to the file bit depths, and the noClamp style
+/// when asked for.
 ///
-/// Port of `RangeWriter` (CTFTransform.cpp:2434-2512 @ v2.5.2).
+/// Port of `RangeWriter` (CTFTransform.cpp:2525-2617 @ v2.6.0).
 struct RangeWriter<'a> {
     /// `m_range`.
     range: &'a OpData,
+    /// `m_noClamp`.
+    no_clamp: bool,
     in_bit_depth: BitDepth,
     out_bit_depth: BitDepth,
 }
 
 /// Writes `<tag> value </tag>`.
 ///
-/// Port of `WriteTag` (CTFTransform.cpp:2474-2480 @ v2.5.2).
+/// Port of `WriteTag` (CTFTransform.cpp:2579-2585 @ v2.6.0).
 fn write_tag(fmt: &mut XmlFormatter<'_>, tag: &[u8], value: f64) {
     let content = [b" ".as_slice(), &double_string(value), b" "].concat();
     fmt.write_content_tag(tag, &content);
@@ -1776,7 +1800,18 @@ impl OpWriter for RangeWriter<'_> {
         self.out_bit_depth
     }
 
-    /// Port of `RangeWriter::writeContent` (CTFTransform.cpp:2482-2512 @ v2.5.2).
+    /// The op's attributes, then `style="noClamp"` for a noClamp Range.
+    ///
+    /// Port of `RangeWriter::getAttributes` (CTFTransform.cpp:2570-2577 @ v2.6.0).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+        if self.no_clamp {
+            attributes.push((ATTR_STYLE.to_vec(), b"noClamp".to_vec()));
+        }
+        Ok(())
+    }
+
+    /// Port of `RangeWriter::writeContent` (CTFTransform.cpp:2587-2615 @ v2.6.0).
     fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
         let OpData::Range(range) = self.range else {
             unreachable!("a Range writer writes a Range");
@@ -2233,23 +2268,152 @@ fn get_input_file_bd(op: &OpData) -> Result<BitDepth> {
     }
 }
 
-/// The writer of a ProcessList: its version (CLF 3, or the lowest CTF version that fits), id
-/// (the ops' cache IDs hashed when it has none), name, inverseOf, descriptions, descriptors
-/// and Info, then its ops (an identity matrix when it has none).
+// A Range with the noClamp style is read in as an equivalent Matrix since a RangeOpData
+// always clamps (see RangeOpData::convertToMatrix). The SMPTE standard ST2136-10, the CLF
+// Broadcast Profile, relies on writing that exact noClamp Range back out rather than a
+// Matrix. Since a Matrix's scale & offset alone can't tell us what minIn/maxIn/minOut/maxOut
+// bounds the original Range used, we only recognize this one specific, fixed transform (and
+// its exact inverse) rather than attempting a general reconstruction.
+//
+// Port of the constants of CTFTransform.cpp:2845-2867 @ v2.6.0.
+
+/// The minOutValue used by the SMPTE CLF Broadcast Profile signal-range brackets: a 10-bit
+/// full-to-narrow range conversion on input and narrow-to-full on output (see
+/// tests/data/files/clf/smpte_only/broadcast_profile_lut33.clf).
+pub(crate) const NOCLAMP_RANGE_MIN_OUT_VALUE: f64 = 64. / 1023.; // 0.06256109481915934
+/// The maxOutValue of the Broadcast Profile's brackets.
+pub(crate) const NOCLAMP_RANGE_MAX_OUT_VALUE: f64 = 940. / 1023.; // 0.91886608015640270
+
+/// Equivalent uniform scale (out = in * scale + offset) for the "input" Range
+/// (minInValue=0, maxInValue=1, minOutValue/maxOutValue as above).
+pub(crate) const NOCLAMP_INPUT_RANGE_SCALE: f64 =
+    NOCLAMP_RANGE_MAX_OUT_VALUE - NOCLAMP_RANGE_MIN_OUT_VALUE;
+/// The input Range's equivalent offset.
+pub(crate) const NOCLAMP_INPUT_RANGE_OFFSET: f64 = NOCLAMP_RANGE_MIN_OUT_VALUE;
+/// The scale of the "output" Range, the input one's exact algebraic inverse
+/// (minInValue/maxInValue as above, minOutValue=0, maxOutValue=1).
+pub(crate) const NOCLAMP_OUTPUT_RANGE_SCALE: f64 = 1.0 / NOCLAMP_INPUT_RANGE_SCALE;
+/// The output Range's offset.
+pub(crate) const NOCLAMP_OUTPUT_RANGE_OFFSET: f64 =
+    -NOCLAMP_RANGE_MIN_OUT_VALUE * NOCLAMP_OUTPUT_RANGE_SCALE;
+
+/// The tolerance of the comparisons with the Broadcast Profile's scales and offsets.
+const NOCLAMP_RANGE_TOLERANCE: f64 = 1e-6;
+
+/// The equivalent noClamp Range for `mat_src` if, and only if, it is a forward, diagonal
+/// matrix applying the same scale & offset to R, G, and B as the fixed Range used by the SMPTE
+/// CLF Broadcast Profile (`is_input_range` selects which one of the pair, the input-side or
+/// the output-side, to compare against), with the matrix's metadata and file bit depths;
+/// `None` otherwise, leaving the Matrix to be written as-is.
 ///
-/// Port of `TransformWriter` (CTFTransform.h:266-289, CTFTransform.cpp:2518-3004 @ v2.5.2).
+/// Port of `GetEquivalentNoClampRange` (CTFTransform.cpp:2874-2917 @ v2.6.0).
+pub(crate) fn get_equivalent_no_clamp_range(
+    mat_src: &MatrixOpData,
+    is_input_range: bool,
+) -> Result<Option<RangeOpData>> {
+    if mat_src.get_direction() != TransformDirection::Forward
+        || mat_src.has_alpha()?
+        || !mat_src.is_diagonal()
+    {
+        return Ok(None);
+    }
+
+    // Matrix must scale R, G, and B by the same amount.
+    let scale = mat_src.get_array_value(0);
+    if !equal_with_abs_error(scale, mat_src.get_array_value(5), NOCLAMP_RANGE_TOLERANCE)
+        || !equal_with_abs_error(scale, mat_src.get_array_value(10), NOCLAMP_RANGE_TOLERANCE)
+    {
+        return Ok(None);
+    }
+
+    // Matrix must offset R, G, and B by the same amount.
+    let offset = mat_src.get_offset_value(0)?;
+    if !equal_with_abs_error(
+        offset,
+        mat_src.get_offset_value(1)?,
+        NOCLAMP_RANGE_TOLERANCE,
+    ) || !equal_with_abs_error(
+        offset,
+        mat_src.get_offset_value(2)?,
+        NOCLAMP_RANGE_TOLERANCE,
+    ) {
+        return Ok(None);
+    }
+
+    let target_scale = if is_input_range {
+        NOCLAMP_INPUT_RANGE_SCALE
+    } else {
+        NOCLAMP_OUTPUT_RANGE_SCALE
+    };
+    let target_offset = if is_input_range {
+        NOCLAMP_INPUT_RANGE_OFFSET
+    } else {
+        NOCLAMP_OUTPUT_RANGE_OFFSET
+    };
+
+    if !equal_with_abs_error(scale, target_scale, NOCLAMP_RANGE_TOLERANCE)
+        || !equal_with_abs_error(offset, target_offset, NOCLAMP_RANGE_TOLERANCE)
+    {
+        return Ok(None);
+    }
+
+    let mut range = if is_input_range {
+        RangeOpData::with_values(
+            0.,
+            1.,
+            NOCLAMP_RANGE_MIN_OUT_VALUE,
+            NOCLAMP_RANGE_MAX_OUT_VALUE,
+        )?
+    } else {
+        RangeOpData::with_values(
+            NOCLAMP_RANGE_MIN_OUT_VALUE,
+            NOCLAMP_RANGE_MAX_OUT_VALUE,
+            0.,
+            1.,
+        )?
+    };
+
+    *range.get_format_metadata_mut() = mat_src.get_format_metadata().clone();
+    range.set_file_input_bit_depth(mat_src.get_file_input_bit_depth());
+    range.set_file_output_bit_depth(mat_src.get_file_output_bit_depth());
+
+    Ok(Some(range))
+}
+
+/// The kind of ProcessList a [`TransformWriter`] writes.
+///
+/// Port of `TransformWriter::SubFormat` (CTFTransform.h:258-263 @ v2.6.0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubFormat {
+    /// `FORMAT_UNKNOWN`.
+    FormatUnknown,
+    /// `FORMAT_CLF`.
+    FormatClf,
+    /// `FORMAT_CTF`.
+    FormatCtf,
+}
+
+/// The writer of a ProcessList: its version (CLF 3 and the SMPTE namespace, or the lowest
+/// CTF version that fits), id (which it must have), name, inverseOf and `xmlns:*`
+/// attributes, Id element, descriptions, descriptors and Info, then its ops (an identity
+/// matrix when it has none).
+///
+/// Port of `TransformWriter` (CTFTransform.h:255-286, CTFTransform.cpp:2623-3233 @ v2.6.0).
 #[derive(Debug)]
 pub struct TransformWriter<'t> {
     /// `m_transform`.
     transform: &'t CtfReaderTransform,
-    /// `m_isCLF`.
-    is_clf: bool,
+    /// `m_subFormat`.
+    sub_format: SubFormat,
 }
 
 impl<'t> TransformWriter<'t> {
-    /// Port of `TransformWriter::TransformWriter` (CTFTransform.cpp:2518-2525 @ v2.5.2).
-    pub fn new(transform: &'t CtfReaderTransform, is_clf: bool) -> TransformWriter<'t> {
-        TransformWriter { transform, is_clf }
+    /// Port of `TransformWriter::TransformWriter` (CTFTransform.cpp:2623-2630 @ v2.6.0).
+    pub fn new(transform: &'t CtfReaderTransform, sub_format: SubFormat) -> TransformWriter<'t> {
+        TransformWriter {
+            transform,
+            sub_format,
+        }
     }
 
     /// The Info metadata `m` and its children.
@@ -2285,15 +2449,16 @@ impl<'t> TransformWriter<'t> {
 
     /// The ops, each with the file bit depths that keep its preferred ones where they can.
     ///
-    /// Port of `TransformWriter::writeOps` (CTFTransform.cpp:2695-3004 @ v2.5.2).
-    fn write_ops(&self, formatter: &mut XmlFormatter<'_>, version: CtfVersion) -> Result<()> {
+    /// Port of `TransformWriter::writeOps` (CTFTransform.cpp:2921-3233 @ v2.6.0).
+    fn write_ops(&self, formatter: &mut XmlFormatter<'_>, version: &CtfVersion) -> Result<()> {
         // If the ops have a specific file input/output bit-depth that was set (e.g., if the
         // ops were originally read in from a CTF/CLF file), then we try to preserve those
         // values on write. Otherwise, default to 32f.
         let mut in_bd;
         let mut out_bd = BitDepth::F32;
+        let is_clf = self.sub_format == SubFormat::FormatClf;
 
-        let ops: &[OpDataRcPtr] = self.transform.get_ops();
+        let ops: &[OpDataRcPtr] = self.transform.get_op_data_vec();
         let num_ops = ops.len();
         let mut num_saved_ops = 0;
         if num_ops != 0 {
@@ -2349,13 +2514,13 @@ impl<'t> TransformWriter<'t> {
                         );
                         *gamma_data.get_format_metadata_mut() = exp.get_format_metadata().clone();
 
-                        if self.is_clf && !gamma_data.is_alpha_component_identity() {
+                        if is_clf && !gamma_data.is_alpha_component_identity() {
                             return Err(throw_write_op("Exponent with alpha"));
                         }
 
                         let gamma = OpData::Gamma(gamma_data);
                         let op_writer = GammaWriter {
-                            version,
+                            version: version.clone(),
                             gamma: &gamma,
                             in_bit_depth: in_bd,
                             out_bit_depth: out_bd,
@@ -2363,7 +2528,7 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::FixedFunction(_) => {
-                        if self.is_clf {
+                        if is_clf {
                             return Err(throw_write_op("FixedFunction"));
                         }
 
@@ -2375,12 +2540,12 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::Gamma(gamma) => {
-                        if self.is_clf && !gamma.is_alpha_component_identity() {
+                        if is_clf && !gamma.is_alpha_component_identity() {
                             return Err(throw_write_op("Gamma with alpha component"));
                         }
 
                         let op_writer = GammaWriter {
-                            version,
+                            version: version.clone(),
                             gamma: op,
                             in_bit_depth: in_bd,
                             out_bit_depth: out_bd,
@@ -2388,7 +2553,7 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::ExposureContrast(_) => {
-                        if self.is_clf {
+                        if is_clf {
                             return Err(throw_write_op("ExposureContrast"));
                         }
 
@@ -2400,7 +2565,7 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::GradingPrimary(_) => {
-                        if self.is_clf {
+                        if is_clf {
                             return Err(throw_write_op("GradingPrimary"));
                         }
 
@@ -2412,7 +2577,7 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::GradingRgbCurve(_) => {
-                        if self.is_clf {
+                        if is_clf {
                             return Err(throw_write_op("GradingRGBCurve"));
                         }
 
@@ -2424,7 +2589,7 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::GradingHueCurve(_) => {
-                        if self.is_clf {
+                        if is_clf {
                             return Err(throw_write_op("GradingHueCurve"));
                         }
 
@@ -2436,7 +2601,7 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::GradingTone(_) => {
-                        if self.is_clf {
+                        if is_clf {
                             return Err(throw_write_op("GradingTone"));
                         }
 
@@ -2456,7 +2621,7 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::Lut1D(lut) => {
-                        if self.is_clf && lut.get_direction() != TransformDirection::Forward {
+                        if is_clf && lut.get_direction() != TransformDirection::Forward {
                             return Err(throw_write_op("InverseLUT1D"));
                         }
                         // Avoid copying LUT, write will take bit-depth into account.
@@ -2476,7 +2641,7 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::Lut3D(lut) => {
-                        if self.is_clf && lut.get_direction() != TransformDirection::Forward {
+                        if is_clf && lut.get_direction() != TransformDirection::Forward {
                             return Err(throw_write_op("InverseLUT3D"));
                         }
                         // Avoid copying LUT, write will take bit-depth into account.
@@ -2496,27 +2661,59 @@ impl<'t> TransformWriter<'t> {
                         op_writer.write(formatter)?;
                     }
                     OpData::Matrix(mat_src) => {
-                        if self.is_clf && mat_src.has_alpha()? {
-                            return Err(throw_write_op("Matrix with alpha component"));
+                        // `break` out of the switch once the noClamp Range is written.
+                        let mut written_as_range = false;
+                        if is_clf {
+                            if mat_src.has_alpha()? {
+                                return Err(throw_write_op("Matrix with alpha component"));
+                            }
+
+                            // SMPTE CLF Broadcast Profile requires writing a noClamp Range at
+                            // the start or end of a CLF when it is equivalent to a specific
+                            // full/narrow scale and offset value. Only op[0] and the last op
+                            // qualify.
+                            if i == 0 || i == num_ops - 1 {
+                                let is_input_range = i == 0;
+                                if let Some(range) =
+                                    get_equivalent_no_clamp_range(mat_src, is_input_range)?
+                                {
+                                    out_bd = get_validated_file_bit_depth(
+                                        range.get_file_output_bit_depth(),
+                                        OpDataType::Range,
+                                    )?;
+
+                                    let range = OpData::Range(range);
+                                    let op_writer = RangeWriter {
+                                        range: &range,
+                                        no_clamp: true,
+                                        in_bit_depth: in_bd,
+                                        out_bit_depth: out_bd,
+                                    };
+                                    op_writer.write(formatter)?;
+                                    written_as_range = true;
+                                }
+                            }
                         }
 
-                        out_bd = get_validated_file_bit_depth(
-                            mat_src.get_file_output_bit_depth(),
-                            op_type,
-                        )?;
-                        // inBD has already been set at previous iteration. inBD can be:
-                        // - This op input file bit-depth if previous op does not define an
-                        //   output file bit-depth.
-                        // - Previous op output file bit-depth if previous op is a LUT, a
-                        //   Matrix or a Range.
+                        if !written_as_range {
+                            out_bd = get_validated_file_bit_depth(
+                                mat_src.get_file_output_bit_depth(),
+                                op_type,
+                            )?;
+                            // inBD has already been set at previous iteration. inBD can be:
+                            // - This op input file bit-depth if previous op does not define an
+                            //   output file bit-depth.
+                            // - Previous op output file bit-depth if previous op is a LUT, a
+                            //   Matrix or a Range.
 
-                        let op_writer = MatrixWriter {
-                            version,
-                            matrix: op,
-                            in_bit_depth: in_bd,
-                            out_bit_depth: out_bd,
-                        };
-                        op_writer.write(formatter)?;
+                            let op_writer = MatrixWriter {
+                                version: version.clone(),
+                                matrix: op,
+                                in_bit_depth: in_bd,
+                                out_bit_depth: out_bd,
+                            };
+                            op_writer.write(formatter)?;
+                        }
                     }
                     OpData::Range(range_src) => {
                         out_bd = get_validated_file_bit_depth(
@@ -2527,6 +2724,7 @@ impl<'t> TransformWriter<'t> {
 
                         let op_writer = RangeWriter {
                             range: op,
+                            no_clamp: false,
                             in_bit_depth: in_bd,
                             out_bit_depth: out_bd,
                         };
@@ -2552,7 +2750,7 @@ impl<'t> TransformWriter<'t> {
             let mat = OpData::Matrix(MatrixOpData::new());
 
             let op_writer = MatrixWriter {
-                version,
+                version: version.clone(),
                 matrix: &mat,
                 in_bit_depth: BitDepth::F32,
                 out_bit_depth: BitDepth::F32,
@@ -2564,69 +2762,102 @@ impl<'t> TransformWriter<'t> {
 }
 
 impl XmlElementWriter for TransformWriter<'_> {
-    /// Port of `TransformWriter::write` (CTFTransform.cpp:2531-2610 @ v2.5.2).
+    /// Port of `TransformWriter::write` (CTFTransform.cpp:2636-2762 @ v2.6.0).
     fn write(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
         let process_list_tag = TAG_PROCESS_LIST;
 
         let mut attributes = Attributes::new();
 
-        let mut write_version = CTF_PROCESS_LIST_VERSION_2_0;
+        // This controls the available ops
+        let write_version = match self.sub_format {
+            SubFormat::FormatUnknown => {
+                return Err(Exception::new(
+                    "Cannot write transform with unknown sub-format.",
+                ));
+            }
+            SubFormat::FormatClf => {
+                // For CLF, we're writing versions per both the Academy and SMPTE
+                // requirements.
+                attributes.push((ATTR_COMP_CLF_VERSION.to_vec(), b"3".to_vec()));
+                attributes.push((ATTR_XMLNS.to_vec(), SMPTE_XMLNS_URL.to_vec()));
+                CTF_PROCESS_LIST_VERSION_2_0
+            }
+            SubFormat::FormatCtf => {
+                let write_version = get_minimum_version(self.transform)?;
+                attributes.push((ATTR_VERSION.to_vec(), write_version.to_bytes()));
+                write_version
+            }
+        };
 
-        if self.is_clf {
-            // Save with CLF version 3.
-            attributes.push((ATTR_COMP_CLF_VERSION.to_vec(), b"3".to_vec()));
-        } else {
-            write_version = get_minimum_version(self.transform)?;
-            attributes.push((
-                ATTR_VERSION.to_vec(),
-                write_version.to_string().into_bytes(),
+        let metada = self.transform.get_format_metadata();
+
+        // Id attribute
+        let id = self.transform.get_id();
+        if id.is_empty() {
+            return Err(Exception::new(
+                "Internal error; at this point the transform should have an id",
             ));
         }
+        attributes.push((ATTR_ID.to_vec(), id.to_vec()));
 
-        let mut id = self.transform.get_id().to_vec();
-        if id.is_empty() {
-            for op in self.transform.get_ops() {
-                id.extend_from_slice(&op.get_cache_id()?);
-            }
-
-            id = cache_id_hash(&id).into_bytes();
-        }
-        attributes.push((ATTR_ID.to_vec(), id));
-
+        // Name attribute
         let name = self.transform.get_name();
         if !name.is_empty() {
             attributes.push((ATTR_NAME.to_vec(), name.to_vec()));
         }
 
-        let inverse_of_id = self.transform.get_inverse_of_id();
-        if !inverse_of_id.is_empty() {
-            attributes.push((ATTR_INVERSE_OF.to_vec(), inverse_of_id.to_vec()));
+        // inverseOf attribute
+        let inverse_of = metada.get_attribute_value_by_name(Some(ATTR_INVERSE_OF));
+        if !inverse_of.is_empty() {
+            attributes.push((ATTR_INVERSE_OF.to_vec(), inverse_of.to_vec()));
+        }
+
+        // Non-default namespace attributes.
+        for i in 0..metada.get_num_attributes() {
+            let attr_name = metada.get_attribute_name(i);
+            if starts_with(attr_name, b"xmlns:") {
+                let attr_value = metada.get_attribute_value(i);
+                if !attr_value.is_empty() {
+                    attributes.push((attr_name.to_vec(), attr_value.to_vec()));
+                }
+            }
         }
 
         formatter.write_start_tag_with(process_list_tag, &attributes);
         {
             let mut scope_indent = XmlScopeIndent::new(formatter);
 
-            write_descriptions(
-                &mut scope_indent,
-                TAG_DESCRIPTION,
-                self.transform.get_descriptions(),
-            );
-
-            let input_desc = self.transform.get_input_descriptor();
-            if !input_desc.is_empty() {
-                scope_indent.write_content_tag(METADATA_INPUT_DESCRIPTOR, input_desc);
+            // Id element, won't generate if not provided but the format is enforced.
+            if let Some(id_idx) = metada.get_first_child_index(METADATA_ID_ELEMENT) {
+                let id_val = metada.get_children_elements()[id_idx].get_element_value();
+                if !id_val.is_empty() {
+                    if self.sub_format == SubFormat::FormatClf && !validate_smpte_id(id_val) {
+                        let mut ss = OStringStream::new(Crt::NATIVE);
+                        ss.put_str("'");
+                        ss.put_bytes(id_val);
+                        ss.put_str("' is not a SMPTE ST 2136-1 compliant Id value.");
+                        return Err(Exception::new(c_str(&ss.into_bytes()).to_vec()));
+                    }
+                    scope_indent.write_content_tag(TAG_ID, id_val);
+                }
             }
 
-            let output_desc = self.transform.get_output_descriptor();
-            if !output_desc.is_empty() {
-                scope_indent.write_content_tag(METADATA_OUTPUT_DESCRIPTOR, output_desc);
-            }
+            // Descriptions.
+            let desc = metada.get_children_elements_named(METADATA_DESCRIPTION);
+            write_tag_element_vec(&mut scope_indent, &desc);
+
+            // Input Descriptors.
+            let desc = metada.get_children_elements_named(METADATA_INPUT_DESCRIPTOR);
+            write_tag_element_vec(&mut scope_indent, &desc);
+
+            // Output Descriptors.
+            let desc = metada.get_children_elements_named(METADATA_OUTPUT_DESCRIPTOR);
+            write_tag_element_vec(&mut scope_indent, &desc);
 
             let info = self.transform.get_info_metadata();
             Self::write_process_list_metadata(&mut scope_indent, info);
 
-            self.write_ops(&mut scope_indent, write_version)?;
+            self.write_ops(&mut scope_indent, &write_version)?;
         }
 
         formatter.write_end_tag(process_list_tag);

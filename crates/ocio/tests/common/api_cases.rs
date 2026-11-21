@@ -1306,6 +1306,7 @@ pub(crate) fn fixed_function() -> Cases {
             &p3_d65_1000[..1],
         ),
         ("FIXED_FUNCTION_ACES_RGB_TO_JMH_20", &ap0[..]),
+        ("FIXED_FUNCTION_ACES_RGB_TO_HMJ_20", &ap0[..]),
     ] {
         cases.push(Case::new(
             style.trim_start_matches("FIXED_FUNCTION_"),
@@ -1409,6 +1410,7 @@ pub(crate) const BUILTINS_WITH_OPS: &[&str] = &[
     "CANON_CLOG3-CGAMUT_to_ACES2065-1",
     "CURVE - CANON_CLOG3_to_LINEAR",
     "APPLE_LOG_to_ACES2065-1",
+    "APPLE_LOG-APPLEWG_to_ACES2065-1",
     "CURVE - APPLE_LOG_to_LINEAR",
     "UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
     "UTILITY - ACES-AP1_to_CIE-XYZ-D65_BFD",

@@ -65,6 +65,7 @@ fn a_scanline_reaching_past_the_buffer_is_refused() {
         &mut rgba,
         4,
         2,
+        BitDepth::F32,
     );
     assert_eq!(packed.unwrap_err().message(), WRAPPED_INDEX);
 
@@ -143,8 +144,16 @@ fn a_scanline_inside_the_buffer_is_written_where_its_index_says() {
     assert_eq!(written, [0.0, 0.0, 2.0, 6.0, 10.0, 14.0, 0.0, 0.0]);
 
     let mut read = [0.0f32; 16];
-    <f32 as Generic>::pack_rgba_from_image_desc(&img, &[&bytes[..]], &mut unused, &mut read, 4, 2)
-        .unwrap();
+    <f32 as Generic>::pack_rgba_from_image_desc(
+        &img,
+        &[&bytes[..]],
+        &mut unused,
+        &mut read,
+        4,
+        2,
+        BitDepth::F32,
+    )
+    .unwrap();
     let blues: Vec<f32> = read.as_chunks::<4>().0.iter().map(|p| p[2]).collect();
     assert_eq!(blues, [2.0, 6.0, 10.0, 14.0]);
 }
@@ -208,6 +217,7 @@ fn a_scanline_outside_the_image_is_left_unwritten() {
             &mut rgba,
             4,
             start,
+            BitDepth::F32,
         );
         assert_eq!(
             packed.unwrap_err().message(),

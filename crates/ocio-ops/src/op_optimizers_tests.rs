@@ -267,7 +267,7 @@ fn remove_trailing_clamp_identity() {
     ops.clear();
 }
 
-/// Port of `OCIO_ADD_TEST(OpOptimizers, combine_ops)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpOptimizers, combine_ops)` @ v2.6.0.
 #[test]
 fn combine_ops() {
     let m1 = [2.0, 2.0, 2.0, 1.0];
@@ -311,9 +311,12 @@ fn combine_ops() {
         assert_eq!(ops.len(), 3);
         super::combine_ops(&mut ops, all_but(OptimizationFlags::COMP_MATRIX)).unwrap();
         assert_eq!(ops.len(), 3);
-        super::combine_ops(&mut ops, all).unwrap();
+        let mut count = super::combine_ops(&mut ops, all).unwrap();
         // CombineOps removes at most one pair on each call, repeat to combine all pairs.
-        super::combine_ops(&mut ops, all).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(ops.len(), 2);
+        count = super::combine_ops(&mut ops, all).unwrap();
+        assert_eq!(count, 1);
         assert_eq!(ops.len(), 1);
     }
 
@@ -325,7 +328,9 @@ fn combine_ops() {
         assert_eq!(ops.len(), 2);
         super::combine_ops(&mut ops, all_but(OptimizationFlags::COMP_MATRIX)).unwrap();
         assert_eq!(ops.len(), 2);
-        super::combine_ops(&mut ops, all).unwrap();
+        let count = super::combine_ops(&mut ops, all).unwrap();
+        // Note: the number of optimisations is 1 even though they both get removed
+        assert_eq!(count, 1);
         assert_eq!(ops.len(), 0);
     }
 
@@ -355,8 +360,11 @@ fn combine_ops() {
         assert_eq!(ops.len(), 5);
         super::combine_ops(&mut ops, all).unwrap();
         // CombineOps removes at most one pair on each call, repeat to combine all pairs.
+        assert_eq!(ops.len(), 4);
         super::combine_ops(&mut ops, all).unwrap();
+        assert_eq!(ops.len(), 3);
         super::combine_ops(&mut ops, all).unwrap();
+        assert_eq!(ops.len(), 2);
         super::combine_ops(&mut ops, all).unwrap();
         assert_eq!(ops.len(), 1);
     }
@@ -374,6 +382,7 @@ fn combine_ops() {
         assert_eq!(ops.len(), 4);
         super::combine_ops(&mut ops, all).unwrap();
         // CombineOps removes at most one pair on each call, repeat to combine all pairs.
+        assert_eq!(ops.len(), 2);
         super::combine_ops(&mut ops, all).unwrap();
         assert_eq!(ops.len(), 0);
     }
@@ -1105,7 +1114,7 @@ fn dyn_properties_prefix() {
     assert!(exp.is_dynamic());
 }
 
-/// Port of `OCIO_ADD_TEST(OpOptimizers, dynamic_ops)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpOptimizers, dynamic_ops)` @ v2.6.0.
 #[test]
 fn dynamic_ops() {
     use crate::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
@@ -1139,6 +1148,46 @@ fn dynamic_ops() {
     }
 
     // Test with dynamic exposure contrast.
+    {
+        let mut ops = OpVec::new();
+        create_matrix_op(&mut ops, matrix.clone(), fwd);
+        create_exposure_contrast_op(&mut ops, exposure_dyn.clone(), fwd);
+        create_matrix_op(&mut ops, matrix.clone(), fwd);
+        assert_eq!(ops.len(), 3);
+        assert!(!ops[0].is_identity().unwrap());
+
+        // Exposure contrast is dynamic.
+        assert!(ops[1].is_dynamic());
+        assert!(!ops[1].is_identity().unwrap());
+
+        assert!(!ops[2].is_identity().unwrap());
+
+        // It does not get optimized with default flags (OPTIMIZATION_NO_DYNAMIC_PROPERTIES off).
+        ops.finalize().unwrap();
+        assert_eq!(
+            super::remove_dynamic_properties(&mut ops, OptimizationFlags::DEFAULT).unwrap(),
+            0
+        );
+        assert_eq!(ops.len(), 3);
+
+        assert!(ops[1].is_dynamic());
+
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+        assert_eq!(ops[1].get_info(), "<ExposureContrastOp>");
+        assert_eq!(ops[2].get_info(), "<MatrixOffsetOp>");
+
+        // It does get optimized if flag is set.
+        assert!(OptimizationFlags::ALL.has_flag(OptimizationFlags::NO_DYNAMIC_PROPERTIES));
+        ops.finalize().unwrap();
+        assert_eq!(
+            super::remove_dynamic_properties(&mut ops, OptimizationFlags::ALL).unwrap(),
+            1
+        );
+        assert_eq!(ops.len(), 3);
+
+        assert!(!ops[1].is_dynamic());
+    }
+
     {
         let mut ops = OpVec::new();
         create_matrix_op(&mut ops, matrix.clone(), fwd);

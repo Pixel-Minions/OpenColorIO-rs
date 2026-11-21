@@ -193,7 +193,7 @@ fn load_multiple_resolve_internal() {
     assert!(matches!(&**ops[9].data(), OpData::Cdl(_)));
 }
 
-/// Port of `OCIO_ADD_TEST(Reference, load_nested_resolve_internal)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Reference, load_nested_resolve_internal)` @ v2.6.0.
 #[test]
 fn load_nested_resolve_internal() {
     let context = test_context();
@@ -210,7 +210,7 @@ fn load_nested_resolve_internal() {
     assert!(find(&path, "reference_nested_2.ctf"));
 
     assert!(get_file_path(&mut path, &ops[2]));
-    assert!(find(&path, "matrix_example.clf"));
+    assert!(find(&path, "matrix_example_utf8.clf"));
 
     assert!(matches!(&**ops[3].data(), OpData::Matrix(_)));
 }

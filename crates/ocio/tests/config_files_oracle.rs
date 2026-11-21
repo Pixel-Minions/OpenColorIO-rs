@@ -43,14 +43,32 @@ fn captured<T>(env: &[(&str, &str)], f: impl FnOnce() -> T) -> (T, Vec<Vec<u8>>)
     (result, log)
 }
 
-/// A config's outcome: its `serialize()` text, or its error.
-type Outcome = Result<Vec<u8>, Vec<u8>>;
+/// A config's outcome: its `serialize()` text, or its error: the Python exception's type
+/// ("undecodable" where the binding couldn't decode the message, which drops the type) and
+/// its message.
+type Outcome = Result<Vec<u8>, (String, Vec<u8>)>;
 
 fn show(outcome: &Outcome) -> String {
     match outcome {
         Ok(text) => format!("a config of {} bytes", text.len()),
-        Err(e) => format!("error {:?}", String::from_utf8_lossy(e)),
+        Err((kind, e)) => format!("{kind} {:?}", String::from_utf8_lossy(e)),
     }
+}
+
+/// The type of the Python exception the binding raises for a port error, as the wheel's
+/// binding raises it for the same C++ exception; "undecodable" for a message that isn't UTF-8.
+fn port_error(e: &ocio::Exception) -> (String, Vec<u8>) {
+    let kind = if std::str::from_utf8(e.what()).is_err() {
+        "undecodable"
+    } else {
+        match e.kind() {
+            ocio::ExceptionKind::Exception => "Exception",
+            ocio::ExceptionKind::MissingFile => "ExceptionMissingFile",
+            ocio::ExceptionKind::SystemError | ocio::ExceptionKind::RegexError => "RuntimeError",
+            other => panic!("no Python type for {other:?}"),
+        }
+    };
+    (kind.to_string(), e.what().to_vec())
 }
 
 /// The bytes of a config source or call: its result, or the bytes the binding couldn't
@@ -68,9 +86,15 @@ fn wheel_outcome(w: &Value) -> (Outcome, Vec<Vec<u8>>) {
     let outcome = if config.is_null() {
         Ok(wheel_bytes(&w["calls"][0], "result"))
     } else if config.get("undecodable").is_some() {
-        Err(wheel_bytes(config, "undecodable"))
+        Err((
+            "undecodable".to_string(),
+            wheel_bytes(config, "undecodable"),
+        ))
     } else {
-        Err(bytes(&config["exception"]["message"]))
+        Err((
+            config["exception"]["type"].as_str().unwrap().to_string(),
+            bytes(&config["exception"]["message"]),
+        ))
     };
     (outcome, log(&w["config_log"]))
 }
@@ -112,7 +136,7 @@ fn check(cases: &[Case], port: impl Fn(&Case) -> Result<Arc<Config>, ocio::Excep
         let (port, port_log) = captured(&env, || {
             port(case)
                 .and_then(|config| config.serialize())
-                .map_err(|e| e.what().to_vec())
+                .map_err(|e| port_error(&e))
         });
         if wheel != port {
             failures.push(format!(
@@ -174,7 +198,37 @@ fn file_case(label: String, path: &str) -> Case {
 }
 
 fn create_from_file(case: &Case) -> Result<Arc<Config>, ocio::Exception> {
-    Config::create_from_file(case.source["file"].as_str().unwrap())
+    match &case.source["file"] {
+        Value::String(path) => Config::create_from_file(path),
+        path => Config::create_from_file(bytes(path)),
+    }
+}
+
+/// On Windows, a config path that isn't ASCII is the port's error, without the wheel, whose
+/// check reads the name in the ANSI code page (docs/improvements.md, U-750; waiver W0028); a
+/// built-in config's URI is no path and isn't refused. Linux compares such paths with the
+/// wheel (config_files_read_as_in_the_wheel).
+#[cfg(windows)]
+#[test]
+fn config_paths_that_arent_ascii_are_refused_on_windows() {
+    let path = write_file(b"ocio_profile_version: 2\nroles: {default: raw}\n");
+    for name in [
+        format!("{path}\u{e9}"),
+        format!("{}/caf\u{e9}.ocio", files_dir().to_str().unwrap()),
+    ] {
+        let e = Config::create_from_file(&name).unwrap_err();
+        assert_eq!(e.kind(), ocio::ExceptionKind::Exception, "{name}");
+        assert_eq!(
+            e.what(),
+            b"The config file path isn't ASCII, which the wheel checks through the ANSI code \
+              page (docs/improvements.md, U-750).",
+            "{name}"
+        );
+    }
+    // Latin-1 bytes too.
+    let mut latin1 = path.clone().into_bytes();
+    latin1.push(0xe9);
+    assert!(Config::create_from_file(&latin1).is_err());
 }
 
 /// Every file of up to three bytes of a byte order mark's bytes, a zero, a letter and a line
@@ -256,6 +310,62 @@ fn config_files_read_as_in_the_wheel() {
     ));
     cases.push(file_case("a directory".into(), &dir));
     cases.push(file_case("an empty name".into(), ""));
+    // 2.6.0's existence check (Config.cpp:1296-1302 @ v2.6.0): a name too long for the file
+    // system, a path through a file, and names Windows can't have.
+    let plain = write_file(b"ocio_profile_version: 2\nroles: {default: raw}\n");
+    cases.push(file_case(
+        "a 300-character name".into(),
+        &format!("{dir}/{}.ocio", "a".repeat(300)),
+    ));
+    cases.push(file_case(
+        "a 4200-character path".into(),
+        &format!("{dir}/{}.ocio", vec!["b".repeat(200); 21].join("/")),
+    ));
+    cases.push(file_case(
+        "a path through a file".into(),
+        &format!("{plain}/x.ocio"),
+    ));
+    for name in ["a<b.ocio", "a?b.ocio", "a:b.ocio"] {
+        cases.push(file_case(
+            format!("the name {name}"),
+            &format!("{dir}/{name}"),
+        ));
+    }
+    // Linux: a symbolic link loop (stat fails with ELOOP, which libstdc++'s exists throws as a
+    // filesystem_error), and names that aren't ASCII, existing or not, UTF-8 or not.
+    #[cfg(unix)]
+    {
+        let files = files_dir();
+        for (a, b) in [("loop1", "loop2"), ("loop2", "loop1")] {
+            let _ = std::os::unix::fs::symlink(b, files.join(a));
+        }
+        cases.push(file_case(
+            "a symbolic link loop".into(),
+            &format!("{dir}/loop1"),
+        ));
+        let config = b"ocio_profile_version: 2\nroles: {default: raw}\ncolorspaces:\n  - \
+                       !<ColorSpace> {name: raw}\n";
+        for (label, name) in [
+            ("a UTF-8 name", "caf\u{e9}.ocio".as_bytes()),
+            ("a Latin-1 name", b"caf\xe9.ocio".as_slice()),
+        ] {
+            use std::os::unix::ffi::OsStrExt;
+            let path = files.join(std::ffi::OsStr::from_bytes(name));
+            std::fs::write(&path, config).unwrap();
+            let full = [dir.as_bytes(), b"/", name].concat();
+            cases.push(Case {
+                label: label.into(),
+                source: json!({"file": {"bytes": hex(&full)}}),
+                env: Vec::new(),
+            });
+            let missing = [dir.as_bytes(), b"/no-", name].concat();
+            cases.push(Case {
+                label: format!("{label}, missing"),
+                source: json!({"file": {"bytes": hex(&missing)}}),
+                env: Vec::new(),
+            });
+        }
+    }
     for uri in [
         "ocio://default",
         "ocio://cg-config-latest",

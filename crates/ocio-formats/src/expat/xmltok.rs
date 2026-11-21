@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from expat 2.7.2 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
-// Ltd and Clark Cooper, Copyright (c) 2001-2025 Expat maintainers); see mod.rs.
+// Ported from expat 2.8.4 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
+// Ltd and Clark Cooper, Copyright (c) 2001-2026 Expat maintainers); see mod.rs.
 
 //! The tokenizer's encodings: a port of `lib/xmltok.c`, `xmltok_ns.c` and `xmltok.h` (expat
-//! 2.7.2), for the parsers without namespace processing.
+//! 2.8.4), for the parsers without namespace processing.
 //!
 //! - **The encodings** ([`Encoding`]): UTF-8, ISO-8859-1, US-ASCII, UTF-16BE and UTF-16LE, as
 //!   documents declare or start with them, and the "internal" UTF-8 and UTF-16LE ones that
@@ -1165,7 +1165,8 @@ pub struct XmlDecl {
 /// `b[ptr..end]` (from "<?xml" to "?>"): `Err(bad)` with the position of the bad character
 /// when it isn't well-formed.
 ///
-/// Port of `XmlParseXmlDecl` (xmltok_ns.c:112-120) and `doParseXmlDecl` (xmltok.c:1151-1230).
+/// Port of `XmlParseXmlDecl` (xmltok_ns.c:115-123 @ R_2_8_4) and `doParseXmlDecl`
+/// (xmltok.c:1158-1242 @ R_2_8_4).
 /// Upstream writes each output through a pointer as it reads it, and some before it finds an
 /// error; the parser reads them only after a success.
 pub fn xml_parse_xml_decl(
@@ -1208,6 +1209,12 @@ pub fn xml_parse_xml_decl(
         }
     } else {
         decl.version = Some((val, ptr));
+        // The version number must not be empty; VersionNum requires at least one character.
+        // The encoding and standalone pseudo-attributes below already reject an empty
+        // value, so keep version consistent (xmltok.c:1184-1190 @ R_2_8_4).
+        if val == ptr - mbpc {
+            return Err(val);
+        }
         if !parse_pseudo_attribute(
             enc,
             b,

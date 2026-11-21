@@ -85,7 +85,7 @@ fn optimization_env_override_basic() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(Processor, basic_cache)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Processor, basic_cache)` @ v2.6.0.
 #[test]
 fn basic_cache() {
     let _env = EnvGuard::new();
@@ -94,7 +94,10 @@ fn basic_cache() {
 
     let processor_empty_group = config.processor(&Transform::from(group)).unwrap();
     assert_eq!(processor_empty_group.num_transforms(), 0);
-    assert_eq!(processor_empty_group.cache_id().unwrap(), "<NOOP>");
+    assert_eq!(
+        processor_empty_group.cache_id().unwrap(),
+        "99aa06d3-0147-98d8-6001-c324468d497f"
+    );
 
     let mut mat = MatrixTransform::new();
     #[rustfmt::skip]
@@ -112,7 +115,7 @@ fn basic_cache() {
     assert_eq!(processor_mat.num_transforms(), 1);
     assert_eq!(
         processor_mat.cache_id().unwrap(),
-        "1b1880136f7669351adb0dcae0f4f9fd"
+        "1adb0dca-e0f4-f9fd-1b18-80136f766935"
     );
 
     // Check behaviour of the cacheID
@@ -122,7 +125,7 @@ fn basic_cache() {
     processor_mat = config.processor(&Transform::from(mat.clone())).unwrap();
     assert_eq!(
         processor_mat.cache_id().unwrap(),
-        "675ca29c0f7d28fbdc865818c8cf5c4c"
+        "dc865818-c8cf-5c4c-675c-a29c0f7d28fb"
     );
 
     matrix[0] = 2.0;
@@ -130,7 +133,7 @@ fn basic_cache() {
     processor_mat = config.processor(&Transform::from(mat.clone())).unwrap();
     assert_eq!(
         processor_mat.cache_id().unwrap(),
-        "1ebac7d1c2d833943e1d1d3c26a7eb18"
+        "3e1d1d3c-26a7-eb18-1eba-c7d1c2d83394"
     );
 
     offset[0] = 0.1;
@@ -140,11 +143,11 @@ fn basic_cache() {
     processor_mat = config.processor(&Transform::from(mat.clone())).unwrap();
     assert_eq!(
         processor_mat.cache_id().unwrap(),
-        "1b1880136f7669351adb0dcae0f4f9fd"
+        "1adb0dca-e0f4-f9fd-1b18-80136f766935"
     );
 }
 
-/// Port of `OCIO_ADD_TEST(Processor, basic_cache_lut)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(Processor, basic_cache_lut)` @ v2.6.0.
 #[test]
 fn basic_cache_lut() {
     use crate::transforms::lut3d_transform::Lut3DTransform;
@@ -155,7 +158,10 @@ fn basic_cache_lut() {
 
     let processor_empty_group = config.processor(&Transform::from(group)).unwrap();
     assert_eq!(processor_empty_group.num_transforms(), 0);
-    assert_eq!(processor_empty_group.cache_id().unwrap(), "<NOOP>");
+    assert_eq!(
+        processor_empty_group.cache_id().unwrap(),
+        "99aa06d3-0147-98d8-6001-c324468d497f"
+    );
 
     let mut lut = Lut3DTransform::with_grid_size(3).unwrap();
     // Make sure it's not an identity.
@@ -165,7 +171,7 @@ fn basic_cache_lut() {
     assert_eq!(processor_lut.num_transforms(), 1);
     assert_eq!(
         processor_lut.cache_id().unwrap(),
-        "2b26d0097cdcf8f141fe3b3d6e21b5ec"
+        "41fe3b3d-6e21-b5ec-2b26-d0097cdcf8f1"
     );
 
     // Check behaviour of the cacheID
@@ -175,7 +181,7 @@ fn basic_cache_lut() {
     processor_lut = config.processor(&Transform::from(lut.clone())).unwrap();
     assert_eq!(
         processor_lut.cache_id().unwrap(),
-        "288ec8ea132adaca5b5aed24a296a1a2"
+        "5b5aed24-a296-a1a2-288e-c8ea132adaca"
     );
 
     // Restore the original value, check that the cache ID matches what it used to be.
@@ -183,7 +189,7 @@ fn basic_cache_lut() {
     processor_lut = config.processor(&Transform::from(lut.clone())).unwrap();
     assert_eq!(
         processor_lut.cache_id().unwrap(),
-        "2b26d0097cdcf8f141fe3b3d6e21b5ec"
+        "41fe3b3d-6e21-b5ec-2b26-d0097cdcf8f1"
     );
 }
 
@@ -511,10 +517,15 @@ fn compute_metadata_reads_the_no_ops() {
     assert_eq!(processor.num_transforms(), 5);
 }
 
-/// `getCacheID` is `<NOOP>` without ops (Processor.cpp:337-340 @ v2.5.2).
+/// Without ops, `getCacheID` is the UUID of the empty op list's cache ID, as for any other list
+/// (Processor.cpp:340-342 @ v2.6.0): the value `OCIO_ADD_TEST(Processor, basic_cache)` expects
+/// of an empty group's processor (tests/cpu/Processor_tests.cpp:22 @ v2.6.0).
 #[test]
 fn cache_id_without_ops() {
-    assert_eq!(processor_of(OpVec::new()).cache_id().unwrap(), "<NOOP>");
+    assert_eq!(
+        processor_of(OpVec::new()).cache_id().unwrap(),
+        "99aa06d3-0147-98d8-6001-c324468d497f"
+    );
 }
 
 /// `getTransformFormatMetadata` outside the ops.
@@ -740,7 +751,7 @@ fn set_major_version_empties_the_processor_cache() {
 /// What a processor's state is: its cache ID, computed afresh (the processor's own is computed
 /// once), and each op's data, its address and its cache ID.
 fn state(processor: &Processor) -> (String, Vec<(usize, String, Vec<u8>)>) {
-    let cache_id = cache_id_hash(&processor.ops.get_cache_id().expect("a cache ID"));
+    let cache_id = cache_id_hash_uuid(&processor.ops.get_cache_id().expect("a cache ID"));
     let ops = processor
         .ops
         .iter()

@@ -3,7 +3,7 @@
 
 //! `ociochecklut`: checks any LUT file and optionally converts a pixel.
 //!
-//! Port of `src/apps/ociochecklut/main.cpp` @ v2.5.2, as both wheels compile it: without
+//! Port of `src/apps/ociochecklut/main.cpp` @ v2.6.0, as both wheels compile it: without
 //! `OCIO_GPU_ENABLED`. So `ProcessorWrapper` holds a CPU processor only, and each GPU option
 //! ends in "Compiled without OpenGL support".
 
@@ -20,7 +20,7 @@ use ocio_tools::c_numbers::strtof;
 use ocio_tools::is_ocio_exception;
 use ocio_tools::stdio::{self, TransformText, cerr, cerr_line, cout, cout_endl, cout_line};
 
-/// Port of `ToString(float)` (src/apps/ociochecklut/main.cpp:138-144 @ v2.5.2).
+/// Port of `ToString(float)` (src/apps/ociochecklut/main.cpp:138-144 @ v2.6.0).
 fn float_to_string(value: f32) -> Vec<u8> {
     let mut outs = OStringStream::new(Crt::NATIVE);
     outs.precision = 7;
@@ -30,14 +30,14 @@ fn float_to_string(value: f32) -> Vec<u8> {
 
 /// `std::cout.width(max(in.size(), out.size())); std::cout << in;`: the fill goes before.
 ///
-/// Port of `PrintFirstComponent` (src/apps/ociochecklut/main.cpp:146-150 @ v2.5.2).
+/// Port of `PrintFirstComponent` (src/apps/ociochecklut/main.cpp:146-150 @ v2.6.0).
 fn print_first_component(input: &[u8], output: &[u8]) {
     let width = input.len().max(output.len());
     cout(" ".repeat(width - input.len()));
     cout(input);
 }
 
-/// Port of `PrintAlignedVec` (src/apps/ociochecklut/main.cpp:152-166 @ v2.5.2).
+/// Port of `PrintAlignedVec` (src/apps/ociochecklut/main.cpp:152-166 @ v2.6.0).
 fn print_aligned_vec(text: &[Vec<u8>], align: &[Vec<u8>], comp: usize) {
     print_first_component(&text[0], &align[0]);
     cout(b" ");
@@ -51,7 +51,7 @@ fn print_aligned_vec(text: &[Vec<u8>], align: &[Vec<u8>], comp: usize) {
 }
 
 /// Port of `ToString(std::vector<std::string> &, ...)` (src/apps/ociochecklut/main.cpp:168-178
-/// @ v2.5.2).
+/// @ v2.6.0).
 fn to_strings(vec: &[f32], comp: usize) -> Vec<Vec<u8>> {
     let mut text = vec![
         float_to_string(vec[0]),
@@ -66,7 +66,7 @@ fn to_strings(vec: &[f32], comp: usize) -> Vec<Vec<u8>> {
 
 /// Prints `Input  [R G B]: [...]` and `Output [R G B]: [...]`.
 ///
-/// Port of the two blocks that do so (src/apps/ociochecklut/main.cpp:407-423, 471-487 @ v2.5.2).
+/// Port of the two blocks that do so (src/apps/ociochecklut/main.cpp:407-423, 471-487 @ v2.6.0).
 fn print_in_out(input: &[Vec<u8>], output: &[Vec<u8>], comp: usize) {
     for (label, text, align) in [(b"Input  ", input, output), (b"Output ", output, input)] {
         cout(label);
@@ -80,7 +80,7 @@ fn print_in_out(input: &[Vec<u8>], output: &[Vec<u8>], comp: usize) {
     }
 }
 
-/// Port of `DESC_STRING` (src/apps/ociochecklut/main.cpp:180-185 @ v2.5.2).
+/// Port of `DESC_STRING` (src/apps/ociochecklut/main.cpp:180-185 @ v2.6.0).
 const DESC_STRING: &str = "\n\
 OCIOCHECKLUT loads any LUT type supported by OCIO and prints any errors\n\
 encountered.  Provide a normalized RGB or RGBA value to send that through\n\
@@ -90,7 +90,7 @@ Use -v to print warnings while parsing the LUT.\n";
 
 /// The values `-t` evaluates: `input4test`.
 ///
-/// Port of `input4test` (src/apps/ociochecklut/main.cpp:344-353 @ v2.5.2).
+/// Port of `input4test` (src/apps/ociochecklut/main.cpp:344-353 @ v2.6.0).
 const INPUT_4_TEST: [f32; 27] = [
     0.0, 0.0, 0.0, //
     0.18, 0.18, 0.18, //
@@ -116,7 +116,7 @@ fn report(exception: &Exception, ocio_prefix: &str, unknown: &str) -> i32 {
 
 /// Each step of a multi-transform LUT on one pixel.
 ///
-/// Port of the `stepInfo` block (src/apps/ociochecklut/main.cpp:369-427 @ v2.5.2).
+/// Port of the `stepInfo` block (src/apps/ociochecklut/main.cpp:369-427 @ v2.6.0).
 fn process_steps(
     config: &Config,
     t: &Transform,
@@ -154,7 +154,7 @@ fn process_steps(
     Ok(())
 }
 
-/// Port of `main` (src/apps/ociochecklut/main.cpp:189-521 @ v2.5.2).
+/// Port of `main` (src/apps/ociochecklut/main.cpp:189-521 @ v2.6.0).
 fn run(argv: &[Vec<u8>]) -> i32 {
     let verbose = Cell::new(false);
     let help = Cell::new(false);
@@ -169,7 +169,7 @@ fn run(argv: &[Vec<u8>]) -> i32 {
     let parsed = Cell::new(0);
     let input = RefCell::new(Vec::new());
 
-    // Port of `parse_end_args` (src/apps/ociochecklut/main.cpp:123-136 @ v2.5.2).
+    // Port of `parse_end_args` (src/apps/ociochecklut/main.cpp:123-136 @ v2.6.0).
     let parse_end_args = |arg: &[u8]| {
         if parsed.get() == 0 {
             *inputfile.borrow_mut() = arg.to_vec();

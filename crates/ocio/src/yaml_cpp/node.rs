@@ -197,8 +197,9 @@ impl Node {
             .map(|(memory, index)| &memory.nodes[*index])
     }
 
-    /// The `InvalidNode` a zombie throws.
-    fn invalid(&self) -> Exception {
+    /// The `InvalidNode` a zombie throws (`InvalidNode(m_invalidKey)`; the key is empty but for a
+    /// zombie).
+    pub(super) fn invalid(&self) -> Exception {
         Exception::invalid_node(&self.invalid_key)
     }
 

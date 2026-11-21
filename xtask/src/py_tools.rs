@@ -210,9 +210,15 @@ mod tests {
     fn package_launcher_is_upstreams_file_verbatim() {
         // The submodule may be checked out with CRLF on Windows. Compare with
         // its pinned Git blob, without normalising or weakening either side.
+        // `--work-tree=.`: the submodule's `core.worktree` doesn't resolve in the Rocky Linux 9
+        // container when this checkout is a linked worktree (as in guards' check_submodule).
         let upstream = crate::git(
             &crate::root().join("upstream/OpenColorIO"),
-            &["show", "HEAD:src/bindings/python/package/command_line.py"],
+            &[
+                "--work-tree=.",
+                "show",
+                "HEAD:src/bindings/python/package/command_line.py",
+            ],
         )
         .expect("the pinned upstream package launcher blob");
         assert_eq!(

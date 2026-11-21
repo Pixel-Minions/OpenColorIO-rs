@@ -4,7 +4,8 @@
 //! The elements of the CDL, CCC and CC readers.
 //!
 //! Port of `src/OpenColorIO/fileformats/cdl/CDLReaderHelper.h` and `CDLReaderHelper.cpp`
-//! (@ v2.5.2), on the element classes of `ocio_formats::fileformats::xmlutils`.
+//! (@ v2.5.2; the `appendMetadata` of v2.6.0), on the element classes of
+//! `ocio_formats::fileformats::xmlutils`.
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -110,12 +111,14 @@ impl XmlReaderElement for CdlReaderColorDecisionListElt {
 
 impl XmlReaderContainerElt for CdlReaderColorDecisionListElt {
     /// Port of `CDLReaderColorDecisionListElt::appendMetadata` (CDLReaderHelper.h:57-60 @
-    /// v2.5.2).
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
+    /// v2.6.0).
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
         self.parsing_info
             .borrow_mut()
             .metadata
-            .add_child_element(Some(name), Some(value))
+            .get_children_elements_mut()
+            .push(metadata);
+        Ok(())
     }
 }
 
@@ -181,9 +184,10 @@ impl XmlReaderElement for CdlReaderColorDecisionElt {
 
 impl XmlReaderContainerElt for CdlReaderColorDecisionElt {
     /// Port of `CDLReaderColorDecisionElt::appendMetadata` (CDLReaderHelper.h:92-95 @
-    /// v2.5.2).
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
-        self.metadata.add_child_element(Some(name), Some(value))
+    /// v2.6.0).
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
+        self.metadata.get_children_elements_mut().push(metadata);
+        Ok(())
     }
 }
 
@@ -243,12 +247,14 @@ impl XmlReaderElement for CdlReaderColorCorrectionCollectionElt {
 
 impl XmlReaderContainerElt for CdlReaderColorCorrectionCollectionElt {
     /// Port of `CDLReaderColorCorrectionCollectionElt::appendMetadata`
-    /// (CDLReaderHelper.h:141-144 @ v2.5.2).
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
+    /// (CDLReaderHelper.h:141-144 @ v2.6.0).
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
         self.parsing_info
             .borrow_mut()
             .metadata
-            .add_child_element(Some(name), Some(value))
+            .get_children_elements_mut()
+            .push(metadata);
+        Ok(())
     }
 }
 
@@ -377,15 +383,14 @@ impl XmlReaderElement for CdlReaderColorCorrectionElt {
 impl XmlReaderContainerElt for CdlReaderColorCorrectionElt {
     /// Keeps description as metadata with supplied name.
     ///
-    /// Port of `CDLReaderColorCorrectionElt::appendMetadata` (CDLReaderHelper.cpp:80-85 @
-    /// v2.5.2).
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
-        let item = FormatMetadataImpl::new(name, value)?;
+    /// Port of `CDLReaderColorCorrectionElt::appendMetadata` (CDLReaderHelper.cpp:80-84 @
+    /// v2.6.0).
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
         self.transform_data
             .borrow_mut()
             .get_format_metadata_mut()
             .get_children_elements_mut()
-            .push(item);
+            .push(metadata);
         Ok(())
     }
 }
@@ -454,9 +459,9 @@ impl XmlReaderElement for CdlReaderSopNodeCcElt {
 }
 
 impl XmlReaderContainerElt for CdlReaderSopNodeCcElt {
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
         let cdl = self.get_cdl();
-        XmlReaderSopNodeBase::append_metadata(&cdl, name, value)
+        XmlReaderSopNodeBase::append_metadata(&cdl, metadata)
     }
 }
 
@@ -526,9 +531,9 @@ impl XmlReaderElement for CdlReaderSatNodeCcElt {
 }
 
 impl XmlReaderContainerElt for CdlReaderSatNodeCcElt {
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()> {
         let cdl = self.get_cdl();
-        sat_node_append_metadata(&cdl, name, value)
+        sat_node_append_metadata(&cdl, metadata)
     }
 }
 

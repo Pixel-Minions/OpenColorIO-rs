@@ -88,7 +88,7 @@ const PROCESSOR_CACHE_FLAGS: &str = q!("ProcessorCacheFlags");
 const COLOR_SPACE_SET: &str = q!("ColorSpaceSet");
 /// The proxy's C++ type, as the signatures write it: `bindPyConfig` runs before
 /// `bindPyConfigIOProxy` registers the class.
-const CONFIG_IO_PROXY: &str = "OpenColorIO_v2_5::ConfigIOProxy";
+const CONFIG_IO_PROXY: &str = "OpenColorIO_v2_6::ConfigIOProxy";
 
 // ---------------------------------------------------------------------------------------------
 // The config as the binding holds it
@@ -1341,6 +1341,42 @@ static GET_CANONICAL_NAME: Function = config_method!(
     }
 );
 
+// .def("generateLocalIDForColorSpace", &Config::generateLocalIDForColorSpace,
+// "srcColorSpaceName"_a) (PyConfig.cpp:340-341 @ v2.6.0): `None` is the null pointer the
+// library refuses as an empty name.
+static GENERATE_LOCAL_ID_FOR_COLOR_SPACE: Function = config_method!(
+    "generateLocalIDForColorSpace",
+    [Param::new("srcColorSpaceName", "str")],
+    "str",
+    |py, a, c| {
+        let name = text(arg_in!(a, 1, c, CharPtr));
+        locked(move |n| {
+            let id = py_result(py, n.config.generate_local_id_for_color_space(name))?;
+            Ok(Some(std_string_to_py(py, &id)?.into_any().unbind()))
+        })
+    }
+);
+
+// .def("findColorSpaceForID", &Config::findColorSpaceForID, "idString"_a) (PyConfig.cpp:
+// 342-343 @ v2.6.0): the config's own color space, as getColorSpace returns it; `None` (a null
+// pointer) is the library's empty ID.
+static FIND_COLOR_SPACE_FOR_ID: Function = config_method!(
+    "findColorSpaceForID",
+    [Param::new("idString", "str")],
+    COLOR_SPACE,
+    |py, a, c| {
+        let id = text(arg_in!(a, 1, c, CharPtr));
+        locked(move |n| {
+            let arc = n
+                .config
+                .find_color_space_for_id(&id)
+                .and_then(|cs| n.config.color_space_arc(cs));
+            let cs = arc.map(|arc| n.color_space(arc));
+            color_space_out(py, cs)
+        })
+    }
+);
+
 // .def("addColorSpace", &Config::addColorSpace, "colorSpace"_a): a copy of the color space;
 // `None` (a null pointer) is dereferenced upstream (U-124).
 static ADD_COLOR_SPACE: Function = config_method!(
@@ -1451,6 +1487,29 @@ static SET_STRICT_PARSING_ENABLED: Function = config_method!(
     }
 );
 
+// .def("getUseDisplayAliases", &Config::getUseDisplayAliases) (PyConfig.cpp:360-361 @
+// v2.6.0).
+static GET_USE_DISPLAY_ALIASES: Function =
+    config_method!("getUseDisplayAliases", [], "bool", |py, n, _, _| ok(
+        py,
+        n.config.use_display_aliases()
+    ));
+
+// .def("setUseDisplayAliases", &Config::setUseDisplayAliases, "enabled"_a) (PyConfig.cpp:
+// 362-363 @ v2.6.0).
+static SET_USE_DISPLAY_ALIASES: Function = config_method!(
+    "setUseDisplayAliases",
+    [Param::new("enabled", "bool")],
+    "None",
+    |py, a, c| {
+        let enabled = arg_in!(a, 1, c, bool);
+        locked(move |n| {
+            n.config.set_use_display_aliases(enabled);
+            none(py)
+        })
+    }
+);
+
 static SET_INACTIVE_COLOR_SPACES: Function = config_method!(
     "setInactiveColorSpaces",
     [Param::new("inactiveColorSpaces", "str")],
@@ -1547,6 +1606,25 @@ const fn text_default(name: &'static str) -> Param {
     empty_string(name)
 }
 
+/// `std::vector<std::string>` as a signature writes it.
+const STRINGS: &str = "collections.abc.Sequence[str]";
+
+fn empty_list(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+    Ok(pyo3::types::PyList::empty(py).into_any())
+}
+
+/// `"aliases"_a = std::vector<std::string>()` (PyConfig.cpp:443, 541 @ v2.6.0).
+const ALIASES_DEFAULT: Param = Param {
+    name: "aliases",
+    ty: STRINGS,
+    default: crate::py_transform::default("[]", empty_list),
+};
+
+// .def("addSharedView", (void (Config::*)(const char *, const char *, const char *, const char
+// *, const char *, const char *, const std::vector<std::string> &)) &Config::addSharedView,
+// "view"_a, "viewTransformName"_a, "colorSpaceName"_a, "looks"_a = "", "ruleName"_a = "",
+// "description"_a = "", "aliases"_a = std::vector<std::string>()) (PyConfig.cpp:432-444 @
+// v2.6.0).
 static ADD_SHARED_VIEW: Function = config_method!(
     "addSharedView",
     [
@@ -1555,7 +1633,8 @@ static ADD_SHARED_VIEW: Function = config_method!(
         Param::new("colorSpaceName", "str"),
         text_default("looks"),
         text_default("ruleName"),
-        text_default("description")
+        text_default("description"),
+        ALIASES_DEFAULT
     ],
     "None",
     |py, a, c| {
@@ -1565,11 +1644,20 @@ static ADD_SHARED_VIEW: Function = config_method!(
         let looks = text(arg_in!(a, 4, c, CharPtr));
         let rule = text(arg_in!(a, 5, c, CharPtr));
         let description = text(arg_in!(a, 6, c, CharPtr));
+        let aliases = arg_in!(a, 7, c, Vec<StdString>);
         locked(move |n| {
+            let aliases: Vec<&[u8]> = aliases.iter().map(|StdString(s)| s.as_slice()).collect();
             py_result(
                 py,
-                n.config
-                    .add_shared_view(view, vt, cs, looks, rule, description),
+                n.config.add_shared_view_with_aliases(
+                    view,
+                    vt,
+                    cs,
+                    looks,
+                    rule,
+                    description,
+                    &aliases,
+                ),
             )?;
             none(py)
         })
@@ -1613,6 +1701,43 @@ static GET_DISPLAYS_ALL: Function =
     config_iterator!("getDisplaysAll", [], DISPLAY_ALL_ITERATOR, |_a, _c| Ok(
         Some(IterArgs::None)
     ));
+
+// .def("getCanonicalDisplayName", &Config::getCanonicalDisplayName, "display"_a)
+// (PyConfig.cpp:463-464 @ v2.6.0): `None` is the null pointer the library answers "" for.
+static GET_CANONICAL_DISPLAY_NAME: Function = config_method!(
+    "getCanonicalDisplayName",
+    [Param::new("display", "str")],
+    "str",
+    |py, a, c| {
+        let display = text(arg_in!(a, 1, c, CharPtr));
+        locked(move |n| string_out(py, n.config.canonical_display_name(display)))
+    }
+);
+
+// .def("getDisplayDescription", &Config::getDisplayDescription, "display"_a) (PyConfig.cpp:
+// 465-466 @ v2.6.0).
+static GET_DISPLAY_DESCRIPTION: Function = config_method!(
+    "getDisplayDescription",
+    [Param::new("display", "str")],
+    "str",
+    |py, a, c| {
+        let display = text(arg_in!(a, 1, c, CharPtr));
+        locked(move |n| string_out(py, n.config.display_description(display)))
+    }
+);
+
+// .def("getCanonicalViewName", &Config::getCanonicalViewName, "display"_a, "view"_a)
+// (PyConfig.cpp:467-468 @ v2.6.0): the caller's view, or the view the alias names.
+static GET_CANONICAL_VIEW_NAME: Function = config_method!(
+    "getCanonicalViewName",
+    [Param::new("display", "str"), Param::new("view", "str")],
+    "str",
+    |py, a, c| {
+        let display = text(arg_in!(a, 1, c, CharPtr));
+        let view = text(arg_in!(a, 2, c, CharPtr));
+        locked(move |n| string_out(py, n.config.canonical_view_name(display, &view[..])))
+    }
+);
 
 static GET_DEFAULT_VIEW: Function = Function {
     name: "getDefaultView",
@@ -1724,6 +1849,51 @@ static GET_DISPLAY_VIEW_COLOR_SPACE_NAME: Function = display_view_getter!(
     "getDisplayViewColorSpaceName",
     display_view_color_space_name
 );
+// .def("getResolvedDisplayViewColorSpaceName", &Config::getResolvedDisplayViewColorSpaceName,
+// "display"_a, "view"_a) (PyConfig.cpp:500-502 @ v2.6.0).
+static GET_RESOLVED_DISPLAY_VIEW_COLOR_SPACE_NAME: Function = display_view_getter!(
+    "getResolvedDisplayViewColorSpaceName",
+    resolved_display_view_color_space_name
+);
+
+// .def("getDisplayViewAliases", [](ConfigRcPtr & self, const std::string & display, const
+// std::string & view) { return DisplayViewAliasIterator(self, display, view); }, "display"_a,
+// "view"_a) (PyConfig.cpp:503-508 @ v2.6.0).
+static GET_DISPLAY_VIEW_ALIASES: Function = method_def!(
+    "getDisplayViewAliases",
+    [
+        SELF,
+        Param::new("display", "str"),
+        Param::new("view", "str")
+    ],
+    DISPLAY_VIEW_ALIAS_ITERATOR,
+    |py, o, a, convert| {
+        let rc = this_shared!(o, a, ConfigNode);
+        let StdString(display) = arg!(a, 1, convert, StdString);
+        let StdString(view) = arg!(a, 2, convert, StdString);
+        let args = IterArgs::DisplayView(display, view);
+        iterator_out(py, DISPLAY_VIEW_ALIAS_ITERATOR, rc, args)
+    }
+);
+
+// .def("hasDisplayViewAlias", &Config::hasDisplayViewAlias, "display"_a, "view"_a, "alias"_a)
+// (PyConfig.cpp:509-511 @ v2.6.0): `None` is the null pointer the library answers false for.
+static HAS_DISPLAY_VIEW_ALIAS: Function = config_method!(
+    "hasDisplayViewAlias",
+    [
+        Param::new("display", "str"),
+        Param::new("view", "str"),
+        Param::new("alias", "str")
+    ],
+    "bool",
+    |py, a, c| {
+        let display = text(arg_in!(a, 1, c, CharPtr));
+        let view = text(arg_in!(a, 2, c, CharPtr));
+        let alias = text(arg_in!(a, 3, c, CharPtr));
+        locked(move |n| ok(py, n.config.has_display_view_alias(display, view, alias)))
+    }
+);
+
 static GET_DISPLAY_VIEW_LOOKS: Function =
     display_view_getter!("getDisplayViewLooks", display_view_looks);
 static GET_DISPLAY_VIEW_RULE: Function =
@@ -1787,6 +1957,7 @@ static ADD_DISPLAY_VIEW: Function = Function {
                 text_default("looks"),
                 text_default("ruleName"),
                 text_default("description"),
+                ALIASES_DEFAULT,
             ],
             ret: "None",
             call: |py, o, a, convert| {
@@ -1798,10 +1969,12 @@ static ADD_DISPLAY_VIEW: Function = Function {
                 let looks = text(arg!(a, 5, convert, CharPtr));
                 let rule = text(arg!(a, 6, convert, CharPtr));
                 let description = text(arg!(a, 7, convert, CharPtr));
+                let aliases = arg!(a, 8, convert, Vec<StdString>);
+                let aliases: Vec<&[u8]> = aliases.iter().map(|StdString(s)| s.as_slice()).collect();
                 with_config(&rc, |n| {
                     py_result(
                         py,
-                        n.config.add_display_view_with_view_transform(
+                        n.config.add_display_view_with_aliases(
                             display,
                             view,
                             vt,
@@ -1809,6 +1982,7 @@ static ADD_DISPLAY_VIEW: Function = Function {
                             looks,
                             rule,
                             description,
+                            &aliases,
                         ),
                     )?;
                     none(py)
@@ -3095,6 +3269,7 @@ const VIRTUAL_VIEW_ITERATOR: &str = q!("Config.VirtualViewIterator");
 const VIEW_ITERATOR: &str = q!("Config.ViewIterator");
 const VIEW_FOR_COLOR_SPACE_ITERATOR: &str = q!("Config.ViewForColorSpaceIterator");
 const VIEW_FOR_VIEW_TYPE_ITERATOR: &str = q!("Config.ViewForViewTypeIterator");
+const DISPLAY_VIEW_ALIAS_ITERATOR: &str = q!("Config.DisplayViewAliasIterator");
 const ACTIVE_DISPLAYS_LIST_ITERATOR: &str = q!("Config.ActiveDisplaysListIterator");
 const ACTIVE_VIEWS_LIST_ITERATOR: &str = q!("Config.ActiveViewsListIterator");
 const LOOK_NAME_ITERATOR: &str = q!("Config.LookNameIterator");
@@ -3116,6 +3291,9 @@ enum IterArgs {
     TypeDisplay(ViewType, Vec<u8>),
     Type(ViewType),
     Visibility(NamedTransformVisibility),
+    /// `DisplayViewAliasIterator`'s display and view (`std::string`s, read up to their
+    /// first NUL by `c_str()`).
+    DisplayView(Vec<u8>, Vec<u8>),
 }
 
 /// An iterator of the config `rc` with `args`.
@@ -3156,6 +3334,13 @@ fn visibility_arg(args: &IterArgs) -> NamedTransformVisibility {
     match args {
         IterArgs::Visibility(v) => *v,
         _ => NamedTransformVisibility::All,
+    }
+}
+
+fn display_view_args(args: &IterArgs) -> (&[u8], &[u8]) {
+    match args {
+        IterArgs::DisplayView(d, v) => (c_str(d), c_str(v)),
+        _ => (b"", b""),
     }
 }
 
@@ -3271,6 +3456,18 @@ iter_kind!(
     |c, a| c.num_views_of_type(type_arg(a), display_arg(a)),
     |py, n, a, i| str_item(py, n.config.view_of_type(type_arg(a), display_arg(a), i))
 );
+// clsDisplayViewAliasIterator (PyConfig.cpp:1345-1366 @ v2.6.0).
+iter_kind!(
+    DISPLAY_VIEW_ALIASES,
+    |c, a| {
+        let (d, v) = display_view_args(a);
+        c.num_display_view_aliases(d, v)
+    },
+    |py, n, a, i| {
+        let (d, v) = display_view_args(a);
+        str_item(py, n.config.display_view_alias(d, v, i))
+    }
+);
 iter_kind!(
     ACTIVE_DISPLAYS,
     |c, _| c.num_active_displays(),
@@ -3349,7 +3546,7 @@ iter_kind!(
 );
 
 /// The iterator classes: the class, the kind, the item type as signatures write it.
-static ITERATORS: [(&str, &str, &IterKind, &str); 25] = [
+static ITERATORS: [(&str, &str, &IterKind, &str); 26] = [
     (
         "EnvironmentVarNameIterator",
         ENVIRONMENT_VAR_NAME_ITERATOR,
@@ -3418,6 +3615,12 @@ static ITERATORS: [(&str, &str, &IterKind, &str); 25] = [
         "ViewForViewTypeIterator",
         VIEW_FOR_VIEW_TYPE_ITERATOR,
         &VIEWS_FOR_TYPE,
+        "str",
+    ),
+    (
+        "DisplayViewAliasIterator",
+        DISPLAY_VIEW_ALIAS_ITERATOR,
+        &DISPLAY_VIEW_ALIASES,
         "str",
     ),
     (
@@ -3812,7 +4015,9 @@ static RESOLVE_CONFIG_PATH: Function = function(
 
 /// Port of `bindPyConfig` (src/bindings/python/PyConfig.cpp:83-1491 @ v2.5.2), in its order:
 /// the iterator classes nested in the class (89-187), the class's methods (189-1011), the
-/// iterators' (1013-1479), the module functions (1481-1490).
+/// iterators' (1013-1479), the module functions (1481-1490); with the 2.6.0 methods and
+/// `DisplayViewAliasIterator` (PyConfig.cpp:42, 69-70, 152-156, 340-343, 360-363, 381-391,
+/// 437-443, 463-468, 500-511, 528-541, 1345-1366 @ v2.6.0).
 pub(crate) fn bind_py_config(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     let cls = class(py, CONFIG)?;
@@ -3869,6 +4074,8 @@ pub(crate) fn bind_py_config(m: &Bound<'_, PyModule>) -> PyResult<()> {
         &GET_COLOR_SPACE,
         &GET_COLOR_SPACE_NAMES,
         &GET_CANONICAL_NAME,
+        &GENERATE_LOCAL_ID_FOR_COLOR_SPACE,
+        &FIND_COLOR_SPACE_FOR_ID,
         &ADD_COLOR_SPACE,
         &REMOVE_COLOR_SPACE,
         &IS_COLOR_SPACE_LINEAR,
@@ -3877,6 +4084,8 @@ pub(crate) fn bind_py_config(m: &Bound<'_, PyModule>) -> PyResult<()> {
         &PARSE_COLOR_SPACE_FROM_STRING,
         &IS_STRICT_PARSING_ENABLED,
         &SET_STRICT_PARSING_ENABLED,
+        &GET_USE_DISPLAY_ALIASES,
+        &SET_USE_DISPLAY_ALIASES,
         &SET_INACTIVE_COLOR_SPACES,
         &GET_INACTIVE_COLOR_SPACES,
         &IS_INACTIVE_COLOR_SPACE,
@@ -3897,10 +4106,16 @@ pub(crate) fn bind_py_config(m: &Bound<'_, PyModule>) -> PyResult<()> {
         &GET_DEFAULT_DISPLAY,
         &GET_DISPLAYS,
         &GET_DISPLAYS_ALL,
+        &GET_CANONICAL_DISPLAY_NAME,
+        &GET_DISPLAY_DESCRIPTION,
+        &GET_CANONICAL_VIEW_NAME,
         &GET_DEFAULT_VIEW,
         &GET_VIEWS,
         &GET_DISPLAY_VIEW_TRANSFORM_NAME,
         &GET_DISPLAY_VIEW_COLOR_SPACE_NAME,
+        &GET_RESOLVED_DISPLAY_VIEW_COLOR_SPACE_NAME,
+        &GET_DISPLAY_VIEW_ALIASES,
+        &HAS_DISPLAY_VIEW_ALIAS,
         &GET_DISPLAY_VIEW_LOOKS,
         &GET_DISPLAY_VIEW_RULE,
         &GET_DISPLAY_VIEW_DESCRIPTION,

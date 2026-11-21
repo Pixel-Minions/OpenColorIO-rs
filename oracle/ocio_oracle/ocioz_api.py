@@ -142,18 +142,25 @@ def _written(root, out, skip=None):
     says}, a symbolic link {"path", "target": {"bytes": hex}, and on Windows its "attributes"};
     on Windows a file or directory with alternate data streams has "streams" (_streams). Each
     is lstat'ed before it is read, so that reading can't change its access time. os.walk
-    doesn't follow links to directories, and a link isn't read through."""
+    doesn't follow links to directories, and a link isn't read through. A Windows junction
+    is a link too, with "junction": true (os.walk would walk into it: it is taken out)."""
     files, dirs, links = [], [], []
     for directory, dirnames, filenames in os.walk(root):
         if directory == root and skip is not None and skip in dirnames:
             dirnames.remove(skip)
-        for name in dirnames + filenames:
+        junctions = [n for n in dirnames if os.path.isjunction(os.path.join(directory, n))]
+        for name in junctions:
+            dirnames.remove(name)
+        for name in dirnames + junctions + filenames:
             full = os.path.join(directory, name)
             relative = os.fsencode(os.path.relpath(full, root))
             relative = relative.replace(os.fsencode(os.sep), b"/")
             entry = {"path": {"bytes": relative.hex()}}
             st = os.lstat(full)
-            if stat.S_ISLNK(st.st_mode) or (os.name == "nt" and os.path.islink(full)):
+            if name in junctions:
+                entry["junction"] = True
+            if (name in junctions or stat.S_ISLNK(st.st_mode)
+                    or (os.name == "nt" and os.path.islink(full))):
                 entry["target"] = {"bytes": os.fsencode(os.readlink(full)).hex()}
                 if os.name == "nt":
                     entry["attributes"] = st.st_file_attributes
@@ -246,14 +253,15 @@ def _check_links(archive):
     with the targets its UNIX1 field and its contents give. Refused: an absolute target (a
     leading separator, or a ':' on Windows); a target whose ".." go above `<root>`; a link whose
     name, or whose target, goes through another link, or back into `<root>/extracted` (whose
-    effect a lexical check can't follow). An archive it can't read is the wheel's to refuse."""
+    effect a lexical check can't follow). An archive it can't read is the wheel's to refuse.
+    Returns how many link entries the archive has."""
     windows = os.name == "nt"
     try:
         with open(archive, "rb") as f:
             data = f.read()
     except OSError:
         # Nor can the wheel read it.
-        return
+        return 0
     try:
         contents = {}
         with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -319,6 +327,155 @@ def _check_links(archive):
                     if tuple(here) in names and here != parts:
                         raise RequestError(
                             f"ocioz: the link {b'/'.join(parts)!r} goes through another link")
+    return len(links)
+
+
+def _inside(root, path):
+    """Whether the absolute `path`, normalized, is `root` or under it (on Windows ignoring
+    case, as its file system does)."""
+    path, root = os.path.normpath(path), os.path.normpath(root)
+    if os.name == "nt":
+        path, root = os.path.normcase(path), os.path.normcase(root)
+    return path == root or path.startswith(root + os.sep)
+
+
+def _check_prepare(items):
+    """The "prepare" list checked: each {"path", "kind", and "target" for a link}. Refused
+    (RequestError): another key or kind; a path or target that isn't text, is absolute (or on
+    Windows holds a ':'), or leads out of the request's directory, lexically; a path, or a
+    link's target, that is or goes through an earlier item's link (so that each lexical check
+    is the system's own). Returns whether the list makes a link."""
+    if not isinstance(items, list):
+        raise RequestError("ocioz: prepare must be a list")
+    probe = os.path.join(os.sep, "root")
+
+    def norm(path):
+        return os.path.normcase(os.path.normpath(path))
+
+    def through(start, relative):
+        # Each prefix of `relative` from `start`, before ".." takes anything away.
+        current = start
+        if os.name == "nt":
+            relative = relative.replace("\\", "/")
+        for part in relative.split("/"):
+            current = os.path.join(current, part)
+            if norm(current) in links:
+                return True
+        return False
+
+    links = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise RequestError(f"ocioz: a prepare item must be an object, not {item!r}")
+        kind = item.get("kind")
+        if kind not in ("dir", "junction", "symlink"):
+            raise RequestError(f"ocioz: unknown prepare kind {kind!r}")
+        check_keys("ocioz: prepare", item, {"path", "kind"} | ({"target"} if kind != "dir"
+                                                                else set()))
+        names = [("path", item.get("path"))]
+        if kind != "dir":
+            names.append(("target", item.get("target")))
+        for key, value in names:
+            if not isinstance(value, str) or not value:
+                raise RequestError(f"ocioz: prepare {key} must be text, not {value!r}")
+            if os.path.isabs(value) or value.startswith(("/", "\\")) or (
+                    os.name == "nt" and ":" in value):
+                raise RequestError(f"ocioz: prepare {key} {value!r} is absolute")
+            if os.name == "nt" and any(
+                    part.endswith((".", " ")) and part not in (".", "..") or "~" in part
+                    for part in value.replace("\\", "/").split("/")):
+                # Windows drops a trailing dot or space and takes 8.3 names (with '~'): other
+                # spellings of a name than the text check sees.
+                raise RequestError(f"ocioz: prepare {key} {value!r} has a component Windows "
+                                   "spells another way")
+        path = os.path.join(probe, item["path"])
+        if not _inside(probe, path) or os.path.normpath(path) == os.path.normpath(probe):
+            raise RequestError(f"ocioz: prepare path {item['path']!r} leads out of the "
+                               "request's directory")
+        if through(probe, item["path"]):
+            raise RequestError(f"ocioz: prepare path {item['path']!r} goes through a link")
+        if kind == "junction" and not _inside(probe, os.path.join(probe, item["target"])):
+            raise RequestError(f"ocioz: prepare target {item['target']!r} leads out of the "
+                               "request's directory")
+        if kind == "symlink" and not _inside(
+                probe, os.path.join(os.path.dirname(path), item["target"])):
+            raise RequestError(f"ocioz: prepare target {item['target']!r} leads out of the "
+                               "request's directory")
+        if kind == "junction" and through(probe, item["target"]) or (
+                kind == "symlink" and through(os.path.dirname(path), item["target"])):
+            raise RequestError(f"ocioz: prepare target {item['target']!r} goes through a link")
+        if kind != "dir":
+            links.append(norm(path))
+    return bool(links)
+
+
+def _native(text):
+    """A path or target with the platform's separators (on Windows `/` becomes a backslash, so that a
+    link's target is one the system follows)."""
+    return text.replace("/", os.sep) if os.name == "nt" else text
+
+
+def _prepare(root, items):
+    """Makes the "prepare" items under `root`, in their order (_check_prepare checked them), and
+    reports for each whether it was made: a directory (os.makedirs), a junction (Windows only:
+    _winapi.CreateJunction to the normalized path of its target under `root`, made only where
+    it then leads to a directory) and a symbolic link (os.symlink of the target, with the
+    platform's separators, relative to the link's directory; a directory link on Windows where
+    the target ends with a separator).
+
+    Then every link made must lead, as the system resolves it (os.path.realpath, strict),
+    to a path strictly under `root`: otherwise (a dangling link too) the links are removed,
+    without following them, and the request is refused (RequestError), so that nothing the
+    extraction writes outlives the request whatever spellings the system takes."""
+    made, links = [], []
+    for item in items:
+        path = os.path.join(root, _native(item["path"]))
+        try:
+            if item["kind"] == "dir":
+                os.makedirs(path)
+            elif item["kind"] == "junction":
+                if os.name != "nt":
+                    raise OSError("junctions are Windows'")
+                import _winapi
+                # CreateJunction pads a target that isn't normalized with NULs.
+                _winapi.CreateJunction(os.path.normpath(os.path.join(root, item["target"])),
+                                       path)
+                links.append(path)
+                if not os.path.isdir(path):
+                    raise OSError("the junction leads nowhere")
+            else:
+                target = _native(item["target"])
+                os.symlink(target, path, target_is_directory=target.endswith(os.sep))
+                links.append(path)
+        except OSError:
+            made.append(False)
+            continue
+        made.append(True)
+    real_root = os.path.normcase(os.path.realpath(root))
+    for link in links:
+        # A dangling link: realpath(strict=True) doesn't always say so on Windows.
+        try:
+            real = (os.path.normcase(os.path.realpath(link, strict=True))
+                    if os.path.exists(link) else None)
+        except OSError:
+            real = None
+        if real is None or not real.startswith(real_root + os.sep):
+            for each in links:
+                _unlink(each)
+            raise RequestError(f"ocioz: a prepared link, {os.path.relpath(link, root)!r}, "
+                               "leads out of the request's directory or nowhere")
+    return made
+
+
+def _unlink(path):
+    """Removes the link or junction `path` without following it (a directory link and a
+    junction with rmdir on Windows); a path that isn't one is left."""
+    if not (os.path.islink(path) or os.path.isjunction(path)):
+        return
+    try:
+        os.unlink(path)
+    except OSError:
+        os.rmdir(path)
 
 
 def _name_bytes(info):
@@ -337,7 +494,13 @@ def ocioz(args, blobs):
                   destination is spelled, relative to the new temporary directory, a path that
                   normalizes to "extracted" (default "extracted", e.g. "sub/../extracted")}:
                   ExtractOCIOZArchive(archive, destination) into the directory "extracted" of
-                  a new temporary directory
+                  a new temporary directory; "prepare" (optional): a list of items made in
+                  that temporary directory first, in order (_prepare): {"path": relative to
+                  it, "kind": "dir"}, {"path", "kind": "junction", "target": relative to it}
+                  or {"path", "kind": "symlink", "target": as the link holds it, relative to
+                  its directory}; paths and targets that are absolute or lead out of it are
+                  refused (_check_prepare), and so are link entries in the archive where
+                  the list makes a link (whose effect a lexical check can't follow)
     result:
       archive:    "entries": in the archive's order, each {"name": {"bytes": hex}, "method",
                   "flag_bits", "create_system", "create_version", "extract_version",
@@ -356,7 +519,10 @@ def ocioz(args, blobs):
                   link "target" {"bytes": hex} and on Windows "attributes"; on Windows a file
                   or directory with alternate data streams "streams". "outside": the same, for
                   what the extraction wrote in the temporary directory outside the destination
-                  (through links)
+                  (through links); "prepared": with "prepare", whether each item was made (a
+                  list of booleans: a symbolic link needs the privilege, or Windows' Developer
+                  Mode, which os.symlink asks for); what the items made is reported with the
+                  rest
       exception, stage   when OCIO or the binding raised: {"type", "message"}, and where:
                   "config", "archive" or "extract"; at the "extract" stage, also "files",
                   "dirs", "links" and "outside": what the extraction wrote before it failed
@@ -376,9 +542,13 @@ def ocioz(args, blobs):
     if ("archive" in args) == ("extract" in args):
         raise RequestError("ocioz takes archive or extract, not both or neither")
     if "extract" in args:
-        check_keys("ocioz: extract", args["extract"], {"archive", "destination"})
+        check_keys("ocioz: extract", args["extract"], {"archive", "destination", "prepare"})
         archive = text("extract archive", args["extract"].get("archive"))
-        _check_links(archive)
+        archive_links = _check_links(archive)
+        prepare = args["extract"].get("prepare")
+        if prepare is not None and _check_prepare(prepare) and archive_links:
+            raise RequestError("ocioz: an archive with link entries can't be extracted where "
+                               "prepare makes links")
         spelled = args["extract"].get("destination", "extracted")
         if (not isinstance(spelled, str) or os.path.isabs(spelled)
                 or os.path.normpath(spelled) != "extracted"):
@@ -406,6 +576,8 @@ def ocioz(args, blobs):
                     out.append(f.read())
                 result["archive"] = len(out) - 1
             else:
+                if prepare is not None:
+                    prepared = _prepare(root, prepare)
                 stage[0] = "extract"
                 OCIO.ExtractOCIOZArchive(archive, spelled_destination)
                 result.update(written(out))
@@ -415,5 +587,7 @@ def ocioz(args, blobs):
             result, out = {"exception": exception_result(exc), "stage": stage[0]}, []
             if stage[0] == "extract":
                 result.update(written(out))
+        if "extract" in args and prepare is not None:
+            result["prepared"] = prepared
     result["log"] = log
     return result, out

@@ -672,6 +672,44 @@ def dump_object(obj):
     return out
 
 
+# The name the dump's view probes end with: one meant to be no view's alias.
+NOT_A_VIEW_ALIAS = "not an alias"
+
+# The display name the dump's display probes end with: one meant to name no display.
+NOT_A_DISPLAY = "not a display"
+
+_ASCII_UPPER = {c: c - 32 for c in range(ord("a"), ord("z") + 1)}
+_ASCII_LOWER = {c: c + 32 for c in range(ord("A"), ord("Z") + 1)}
+
+
+def _ascii_upper(name):
+    """`name` (text, or bytes the binding couldn't decode) with its ASCII letters upper-cased
+    and every other character as it is."""
+    return name.upper() if isinstance(name, bytes) else name.translate(_ASCII_UPPER)
+
+
+def _ascii_lower(name):
+    """`name` (text, or bytes the binding couldn't decode) with its ASCII letters lower-cased
+    and every other character as it is."""
+    return name.lower() if isinstance(name, bytes) else name.translate(_ASCII_LOWER)
+
+
+def _spellings(name):
+    """`name` as it is, with its ASCII letters upper-cased, then lower-cased."""
+    return (name, _ascii_upper(name), _ascii_lower(name))
+
+
+def _name_of(fn):
+    """The name fn() returns, as text or as the bytes the binding couldn't decode; None where
+    the library raised."""
+    try:
+        return fn()
+    except UnicodeDecodeError as exc:
+        return bytes(exc.object)
+    except REPORTED:
+        return None
+
+
 def dump_config(config):
     """Everything a config holds, through every getter, in this order (each value as value_out
     writes it, or {"exception": ...} or {"undecodable": hex} where the getter raised or its text
@@ -690,10 +728,12 @@ def dump_config(config):
       lookups       per name of the color spaces, their aliases, the roles, the named transforms
                     and their aliases, the looks and the view transforms (each once, in that
                     order): {"name", "getColorSpace" (the found space's name, or null),
-                    "getCanonicalName", "getNamedTransform" (the found one's name, or null)}
+                    "getCanonicalName", "getNamedTransform" (the found one's name, or null),
+                    "getCanonicalDisplayName", "getDisplayDescription"}
       environment   per name of getEnvironmentVarNames(): [name, getEnvironmentVarDefault]
       displays      per display of getDisplaysAll(): {"display", "isDisplayTemporary",
-                    "getDefaultView", "getViews": getViews(display), "VIEW_SHARED" and
+                    "getDefaultView", "getViews": getViews(display), "getCanonicalDisplayName",
+                    "getDisplayDescription", "display_probes" (below), "VIEW_SHARED" and
                     "VIEW_DISPLAY_DEFINED": getViews(type, display), "views": per view of
                     those (each once) the view getters below, "by_color_space": per color space
                     [name, getViews(display, name), getDefaultView(display, name)]}
@@ -713,8 +753,20 @@ def dump_config(config):
       serialize     serialize()
       validate      null, or validate()'s exception (or {"undecodable"})
       not_dumped    the get*/is*/has* methods the dump never calls
-    The view getters: {"view", "hasView", "isViewShared", and getDisplayView{TransformName,
-    ColorSpaceName,Looks,Rule,Description}}."""
+    The view getters: {"view", "hasView", "isViewShared", getDisplayView{TransformName,
+    ColorSpaceName,Looks,Rule,Description}, and OCIO 2.6's "getDisplayViewAliases",
+    "hasDisplayViewAlias": per probe [probe, hasDisplayViewAlias(display, view, probe)],
+    "getCanonicalViewName" and "getResolvedDisplayViewColorSpaceName" of the view, and
+    "by_probe": per probe [probe, getCanonicalViewName(display, probe),
+    getResolvedDisplayViewColorSpaceName(display, probe)], and for a display's view (not a
+    shared view's entry) "by_display": per display probe of the display [display probe, the
+    by_probe list with that name as the display]}. The probes: the view's name and each of its
+    aliases, then NOT_A_VIEW_ALIAS. A display's probes (its entry's "display_probes": [display
+    probe, getCanonicalDisplayName(display probe)]): the display's name, the name and each alias
+    of the color space getColorSpace(display) finds, and each role whose getRoleColorSpace names
+    that color space (by its name or an alias: getCanonicalName), then NOT_A_DISPLAY, never the
+    display's own name. Each name is probed as it is, with its ASCII letters upper-cased, then
+    lower-cased; each probe once, in that order."""
     out = {"class": "Config"}
     getters, _ = _getters(config, skip=("getColorSpaces", "getLooks", "getViewTransforms",
                                         "getNamedTransforms"))
@@ -785,7 +837,9 @@ def dump_config(config):
     out["lookups"] = [{"name": value_out(k),
                        "getColorSpace": attempt(found_name, config.getColorSpace, k),
                        "getCanonicalName": attempt(config.getCanonicalName, k),
-                       "getNamedTransform": attempt(found_name, config.getNamedTransform, k)}
+                       "getNamedTransform": attempt(found_name, config.getNamedTransform, k),
+                       "getCanonicalDisplayName": attempt(config.getCanonicalDisplayName, k),
+                       "getDisplayDescription": attempt(config.getDisplayDescription, k)}
                       for k in keys]
     note("getCanonicalName", "getNamedTransform")
 
@@ -793,12 +847,63 @@ def dump_config(config):
                           for n in raw_strings(config.getEnvironmentVarNames)]
     note("getEnvironmentVarDefault")
 
-    def view_getters(display, view):
+    def display_probes(display):
+        found = []
+        try:
+            space = config.getColorSpace(display)
+        except REPORTED:
+            space = None
+        names = [display]
+        space_name = None
+        if space is not None:
+            space_name = _name_of(space.getName)
+            names.append(space_name)
+            names += raw_strings(space.getAliases)
+        for role in roles:
+            named = _name_of(lambda r=role: config.getRoleColorSpace(r))
+            if named is None or space_name is None:
+                continue
+            if _name_of(lambda n=named: config.getCanonicalName(n)) == space_name:
+                names.append(role)
+        for name in names:
+            for probe in _spellings(name):
+                if probe not in found:
+                    found.append(probe)
+        if NOT_A_DISPLAY not in found:
+            found.append(NOT_A_DISPLAY)
+        return [p for p in found if p != display]
+
+    def view_getters(display, view, displays_probed=()):
         entry = {"view": value_out(view), "hasView": attempt(config.hasView, display, view),
                  "isViewShared": attempt(config.isViewShared, display, view)}
         for what in ("TransformName", "ColorSpaceName", "Looks", "Rule", "Description"):
             entry[f"getDisplayView{what}"] = attempt(getattr(config, f"getDisplayView{what}"),
                                                      display, view)
+        # OCIO 2.6: the view's aliases, and the names the display and view resolve to. The
+        # probes: the view's name and each alias, as they are and with their ASCII letters
+        # upper-cased, then lower-cased (OCIO compares names ignoring the case of ASCII letters
+        # only), then a name that is no alias; each once, in that order.
+        entry["getDisplayViewAliases"] = attempt(config.getDisplayViewAliases, display, view)
+        probes = []
+        for name in [view] + raw_strings(lambda: config.getDisplayViewAliases(display, view)):
+            for probe in _spellings(name):
+                if probe not in probes:
+                    probes.append(probe)
+        if NOT_A_VIEW_ALIAS not in probes:
+            probes.append(NOT_A_VIEW_ALIAS)
+        entry["hasDisplayViewAlias"] = [
+            [value_out(a), attempt(config.hasDisplayViewAlias, display, view, a)]
+            for a in probes]
+        entry["getCanonicalViewName"] = attempt(config.getCanonicalViewName, display, view)
+        entry["getResolvedDisplayViewColorSpaceName"] = attempt(
+            config.getResolvedDisplayViewColorSpaceName, display, view)
+        def by_probe(shown):
+            return [[value_out(a), attempt(config.getCanonicalViewName, shown, a),
+                     attempt(config.getResolvedDisplayViewColorSpaceName, shown, a)]
+                    for a in probes]
+        entry["by_probe"] = by_probe(display)
+        if display != "":
+            entry["by_display"] = [[value_out(d), by_probe(d)] for d in displays_probed]
         return entry
 
     displays = []
@@ -806,14 +911,19 @@ def dump_config(config):
         entry = {"display": value_out(display),
                  "isDisplayTemporary": attempt(config.isDisplayTemporary, display),
                  "getDefaultView": attempt(config.getDefaultView, display),
-                 "getViews": attempt(config.getViews, display)}
+                 "getViews": attempt(config.getViews, display),
+                 "getCanonicalDisplayName": attempt(config.getCanonicalDisplayName, display),
+                 "getDisplayDescription": attempt(config.getDisplayDescription, display)}
+        probed = display_probes(display)
+        entry["display_probes"] = [[value_out(d), attempt(config.getCanonicalDisplayName, d)]
+                                   for d in probed]
         views = []
         for vt in _enum_members(OCIO.ViewType):
             entry[vt.name] = attempt(config.getViews, vt, display)
             views.extend(v for v in raw_strings(lambda t=vt: config.getViews(t, display))
                          if v not in views)
         views.extend(v for v in raw_strings(lambda: config.getViews(display)) if v not in views)
-        entry["views"] = [view_getters(display, v) for v in views]
+        entry["views"] = [view_getters(display, v, probed) for v in views]
         entry["by_color_space"] = [
             [value_out(cs), attempt(config.getViews, display, cs),
              attempt(config.getDefaultView, display, cs)] for cs in all_names]
@@ -822,7 +932,9 @@ def dump_config(config):
     out["shared_views"] = [view_getters("", v) for v in raw_strings(config.getSharedViews)]
     note("isDisplayTemporary", "getDefaultView", "getViews", "hasView", "isViewShared",
          *[f"getDisplayView{w}" for w in ("TransformName", "ColorSpaceName", "Looks", "Rule",
-                                          "Description")])
+                                          "Description")],
+         "getCanonicalDisplayName", "getDisplayDescription", "getDisplayViewAliases",
+         "hasDisplayViewAlias", "getCanonicalViewName", "getResolvedDisplayViewColorSpaceName")
 
     virtual = {}
     vviews = []

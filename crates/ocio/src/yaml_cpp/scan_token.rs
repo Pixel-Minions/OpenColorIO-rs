@@ -221,7 +221,7 @@ impl Scanner<'_> {
         Ok(())
     }
 
-    /// `ScanValue()` (scantoken.cpp:191-218): `:`, which validates the pending simple key, or
+    /// `ScanValue()` (scantoken.cpp:192-222 @ yaml-cpp-0.9.0): `:`, which validates the pending simple key, or
     /// stands alone.
     pub(super) fn scan_value(&mut self) -> Result<()> {
         // and check that simple key
@@ -245,6 +245,9 @@ impl Scanner<'_> {
             // can only put a simple key here if we're in block context
             self.simple_key_allowed = self.in_block_context();
         }
+
+        // we are parsing a `key: value` pair; scalars are always allowed
+        self.scalar_value_allowed = true;
 
         // eat
         let mark = self.input.mark();
@@ -429,6 +432,10 @@ impl Scanner<'_> {
         // and scan
         let scalar = scan_scalar(&mut self.input, &mut params)?;
         self.simple_key_allowed = false;
+        // we just scanned a quoted scalar;
+        // we can only have another scalar in this line
+        // if we are in a flow, eg: `[ "foo", "bar" ]` is ok, but `"foo", "bar"` isn't.
+        self.scalar_value_allowed = self.in_flow_context();
         self.can_be_json_flow = true;
 
         let mut token = Token::new(TokenType::NonPlainScalar, mark);

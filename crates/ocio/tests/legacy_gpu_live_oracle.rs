@@ -458,7 +458,7 @@ fn wheel(response: &Response) -> Outcome {
         result.get("crashed").is_none(),
         "native oracle crashed: {result}"
     );
-    assert_eq!(result["oracle_native"]["wheel_version"], "2.5.2");
+    assert_eq!(result["oracle_native"]["wheel_version"], "2.6.0");
     assert_eq!(
         result["oracle_native"]["source_key"]
             .as_str()

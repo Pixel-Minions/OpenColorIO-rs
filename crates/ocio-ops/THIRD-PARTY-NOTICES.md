@@ -5,10 +5,10 @@ This package is part of OpenColorIO-rs, a port of OpenColorIO 2.5.2 under BSD-3-
 below. The sections are those of the repository's `THIRD-PARTY-NOTICES.md`, which lists every
 project the port takes code from. The crates this package depends on ship their own licenses.
 
-## Imath 3.2.1
+## Imath 3.2.3
 
 <https://github.com/AcademySoftwareFoundation/Imath>. The half-float conversions OpenColorIO
-2.5.2 uses (`half.h`, `half.cpp`), ported in `crates/ocio-ops/src/imath_half.rs`.
+2.6.0 uses (`half.h`, `half.cpp`), ported in `crates/ocio-ops/src/imath_half.rs`.
 
 ```text
 Copyright Contributors to the OpenEXR Project.

@@ -33,9 +33,17 @@ pub(super) enum Build {
 
 #[derive(Debug)]
 pub(super) enum Input {
-    Ramp { low: f32, high: f32 },
+    Ramp {
+        low: f32,
+        high: f32,
+    },
     Literal(&'static [f32]),
-    Grid { edge: usize, scale: f32 },
+    Grid {
+        edge: usize,
+        scale: f32,
+    },
+    /// A JMh literal repacked as HMJ (`JMhToHMJ`, FixedFunctionOp_test.cpp:848-864 @ v2.6.0).
+    JmhToHmj(&'static [f32]),
 }
 
 #[derive(Debug)]
@@ -70,6 +78,24 @@ fn identity_grid(edge: usize, scale: f32) -> Vec<f32> {
     values
 }
 
+/// Reorders and scales JMh values into the HMJ layout of FIXED_FUNCTION_ACES_RGB_TO_HMJ_20:
+/// [ h/360, M/200, J/100 ], alpha as it is.
+///
+/// Port of `JMhToHMJ` (FixedFunctionOp_test.cpp:848-864 @ v2.6.0).
+fn jmh_to_hmj(jmh: &[f32]) -> Vec<f32> {
+    let mut hmj = vec![0.0; jmh.len()];
+    for idx in (0..jmh.len()).step_by(4) {
+        let j = jmh[idx];
+        let m = jmh[idx + 1];
+        let h = jmh[idx + 2];
+        hmj[idx] = h / 360.0;
+        hmj[idx + 1] = m / 200.0;
+        hmj[idx + 2] = j / 100.0;
+        hmj[idx + 3] = jmh[idx + 3];
+    }
+    hmj
+}
+
 pub(super) fn input_test(case: &Case) -> GpuUnitTest {
     let mut test = GpuUnitTest::new("FixedFunction", case.name);
     test.comparison.error_threshold = case.threshold;
@@ -88,6 +114,7 @@ pub(super) fn input_test(case: &Case) -> GpuUnitTest {
         }
         Input::Literal(values) => Some(values.to_vec()),
         Input::Grid { edge, scale } => Some(identity_grid(*edge, *scale)),
+        Input::JmhToHmj(jmh) => Some(jmh_to_hmj(jmh)),
     };
     if let Some(values) = custom {
         assert_eq!(values.len(), case.original_entries);

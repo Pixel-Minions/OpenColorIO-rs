@@ -46,6 +46,7 @@ fn style(py: Python<'_>, v: i64) -> PyResult<FixedFunctionStyle> {
         AcesRgbToJmh20,
         AcesTonescaleCompress20,
         AcesGamutCompress20,
+        AcesRgbToHmj20,
         RgbToHsyLin,
         RgbToHsyLog,
         RgbToHsyVid,

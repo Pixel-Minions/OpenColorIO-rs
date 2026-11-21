@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 //
-// Ported from minizip-ng 4.0.10 (see `mod.rs` for its notice): an altered version.
+// Ported from minizip-ng 4.2.2 (see `mod.rs` for its notice): an altered version.
 
 //! The system calls of minizip-ng's that safe Rust can't make as minizip-ng makes them:
 //! - `CreateSymbolicLinkW` with minizip-ng's own flags. `std`'s links pass
@@ -11,6 +11,9 @@
 //!   (`mz_os_open_dir`), which for a long path isn't the directory's listing: it matches the
 //!   parent's entries by their long and their 8.3 short names, which `std` can't list.
 //!   `GetLastError` tells how the listing ended.
+//! - `FindFirstFileW` and `FindClose` again, for the reparse tag of a path
+//!   (`dwReserved0`), which `mz_os_read_symlink` reads with `FSCTL_GET_REPARSE_POINT`
+//!   (owner decision 2026-11-18, deviation D-22: no new system call).
 //!
 //! This module is the one exception to `unsafe` outside the SIMD modules, `ocio-py` and the
 //! test kit's C runtime reference (owner decisions 2026-10-17: the link, then the listing;
@@ -72,7 +75,7 @@ fn wide(path: &Path) -> Vec<u16> {
 /// calls `CreateSymbolicLinkW`: with `SYMBOLIC_LINK_FLAG_DIRECTORY` or no flag at all. Whether
 /// the system made it.
 ///
-/// Port of the call in `mz_os_make_symlink` (mz_os_win32.c:483-530 @ 4.0.10, the call at 516-520),
+/// Port of the call in `mz_os_make_symlink` (mz_os_win32.c:563-610 @ 4.2.2, the call at 516-520),
 /// which looks `CreateSymbolicLinkW` up in kernel32 (every Windows the port runs on has it).
 pub(crate) fn create_symbolic_link(path: &Path, target: &Path, directory: bool) -> bool {
     let (path, target) = (wide(path), wide(target));
@@ -100,7 +103,7 @@ pub(crate) struct Listing {
 /// `FindFirstFileW` fails (`mz_os_open_dir` returns no directory).
 ///
 /// Port of the calls in `mz_os_open_dir`, `mz_os_read_dir` and `mz_os_close_dir`
-/// (mz_os_win32.c:362-399, 401-421, 423-435 @ 4.0.10).
+/// (mz_os_win32.c:422-459, 461-481, 483-495 @ 4.2.2).
 pub(crate) fn find_files(pattern: &[u16]) -> Option<Listing> {
     let pattern: Vec<u16> = pattern.iter().copied().chain(Some(0)).collect();
     let name = |data: &Win32FindDataW| {
@@ -151,4 +154,40 @@ pub(crate) fn find_files(pattern: &[u16]) -> Option<Listing> {
     // SAFETY: `handle` is the search `FindFirstFileW` opened, closed once here.
     unsafe { FindClose(handle) };
     Some(listing)
+}
+
+/// `FILE_ATTRIBUTE_REPARSE_POINT` (winnt.h).
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+
+/// The reparse tag of `path` (UTF-16, without its NUL): `dwReserved0` of the entry
+/// `FindFirstFileW` finds for it, where that entry is a reparse point; `None` where it finds
+/// none or the entry isn't one.
+///
+/// What `mz_os_read_symlink` (mz_os_win32.c:612-714 @ 4.2.2) learns from
+/// `FSCTL_GET_REPARSE_POINT` before it reads a target: whether the reparse point is a symbolic
+/// link (`IO_REPARSE_TAG_SYMLINK`). The tag comes from the approved listing call instead
+/// (owner decision 2026-11-18, deviation D-22).
+pub(crate) fn reparse_tag(path: &[u16]) -> Option<u32> {
+    let path: Vec<u16> = path.iter().copied().chain(Some(0)).collect();
+    let mut data = Win32FindDataW {
+        file_attributes: 0,
+        creation_time: [0; 2],
+        last_access_time: [0; 2],
+        last_write_time: [0; 2],
+        file_size_high: 0,
+        file_size_low: 0,
+        reserved0: 0,
+        reserved1: 0,
+        file_name: [0; 260],
+        alternate_file_name: [0; 14],
+    };
+    // SAFETY: `path` is a NUL-terminated UTF-16 string, and `data` a `WIN32_FIND_DATAW` the
+    // function writes; both live until the call returns.
+    let handle = unsafe { FindFirstFileW(path.as_ptr(), &mut data) };
+    if handle == INVALID_HANDLE_VALUE {
+        return None;
+    }
+    // SAFETY: `handle` is the search `FindFirstFileW` opened, closed once here.
+    unsafe { FindClose(handle) };
+    (data.file_attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0).then_some(data.reserved0)
 }

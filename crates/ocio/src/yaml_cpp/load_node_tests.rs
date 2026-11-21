@@ -8,12 +8,12 @@
 //! need `Clone`; `Binary` and `BinaryWithWhitespaces` need `Binary`; `EmitEmptyNode` and
 //! `SpecialFlow` emit nodes), and `ForEach` and `ForEachMap`, which need Boost.
 
-use super::load;
+use super::{load, load_all};
 use crate::yaml_cpp::convert::CChar;
 use crate::yaml_cpp::event_handler::EmitterStyle;
 use crate::yaml_cpp::exceptions::{ExceptionType, Result, error_msg};
 use crate::yaml_cpp::handler_test::Bytes;
-use crate::yaml_cpp::node::Node;
+use crate::yaml_cpp::node::{Node, NodeType};
 
 /// `EXPECT_THROW(statement, InvalidNode)`.
 #[track_caller]
@@ -318,5 +318,122 @@ fn numeric_conversion() -> Result<()> {
     expect_bad_conversion(load(b"-128")?.as_::<std::ffi::c_ulong>());
     expect_bad_conversion(load(b"-128")?.as_::<u64>());
     expect_bad_conversion(load(b"-128")?.as_::<u8>());
+    Ok(())
+}
+
+/// `EXPECT_THROW(Load(input), ParserException)`.
+#[track_caller]
+fn expect_parser_exception(input: &[u8]) {
+    match load(input) {
+        Ok(node) => panic!("no exception for {}: {node:?}", input.escape_ascii()),
+        Err(e) => assert!(e.is_parser_exception(), "{}: {e:?}", input.escape_ascii()),
+    }
+}
+
+/// Port of yaml-cpp 0.9.0 `TEST(NodeTest, LoadNonClosedQuotedString)`.
+#[test]
+fn load_non_closed_quoted_string() {
+    expect_parser_exception(br#""foo"#);
+}
+
+/// Port of yaml-cpp 0.9.0 `TEST(NodeTest, LoadWrongQuotedString)`.
+#[test]
+fn load_wrong_quoted_string() {
+    expect_parser_exception(br#""foo" ["#);
+    expect_parser_exception(br#""foo", ["#);
+}
+
+/// Port of yaml-cpp 0.9.0 `TEST(NodeTest, LoadUnquotedQuotedStrings)`.
+#[test]
+fn load_unquoted_quoted_strings() -> Result<()> {
+    let node = load(br#"foo,"bar""#)?;
+    assert_eq!(
+        Bytes::from(node.as_::<Vec<u8>>()?),
+        Bytes::from(br#"foo,"bar""#)
+    );
+
+    let node = load(br#"foo,bar"#)?;
+    assert_eq!(Bytes::from(node.as_::<Vec<u8>>()?), Bytes::from(b"foo,bar"));
+
+    let node = load(br#"foo,"#)?;
+    assert_eq!(Bytes::from(node.as_::<Vec<u8>>()?), Bytes::from(b"foo,"));
+
+    let node = load(br#"foo "bar""#)?;
+    assert_eq!(
+        Bytes::from(node.as_::<Vec<u8>>()?),
+        Bytes::from(br#"foo "bar""#)
+    );
+    Ok(())
+}
+
+/// Port of yaml-cpp 0.9.0 `TEST(NodeTest, LoadCommaSeparatedStrings)`.
+#[test]
+fn load_comma_separated_strings() {
+    expect_parser_exception(br#""foo","bar""#);
+    expect_parser_exception(br#""foo",bar"#);
+    expect_parser_exception(br#","#);
+    expect_parser_exception(br#""foo","#);
+    expect_parser_exception(br#""foo","""#);
+    expect_parser_exception(br#""foo","#);
+    expect_parser_exception(br#","foo""#);
+    expect_parser_exception(br#",foo"#);
+}
+
+/// Port of yaml-cpp 0.9.0 `TEST(NodeSpecTest, InfiniteLoopNodes)`.
+#[test]
+fn infinite_loop_nodes() {
+    // Until yaml-cpp <= 0.8.0 this caused an infinite loop;
+    // After, it triggers an exception (but LoadAll is smart enough to avoid
+    // the infinite loop in any case).
+    match load_all(b",") {
+        Ok(docs) => panic!("no exception: {docs:?}"),
+        Err(e) => assert!(e.is_parser_exception(), "{e:?}"),
+    }
+}
+
+/// Port of yaml-cpp 0.9.0 `TEST(NodeTest, LoadNewLineStrings)`: the cases that throw, and the
+/// node type of the others. Their emitted text (`Emitter << node`) isn't checked: the port has
+/// no node emitter (`yaml_cpp/mod.rs`).
+#[test]
+fn load_new_line_strings() -> Result<()> {
+    // {input, should_throw}
+    let tests: [(&[u8], bool); 4] = [
+        (b"foo\n, bar", false),
+        (b"foo\n, \"bar\"", false),
+        (b"\"foo\"\n, \"bar\"", true),
+        (b"\"foo\"\n, bar", true),
+    ];
+    for (input, should_throw) in tests {
+        if should_throw {
+            expect_parser_exception(input);
+        } else {
+            let node = load(input)?;
+            assert_eq!(NodeType::Scalar, node.node_type()?);
+        }
+    }
+    Ok(())
+}
+
+/// Port of yaml-cpp 0.9.0 `TEST(NodeTest, LoadSameLineStrings)`.
+#[test]
+fn load_same_line_strings() {
+    expect_parser_exception(br#""foo" "bar""#);
+    expect_parser_exception(br#""foo" bar"#);
+}
+
+/// Port of yaml-cpp 0.9.0 `TEST(LoadNodeTest, BlockCREncoded)`.
+#[test]
+fn block_cr_encoded() -> Result<()> {
+    let node = load(
+        b"blockText: |\r  some arbitrary text \r  spanning some \r  lines, that are split \r  \
+          by CR and NL\rfollowup: 1",
+    )?;
+    assert_eq!(
+        Bytes::from(
+            b"some arbitrary text \nspanning some \nlines, that are split \nby CR and NL\n"
+        ),
+        Bytes::from(node.get(b"blockText")?.as_::<Vec<u8>>()?)
+    );
+    assert_eq!(1, node.get(b"followup")?.as_::<i32>()?);
     Ok(())
 }

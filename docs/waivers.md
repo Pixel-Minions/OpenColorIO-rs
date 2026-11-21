@@ -108,6 +108,7 @@ W0013 below remains the single non-finite GPU class; retired Matrix rules are re
 The five finite exact pins W0014-W0018 are separately owner-approved on 2026-10-30.
 W0019 and W0020, for the dev tools, are owner-approved on 2026-10-31.
 W0021 to W0027, known non-matches the register records, are owner-approved on 2026-11-02.
+W0028, a config file path that isn't ASCII on Windows, is owner-approved on 2026-11-18.
 
 ## W0003 — MatrixOps/matrix (retired 2026-10-29; historical evidence)
 
@@ -610,6 +611,13 @@ directory on Windows, so no check is relaxed in code.
 `Config.archive`. The wheel's file name depends on the machine's ANSI code page and the process's
 locale, so its result isn't fixed by the OS and CPU. The port raises ValueError and creates no
 file. ASCII names and Linux aren't waived, and `group_write_oracle.rs` compares them.
+
+## W0028 - Config file paths that aren't ASCII, on Windows (owner approved 2026-11-18)
+
+`improvements.md` U-750. OCIO 2.6.0's `Config::CreateFromFile` checks the path with
+`std::filesystem::exists`, which MSVC reads in the ANSI code page, so the wheel's answer for a path
+that isn't ASCII depends on the machine's settings. The port refuses such a path with its own
+error. ASCII paths and Linux aren't waived, and `config_files_oracle.rs` compares them.
 
 ## P9-6 - Reviewed C++ tests not applicable (owner approved 2026-10-23)
 

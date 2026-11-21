@@ -24,11 +24,13 @@ pub trait Convert: Sized {
     /// false. Converting the elements of a sequence can throw.
     fn decode(node: &Node) -> Result<Option<Self>>;
 
-    /// `as_if<T, void>::operator()` (node/impl.h:121-135): the value, or
-    /// `TypedBadConversion<T>` at the node's mark (the null mark for `Node()`).
+    /// `as_if<T, void>::operator()` (node/impl.h:122-136 @ yaml-cpp-0.9.0): the value, or
+    /// `TypedBadConversion<T>` at the node's mark. Since 0.9.0 a node without data (`Node()`)
+    /// throws `InvalidNode(m_invalidKey)` ("no fallback", yaml-cpp commit 3d2888c).
     fn as_if(node: &Node) -> Result<Self> {
         if !node.has_data() {
-            return Err(Exception::bad_conversion(node.mark()?));
+            // no fallback
+            return Err(node.invalid());
         }
         match Self::decode(node)? {
             Some(value) => Ok(value),
@@ -55,9 +57,15 @@ impl Convert for Vec<u8> {
         Ok(Some(node.scalar()?.to_vec()))
     }
 
-    /// `as_if<std::string, void>` (node/impl.h:137-149): `"null"` for a null node (`Node()`
-    /// included), the scalar's text, or `TypedBadConversion` for a collection.
+    /// `as_if<std::string, void>` (node/impl.h:138-153 @ yaml-cpp-0.9.0): `InvalidNode` for an
+    /// undefined node (new in 0.9.0; only the inserting `operator[]`, which the port leaves
+    /// out, makes one), `"null"` for a null node (`Node()` included), the scalar's text, or
+    /// `TypedBadConversion` for a collection.
     fn as_if(node: &Node) -> Result<Self> {
+        if node.node_type()? == NodeType::Undefined {
+            // no fallback
+            return Err(node.invalid());
+        }
         if node.node_type()? == NodeType::Null {
             return Ok(b"null".to_vec());
         }

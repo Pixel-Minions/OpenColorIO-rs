@@ -470,7 +470,7 @@ impl Transform {
 /// The base class's check of the direction.
 ///
 /// Upstream throws `"<typeid name>: invalid direction."` for a direction other than forward and
-/// inverse; the name is the compiler's (MSVC's `class OpenColorIO_v2_5::MatrixTransformImpl`,
+/// inverse; the name is the compiler's (MSVC's `class OpenColorIO_v2_6::MatrixTransformImpl`,
 /// GCC's mangled one), so the text differs between the wheels. Neither a Rust
 /// [`TransformDirection`] nor Python's enum can hold such a direction, so the check always
 /// passes here (the owner's decision, 2026-10-01).
@@ -551,187 +551,51 @@ impl Transform {
     }
 }
 
-/// The deepest nesting of transforms that [`build_ops`] and
-/// [`collect_context_variables`](crate::context_variable_utils::collect_context_variables)
-/// follow: a color space, look, view transform or named transform whose transform refers back
-/// to it nests without end. Group transforms don't count here: they name nothing, and the
-/// loader refuses groups nested more than 590 deep (docs/improvements.md, U-60); they count in
-/// [`MAX_NESTING_WEIGHT`].
-///
-/// Upstream has no limit: it recurses until the stack overflows, which ends the process (the
-/// wheel at 573 nested display view transforms on Windows, docs/improvements.md U-58). The port
-/// refuses deeper nesting with an error instead (the owner's general rule), about half the
-/// shallowest depth at which the wheel crashes. The functions [`build_ops`] recurses through
-/// keep their frames small, so that the longest chains it accepts build on a 1 MiB thread at
-/// every optimization level (U-58).
-pub(crate) const MAX_TRANSFORM_NESTING: usize = 256;
-
-/// A level's weight in [`MAX_NESTING_WEIGHT`], in hundredths of a color space transform's: what
-/// a level of each kind costs the wheel's stack, from the depths at which the Windows wheel
-/// crashes (docs/improvements.md, U-58): 1,363 color space transforms; 618 look transforms
-/// (2.21 times as much each); 573 display view transforms (2.38); 794 color space transforms
-/// each in a group (a group 0.72); 1,193 color space transforms before 256 CTF files (a file
-/// 0.66; 2,125 files alone, 0.64). Each is rounded up. A transform that names nothing weighs as
-/// a color space transform: it ends the chain.
-const COLOR_SPACE_WEIGHT: usize = 100;
-/// See [`COLOR_SPACE_WEIGHT`].
-const LOOK_WEIGHT: usize = 221;
-/// See [`COLOR_SPACE_WEIGHT`].
-const DISPLAY_VIEW_WEIGHT: usize = 238;
-/// See [`COLOR_SPACE_WEIGHT`].
-const GROUP_WEIGHT: usize = 72;
-/// See [`COLOR_SPACE_WEIGHT`]: a file of a chain of CTF references, and a file transform's own
-/// level of [`build_ops`]. A file transform reached through [`build_ops`] so counts twice: as a
-/// transform, and as the first file of its chain.
-const FILE_WEIGHT: usize = 67;
-
-/// The heaviest nesting of everything [`build_ops`] and
-/// [`collect_context_variables`](crate::context_variable_utils::collect_context_variables)
-/// recurse through, each level weighed by its kind ([`COLOR_SPACE_WEIGHT`] and siblings),
-/// counting group transforms and (for [`build_ops`]) the files of a chain of CTF references
-/// too: within [`MAX_TRANSFORM_NESTING`] transforms, groups multiply the depth of a chain, and
-/// a chain of transforms can end in a chain of files.
-///
-/// Upstream has no limit: the wheel's stack overflows (docs/improvements.md, U-58). The port
-/// refuses deeper nesting with an error, at half the wheel's stack as the weights measure it
-/// (half of 1,363 color space transforms), so that every kind of chain, groups and files
-/// included, stops at about half the depth at which the wheel crashes, or before. The deepest
-/// group the loader reads (590 groups and the transform they hold, U-60) weighs 42,580.
-pub(crate) const MAX_NESTING_WEIGHT: usize = 1_363 * COLOR_SPACE_WEIGHT / 2;
-
-/// The weight of a level of `transform` (see [`COLOR_SPACE_WEIGHT`]).
-fn nesting_weight(transform: &Transform) -> usize {
-    match transform {
-        Transform::Group(_) => GROUP_WEIGHT,
-        Transform::Look(_) => LOOK_WEIGHT,
-        Transform::DisplayView(_) => DISPLAY_VIEW_WEIGHT,
-        Transform::File(_) => FILE_WEIGHT,
-        _ => COLOR_SPACE_WEIGHT,
-    }
-}
-
 thread_local! {
-    /// How many transforms other than groups [`build_ops`] nests on this thread.
-    static BUILD_NESTING: Cell<usize> = const { Cell::new(0) };
-    /// How many transforms other than groups `collect_context_variables` nests on this thread.
-    static COLLECT_NESTING: Cell<usize> = const { Cell::new(0) };
-    /// The weight of the levels of [`build_ops`] (groups included) and of CTF references that
-    /// nest on this thread.
-    static BUILD_WEIGHT: Cell<usize> = const { Cell::new(0) };
-    /// The weight of the levels of `collect_context_variables` (groups included) that nest on
-    /// this thread.
-    static COLLECT_WEIGHT: Cell<usize> = const { Cell::new(0) };
+    /// `BuildOps`'s `static thread_local int depth` (src/OpenColorIO/Transform.cpp:61 @ v2.6.0).
+    static BUILD_OPS_DEPTH: Cell<i32> = const { Cell::new(0) };
+    /// `CollectContextVariables`'s `static thread_local int depth`
+    /// (src/OpenColorIO/ContextVariableUtils.cpp:194 @ v2.6.0).
+    static COLLECT_DEPTH: Cell<i32> = const { Cell::new(0) };
 }
 
-/// One level of a nesting counter, of a weight, given back when it is dropped.
-pub(crate) struct Level(&'static LocalKey<Cell<usize>>, usize);
+/// One level of upstream's cycle guard, given back when it is dropped.
+///
+/// Port of the `struct DepthGuard` of `BuildOps` and of `CollectContextVariables`
+/// (src/OpenColorIO/Transform.cpp:61-71, ContextVariableUtils.cpp:194-204 @ v2.6.0): a level is
+/// entered only while the depth is at most 32, so 33 calls nest and the 34th throws, whether
+/// the transforms form a cycle or not, groups included. The functions the recursion goes
+/// through keep their frames small, so that the deepest nesting the guards let through, a
+/// chain of CTF references (which recurse outside `BuildOps`, docs/improvements.md U-76) after
+/// it, builds on a 1 MiB thread at every optimization level (U-58).
+pub(crate) struct DepthGuard(&'static LocalKey<Cell<i32>>);
 
-impl Level {
-    /// `weight` more of `counter`; `None` past `limit`.
-    fn enter(
-        counter: &'static LocalKey<Cell<usize>>,
-        weight: usize,
-        limit: usize,
-    ) -> Option<Level> {
-        let total = counter.get() + weight;
-        if total > limit {
+impl DepthGuard {
+    /// `if (depth > 32) throw ...;` then `++depth`: `None` where upstream throws. Not a
+    /// `Result` of an error, so that the frames of the recursion don't hold an error's room
+    /// (docs/improvements.md, U-58).
+    fn enter(depth: &'static LocalKey<Cell<i32>>) -> Option<DepthGuard> {
+        if depth.get() > 32 {
             return None;
         }
-        counter.set(total);
-        Some(Level(counter, weight))
+        depth.set(depth.get() + 1);
+        Some(DepthGuard(depth))
     }
 
-    /// One more file of a chain of CTF references in [`MAX_NESTING_WEIGHT`]'s count of
-    /// [`build_ops`]; `None` past it, whose error is [`total_too_deep`].
-    pub(crate) fn file() -> Option<Level> {
-        Level::enter(&BUILD_WEIGHT, FILE_WEIGHT, MAX_NESTING_WEIGHT)
+    /// A level of [`build_ops`].
+    pub(crate) fn build() -> Option<DepthGuard> {
+        DepthGuard::enter(&BUILD_OPS_DEPTH)
+    }
+
+    /// A level of `collect_context_variables`.
+    pub(crate) fn collect() -> Option<DepthGuard> {
+        DepthGuard::enter(&COLLECT_DEPTH)
     }
 }
 
-impl Drop for Level {
+impl Drop for DepthGuard {
     fn drop(&mut self) {
-        self.0.set(self.0.get() - self.1);
-    }
-}
-
-/// The limit a level passed.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum TooDeep {
-    /// [`MAX_TRANSFORM_NESTING`].
-    Transforms,
-    /// [`MAX_NESTING_WEIGHT`].
-    Total,
-}
-
-impl TooDeep {
-    /// The error of a level past the limit.
-    #[cold]
-    #[inline(never)]
-    pub(crate) fn error<T>(self) -> Result<T> {
-        match self {
-            TooDeep::Transforms => Err(Exception::new(format!(
-                "The transforms nest more than {MAX_TRANSFORM_NESTING} levels deep: a color \
-                 space, look, view transform or named transform may refer to itself."
-            ))),
-            TooDeep::Total => total_too_deep(),
-        }
-    }
-}
-
-/// The error of a level past [`MAX_NESTING_WEIGHT`].
-#[cold]
-#[inline(never)]
-pub(crate) fn total_too_deep<T>() -> Result<T> {
-    Err(Exception::new(
-        "The transforms nest too deep, counting groups and CTF references: upstream's stack \
-         overflows.",
-    ))
-}
-
-/// One level of nesting of [`build_ops`] or `collect_context_variables`: of the transforms
-/// other than groups, and of the weight, given back when it is dropped.
-pub(crate) struct Nesting {
-    /// The level of [`MAX_TRANSFORM_NESTING`], but for a group.
-    _transform: Option<Level>,
-    /// The level of [`MAX_NESTING_WEIGHT`].
-    _total: Level,
-}
-
-impl Nesting {
-    /// One more level of `transforms` (unless `transform` is a group) and its weight in
-    /// `total`; the limit it passes, [`MAX_TRANSFORM_NESTING`] first. Not a `Result` of an
-    /// error, so that the frames of the recursion don't hold an error's room
-    /// (docs/improvements.md, U-58).
-    fn enter(
-        transforms: &'static LocalKey<Cell<usize>>,
-        total: &'static LocalKey<Cell<usize>>,
-        transform: &Transform,
-    ) -> std::result::Result<Nesting, TooDeep> {
-        let level = if matches!(transform, Transform::Group(_)) {
-            None
-        } else {
-            match Level::enter(transforms, 1, MAX_TRANSFORM_NESTING) {
-                Some(level) => Some(level),
-                None => return Err(TooDeep::Transforms),
-            }
-        };
-        match Level::enter(total, nesting_weight(transform), MAX_NESTING_WEIGHT) {
-            Some(total) => Ok(Nesting {
-                _transform: level,
-                _total: total,
-            }),
-            None => Err(TooDeep::Total),
-        }
-    }
-
-    /// One more level of [`build_ops`], of `transform`.
-    pub(crate) fn build(transform: &Transform) -> std::result::Result<Nesting, TooDeep> {
-        Nesting::enter(&BUILD_NESTING, &BUILD_WEIGHT, transform)
-    }
-
-    /// One more level of `collect_context_variables`, of `transform`.
-    pub(crate) fn collect(transform: &Transform) -> std::result::Result<Nesting, TooDeep> {
-        Nesting::enter(&COLLECT_NESTING, &COLLECT_WEIGHT, transform)
+        self.0.set(self.0.get() - 1);
     }
 }
 
@@ -746,11 +610,10 @@ pub(crate) fn build_error(message: &'static str) -> Result<()> {
 
 /// Appends the ops of `transform` in the direction `dir`.
 ///
-/// Port of `BuildOps` (src/OpenColorIO/Transform.cpp:42-175 @ v2.5.2). A null transform, which
+/// Port of `BuildOps` (src/OpenColorIO/Transform.cpp:42-196 @ v2.6.0). A null transform, which
 /// upstream builds as no ops, can't be passed: the callers hold transforms. Its "Unknown
-/// transform type for creation" can't happen with an enum. Transforms nested deeper than
-/// [`MAX_TRANSFORM_NESTING`] are an error, where upstream overflows the stack
-/// (docs/improvements.md, U-58).
+/// transform type for creation" can't happen with an enum. Its cycle guard ([`DepthGuard`])
+/// refuses the 34th nested call, groups included.
 ///
 /// Internal to the processors (crate-private, the owner's decision of 2026-10-04).
 pub(crate) fn build_ops(
@@ -760,11 +623,11 @@ pub(crate) fn build_ops(
     transform: &Transform,
     dir: TransformDirection,
 ) -> Result<()> {
-    // A group names nothing, so it can't refer to itself, and the loader bounds its nesting
-    // (U-60): it counts only in the total, which groups multiply.
-    let _nesting = match Nesting::build(transform) {
-        Ok(nesting) => nesting,
-        Err(too_deep) => return too_deep.error(),
+    // Guard against infinite recursion through cycles in the color space / look / view
+    // transform reference graph (e.g. a ColorSpace whose from_reference is a
+    // ColorSpaceTransform pointing back to itself).
+    let Some(_depth) = DepthGuard::build() else {
+        return build_error("Cycle detected while building ops from transform.");
     };
     match transform {
         Transform::ColorSpace(color_space_transform) => {
@@ -790,7 +653,7 @@ pub(crate) fn build_ops(
 /// [`build_ops`] that don't recurse, out of line so that its frame stays small
 /// (docs/improvements.md, U-58).
 ///
-/// Part of the port of `BuildOps` (src/OpenColorIO/Transform.cpp:42-175 @ v2.5.2).
+/// Part of the port of `BuildOps` (src/OpenColorIO/Transform.cpp:42-196 @ v2.6.0).
 #[inline(never)]
 fn build_leaf_ops(
     ops: &mut OpVec,

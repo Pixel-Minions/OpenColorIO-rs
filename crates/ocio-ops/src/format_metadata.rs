@@ -57,6 +57,14 @@ pub const METADATA_INPUT_DESCRIPTOR: &[u8] = b"InputDescriptor";
 /// v2.5.2; declared in include/OpenColorIO/OpenColorTypes.h:960-964).
 pub const METADATA_OUTPUT_DESCRIPTOR: &[u8] = b"OutputDescriptor";
 
+/// The "Id" element of SMPTE ST 2136-1 CLF: an ID stored as an XML element rather than as an
+/// attribute, the preferred form in that version of the format. When present, only the
+/// top-level metadata has it.
+///
+/// Port of `METADATA_ID_ELEMENT` (src/OpenColorIO/fileformats/FormatMetadata.cpp:22-23 @
+/// v2.6.0; declared in include/OpenColorIO/OpenColorTypes.h:988-993).
+pub const METADATA_ID_ELEMENT: &[u8] = b"Id";
+
 /// The "name" attribute of CLF/CTF elements.
 ///
 /// Port of `METADATA_NAME` (src/OpenColorIO/fileformats/FormatMetadata.cpp:23 @ v2.5.2;
@@ -243,6 +251,20 @@ impl FormatMetadataImpl {
         self.elements
             .iter()
             .position(|e| equal_ignoring_case(name, e.get_element_name()))
+    }
+
+    /// Copies of the children whose name is `name`, ignoring ASCII case, in their order.
+    ///
+    /// Port of `FormatMetadataImpl::getChildrenElements(const std::string &) const`
+    /// (FormatMetadata.cpp:222-234 @ v2.6.0). `name` is compared as a C string
+    /// (`name.c_str()`).
+    pub fn get_children_elements_named(&self, name: &[u8]) -> Elements {
+        let name = c_str(name);
+        self.elements
+            .iter()
+            .filter(|it| equal_ignoring_case(name, it.get_element_name()))
+            .cloned()
+            .collect()
     }
 
     /// The index of the first attribute whose name is `name`, ignoring ASCII case.

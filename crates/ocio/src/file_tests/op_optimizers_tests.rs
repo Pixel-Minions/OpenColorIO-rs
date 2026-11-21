@@ -253,7 +253,7 @@ fn lut1d_identities() {
     compare_render(&ops, &opt_ops, 3e-4, false);
 }
 
-/// Port of `OCIO_ADD_TEST(OpOptimizers, lut1d_identity_replacement_order)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpOptimizers, lut1d_identity_replacement_order)` @ v2.6.0.
 #[test]
 fn lut1d_identity_replacement_order() {
     // See issue #1737, https://github.com/AcademySoftwareFoundation/OpenColorIO/issues/1737.
@@ -367,7 +367,7 @@ fn mntr_identities() {
     assert_eq!(ops.len(), 0);
 }
 
-/// Port of `OCIO_ADD_TEST(OpOptimizers, gamma_comp)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpOptimizers, gamma_comp)` @ v2.6.0.
 #[test]
 fn gamma_comp() {
     // This transform has a pair of gammas separated by an identity matrix that should
@@ -414,7 +414,7 @@ fn gamma_comp() {
     compare_render(&ops, &opt_ops, 1e-4, true);
 }
 
-/// Port of `OCIO_ADD_TEST(OpOptimizers, gamma_comp_test2)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpOptimizers, gamma_comp_test2)` @ v2.6.0.
 #[test]
 fn gamma_comp_test2() {
     // This transform has a pair of gammas separated by a pair of matrices that compose into
@@ -552,7 +552,7 @@ fn range_lut() {
     compare_render(&ops, &opt_ops, 1e-6, false);
 }
 
-/// Port of `OCIO_ADD_TEST(OpOptimizers, opt_prefix_test1)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(OpOptimizers, opt_prefix_test1)` @ v2.6.0.
 #[test]
 fn opt_prefix_test1() {
     let file_name = "opt_prefix_test1.ctf";
@@ -563,7 +563,7 @@ fn opt_prefix_test1() {
     // First one is the file no op.
     assert_eq!(ops.len(), 12);
 
-    remove_no_op_types(&mut ops);
+    remove_no_op_types(&mut ops, OptimizationFlags::ALL);
 
     assert_eq!(ops.len(), 11);
 

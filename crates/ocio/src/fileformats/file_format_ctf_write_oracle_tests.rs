@@ -93,9 +93,13 @@ fn port_write(path: &str, dir: TransformDirection, format: &str) -> Result<Vec<u
 
     // Its group's metadata, and the group's write (`LocalFileFormat::write`).
     let metadata = ops.get_format_metadata().clone();
-    let is_clf = strcasecmp(format.as_bytes(), FILEFORMAT_CLF.as_bytes()).is_eq();
+    let sub_format = if strcasecmp(format.as_bytes(), FILEFORMAT_CLF.as_bytes()).is_eq() {
+        SubFormat::FormatClf
+    } else {
+        SubFormat::FormatCtf
+    };
     let mut ostream = OStringStream::new(Crt::NATIVE);
-    if let Err(e) = write_ops(&mut ops, &metadata, is_clf, &mut ostream) {
+    if let Err(e) = write_ops(&mut ops, &metadata, sub_format, &mut ostream) {
         // `GroupTransform::write`'s message (transforms/GroupTransform.cpp:128-138 @ v2.5.2).
         let mut err = OStringStream::new(Crt::NATIVE);
         err.put_str("Error writing format '");

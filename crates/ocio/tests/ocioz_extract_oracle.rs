@@ -293,6 +293,9 @@ enum Node {
     Dir { mode: u64 },
     /// A symbolic link and its target.
     Link { target: Vec<u8> },
+    /// A Windows junction (its target is an absolute path, which differs between the
+    /// wheel's directory and the port's).
+    Junction,
 }
 
 /// Paths, as bytes with `/` between the components, and what is there.
@@ -388,8 +391,14 @@ fn port_tree(root: &Path, compared: Compared, skip: Option<&str>) -> Tree {
             let m = std::fs::symlink_metadata(&path).unwrap();
             let node = if m.file_type().is_symlink() {
                 let target = std::fs::read_link(&path).unwrap();
-                Node::Link {
-                    target: name_bytes(target.as_os_str()),
+                // Only the junctions `prepare` makes have absolute targets: the oracle refuses
+                // an archive's links to absolute targets.
+                if cfg!(windows) && target.is_absolute() {
+                    Node::Junction
+                } else {
+                    Node::Link {
+                        target: name_bytes(target.as_os_str()),
+                    }
                 }
             } else if m.is_dir() {
                 stack.push((path, relative.clone()));
@@ -451,12 +460,14 @@ fn wheel_tree(result: &Value, blobs: &[Vec<u8>], compared: Compared) -> Tree {
         out.insert(bytes(&d["path"]), Node::Dir { mode: mode(d) });
     }
     for l in result["links"].as_array().unwrap() {
-        out.insert(
-            bytes(&l["path"]),
+        let node = if l.get("junction") == Some(&json!(true)) {
+            Node::Junction
+        } else {
             Node::Link {
                 target: bytes(&l["target"]),
-            },
-        );
+            }
+        };
+        out.insert(bytes(&l["path"]), node);
     }
     out
 }
@@ -487,6 +498,9 @@ struct Case {
     /// How the destination is spelled, relative to the extraction's own directory (a path that
     /// normalizes to `extracted`, which minizip-ng's caller normalizes).
     destination: &'static str,
+    /// What the extraction's own directory holds first: the oracle's `prepare` list (each
+    /// `{"path", "kind", "target"}`), which the port's side makes the same way (`prepare`).
+    prepare: Option<Value>,
 }
 
 fn case(label: impl Into<String>, entries: &[Entry], times: Times) -> Case {
@@ -495,7 +509,51 @@ fn case(label: impl Into<String>, entries: &[Entry], times: Times) -> Case {
         path: write_file(&archive(entries)),
         times,
         destination: "extracted",
+        prepare: None,
     }
+}
+
+/// Makes the oracle's `prepare` items under `root`, in order, as the oracle does: a directory,
+/// a junction (Windows: `mklink /J`, the target under `root`) and a symbolic link (its target
+/// as given; a directory link where it ends with a separator); whether each was made.
+fn prepare(root: &Path, items: &Value) -> Vec<bool> {
+    items
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            // `mklink` takes backslashes only.
+            let native = |s: &str| s.replace('/', std::path::MAIN_SEPARATOR_STR);
+            let path = root.join(native(item["path"].as_str().unwrap()));
+            let target = item["target"].as_str().unwrap_or("");
+            match item["kind"].as_str().unwrap() {
+                "dir" => std::fs::create_dir_all(&path).is_ok(),
+                "junction" => {
+                    cfg!(windows)
+                        && std::process::Command::new("cmd")
+                            .arg("/C")
+                            .arg("mklink")
+                            .arg("/J")
+                            .arg(&path)
+                            .arg(root.join(native(target)))
+                            .output()
+                            .is_ok_and(|o| o.status.success())
+                }
+                "symlink" => {
+                    #[cfg(windows)]
+                    let made = if target.ends_with(['/', '\\']) {
+                        std::os::windows::fs::symlink_dir(target, &path)
+                    } else {
+                        std::os::windows::fs::symlink_file(target, &path)
+                    };
+                    #[cfg(unix)]
+                    let made = std::os::unix::fs::symlink(target, &path);
+                    made.is_ok()
+                }
+                kind => panic!("a prepare kind {kind}"),
+            }
+        })
+        .collect()
 }
 
 /// Each archive extracted by the wheel and by the port.
@@ -505,8 +563,14 @@ fn check(cases: &[Case]) {
         .iter()
         .map(|c| BatchCall {
             cmd: "ocioz",
-            args: json!({"extract": {"archive": c.path.to_str().unwrap(),
-                                     "destination": c.destination}}),
+            args: {
+                let mut extract = json!({"archive": c.path.to_str().unwrap(),
+                                         "destination": c.destination});
+                if let Some(prepare) = &c.prepare {
+                    extract["prepare"] = prepare.clone();
+                }
+                json!({ "extract": extract })
+            },
             blobs: Vec::new(),
         })
         .collect();
@@ -538,6 +602,15 @@ fn check(cases: &[Case]) {
         let root = files_dir("extracted").join(format!("{test}_{i}"));
         remove_tree(&root);
         std::fs::create_dir_all(&root).unwrap();
+        if let Some(items) = &c.prepare {
+            let made = prepare(&root, items);
+            assert_eq!(
+                w.result["prepared"],
+                json!(made),
+                "{}: what the wheel's side and the port's made",
+                c.label
+            );
+        }
         let destination = root.join(c.destination);
         let before = nanos(std::time::SystemTime::now());
         let port = extract_ocioz_archive(
@@ -599,6 +672,7 @@ fn upstream_and_port_archives() {
         path: upstream_archive(dir, name),
         times: Times::Dos,
         destination: "extracted",
+        prepare: None,
     };
     check(&[
         upstream(
@@ -627,6 +701,7 @@ fn upstream_and_port_archives() {
             path: write_file(&port_archive),
             times: Times::Dos,
             destination: "extracted",
+            prepare: None,
         },
     ]);
 }
@@ -718,6 +793,7 @@ fn structures() {
     check(&[
         Case {
             destination: "sub/../extracted",
+            prepare: None,
             ..case(
                 "a destination spelled with a directory that doesn't exist",
                 &[stored(b"a.txt", b"a"), stored(b"d/b.txt", b"b")],
@@ -901,7 +977,8 @@ fn times() {
 }
 
 /// The attributes files get: Windows ones (read-only, hidden, system) and Unix modes, set
-/// where the entry's host gives them.
+/// where the entry's host gives them, and the mode a file is created with where its host's
+/// attributes aren't converted.
 #[test]
 fn attributes() {
     check(&[
@@ -922,6 +999,18 @@ fn attributes() {
                 stored(b"m4755.txt", b"s").host(UNIX, mode(0o104755)),
                 stored(b"m222.txt", b"w").host(UNIX, mode(0o100222)),
                 stored(b"m444.txt", b"r").host(UNIX, mode(0o100444)),
+                stored(b"after.txt", b"a"),
+            ],
+            Times::Dos,
+        ),
+        // OS/2 HPFS (6) and MVS (11), which mz_zip_attrib_convert doesn't convert: the files
+        // keep the mode they are created with (minizip-ng 4.2.2 on Linux: 0640 before the
+        // umask; 4.0.10: 0666).
+        case(
+            "hosts whose attributes aren't converted",
+            &[
+                stored(b"os2.txt", b"o").host(6 << 8 | 20, 0x01),
+                stored(b"mvs.txt", b"m").host(11 << 8 | 20, mode(0o100444)),
                 stored(b"after.txt", b"a"),
             ],
             Times::Dos,
@@ -1049,12 +1138,113 @@ fn failures() {
         path: write_file(b"PK, and no archive"),
         times: Times::Dos,
         destination: "extracted",
+        prepare: None,
     });
     cases.push(Case {
         label: "missing".to_owned(),
         path: files_dir("archives").join("does_not_exist.ocioz"),
         times: Times::Dos,
         destination: "extracted",
+        prepare: None,
     });
+    check(&cases);
+}
+
+/// A case extracted where `prepare` made junctions, links or directories first.
+fn prepared(label: &str, entries: &[Entry], prepare: Value) -> Case {
+    Case {
+        prepare: Some(prepare),
+        ..case(label, entries, Times::Dos)
+    }
+}
+
+/// Whether this process can make a directory link as the oracle's `os.symlink` does (Rust's
+/// `symlink_dir`, as `os.symlink`, asks for an unprivileged link where Windows' Developer
+/// Mode allows it, and otherwise needs the privilege). On Linux, always. `check` asserts that
+/// the oracle's side made the same.
+fn can_make_links() -> bool {
+    let dir = files_dir("probe").join(format!("links_{}", std::process::id()));
+    remove_tree(&dir);
+    std::fs::create_dir_all(dir.join("t")).unwrap();
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir("t", dir.join("l")).is_ok();
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink("t", dir.join("l")).is_ok();
+    remove_tree(&dir);
+    made
+}
+
+/// Extracting where the destination already holds links (minizip-ng 4.2.2's
+/// `mz_dir_has_unsafe_symlink` checks each component of an entry's directory below the
+/// destination that is a link, or on Windows any reparse point). On Windows: a junction to a
+/// directory outside the destination, which 4.2.2 doesn't read a target from and lets through
+/// (the file is written outside, docs/improvements.md I-952), and one inside; then, where this
+/// process can make links (the probe's answer is printed, and the oracle's side must agree),
+/// links to a directory outside the destination (refused) and inside it (taken), whose targets
+/// the port reads in safe Rust (deviation D-22). On Linux: links outside (refused) and inside
+/// (taken), and links inside whose targets are 1,022 bytes (taken) and 1,023 bytes (refused:
+/// `readlink` fills minizip-ng's buffer, `MZ_BUF_ERROR`).
+#[test]
+fn prepared_links() {
+    let after = stored(b"after.txt", b"a");
+    let entries = [stored(b"l/x.txt", b"through"), after.clone()];
+    let links = can_make_links();
+    eprintln!("this process can make directory links: {links}");
+    let sep = if cfg!(windows) { "\\" } else { "/" };
+    let mut cases = Vec::new();
+    if cfg!(windows) {
+        cases.push(prepared(
+            "a junction to a directory outside",
+            &entries,
+            json!([{"path": "side", "kind": "dir"},
+                   {"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/l", "kind": "junction", "target": "side"}]),
+        ));
+        cases.push(prepared(
+            "a junction to a directory inside",
+            &entries,
+            json!([{"path": "extracted/in", "kind": "dir"},
+                   {"path": "extracted/l", "kind": "junction", "target": "extracted/in"}]),
+        ));
+    }
+    if links {
+        cases.push(prepared(
+            "a link to a directory outside",
+            &entries,
+            json!([{"path": "side", "kind": "dir"},
+                   {"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/l", "kind": "symlink",
+                    "target": format!("..{sep}side{sep}")}]),
+        ));
+        cases.push(prepared(
+            "a link to a directory inside",
+            &entries,
+            json!([{"path": "extracted/in", "kind": "dir"},
+                   {"path": "extracted/l", "kind": "symlink", "target": format!("in{sep}")}]),
+        ));
+        cases.push(prepared(
+            "a link inside a directory of the archive",
+            &[stored(b"d/l/x.txt", b"through"), after.clone()],
+            json!([{"path": "extracted/d/in", "kind": "dir"},
+                   {"path": "extracted/d/l", "kind": "symlink",
+                    "target": format!("..{sep}d{sep}in")}]),
+        ));
+    }
+    if cfg!(unix) {
+        // "in" followed by "/." up to the length: the same directory.
+        let long = |len: usize| format!("in{}", "/.".repeat((len - 2) / 2));
+        assert_eq!(long(1022).len(), 1022);
+        assert_eq!(long(1024).len(), 1024);
+        for (len, target) in [(1022, long(1022)), (1023, format!("{}/", long(1022)))] {
+            assert_eq!(target.len(), len);
+            cases.push(prepared(
+                &format!("a link inside whose target has {len} bytes"),
+                &entries,
+                json!([{"path": "extracted/in", "kind": "dir"},
+                       {"path": "extracted/l", "kind": "symlink", "target": target}]),
+            ));
+        }
+    }
+    assert!(!cases.is_empty());
     check(&cases);
 }

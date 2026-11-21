@@ -1,24 +1,27 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from Imath 3.2.1 (src/Imath/half.h), BSD-3-Clause,
+// Ported from Imath 3.2.3 (src/Imath/half.h), BSD-3-Clause,
 // Copyright Contributors to the OpenEXR Project.
 
-//! The half-float conversions of Imath 3.2.1, as OpenColorIO 2.5.2's wheels build them.
+//! The half-float conversions of Imath 3.2.3, as OpenColorIO 2.6.0's wheels build them.
+//! 3.2.3 is OCIO 2.6.0's recommended version (share/cmake/modules/FindExtPackages.cmake:76-81
+//! @ v2.6.0; the patch level isn't visible in the wheels' binaries), and its conversions are
+//! 3.2.1's, OCIO 2.5.2's, line for line (`docs/ocio-2.6-deps-triage.md`, I1).
 //!
-//! OCIO's `half` type is Imath's (`BitDepthUtils.h:9 @ v2.5.2`). Two build choices select
+//! OCIO's `half` type is Imath's (`BitDepthUtils.h:10 @ v2.6.0`). Two build choices select
 //! which of Imath's conversion paths OCIO runs:
 //! - Imath is built with `IMATH_HALF_USE_LOOKUP_TABLE=OFF`
-//!   (share/cmake/modules/install/InstallImath.cmake:85 @ v2.5.2), so half to float uses
+//!   (share/cmake/modules/install/InstallImath.cmake:85 @ v2.6.0), so half to float uses
 //!   Imath's bit-shifting code, not its table.
 //! - OCIO's library sources are compiled without `-mf16c` (only the AVX and AVX2 kernel files
 //!   get it, and MSVC never defines `__F16C__`), so `half.h` does not use F16C
-//!   (half.h:287 and :376 @ Imath v3.2.1).
+//!   (half.h:287 and :376 @ Imath v3.2.3).
 //!
 //! These differ from F16C, SSE2's software conversion and the `half` crate only for NaNs:
 //! Imath keeps a signaling NaN signaling in both directions (spike S4, `docs/spikes/s4.md`).
 
 /// Converts half bits to float. Port of `imath_half_to_float` without F16C or the lookup
-/// table (src/Imath/half.h:284-364 @ Imath v3.2.1).
+/// table (src/Imath/half.h:284-364 @ Imath v3.2.3).
 pub fn half_to_float(h: u16) -> f32 {
     half_to_float_bits(h)
 }
@@ -64,7 +67,7 @@ fn half_to_float_bits(h: u16) -> f32 {
 
 /// Converts a float to half bits, rounding to nearest even. Port of `imath_float_to_half`
 /// without F16C and without `IMATH_HALF_ENABLE_FP_EXCEPTIONS`
-/// (src/Imath/half.h:373-443 @ Imath v3.2.1).
+/// (src/Imath/half.h:373-443 @ Imath v3.2.3).
 pub fn float_to_half(f: f32) -> u16 {
     let bits = f.to_bits();
     let mut ui = bits & !0x8000_0000;

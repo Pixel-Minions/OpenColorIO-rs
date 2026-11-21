@@ -118,6 +118,17 @@ pub enum NamedTransformVisibility {
 
 /// Which views of a display: the shared views it uses, or its own.
 ///
+/// A compatibility requirement a config may be checked against
+/// (`ConfigCompatibilityHelpers::CheckCompatibility`).
+///
+/// Port of `ConfigCompatibility` (include/OpenColorIO/OpenColorTypes.h:746-751 @ v2.6.0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ConfigCompatibility {
+    /// `CONFIG_HDR_DISPLAY_SUPPORT_26`: the config meets the HDR display requirements as of
+    /// OCIO 2.6.
+    HdrDisplaySupport26 = 0,
+}
+
 /// Port of `ViewType` (include/OpenColorIO/OpenColorTypes.h:337-341 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ViewType {
@@ -259,7 +270,7 @@ pub fn negative_style_to_string(style: NegativeStyle) -> &'static str {
 
 /// The algorithms of a `FixedFunctionTransform`. The discriminants are upstream's.
 ///
-/// Port of `FixedFunctionStyle` (include/OpenColorIO/OpenColorTypes.h:499-524 @ v2.5.2).
+/// Port of `FixedFunctionStyle` (include/OpenColorIO/OpenColorTypes.h:499-525 @ v2.6.0).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FixedFunctionStyle {
     /// `FIXED_FUNCTION_ACES_RED_MOD_03`: red modifier (ACES 0.3/0.7).
@@ -328,6 +339,9 @@ pub enum FixedFunctionStyle {
     /// `FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20`: ACES 2.0 gamut compression.
     #[doc(alias = "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20")]
     AcesGamutCompress20,
+    /// `FIXED_FUNCTION_ACES_RGB_TO_HMJ_20`: ACES 2.0 RGB to HMJ (h/360, M/200, J/100).
+    #[doc(alias = "FIXED_FUNCTION_ACES_RGB_TO_HMJ_20")]
+    AcesRgbToHmj20,
     /// `FIXED_FUNCTION_RGB_TO_HSY_LIN`: RGB to HSY (hue, saturation, luminance) for linear
     /// spaces.
     #[doc(alias = "FIXED_FUNCTION_RGB_TO_HSY_LIN")]
@@ -349,7 +363,7 @@ pub const UNIMPLEMENTED_GAMUTMAP: &str = "Unimplemented fixed function types: \
 /// The style's name: `ACES_RedMod03`, ..., `ACES2_OutputTransform`, ..., `RGB_TO_HSY_VID`. The
 /// two styles upstream doesn't implement are refused ([`UNIMPLEMENTED_GAMUTMAP`]).
 ///
-/// Port of `FixedFunctionStyleToString` (src/OpenColorIO/ParseUtils.cpp:354-388 @ v2.5.2). Its
+/// Port of `FixedFunctionStyleToString` (src/OpenColorIO/ParseUtils.cpp:354-389 @ v2.6.0). Its
 /// "Unknown Fixed FunctionOp style" for a value outside the enum can't happen.
 pub fn fixed_function_style_to_string(style: FixedFunctionStyle) -> Result<&'static str> {
     use FixedFunctionStyle::*;
@@ -362,6 +376,7 @@ pub fn fixed_function_style_to_string(style: FixedFunctionStyle) -> Result<&'sta
         AcesGamutComp13 => "ACES_GamutComp13",
         AcesOutputTransform20 => "ACES2_OutputTransform",
         AcesRgbToJmh20 => "ACES2_RGB_TO_JMh",
+        AcesRgbToHmj20 => "ACES2_RGB_TO_HMJ",
         AcesTonescaleCompress20 => "ACES2_TonescaleCompress",
         AcesGamutCompress20 => "ACES2_GamutCompress",
         Rec2100Surround => "REC2100_Surround",
@@ -385,7 +400,7 @@ pub fn fixed_function_style_to_string(style: FixedFunctionStyle) -> Result<&'sta
 /// gives, but the two unimplemented styles'), or "Unknown Fixed FunctionOp style: 'style'.".
 /// `None` is upstream's null pointer, read as "".
 ///
-/// Port of `FixedFunctionStyleFromString` (src/OpenColorIO/ParseUtils.cpp:390-421 @ v2.5.2).
+/// Port of `FixedFunctionStyleFromString` (src/OpenColorIO/ParseUtils.cpp:391-423 @ v2.6.0).
 pub fn fixed_function_style_from_string(style: Option<&[u8]>) -> Result<FixedFunctionStyle> {
     use FixedFunctionStyle::*;
     let p = style.map_or(&[][..], crate::utils::string_utils::c_str);
@@ -398,6 +413,7 @@ pub fn fixed_function_style_from_string(style: Option<&[u8]>) -> Result<FixedFun
         b"aces_gamutcomp13" => AcesGamutComp13,
         b"aces2_outputtransform" => AcesOutputTransform20,
         b"aces2_rgb_to_jmh" => AcesRgbToJmh20,
+        b"aces2_rgb_to_hmj" => AcesRgbToHmj20,
         b"aces2_tonescalecompress" => AcesTonescaleCompress20,
         b"aces2_gamutcompress" => AcesGamutCompress20,
         b"rec2100_surround" => Rec2100Surround,

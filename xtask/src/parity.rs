@@ -6,7 +6,7 @@
 //! A Rust test counts as a port of an upstream test when its doc comment, directly above
 //! `#[test]` (other doc lines and attributes may come between), has a marker line: `/// Port
 //! of`, the upstream test in backquotes exactly as upstream's macro names it, then
-//! ` @ v2.5.2.`, which anything may follow on that line. For example:
+//! ` @ v2.5.2.` or ` @ v2.6.0.`, which anything may follow on that line. For example:
 //!
 //! ```text
 //! /// Port of `OCIO_ADD_TEST(Lut1DOpCPU, apply_half)` @ v2.5.2.
@@ -16,6 +16,10 @@
 //!
 //! Any other mention of an upstream test, such as a partial port or a stand-in that names
 //! the test it stands in for, doesn't count.
+//!
+//! A marker names the upstream version whose test it ports. The port moved from 2.5.2 to
+//! 2.6.0 (docs/ocio-2.6-plan.md): a test re-ported from 2.6.0 says ` @ v2.6.0.`, and one whose
+//! upstream body did not change keeps ` @ v2.5.2.`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -31,11 +35,15 @@ pub(crate) struct UpstreamTest {
     pub(crate) file: String,
 }
 
-/// Removes comments, `#define` bodies and `#if 0` blocks, keeping line structure.
+/// Removes comments, `#define` bodies and `#if 0` blocks, keeping line structure. String and
+/// character literals (raw strings included) are kept as they are, so that a `/*` or `//`
+/// inside one starts no comment (2.6.0's `SanitizeIDToken("abc.-_~/*#%^+()[]|09")` did, and
+/// hid the tests after it).
 fn preprocess(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     let mut in_block = false;
+    let mut prev = '\0';
     while let Some(c) = chars.next() {
         if in_block {
             if c == '*' && chars.peek() == Some(&'/') {
@@ -46,7 +54,46 @@ fn preprocess(text: &str) -> String {
             }
             continue;
         }
+        let ident_before = prev.is_ascii_alphanumeric() || prev == '_';
+        prev = c;
         match c {
+            // A raw string literal, R"delim( ... )delim": up to its closing delimiter.
+            '"' if out.ends_with('R') && !out[..out.len() - 1].ends_with(is_ident_char) => {
+                out.push(c);
+                let mut delim = String::new();
+                for d in chars.by_ref() {
+                    out.push(d);
+                    if d == '(' {
+                        break;
+                    }
+                    delim.push(d);
+                }
+                let close = format!("){delim}\"");
+                let mut tail = String::new();
+                for d in chars.by_ref() {
+                    out.push(d);
+                    tail.push(d);
+                    if tail.ends_with(&close) {
+                        break;
+                    }
+                }
+                prev = '"';
+            }
+            // A string or character literal (not a digit separator): up to its unescaped end.
+            '"' | '\'' if !(c == '\'' && ident_before) => {
+                out.push(c);
+                while let Some(d) = chars.next() {
+                    out.push(d);
+                    if d == '\\' {
+                        if let Some(e) = chars.next() {
+                            out.push(e);
+                        }
+                    } else if d == c || d == '\n' {
+                        break;
+                    }
+                }
+                prev = c;
+            }
             '/' if chars.peek() == Some(&'*') => {
                 chars.next();
                 in_block = true;
@@ -143,6 +190,11 @@ fn macro_ids(text: &str) -> Vec<(&'static str, String)> {
     ids
 }
 
+/// A character of a C++ identifier (or of a number).
+fn is_ident_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
 fn is_ident(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
@@ -205,17 +257,25 @@ pub(crate) fn upstream_python_tests() -> Vec<String> {
     tests
 }
 
-/// The upstream version port markers name.
-const MARKER_VERSION: &str = "v2.5.2";
+/// The upstream versions port markers may name: the release the port matched before
+/// (tests whose upstream body did not change since) and the pinned one.
+const MARKER_VERSIONS: &[&str] = &["v2.5.2", "v2.6.0"];
 
 /// The upstream test a port marker line names: `/// Port of `, one upstream test macro in
-/// backquotes, then ` @ v2.5.2.`, with anything after that. Any other line names none.
+/// backquotes, then ` @ v2.5.2.` or ` @ v2.6.0.`, with anything after that. Any other line
+/// names none.
+#[cfg(test)]
 fn marker_id(line: &str) -> Option<(&'static str, String)> {
+    marker_with_version(line).map(|(suite, id, _)| (suite, id))
+}
+
+/// `marker_id` and the version the marker names.
+fn marker_with_version(line: &str) -> Option<(&'static str, String, &'static str)> {
     let rest = line.trim_start().strip_prefix("/// Port of `")?;
     let (invocation, after) = rest.split_once('`')?;
-    if !after.starts_with(&format!(" @ {MARKER_VERSION}.")) {
-        return None;
-    }
+    let version = *MARKER_VERSIONS
+        .iter()
+        .find(|v| after.starts_with(&format!(" @ {v}.")))?;
     // The backquotes hold exactly one macro, and nothing else.
     if !invocation.starts_with("OCIO_ADD_") || !invocation.ends_with(')') {
         return None;
@@ -224,16 +284,16 @@ fn marker_id(line: &str) -> Option<(&'static str, String)> {
     if ids.len() != 1 {
         return None;
     }
-    ids.pop()
+    ids.pop().map(|(suite, id)| (suite, id, version))
 }
 
 /// The upstream tests `text` (a Rust source) marks as ported: each marker line
 /// ([`marker_id`]) in a comment block directly above a `#[test]` function.
-fn markers_in(text: &str) -> Vec<(&'static str, String)> {
+fn markers_in(text: &str) -> Vec<(&'static str, String, &'static str)> {
     let lines: Vec<&str> = text.lines().collect();
     let mut ids = Vec::new();
     for (i, line) in lines.iter().enumerate() {
-        let Some(id) = marker_id(line) else {
+        let Some(id) = marker_with_version(line) else {
             continue;
         };
         // The marker must be in the comment block directly above a #[test] function.
@@ -251,16 +311,34 @@ fn markers_in(text: &str) -> Vec<(&'static str, String)> {
 
 /// Ported-test markers in Rust sources: (suite, id) -> Rust files marking it.
 pub(crate) fn ported_markers() -> Result<BTreeMap<(&'static str, String), Vec<String>>, String> {
-    let root = paths::workspace_root();
     let mut found: BTreeMap<(&'static str, String), Vec<String>> = BTreeMap::new();
+    for ((suite, id, _), files) in versioned_markers()? {
+        found.entry((suite, id)).or_default().extend(files);
+    }
+    for files in found.values_mut() {
+        files.sort();
+    }
+    Ok(found)
+}
+
+/// Ported-test markers with the version each names: (suite, id, version) -> Rust files.
+pub(crate) type VersionedMarkers = BTreeMap<(&'static str, String, &'static str), Vec<String>>;
+
+/// Ported-test markers in Rust sources with the version each names.
+pub(crate) fn versioned_markers() -> Result<VersionedMarkers, String> {
+    let root = paths::workspace_root();
+    let mut found = VersionedMarkers::new();
     for rel in crate::walk(&root.join("crates")) {
         if !rel.ends_with(".rs") {
             continue;
         }
         let file = format!("crates/{rel}");
         let text = std::fs::read_to_string(root.join(&file)).map_err(|e| format!("{file}: {e}"))?;
-        for (suite, id) in markers_in(&text) {
-            found.entry((suite, id)).or_default().push(file.clone());
+        for (suite, id, version) in markers_in(&text) {
+            found
+                .entry((suite, id, version))
+                .or_default()
+                .push(file.clone());
         }
     }
     Ok(found)
@@ -523,6 +601,8 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     let map = crate::upstream::load_map()?;
     let waivers = crate::guards::load_waivers()?;
     let python = upstream_python_tests();
+    let markers = versioned_markers()?;
+    let stale = crate::stale::stale(&markers, &crate::stale::changed_list()?);
 
     let mut per_file: BTreeMap<&str, (&str, usize, usize, usize)> = BTreeMap::new();
     for t in &c.upstream {
@@ -583,11 +663,36 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
         map.files.len()
     );
     let _ = writeln!(md, "| Open waivers | {} | | |", waivers.waivers.len());
+    let _ = writeln!(
+        md,
+        "| Stale ports (marked @ {}, upstream body or file preamble changed since) | {} | | |",
+        crate::stale::OLD_MARKER,
+        stale.len()
+    );
     let _ = writeln!(md, "\n## Upstream test files\n");
     let _ = writeln!(md, "| File | Suite | Ported | N/A | Tests |");
     let _ = writeln!(md, "|---|---|---:|---:|---:|");
     for (file, (suite, n, p, a)) in &per_file {
         let _ = writeln!(md, "| `{file}` | {suite} | {p} | {a} | {n} |");
+    }
+    let _ = writeln!(md, "\n## Stale ports\n");
+    let _ = writeln!(
+        md,
+        "Ported tests still marked `@ {}` whose upstream body or file preamble changed in the \
+         pinned release (`{}`): each owning card re-ports them `@ v2.6.0`; `cargo xtask ci \
+         --no-stale` fails while any remain.\n",
+        crate::stale::OLD_MARKER,
+        crate::stale::CHANGED_LIST
+    );
+    if stale.is_empty() {
+        let _ = writeln!(md, "None.");
+    } else {
+        let _ = writeln!(md, "| Test | Suite | Rust files |");
+        let _ = writeln!(md, "|---|---|---|");
+        for (suite, id, files) in &stale {
+            let files: Vec<String> = files.iter().map(|f| format!("`{f}`")).collect();
+            let _ = writeln!(md, "| `{id}` | {suite} | {} |", files.join(", "));
+        }
     }
     let _ = writeln!(md, "\n## Upstream files by kind\n");
     let mut kinds: BTreeMap<&str, [usize; 4]> = BTreeMap::new();
@@ -620,6 +725,14 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
     }
     std::fs::create_dir_all(path.parent().expect("docs dir")).map_err(|e| e.to_string())?;
     std::fs::write(&path, md).map_err(|e| e.to_string())?;
+    if !stale.is_empty() {
+        println!(
+            "parity: warning: {} ported tests are marked @ {} but their upstream body or file \
+             preamble changed (docs/parity.md, \"Stale ports\")",
+            stale.len(),
+            crate::stale::OLD_MARKER
+        );
+    }
     println!(
         "parity: cpu {}/{}, gpu {}/{}, python {}/{}",
         ported("cpu"),
@@ -672,6 +785,27 @@ mod tests {
     }
 
     #[test]
+    fn preprocess_keeps_string_and_char_literals() {
+        // A comment opener inside a string, a raw string or a character literal starts no
+        // comment (ConfigUtils_tests.cpp @ v2.6.0), and a digit separator starts no literal.
+        let src = r#"OCIO_ADD_TEST(A, a)
+{ f("abc.-_~/*#%^+()[]|09"); g("ocio://x", '/', '\'', "\"/*", 1'000); }
+OCIO_ADD_TEST(A, b)
+{ h(R"(/* not a comment
+)"); i(R"x(a)" /* )x"); }
+OCIO_ADD_TEST(A, c)
+/* a real comment OCIO_ADD_TEST(A, hidden) */
+// OCIO_ADD_TEST(A, hidden2)
+OCIO_ADD_TEST(A, d)
+"#;
+        let ids: Vec<String> = macro_ids(&preprocess(src))
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect();
+        assert_eq!(ids, ["A/a", "A/b", "A/c", "A/d"]);
+    }
+
+    #[test]
     fn preprocess_skips_disabled_code() {
         let src = "OCIO_ADD_TEST(A, b)\n#if 0\nOCIO_ADD_TEST(A, c)\n#endif\n// OCIO_ADD_TEST(A, d)\n#define X(n) \\\n OCIO_ADD_TEST(A, n)\nOCIO_ADD_TEST_SSE2(e)\n";
         let ids: Vec<String> = macro_ids(&preprocess(src))
@@ -704,6 +838,11 @@ mod tests {
             marker("/// Port of `OCIO_ADD_TEST_AVX2(packed_all_test)` @ v2.5.2.").as_deref(),
             Some("cpu AVX2/packed_all_test")
         );
+        // A test re-ported from 2.6.0.
+        assert_eq!(
+            marker("/// Port of `OCIO_ADD_TEST(OpOptimizers, a)` @ v2.6.0.").as_deref(),
+            Some("cpu OpOptimizers/a")
+        );
     }
 
     #[test]
@@ -718,7 +857,10 @@ mod tests {
             "/// Part of `OCIO_ADD_TEST(A, b)` @ v2.5.2.",
             // A port of something else, another version, or no version.
             "/// Port of `CreateLogOp` (src/OpenColorIO/ops/log/LogOp.cpp:1-9 @ v2.5.2).",
-            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.6.0.",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.4.0.",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.6.1.",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.6.0",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ 2.6.0.",
             "/// Port of `OCIO_ADD_TEST(A, b)` (tests/cpu/A_tests.cpp:1-9 @ v2.5.2).",
             "/// Port of `OCIO_ADD_TEST(A, b)`.",
             // Two tests, or more than the macro, in the backquotes.
@@ -759,7 +901,7 @@ fn after_code() {}
 #[test]
 fn partial() {}
 ";
-        let ids: Vec<String> = markers_in(text).into_iter().map(|(_, id)| id).collect();
+        let ids: Vec<String> = markers_in(text).into_iter().map(|(_, id, _)| id).collect();
         assert_eq!(ids, ["A/attached", "A/with_lines_between"]);
     }
 }

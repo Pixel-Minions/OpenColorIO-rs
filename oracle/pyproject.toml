@@ -6,7 +6,7 @@ description = "Reference outputs from the official OpenColorIO wheel, for OpenCo
 # (VFX Reference Platform CY2027).
 requires-python = "==3.13.*"
 dependencies = [
-    "opencolorio==2.5.2",
+    "opencolorio==2.6.0",
     "numpy==2.3.5",
 ]
 

@@ -198,6 +198,7 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("Config", "getColorSpaces", 2, Holder),  // :327
     ("Config", "clearColorSpaces", 0, Pointer),  // :341
     ("Config", "isStrictParsingEnabled", 0, Pointer),  // :345
+    ("Config", "getUseDisplayAliases", 0, Pointer),  // :360 @ v2.6.0
     ("Config", "getInactiveColorSpaces", 0, Pointer),  // :351
     ("Config", "getRoleNames", 0, Iterator),  // :391
     ("Config", "getRoles", 0, Iterator),  // :395
@@ -293,6 +294,10 @@ pub static UNNAMED: &[(&str, &str, u8, SelfKind)] = &[
     ("Config.ViewForViewTypeIterator", "__getitem__", 0, Reference),  // :1278
     ("Config.ViewForViewTypeIterator", "__iter__", 0, Reference),  // :1285
     ("Config.ViewForViewTypeIterator", "__next__", 0, Reference),  // :1289
+    ("Config.DisplayViewAliasIterator", "__len__", 0, Reference),  // :1346 @ v2.6.0
+    ("Config.DisplayViewAliasIterator", "__getitem__", 0, Reference),  // :1349 @ v2.6.0
+    ("Config.DisplayViewAliasIterator", "__iter__", 0, Reference),  // :1356 @ v2.6.0
+    ("Config.DisplayViewAliasIterator", "__next__", 0, Reference),  // :1360 @ v2.6.0
     ("Config.ActiveDisplaysListIterator", "__len__", 0, Reference),  // :1298
     ("Config.ActiveDisplaysListIterator", "__getitem__", 0, Reference),  // :1299
     ("Config.ActiveDisplaysListIterator", "__iter__", 0, Reference),  // :1304

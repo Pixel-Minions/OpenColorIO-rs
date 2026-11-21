@@ -494,6 +494,8 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // The app helpers (PyOpenColorIO.cpp:98-103), including config merging (chunk 6.8a).
     crate::apphelpers::py_color_space_helpers::bind_py_color_space_menu_helpers(m)?;
+    // PyOpenColorIO.cpp:100 @ v2.6.0.
+    crate::apphelpers::py_config_compatibility_helpers::bind_py_config_compatibility_helpers(m)?;
     crate::apphelpers::py_merge_configs::bind_py_config_merging_helpers(m)?;
     crate::apphelpers::py_display_view_helpers::bind_py_display_view_helpers(m)?;
     crate::apphelpers::py_legacy_viewing_pipeline::bind_py_legacy_viewing_pipeline(m)?;

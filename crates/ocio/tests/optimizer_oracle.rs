@@ -4,15 +4,15 @@
 //! The optimizer through the API against the wheel: for groups of transforms of every family
 //! that has a pair of inverse ops or a pair it combines, the CPU processor's cache ID and the
 //! debug log of building it, which prints the ops before and after and the pass counts
-//! (`OpRcPtrVec::optimize`, src/OpenColorIO/OpOptimizers.cpp:611-756 @ v2.5.2), through the
+//! (`OpRcPtrVec::optimize`, src/OpenColorIO/OpOptimizers.cpp:638-772 @ v2.6.0), through the
 //! oracle's `processor_debug_log`, message for message.
 //!
 //! - Nested pairs of inverses, `A B B' A'`, of each family: `RemoveInverseOps` steps back
-//!   after removing a pair, so one pass removes both (OpOptimizers.cpp:207-300); with the
+//!   after removing a pair, so one pass removes both (OpOptimizers.cpp:234-328); with the
 //!   family's `PAIR_IDENTITY_*` flag off, the ops stay or combine.
-//! - A pass that only removes inverse pairs makes the loop go on (OpOptimizers.cpp:696).
+//! - A pass that only removes inverse pairs makes the loop go on (OpOptimizers.cpp:713).
 //! - Two ops of a type that combines, with every flag and with every flag but that type's
-//!   `COMP_*` (`IsCombineEnabled`, OpOptimizers.cpp:61-70).
+//!   `COMP_*` (`IsCombineEnabled`, OpOptimizers.cpp:64-73).
 //!
 //! The inverse and composed Lut1D come with Phase 2 (WP 2.1, 2.5), and the Exponent op only in
 //! a version 1 config. The tests set the process's logging level and function, so each holds
@@ -22,8 +22,9 @@ use std::sync::{Arc, Mutex};
 
 use ocio::{
     BitDepth, CdlStyle, CdlTransform, Config, ExponentTransform, ExponentWithLinearTransform,
-    GroupTransform, LogAffineTransform, LogCameraTransform, LogTransform, Lut3DTransform,
-    MatrixTransform, OptimizationFlags, RangeTransform, Transform, TransformDirection,
+    ExposureContrastTransform, GroupTransform, LogAffineTransform, LogCameraTransform,
+    LogTransform, Lut3DTransform, MatrixTransform, OptimizationFlags, RangeTransform, Transform,
+    TransformDirection,
 };
 use ocio_ops::logging::{
     LoggingFunction, get_logging_level, reset_to_default_logging_function, set_logging_function,
@@ -523,6 +524,151 @@ fn identity_ranges_before_lut3ds_match_the_wheel() {
                 offset_matrix([0.1, 0.0, 0.0, 0.0], Forward),
                 range(0.0, 1.0, 0.0, 1.0),
                 lut3d(Forward),
+            ],
+            flags,
+        },
+    ];
+    check(&cases);
+}
+
+/// A CDL whose power is 1: `ReplaceOps` replaces it with a matrix, then for a saturation other
+/// than 1 a saturation matrix, with clamps for the clamping style (`CDLOpData::
+/// getSimplerReplacement`).
+fn cdl_without_power(slope: f64, sat: f64, style: CdlStyle, dir: TransformDirection) -> Built {
+    let (slope, offset, power) = ([slope, 1.0, 0.9], [0.01, -0.02, 0.0], [1.0, 1.0, 1.0]);
+    let mut t = CdlTransform::new();
+    t.set_slope(&slope);
+    t.set_offset(&offset);
+    t.set_power(&power);
+    t.set_sat(sat);
+    t.set_style(style);
+    t.set_direction(dir);
+    let style = match style {
+        CdlStyle::Asc => "CDL_ASC",
+        CdlStyle::NoClamp => "CDL_NO_CLAMP",
+    };
+    let spec = json!({"class": "CDLTransform", "calls": [
+        ["setSlope", f64s(&slope)],
+        ["setOffset", f64s(&offset)],
+        ["setPower", f64s(&power)],
+        ["setSat", f64_spec(sat)],
+        ["setStyle", {"enum": style}],
+        ["setDirection", dir_spec(dir)],
+    ]});
+    (spec, t.into())
+}
+
+/// An ExposureContrastTransform whose exposure is dynamic.
+fn dynamic_exposure(exposure: f64) -> Built {
+    let mut t = ExposureContrastTransform::new();
+    t.set_exposure(exposure);
+    t.make_exposure_dynamic();
+    let spec = json!({"class": "ExposureContrastTransform", "calls": [
+        ["setExposure", f64_spec(exposure)],
+        ["makeExposureDynamic"],
+    ]});
+    (spec, t.into())
+}
+
+/// Every single optimization flag, alone and as the only one missing from `ALL`, and the
+/// levels.
+fn every_flag() -> Vec<OptimizationFlags> {
+    let singles = [
+        OptimizationFlags::IDENTITY,
+        OptimizationFlags::IDENTITY_GAMMA,
+        OptimizationFlags::PAIR_IDENTITY_CDL,
+        OptimizationFlags::PAIR_IDENTITY_EXPOSURE_CONTRAST,
+        OptimizationFlags::PAIR_IDENTITY_FIXED_FUNCTION,
+        OptimizationFlags::PAIR_IDENTITY_GAMMA,
+        OptimizationFlags::PAIR_IDENTITY_LUT1D,
+        OptimizationFlags::PAIR_IDENTITY_LUT3D,
+        OptimizationFlags::PAIR_IDENTITY_LOG,
+        OptimizationFlags::PAIR_IDENTITY_GRADING,
+        OptimizationFlags::COMP_EXPONENT,
+        OptimizationFlags::COMP_GAMMA,
+        OptimizationFlags::COMP_MATRIX,
+        OptimizationFlags::COMP_LUT1D,
+        OptimizationFlags::COMP_LUT3D,
+        OptimizationFlags::COMP_RANGE,
+        OptimizationFlags::COMP_SEPARABLE_PREFIX,
+        OptimizationFlags::LUT_INV_FAST,
+        OptimizationFlags::FAST_LOG_EXP_POW,
+        OptimizationFlags::SIMPLIFY_OPS,
+        OptimizationFlags::NO_DYNAMIC_PROPERTIES,
+    ];
+    let mut flags = vec![
+        OptimizationFlags::NONE,
+        OptimizationFlags::LOSSLESS,
+        OptimizationFlags::VERY_GOOD,
+        OptimizationFlags::GOOD,
+        OptimizationFlags::DRAFT,
+        OptimizationFlags::DEFAULT,
+        OptimizationFlags::ALL,
+    ];
+    for flag in singles {
+        flags.push(flag);
+        flags.push(all_but(flag));
+    }
+    flags
+}
+
+/// The steps 2.6.0 changed (PR #2244, `OpOptimizers.cpp:77-441, 607-772` @ v2.6.0), with every
+/// flag alone, every flag but one, and every level: a CDL that `ReplaceOps` simplifies (a pass
+/// that only replaces ops now counts as progress), two of them and an inverse pair around
+/// them (the rebuilt list), a dynamic exposure between matrices (`RemoveDynamicProperties`
+/// counts what it makes static), a pair of logs whose clamp then meets a range
+/// (`RemoveInverseOps` now compares a pair's replacement with the next op), and a pair of
+/// inverse logs inside a pair of matrices (the stack). The debug log names each step and its
+/// count, each pass and its summary.
+#[test]
+fn the_steps_match_the_wheel_with_every_flag() {
+    let flags = every_flag();
+    let cases = vec![
+        Case {
+            label: "a CDL without power",
+            v1: false,
+            children: vec![cdl_without_power(1.2, 1.0, CdlStyle::NoClamp, Forward)],
+            flags: flags.clone(),
+        },
+        Case {
+            label: "two clamping CDLs without power inside an inverse pair of logs",
+            v1: false,
+            children: vec![
+                log(2.0, Forward),
+                cdl_without_power(1.2, 0.8, CdlStyle::Asc, Forward),
+                cdl_without_power(0.9, 1.1, CdlStyle::Asc, Inverse),
+                log(2.0, Inverse),
+            ],
+            flags: flags.clone(),
+        },
+        Case {
+            label: "a dynamic exposure between matrices",
+            v1: false,
+            children: vec![
+                offset_matrix([0.1, 0.0, 0.0, 0.0], Forward),
+                dynamic_exposure(0.5),
+                offset_matrix([0.0, 0.2, 0.0, 0.0], Forward),
+            ],
+            flags: flags.clone(),
+        },
+        Case {
+            label: "a pair of inverse logs, then a range",
+            v1: false,
+            children: vec![
+                log(10.0, Forward),
+                log(10.0, Inverse),
+                range(0.0, 1.0, 0.0, 1.0),
+            ],
+            flags: flags.clone(),
+        },
+        Case {
+            label: "a pair of inverse logs inside a pair of inverse matrices",
+            v1: false,
+            children: vec![
+                offset_matrix([0.1, 0.0, 0.0, 0.0], Forward),
+                log(2.0, Forward),
+                log(2.0, Inverse),
+                offset_matrix([0.1, 0.0, 0.0, 0.0], Inverse),
             ],
             flags,
         },

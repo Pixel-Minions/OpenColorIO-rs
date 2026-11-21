@@ -4,9 +4,10 @@
 //! Tests of the reference-space converters and the color-space fingerprints:
 //! `tests/cpu/ConfigUtils_tests.cpp` @ v2.5.2.
 
-use ocio_testkit::upstream::check_close;
+use ocio_testkit::upstream::{check_close, check_throw_what};
 
 use super::*;
+use crate::test_env::EnvGuard;
 use crate::transform::TransformType;
 use crate::transforms::matrix_transform::MatrixTransform;
 use crate::view_transform::ViewTransform;
@@ -604,7 +605,7 @@ colorspaces:   # reference space = linear rec 709
     }
 }
 
-/// Port of `OCIO_ADD_TEST(MergeConfigs, config_utils_find_equivalent_colorspace)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(MergeConfigs, config_utils_find_equivalent_colorspace)` @ v2.6.0.
 #[test]
 fn config_utils_find_equivalent_colorspace() {
     const INPUT: &str = r#"ocio_profile_version: 2.1
@@ -723,7 +724,7 @@ display_colorspaces:
 
     let find = |name: &str| -> Vec<u8> {
         let cs = input_config.color_space(name).unwrap();
-        find_equivalent_colorspace(&fingerprints, &input_config, cs)
+        find_equivalent_color_space(&fingerprints, &input_config, cs)
             .unwrap()
             .to_vec()
     };
@@ -744,7 +745,7 @@ display_colorspaces:
     assert!(
         !calc_color_space_fingerprint(
             &mut fingerprint_vals,
-            &fingerprints,
+            &fingerprints.test_vals,
             &input_config,
             input_config.color_space("Rec.601 - Display").unwrap(),
         )
@@ -757,7 +758,7 @@ display_colorspaces:
     assert!(
         !calc_color_space_fingerprint(
             &mut fingerprint_vals,
-            &fingerprints,
+            &fingerprints.test_vals,
             &input_config,
             input_config.color_space("Rec.601 (PAL) - Display").unwrap(),
         )
@@ -766,4 +767,367 @@ display_colorspaces:
     for v in &fingerprint_vals {
         assert!(f64::from(*v) >= 0.);
     }
+
+    // Test the overload that uses the test values of the input config rather than those of
+    // the base config. This is what Config::LocateBuiltinColorSpace uses, since it allows the
+    // color spaces of two configs to be compared without first adjusting the reference space
+    // of the input color space.
+
+    let mut input_test_vals = TestVals::default();
+    initialize_test_vals(&mut input_test_vals, &input_config);
+
+    // The base config has both interchange roles.
+    assert!(fingerprints.test_vals.scene_ref_test_vals_converted);
+    assert!(fingerprints.test_vals.display_ref_test_vals_converted);
+
+    // The input config has neither interchange role, so the heuristics are used. They are able
+    // to identify the scene-referred reference space ("ref_space"), but they do not support
+    // display-referred spaces. (The display-referred test values happen to be correct anyway
+    // here, since the display reference space is CIE-XYZ-D65.)
+    assert!(input_test_vals.scene_ref_test_vals_converted);
+    assert!(!input_test_vals.display_ref_test_vals_converted);
+
+    // The reference space of the input config is also ACES2065-1, so the results are the same
+    // as the ones above.
+    let find_with = |name: &str| -> Vec<u8> {
+        let cs = input_config.color_space(name).unwrap();
+        find_equivalent_color_space_with(&fingerprints, &input_test_vals, &input_config, cs)
+            .unwrap()
+            .to_vec()
+    };
+    assert_eq!(find_with("ACES cg"), b"ACEScg");
+    assert_eq!(find_with("standard RGB"), b"sRGB - Texture");
+    assert_eq!(find_with("very approx. standard RGB"), b"");
+    assert_eq!(find_with("pq display"), b"Rec.2100-PQ - Display");
+}
+
+/// Port of `OCIO_ADD_TEST(ConfigUtils, sanitize_id_token)` @ v2.6.0.
+#[test]
+fn sanitize_id_token_test() {
+    let check = |token: &[u8], expected: &[u8]| {
+        assert_eq!(
+            sanitize_id_token(token),
+            expected,
+            "{}",
+            String::from_utf8_lossy(token)
+        );
+    };
+
+    // Lower-case allowed characters pass through unchanged.
+    check(b"abc.-_~/*#%^+()[]|09", b"abc.-_~/*#%^+()[]|09");
+
+    // Upper-case letters are lowered.
+    check(b"ABCxyz", b"abcxyz");
+
+    // Explicit character mappings.
+    check(b" \t\n\r", b"____");
+    check(b"{}<>", b"()()");
+    check(b",", b".");
+    check(b";:", b"||");
+    check(b"'\"", b"##");
+    check(b"\\", b"/");
+
+    // Any other disallowed ASCII character becomes '*'.
+    check(b"a!b@c?", b"a*b*c*");
+
+    // A multi-byte UTF-8 codepoint becomes a single '^', regardless of how many bytes it takes
+    // to encode, so the result does not depend on the input's byte-level UTF-8 encoding.
+    check(b"a\xC3\xA9z", b"a^z"); // "a" + e acute (2 bytes) + "z"
+    check(b"a\xE4\xB8\xADz", b"a^z"); // "a" + a CJK ideograph (3 bytes) + "z"
+    check(b"a\xF0\x9F\x98\x80z", b"a^z"); // "a" + emoji (4 bytes) + "z"
+
+    // Malformed UTF-8 (a stray continuation/lead byte not followed by the expected
+    // continuation bytes) is still handled safely, one '^' per byte actually consumed.
+    check(b"a\x80z", b"a^z");
+    check(b"a\xC3z", b"a^z");
+
+    // Empty string.
+    check(b"", b"");
+}
+
+/// Port of `OCIO_ADD_TEST(ConfigUtils, generate_local_id_for_color_space)` @ v2.6.0.
+#[test]
+fn generate_local_id_for_color_space_test() {
+    let _env = EnvGuard::new();
+    let mut cfg = Config::new().unwrap();
+    cfg.set_name("My Studio!");
+
+    let mut cs = ColorSpace::new();
+    cs.set_name("sRGB Encoded,Space");
+    // This alias also requires sanitization (space, uppercase), so it does not qualify to be
+    // preferred over the color space name; see the alias-preference test below for that case.
+    cs.add_alias("My Alias");
+    // The color space already has an interop ID, but generateLocalIDForColorSpace must ignore
+    // it and always generate a local ID.
+    cs.set_interop_id("lin_rec709_scene").unwrap();
+    cfg.add_color_space(&cs).unwrap();
+
+    // Config name and color space name are each sanitized per Annex C: uppercase is lowered,
+    // spaces become '_', ',' becomes '.', and '!' (not allowed, no explicit mapping) becomes
+    // '*'.
+    let id = cfg
+        .generate_local_id_for_color_space("sRGB Encoded,Space")
+        .unwrap();
+    assert_eq!(id, b"my_studio*:local:srgb_encoded.space");
+    assert!(!id.windows(9).any(|w| w == b"populated"));
+    // The color space's own interop ID is left untouched.
+    assert_eq!(
+        cfg.color_space("sRGB Encoded,Space").unwrap().interop_id(),
+        b"lin_rec709_scene"
+    );
+
+    // An alias resolves to the same ID, since the canonical color space name is used, not the
+    // caller-supplied string.
+    let id = cfg.generate_local_id_for_color_space("My Alias").unwrap();
+    assert_eq!(id, b"my_studio*:local:srgb_encoded.space");
+
+    // A config with no name set cannot generate a local ID.
+    let mut cfg_no_name = Config::new().unwrap();
+    cfg_no_name.add_color_space(&cs).unwrap();
+    check_throw_what(
+        cfg_no_name.generate_local_id_for_color_space("sRGB Encoded,Space"),
+        "May not generate a local interop ID if the config name is empty.",
+    );
+
+    // Null / empty color space name.
+    check_throw_what(
+        cfg.generate_local_id_for_color_space(""),
+        "srcColorSpaceName must not be null or empty",
+    );
+    check_throw_what(
+        cfg.generate_local_id_for_color_space(""),
+        "srcColorSpaceName must not be null or empty",
+    );
+
+    // Color space that does not exist in the config.
+    check_throw_what(
+        cfg.generate_local_id_for_color_space("does_not_exist"),
+        "does not contain the requested color space",
+    );
+
+    // Renaming the config is reflected immediately.
+    cfg.set_name("Other Studio");
+    let id = cfg
+        .generate_local_id_for_color_space("sRGB Encoded,Space")
+        .unwrap();
+    assert_eq!(id, b"other_studio:local:srgb_encoded.space");
+
+    // Disallow usage of config names for one of the OCIO configs for ACES that already contains
+    // interop IDs for all color spaces. Trying to avoid the situation where someone edits one
+    // of these configs but forgets to change the config name. This would result in a
+    // meaningless interop ID.
+
+    // A config named like one of the built-in configs at version 4.0.0 or higher already has
+    // interop IDs populated, so it may not be used as the namespace of a locally-generated one.
+    // Don't allow anything that would sanitize to one of the disallowed config names. Then an
+    // example of a potential future built-in config name, and one with more digits in the ACES
+    // version.
+    for name in [
+        "cg-config-v4.0.0_aces-v2.0_ocio-v2.5",
+        "CG-config-v4.0.0_aces-v2.0_ocio-v2.5",
+        "studio-config-v5.1.2_aces-v2.2_ocio-v2.7",
+        "studio-config-v4.1.2_aces-v2.2.1_ocio-v2.7",
+    ] {
+        cfg.set_name(name);
+        check_throw_what(
+            cfg.generate_local_id_for_color_space("sRGB Encoded,Space"),
+            "May not generate a local interop ID if the name matches",
+        );
+    }
+
+    // A built-in-looking config name with a major version below 4 does not have interop IDs, so
+    // it is still legal to use as a local ID namespace.
+    cfg.set_name("studio-config-v3.0.0_aces-v2.0_ocio-v2.4");
+    let id = cfg
+        .generate_local_id_for_color_space("sRGB Encoded,Space")
+        .unwrap();
+    assert_eq!(
+        id,
+        b"studio-config-v3.0.0_aces-v2.0_ocio-v2.4:local:srgb_encoded.space"
+    );
+
+    // A name that starts like a built-in config and has a version 4.0.0+, but continues with
+    // something other than the exact "_aces-<version>_ocio-<version>" suffix, is not actually
+    // one of the reserved built-in config names and so remains legal.
+    cfg.set_name("cg-config-v4.0.0_aces-v2.0_ocio-v2.5_custom");
+    let id = cfg
+        .generate_local_id_for_color_space("sRGB Encoded,Space")
+        .unwrap();
+    assert_eq!(
+        id,
+        b"cg-config-v4.0.0_aces-v2.0_ocio-v2.5_custom:local:srgb_encoded.space"
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(ConfigUtils, generate_local_id_for_color_space_alias_preference)` @
+/// v2.6.0.
+#[test]
+fn generate_local_id_for_color_space_alias_preference() {
+    let _env = EnvGuard::new();
+    let mut cfg = Config::new().unwrap();
+    cfg.set_name("studio");
+
+    let mut add = |name: &str, aliases: &[&str]| {
+        let mut cs = ColorSpace::new();
+        cs.set_name(name);
+        for alias in aliases {
+            cs.add_alias(alias);
+        }
+        cfg.add_color_space(&cs).unwrap();
+        cfg.generate_local_id_for_color_space(name).unwrap()
+    };
+
+    // If the color space name already requires no sanitization, it is used as-is, even though
+    // an alias that also requires no sanitization is present.
+    assert_eq!(
+        add("aces_cg", &["some_other_name"]),
+        b"studio:local:aces_cg"
+    );
+
+    // If the name requires sanitization but an alias does not, the alias is preferred.
+    assert_eq!(
+        add("ACES CG", &["aces_cg_alias"]),
+        b"studio:local:aces_cg_alias"
+    );
+
+    // If several aliases would not require sanitization, the first one (in alias order) wins.
+    assert_eq!(
+        add(
+            "Linear Rec709",
+            &[
+                "Needs Sanitizing",
+                "first_clean_alias",
+                "second_clean_alias"
+            ]
+        ),
+        b"studio:local:first_clean_alias"
+    );
+
+    // If the name and all aliases require sanitization, fall back to the sanitized name, as
+    // before this feature was added.
+    assert_eq!(
+        add("Camera Log,Space", &["Also Needs Sanitizing"]),
+        b"studio:local:camera_log.space"
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(ConfigUtils, find_color_space_for_id)` @ v2.6.0.
+#[test]
+fn find_color_space_for_id_test() {
+    let _env = EnvGuard::new();
+    let mut cfg = Config::new().unwrap();
+    cfg.set_name("MyStudio!");
+
+    let mut acescg = ColorSpace::new();
+    acescg.set_name("ACEScg");
+    acescg.add_alias("lin_ap1");
+    cfg.add_color_space(&acescg).unwrap();
+
+    let mut srgb = ColorSpace::new();
+    srgb.set_name("srgb");
+    cfg.add_color_space(&srgb).unwrap();
+
+    let mut foo = ColorSpace::new();
+    foo.set_name("foo");
+    cfg.add_color_space(&foo).unwrap();
+
+    let mut fancy = ColorSpace::new();
+    fancy.set_name("My Color Space!");
+    fancy.add_alias("Fancy Alias");
+    cfg.add_color_space(&fancy).unwrap();
+
+    // A different name that sanitizes to the same base as the color space above (both '!' and
+    // '?' sanitize to '*'). The color space added first wins.
+    let mut fancy_too = ColorSpace::new();
+    fancy_too.set_name("My Color Space?");
+    cfg.add_color_space(&fancy_too).unwrap();
+
+    let found = |cfg: &Config, id: &[u8]| -> Option<Vec<u8>> {
+        cfg.find_color_space_for_id(id).map(|cs| cs.name().to_vec())
+    };
+    let name = |n: &str| Some(n.as_bytes().to_vec());
+
+    // Mode 1: exact name and exact alias.
+    assert_eq!(found(&cfg, b"ACEScg"), name("ACEScg"));
+    assert_eq!(found(&cfg, b"lin_ap1"), name("ACEScg"));
+
+    // Mode 2: one namespace, falls back to the base name.
+    assert_eq!(found(&cfg, b"somestudio:acescg"), name("ACEScg"));
+
+    // But if the namespaced name is there, it takes precedence.
+    let mut nsname = ColorSpace::new();
+    nsname.set_name("Namespaced name");
+    nsname.add_alias("somestudio:acescg");
+    cfg.add_color_space(&nsname).unwrap();
+    assert_eq!(found(&cfg, b"somestudio:acescg"), name("Namespaced name"));
+
+    // Two-namespace ID whose one-level-stripped remainder is not itself a valid name/alias: no
+    // recursive stripping, so this must not match "ACEScg".
+    assert_eq!(found(&cfg, b"outer:inner:acescg"), None);
+
+    // Mode 3 (local): outer namespace matches this config's sanitized name.
+    assert_eq!(found(&cfg, b"mystudio*:local:acescg"), name("ACEScg"));
+
+    // Mode 3 negative: outer namespace does not match the config's name.
+    assert_eq!(found(&cfg, b"othername:local:acescg"), None);
+    assert_eq!(found(&cfg, b":local:acescg"), None);
+    assert_eq!(found(&cfg, b"::local:acescg"), None);
+
+    // Mode 3 with a color space whose name must be sanitized in order to match the ID base.
+    // (The first of the two color spaces that sanitize to this base is the one returned.)
+    assert_eq!(
+        found(&cfg, b"mystudio*:local:my_color_space*"),
+        name("My Color Space!")
+    );
+
+    // Aliases are searched as well, and are also compared in their sanitized form.
+    assert_eq!(
+        found(&cfg, b"mystudio*:local:fancy_alias"),
+        name("My Color Space!")
+    );
+
+    // In this case, the outer namespace is illegal since it's not lower-case. However, the base
+    // name would match regardless of case, so it's more predictable to allow this to match
+    // too.
+    assert_eq!(
+        found(&cfg, b"myStudio*:local:fancy_Alias"),
+        name("My Color Space!")
+    );
+
+    // The sanitized comparison is only used for the local mode fall-back, so the sanitized base
+    // does not match on its own or with a namespace that is not this config's name.
+    assert_eq!(found(&cfg, b"my_color_space*"), None);
+    assert_eq!(found(&cfg, b"othername:local:my_color_space*"), None);
+
+    // Empty inner namespace: "my-studio::srgb" strips to ":srgb", which must not match "srgb".
+    assert_eq!(found(&cfg, b"my-studio::srgb"), None);
+
+    // Use of "local" as an ordinary namespace is not allowed, it may only be used as a keyword
+    // for the local (mode 3) form of an ID.
+    assert_eq!(found(&cfg, b"local:foo"), None);
+
+    // Garbage input: extra colons, empty string, and null all resolve to "not found" without
+    // throwing.
+    assert_eq!(found(&cfg, b"a:b:c:d"), None);
+    assert_eq!(found(&cfg, b""), None);
+    assert_eq!(found(&cfg, b""), None);
+
+    // Round-trip: an ID generated by this config is resolved back to the same color space.
+    let generated = cfg.generate_local_id_for_color_space("ACEScg").unwrap();
+    assert_eq!(found(&cfg, &generated), name("ACEScg"));
+
+    // Round-trip for a color space whose name requires more than case sanitizing.
+    let generated_fancy = cfg
+        .generate_local_id_for_color_space("My Color Space!")
+        .unwrap();
+    assert_eq!(generated_fancy, b"mystudio*:local:my_color_space*");
+    assert_eq!(found(&cfg, &generated_fancy), name("My Color Space!"));
+
+    // A config with no name never matches a local mode ID, not even one with an empty outer
+    // namespace (such an ID could not have been generated by an unnamed config).
+    let mut cfg_no_name = Config::new().unwrap();
+    cfg_no_name.add_color_space(&foo).unwrap();
+    assert_eq!(found(&cfg_no_name, b"foo"), name("foo"));
+    assert_eq!(found(&cfg_no_name, b":local:foo"), None);
+    assert_eq!(found(&cfg_no_name, b"mystudio*:local:foo"), None);
 }

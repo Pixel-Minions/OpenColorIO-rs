@@ -94,7 +94,7 @@ def prove_ordinary(program, args):
     expected, expected_blobs = direct_ordinary(args)
     native, blobs, abi = updates._native(program, updates._message(args, [], [{"kind": "default", "optimization": args.get("optimization")}]))
     assert native == expected and blobs == expected_blobs, (args, native, expected, blobs == expected_blobs)
-    assert abi["wheel_version"] == "2.5.2", abi
+    assert abi["wheel_version"] == "2.6.0", abi
     return expected
 
 

@@ -1376,3 +1376,364 @@ colorspaces:
         build(&config, &dt, TransformDirection::Forward).unwrap();
     }
 }
+
+/// The op data of `a` and `b` are equal, op by op (upstream's `*opA->data() == *opB->data()`).
+#[track_caller]
+fn check_same_ops(a: &OpVec, b: &OpVec) {
+    assert_eq!(a.len(), b.len());
+    for i in 0..a.len() {
+        assert!(**a[i].data() == **b[i].data(), "op {i}");
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(DisplayViewTransform, use_display_name_alias)` @ v2.6.0.
+#[test]
+fn use_display_name_alias() {
+    let _env = EnvGuard::new();
+    // Test that USE_DISPLAY_NAME will find a display color space where the display name is an
+    // alias. Note that this has nothing to do with whether use_display_aliases is set. It is
+    // simply a consequence of the fact that USE_DISPLAY_NAME is resolved via a call to
+    // config->getColorSpace(displayName), which handles aliases.
+
+    const SIMPLE_CONFIG: &str = r#"
+ocio_profile_version: 2
+
+roles:
+  default: raw
+
+shared_views:
+  - !<View> {name: view1, view_transform: display_vt, display_colorspace: <USE_DISPLAY_NAME>}
+
+displays:
+  sRGB - Display:
+    - !<Views> [view1]
+  # Note that the "sRGB" display needs to be present. This test relies on color space aliases
+  # rather than display aliases.
+  sRGB:
+    - !<Views> [view1]
+
+view_transforms:
+  - !<ViewTransform>
+    name: display_vt
+    to_scene_reference: !<MatrixTransform> {offset: [0.3, 0.1, 0.1, 0]}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: sRGB - Display
+    aliases: [sRGB]
+    to_display_reference: !<MatrixTransform> {offset: [0.25, 0.15, 0.35, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+
+  - !<ColorSpace>
+    name: source
+    to_scene_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}
+"#;
+
+    let config = Config::create_from_stream(SIMPLE_CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    let display = "sRGB - Display";
+    let alias_display = "sRGB";
+    let view = "view1";
+
+    let mut dt = DisplayViewTransform::new();
+    dt.set_src("source");
+    dt.set_view(view);
+
+    // Build once with the display name matching the display color space name.
+    dt.set_display(display);
+    let mut current_ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+    current_ops.validate().unwrap();
+    assert_eq!(current_ops.len(), 5); // (includes gpu allocation no-ops)
+
+    // Build again with the display name matching an alias. The result must be identical.
+    dt.set_display(alias_display);
+    let mut aliased_ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+    aliased_ops.validate().unwrap();
+    check_same_ops(&aliased_ops, &current_ops);
+}
+
+/// Port of `OCIO_ADD_TEST(DisplayViewTransform, display_alias_fallback)` @ v2.6.0.
+#[test]
+fn display_alias_fallback() {
+    let _env = EnvGuard::new();
+    // Validate that BuildDisplayOps resolves a display using Config::getCanonicalDisplayName, so
+    // that renaming a display in a config (while keeping the old name as an alias on the
+    // associated display color space) doesn't break a DisplayViewTransform still using the old
+    // name.
+
+    const CONFIG: &str = r#"
+ocio_profile_version: 2.6
+
+# Opt-in to display aliasing.
+use_display_aliases: true
+
+roles:
+  default: raw
+  aces_interchange: raw
+  cie_xyz_d65_interchange: sRGB - Display
+  color_timing: raw
+  compositing_log: raw
+  scene_linear: raw
+
+shared_views:
+  - !<View> {name: view, view_transform: display_vt, display_colorspace: <USE_DISPLAY_NAME>}
+
+displays:
+  sRGB - Display:
+    - !<Views> [view]
+
+view_transforms:
+  - !<ViewTransform>
+    name: display_vt
+    to_scene_reference: !<MatrixTransform> {offset: [0.3, 0.1, 0.1, 0]}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: sRGB - Display
+    aliases: [sRGB]
+    to_display_reference: !<MatrixTransform> {offset: [0.25, 0.15, 0.35, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+
+  - !<ColorSpace>
+    name: source
+    to_scene_reference: !<MatrixTransform> {offset: [0, 0.1, 0.2, 0]}
+"#;
+
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    let display = "sRGB - Display";
+    let old_display_name = "sRGB";
+    let view = "view";
+
+    assert_eq!(
+        config.canonical_display_name(old_display_name),
+        display.as_bytes()
+    );
+
+    let mut dt = DisplayViewTransform::new();
+    dt.set_src("source");
+    dt.set_view(view);
+
+    // Build once using the display's current name.
+    dt.set_display(display);
+    let mut current_ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+    current_ops.validate().unwrap();
+    assert_eq!(current_ops.len(), 5); // (includes gpu allocation no-ops)
+
+    // Build again using only the display's old, alias-only name. The result must be identical.
+    dt.set_display(old_display_name);
+    let mut aliased_ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+    aliased_ops.validate().unwrap();
+    check_same_ops(&aliased_ops, &current_ops);
+
+    // A display name that cannot be resolved at all -- not an existing display, and not a
+    // display color space name or alias either -- must still throw, referencing the name the
+    // caller actually provided.
+    dt.set_display("not a display");
+    check_throw_what(
+        build(&config, &dt, TransformDirection::Forward),
+        "DisplayViewTransform error. Display 'not a display' not found.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(DisplayViewTransform, view_alias_fallback)` @ v2.6.0.
+#[test]
+fn view_alias_fallback() {
+    let _env = EnvGuard::new();
+    // Validate that BuildDisplayOps resolves a view using Config::getCanonicalViewName, so that
+    // renaming a view in a config (while keeping the old name as one of the view's aliases)
+    // doesn't break a DisplayViewTransform still using the old name as its "view".
+
+    const CONFIG: &str = r#"
+ocio_profile_version: 2.6
+
+roles:
+  default: raw
+  aces_interchange: raw
+  cie_xyz_d65_interchange: sRGB - Display
+  color_timing: raw
+  compositing_log: raw
+  scene_linear: raw
+
+displays:
+  sRGB - Display:
+    - !<View> {name: view, view_transform: display_vt, display_colorspace: sRGB - Display,
+               looks: look1, aliases: [old_view]}
+
+looks:
+  - !<Look>
+    name: look1
+    process_space: source
+    transform: !<CDLTransform> {slope: [1.1, 1.2, 1.3]}
+
+view_transforms:
+  - !<ViewTransform>
+    name: display_vt
+    to_scene_reference: !<MatrixTransform> {offset: [0.3, 0.1, 0.1, 0]}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: sRGB - Display
+    to_display_reference: !<MatrixTransform> {offset: [0.25, 0.15, 0.35, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+
+  - !<ColorSpace>
+    name: source
+    to_scene_reference: !<MatrixTransform> {offset: [0, 0.1, 0.2, 0]}
+"#;
+
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    let display = "sRGB - Display";
+    let view = "view";
+    let old_view_name = "old_view";
+
+    assert_eq!(
+        config.canonical_view_name(display, old_view_name),
+        view.as_bytes()
+    );
+
+    let mut dt = DisplayViewTransform::new();
+    dt.set_src("source");
+    dt.set_display(display);
+
+    // Build once using the view's current name.
+    dt.set_view(view);
+    let mut current_ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+    current_ops.validate().unwrap();
+    assert_eq!(current_ops.len(), 7); // (includes gpu allocation no-ops)
+
+    // Build again using only the view's old, alias-only name as the "view". The result must be
+    // identical. Note that the view has a look, so this also verifies that the resolved view
+    // name is used to look up the view's looks, not just its color space and view transform.
+    dt.set_view(old_view_name);
+    let mut aliased_ops = build(&config, &dt, TransformDirection::Forward).unwrap();
+    aliased_ops.validate().unwrap();
+    check_same_ops(&aliased_ops, &current_ops);
+
+    // A view name that cannot be resolved at all -- not an existing view, and not an alias of a
+    // view used by this display either -- must still throw, referencing the name the caller
+    // actually provided.
+    dt.set_view("not a view");
+    check_throw_what(
+        build(&config, &dt, TransformDirection::Forward),
+        "DisplayViewTransform error. The display 'sRGB - Display' does not have view 'not a \
+         view'.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(DisplayViewTransform, context_variables_with_resolved_display_view)`
+/// @ v2.6.0.
+#[test]
+fn context_variables_with_resolved_display_view() {
+    let _env = EnvGuard::new();
+    // Validate that CollectContextVariables resolves the (display, view) pair the same way
+    // BuildDisplayOps does, so that the context variables of the display color space are found
+    // even when the view uses <USE_DISPLAY_NAME> or when the display name is aliased.
+
+    const OCIO_CONFIG: &str = r#"
+ocio_profile_version: 2.6
+
+use_display_aliases: true
+
+environment: { FILE: cdl_test1.cc }
+
+roles:
+  default: raw
+  aces_interchange: raw
+  cie_xyz_d65_interchange: sRGB - Display
+  color_timing: raw
+  compositing_log: raw
+  scene_linear: source
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+shared_views:
+  - !<View> {name: view, view_transform: display_vt, display_colorspace: <USE_DISPLAY_NAME>}
+
+displays:
+  sRGB - Display:
+    - !<Views> [view]
+    - !<View> {name: plain_view, colorspace: source}
+
+view_transforms:
+  - !<ViewTransform>
+    name: display_vt
+    to_scene_reference: !<MatrixTransform> {offset: [0.3, 0.1, 0.1, 0]}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: sRGB - Display
+    aliases: [sRGB]
+    to_display_reference: !<FileTransform> {src: $FILE}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+
+  - !<ColorSpace>
+    name: source
+    allocation: uniform
+"#;
+
+    let mut cfg = (*Config::create_from_stream(OCIO_CONFIG.as_bytes()).unwrap()).clone();
+    cfg.set_search_path(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../upstream/OpenColorIO/tests/data/files"
+    ));
+    cfg.validate().unwrap();
+
+    let mut used_context_vars = Context::new();
+
+    let mut dt = DisplayViewTransform::new();
+    dt.set_src("source");
+
+    let collect = |cfg: &Config, dt: &DisplayViewTransform, used: &mut Context| {
+        collect_display_view_transform_context_variables(
+            cfg,
+            &cfg.current_context().get(),
+            dt,
+            used,
+        )
+        .unwrap()
+    };
+
+    // A view with no context variables anywhere: neither the source nor the color space it
+    // targets uses one. Returns false.
+    dt.set_display("sRGB - Display");
+    dt.set_view("plain_view");
+    assert!(!collect(&cfg, &dt, &mut used_context_vars));
+    assert_eq!(0, used_context_vars.num_string_vars());
+
+    // The shared view's display color space is <USE_DISPLAY_NAME>, so finding the context
+    // variable requires resolving that to the display color space named after the display. The
+    // context variable is found: returns true.
+    dt.set_view("view");
+    assert!(collect(&cfg, &dt, &mut used_context_vars));
+    assert_eq!(1, used_context_vars.num_string_vars());
+    assert_eq!(b"FILE", used_context_vars.string_var_name_by_index(0));
+
+    // The display's old, alias-only name is resolved too, so the same context variable is
+    // found. The context variable is found: returns true.
+    dt.set_display("sRGB");
+    assert!(collect(&cfg, &dt, &mut used_context_vars));
+    assert_eq!(1, used_context_vars.num_string_vars());
+    assert_eq!(b"FILE", used_context_vars.string_var_name_by_index(0));
+}

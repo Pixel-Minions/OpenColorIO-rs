@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use ocio_testkit::paths;
 use serde::{Deserialize, Serialize};
 
-pub(crate) const UPSTREAM_TAG: &str = "v2.5.2";
-pub(crate) const UPSTREAM_COMMIT: &str = "c52966a6677723d5bd2dbef0ccec3fed9cbc3790";
+pub(crate) const UPSTREAM_TAG: &str = "v2.6.0";
+pub(crate) const UPSTREAM_COMMIT: &str = "10a43ec1df03d072ca9a9e2fb3f26e454b0900d8";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct UpstreamMap {

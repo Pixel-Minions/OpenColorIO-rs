@@ -1073,14 +1073,16 @@ fn reverse_reference(args: &[Value]) -> Vec<Response> {
     const SCRIPT: &str = r#"
 import json,sys
 from ocio_oracle import commands,legacy_gpu,native_build
+version=native_build.HEADERS_VERSION
+assert version=='2.6.0',version
 for index,args in enumerate(json.load(sys.stdin)):
     try:
         checked,_=legacy_gpu.legacy_gpu_shader(args,[])
-        assert checked['oracle_native']['wheel_version']=='2.5.2'
+        assert checked['oracle_native']['wheel_version']==version
         program,provenance=native_build.executable()
         requests=args['before']+[{'kind':'default','optimization':args['optimization']}]
         result,blobs,abi=legacy_gpu._native(program,legacy_gpu._message(args,[],requests))
-        assert abi['wheel_version']=='2.5.2' and abi['abi']==checked['oracle_native']['abi']
+        assert abi['wheel_version']==version and abi['abi']==checked['oracle_native']['abi']
         provenance.update(abi)
         result['oracle_native']=provenance
         print(json.dumps({'result':result,'blobs':[list(blob) for blob in blobs]}),flush=True)
@@ -1158,7 +1160,7 @@ fn ordinary_after_legacy_keeps_native_cached_shader_and_texture_values() {
             let reply = GpuShaderReply::from_response(response);
             assert_eq!(
                 reply.result["oracle_native"]["wheel_version"],
-                json!("2.5.2"),
+                json!("2.6.0"),
                 "{label}"
             );
             let expected = wheel(&reply);
@@ -1283,7 +1285,7 @@ fn compare_batches(
             );
             assert_eq!(
                 reply.result["oracle_native"]["wheel_version"],
-                json!("2.5.2"),
+                json!("2.6.0"),
                 "{label}: actual native wheel"
             );
             let expected = wheel(&reply);

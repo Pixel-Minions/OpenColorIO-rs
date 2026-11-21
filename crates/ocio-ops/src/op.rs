@@ -1122,10 +1122,12 @@ impl OpVec {
     /// ([`FormatMetadataImpl::combine`]), which fails if the two metadata elements have
     /// different names; the ops are appended first.
     ///
-    /// For `ops += ops`, upstream appends a copy of the list; in Rust the caller passes the
-    /// copy.
+    /// A list can't be appended to itself in Rust. Upstream 2.6.0's `ops += ops` inserts the
+    /// vector's own range into it (which the standard leaves undefined; `reserve` makes it work
+    /// in practice) and skips combining the metadata, where 2.5.2 appended a copy and combined
+    /// its metadata; no caller in the library appends a list to itself.
     ///
-    /// Port of `OpRcPtrVec::operator+=` (src/OpenColorIO/Op.cpp:236-249 @ v2.5.2).
+    /// Port of `OpRcPtrVec::operator+=` (src/OpenColorIO/Op.cpp:155-167 @ v2.6.0).
     pub fn append(&mut self, other: &OpVec) -> Result<()> {
         self.ops.extend(other.ops.iter().cloned());
         self.metadata.combine(&other.metadata)

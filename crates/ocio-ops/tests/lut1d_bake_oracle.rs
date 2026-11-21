@@ -35,7 +35,7 @@ use common::image::{depth_name, port_depth, port_image};
 use common::log_chain::{Affine, T, port_raw_ops};
 use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::exception::Result;
-use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::hash_utils::cache_id_hash_uuid;
 use ocio_ops::image_desc::Bytes;
 use ocio_ops::op::OpVec;
 use ocio_ops::op_data::OpData;
@@ -337,12 +337,9 @@ fn check_bakes(cases: &[BakeCase]) -> usize {
             }
         };
 
-        // The cache ID: the hash of the ops' cache IDs.
-        let port_id = if ops.is_empty() {
-            "<NOOP>".to_string()
-        } else {
-            cache_id_hash(&ops.get_cache_id().unwrap())
-        };
+        // The cache ID: the UUID-shaped hash of the ops' cache IDs, an empty list's too
+        // (`Processor::Impl::getCacheID`, Processor.cpp:331-342 @ v2.6.0).
+        let port_id = cache_id_hash_uuid(&ops.get_cache_id().unwrap());
         if port_id != optimized["cache_id"].as_str().unwrap() {
             failures.push(format!("{what}: the cache IDs differ"));
         }

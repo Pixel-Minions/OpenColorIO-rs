@@ -118,6 +118,7 @@ fn fixed_function_style(v: &Value) -> FixedFunctionStyle {
         "FIXED_FUNCTION_ACES_RGB_TO_JMH_20" => AcesRgbToJmh20,
         "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20" => AcesTonescaleCompress20,
         "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20" => AcesGamutCompress20,
+        "FIXED_FUNCTION_ACES_RGB_TO_HMJ_20" => AcesRgbToHmj20,
         "FIXED_FUNCTION_RGB_TO_HSY_LIN" => RgbToHsyLin,
         "FIXED_FUNCTION_RGB_TO_HSY_LOG" => RgbToHsyLog,
         "FIXED_FUNCTION_RGB_TO_HSY_VID" => RgbToHsyVid,

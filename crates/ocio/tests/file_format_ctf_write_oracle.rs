@@ -487,7 +487,7 @@ fn groups_of_matrices_write_as_in_the_wheel() {
 fn processors_of_matrix_files_write_as_in_the_wheel() {
     let mut cases = Vec::new();
     for src in [
-        "clf/matrix_example.clf",
+        "clf/pre-smpte_only/matrix_example.clf",
         "clf/matrix_3x4_example.clf",
         "matrix_example4x4.ctf",
         "matrix_offsets_example.ctf",
@@ -532,6 +532,177 @@ fn info_metadata_writes_as_in_the_wheel() {
                 Forward,
                 format,
             ));
+        }
+    }
+    check_writes(&cases);
+}
+
+/// SMPTE ST 2136-1 CLF (OCIO 2.6.0) in the writer: the SMPTE namespace beside
+/// compCLFversion, the id the writer makes from the ops when the group has none, the Id
+/// element (refused in a CLF when it isn't a SMPTE Id), the `xmlns:*` attributes, and the
+/// descriptions and descriptors with their names and attributes, from groups and from read
+/// files.
+#[test]
+fn smpte_metadata_writes_as_in_the_wheel() {
+    const VALID: &str = "urn:uuid:123e4567-e89b-12d3-a456-426655440000";
+    let m = matrix_cases();
+    let groups: Vec<(&str, Vec<Case>)> = vec![
+        ("empty", Vec::new()),
+        ("one matrix", vec![m[1].clone()]),
+        ("two matrices", vec![m[2].clone(), m[5].clone()]),
+    ];
+    let metadata: &[(&str, &[MetadataCall<'_>])] = &[
+        ("no metadata", &[]),
+        ("an id", &[("setID", "UID42", "")]),
+        ("an Id", &[("addChildElement", "Id", VALID)]),
+        (
+            "an Id and an id",
+            &[("setID", "UID42", ""), ("addChildElement", "Id", VALID)],
+        ),
+        (
+            "an Id that isn't SMPTE",
+            &[("addChildElement", "Id", "abc")],
+        ),
+        (
+            "an Id in upper case",
+            &[(
+                "addChildElement",
+                "Id",
+                "urn:uuid:123E4567-E89B-12D3-A456-426655440000",
+            )],
+        ),
+        (
+            "an Id with URN in upper case",
+            &[(
+                "addChildElement",
+                "Id",
+                "URN:uuid:123e4567-e89b-12d3-a456-426655440000",
+            )],
+        ),
+        (
+            "an Id with a trailing space",
+            &[(
+                "addChildElement",
+                "Id",
+                "urn:uuid:123e4567-e89b-12d3-a456-426655440000 ",
+            )],
+        ),
+        ("an empty Id", &[("addChildElement", "Id", "")]),
+        (
+            "two Id, the SMPTE one last",
+            &[
+                ("addChildElement", "Id", "abc"),
+                ("addChildElement", "Id", VALID),
+            ],
+        ),
+        (
+            "two Id, the SMPTE one first",
+            &[
+                ("addChildElement", "Id", VALID),
+                ("addChildElement", "Id", "abc"),
+            ],
+        ),
+        ("an id element", &[("addChildElement", "id", "abc")]),
+        (
+            "xmlns attributes",
+            &[
+                ("__setitem__", "xmlns:b", "urn:b"),
+                ("__setitem__", "xmlns:a", "urn:a & <a>"),
+                ("__setitem__", "xmlns:e", ""),
+                ("__setitem__", "XMLNS:c", "urn:c"),
+                ("__setitem__", "xmlns", "urn:d"),
+                ("__setitem__", "xmlns:", "urn:empty prefix"),
+            ],
+        ),
+        (
+            "the attributes in another order and case",
+            &[
+                ("__setitem__", "xmlns:b", "urn:b"),
+                ("__setitem__", "INVERSEOF", "inv"),
+                ("__setitem__", "NAME", "n"),
+                ("__setitem__", "ID", "i"),
+            ],
+        ),
+        (
+            "descriptions and descriptors in other cases",
+            &[
+                ("addChildElement", "OutputDescriptor", "o1"),
+                ("addChildElement", "description", "lower"),
+                ("addChildElement", "INPUTDESCRIPTOR", "i1"),
+                ("addChildElement", "Description", "d"),
+                ("addChildElement", "OutputDescriptor", "o2"),
+                ("addChildElement", "InputDescriptor", "i2"),
+                ("addChildElement", "Description", ""),
+            ],
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (label, children) in &groups {
+        for (md_label, md) in metadata {
+            for format in [CTF, CLF] {
+                cases.push(group_case(
+                    &format!("{label}, {md_label}"),
+                    children,
+                    md,
+                    format,
+                ));
+            }
+        }
+    }
+
+    // Read files: their Id, xmlns:* attributes, descriptions with a language.
+    let m = "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Description language=\"en\">md</Description>\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n";
+    let x = "xmlns=\"http://www.smpte-ra.org/ns/2136-1/2024\"";
+    for (label, attrs, body) in [
+        (
+            "an Id and descriptions with a language",
+            format!("{x} xmlns:a=\"urn:a\" name=\"n\""),
+            format!(
+                "    <Id>urn:uuid:9d768121-0cf9-40a3-a8e3-7b49f79858a7</Id>\n\
+                 \x20   <Description language=\"en\">e</Description>\n\
+                 \x20   <Description>  spaced  </Description>\n\
+                 \x20   <InputDescriptor language=\"fr\">i</InputDescriptor>\n\
+                 \x20   <OutputDescriptor language=\"de\">o</OutputDescriptor>\n\
+                 \x20   <OutputDescriptor/>\n{m}"
+            ),
+        ),
+        (
+            "an Id that isn't SMPTE",
+            format!("id=\"a\" {x}"),
+            format!("    <Id>abc</Id>\n{m}"),
+        ),
+        (
+            "an Id in an operator",
+            "id=\"a\" compCLFversion=\"3\"".to_owned(),
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Id>op id</Id>\n\
+             \x20       <Array dim=\"3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n"
+                .to_owned(),
+        ),
+    ] {
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <ProcessList {attrs}>\n{body}</ProcessList>\n"
+        );
+        let dir = write_files(&[file("smpte.clf", text.into_bytes())]);
+        for format in [CTF, CLF] {
+            for dir_ in [Forward, Inverse] {
+                cases.push(path_case(label, &format!("{dir}/smpte.clf"), dir_, format));
+            }
+        }
+    }
+    for src in [
+        "clf/bit_depth_identity.clf",
+        "clf/smpte_only/namespaces.clf",
+        "clf/smpte_only/illegal/id_bad_value.clf",
+        "clf/pre-smpte_only/process_list_v3_namespace.clf",
+    ] {
+        for dir in [Forward, Inverse] {
+            for format in [CTF, CLF] {
+                cases.push(processor_case(src, dir, format));
+            }
         }
     }
     check_writes(&cases);
@@ -1534,7 +1705,8 @@ fn processors_of_lut_files_write_as_in_the_wheel() {
 
 /// Valid parameters of each FixedFunction style that takes some: upstream's test values
 /// (tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp:71, 169, 219-220, 270-271,
-/// FixedFunctionOpCPU_tests.cpp:564-569, 773, 866 @ v2.5.2), as
+/// FixedFunctionOpCPU_tests.cpp:564-569, 773, 866 @ v2.5.2; HMJ's from
+/// tests/cpu/fileformats/FileFormatCTF_tests.cpp:7214 @ v2.6.0), as
 /// `tests/fixed_function_transform_oracle.rs` takes them.
 fn ff_valid_params(style: FixedFunctionStyle) -> Vec<f64> {
     use FixedFunctionStyle::*;
@@ -1559,7 +1731,7 @@ fn ff_valid_params(style: FixedFunctionStyle) -> Vec<f64> {
         AcesOutputTransform20 | AcesGamutCompress20 => vec![
             100.0, 0.6400, 0.3300, 0.3000, 0.6000, 0.1500, 0.0600, 0.3127, 0.3290,
         ],
-        AcesRgbToJmh20 => vec![
+        AcesRgbToJmh20 | AcesRgbToHmj20 => vec![
             0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
         ],
         AcesTonescaleCompress20 => vec![1000.0],
@@ -1568,7 +1740,7 @@ fn ff_valid_params(style: FixedFunctionStyle) -> Vec<f64> {
 }
 
 /// Every FixedFunction style.
-const FF_STYLES: [FixedFunctionStyle; 23] = {
+const FF_STYLES: [FixedFunctionStyle; 24] = {
     use FixedFunctionStyle::*;
     [
         AcesRedMod03,
@@ -1594,6 +1766,7 @@ const FF_STYLES: [FixedFunctionStyle; 23] = {
         RgbToHsyLin,
         RgbToHsyLog,
         RgbToHsyVid,
+        AcesRgbToHmj20,
     ]
 };
 
@@ -2384,4 +2557,328 @@ fn processors_of_exposure_contrast_and_grading_files_write_as_in_the_wheel() {
     }
     assert_eq!(cases.len(), 30);
     check_writes(&cases);
+}
+
+/// The SMPTE CLF Broadcast Profile's noClamp Ranges (OCIO 2.6.0, PR #2349): a CLF writes a
+/// first or last Matrix that scales and offsets R, G and B like the profile's full-to-narrow
+/// input Range (first) or narrow-to-full output Range (last), within 1e-6, as that Range with
+/// `style="noClamp"`, with the Matrix's metadata and file bit depths. Matrices in the middle,
+/// swapped, near the tolerance, not uniform (each channel's scale and offset), with alpha, not diagonal, inverse or NaN, groups
+/// of one op, ranges that clamp, CTF, and the upstream file and files of noClamp ranges with
+/// bit depths and metadata.
+#[test]
+fn broadcast_profile_ranges_write_as_in_the_wheel() {
+    // The probe values: the profile's 10-bit full/narrow bounds, as upstream's file has them.
+    let lo = 64. / 1023.;
+    let hi = 940. / 1023.;
+    let s_in = hi - lo;
+    let o_in = lo;
+    let s_out = 1.0 / s_in;
+    let o_out = -lo * s_out;
+    let f32s = (BitDepth::F32, BitDepth::F32);
+    let u10 = (BitDepth::Uint10, BitDepth::Uint10);
+    let diag = |label: &str, s: [f64; 4], o: [f64; 4], dir, depths| {
+        let m = [
+            s[0], 0., 0., 0., 0., s[1], 0., 0., 0., 0., s[2], 0., 0., 0., 0., s[3],
+        ];
+        matrix(label, m, o, dir, depths)
+    };
+    let input = |depths| {
+        diag(
+            "in",
+            [s_in, s_in, s_in, 1.],
+            [o_in, o_in, o_in, 0.],
+            Forward,
+            depths,
+        )
+    };
+    let output = |depths| {
+        diag(
+            "out",
+            [s_out, s_out, s_out, 1.],
+            [o_out, o_out, o_out, 0.],
+            Forward,
+            depths,
+        )
+    };
+    let near = |ds: f64, d_off: f64| {
+        let s = s_in + ds;
+        let o = o_in + d_off;
+        diag("near", [s, s, s, 1.], [o, o, o, 0.], Forward, f32s)
+    };
+    let mid = matrix_cases()[1].clone();
+    let bounded = |label: &str, b: [f64; 4], style| range(label, b.map(Some), style, f32s, Forward);
+    let nc_in = bounded("noClamp input", [0., 1., lo, hi], RangeStyle::NoClamp);
+    let nc_out = bounded("noClamp output", [lo, hi, 0., 1.], RangeStyle::NoClamp);
+    let clamp_in = bounded("clamping input", [0., 1., lo, hi], RangeStyle::Clamp);
+    let clamp_out = bounded("clamping output", [lo, hi, 0., 1.], RangeStyle::Clamp);
+    let mut off_diagonal = [
+        s_in, 0., 0., 0., 0., s_in, 0., 0., 0., 0., s_in, 0., 0., 0., 0., 1.,
+    ];
+    off_diagonal[1] = 0.01;
+    let groups: Vec<(&str, Vec<Case>)> = vec![
+        ("the input matrix alone", vec![input(f32s)]),
+        ("the output matrix alone", vec![output(f32s)]),
+        (
+            "input, 3x3, output",
+            vec![input(f32s), mid.clone(), output(f32s)],
+        ),
+        ("input then output", vec![input(f32s), output(f32s)]),
+        ("output then input", vec![output(f32s), input(f32s)]),
+        ("input twice", vec![input(f32s), input(f32s)]),
+        (
+            "the input matrix between 3x3s",
+            vec![mid.clone(), input(f32s), mid.clone()],
+        ),
+        (
+            "noClamp ranges around a 3x3",
+            vec![nc_in.clone(), mid.clone(), nc_out.clone()],
+        ),
+        (
+            "clamping ranges around a 3x3",
+            vec![clamp_in, mid.clone(), clamp_out],
+        ),
+        ("the noClamp output range alone", vec![nc_out]),
+        ("the noClamp input range alone", vec![nc_in]),
+        ("within the tolerance", vec![near(1e-7, -1e-7)]),
+        ("just inside the tolerance", vec![near(9.9e-7, -9.9e-7)]),
+        ("the scale just outside", vec![near(1.1e-6, 0.)]),
+        ("the offset just outside", vec![near(0., -1.1e-6)]),
+        ("far outside", vec![near(1e-3, 0.)]),
+        (
+            "green's scale differs within the tolerance",
+            vec![diag(
+                "g",
+                [s_in, s_in + 5e-7, s_in, 1.],
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "blue's scale differs",
+            vec![diag(
+                "b",
+                [s_in, s_in, s_in + 1e-5, 1.],
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "green's offset differs",
+            vec![diag(
+                "g",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in + 1e-5, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "blue's offset differs",
+            vec![diag(
+                "b",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in, o_in + 1e-5, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "blue's offset differs within the tolerance",
+            vec![diag(
+                "b",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in, o_in - 5e-7, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "an alpha offset",
+            vec![diag(
+                "a",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in, o_in, 0.1],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "an alpha scale",
+            vec![diag(
+                "a",
+                [s_in, s_in, s_in, 0.5],
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "an off-diagonal value",
+            vec![matrix(
+                "off",
+                off_diagonal,
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        (
+            "the input matrix inverted",
+            vec![diag(
+                "inv",
+                [s_in, s_in, s_in, 1.],
+                [o_in, o_in, o_in, 0.],
+                Inverse,
+                f32s,
+            )],
+        ),
+        (
+            "the output matrix inverted, last",
+            vec![
+                mid.clone(),
+                diag(
+                    "inv",
+                    [s_out, s_out, s_out, 1.],
+                    [o_out, o_out, o_out, 0.],
+                    Inverse,
+                    f32s,
+                ),
+            ],
+        ),
+        (
+            "a NaN scale",
+            vec![diag(
+                "nan",
+                [f64::NAN, f64::NAN, f64::NAN, 1.],
+                [o_in, o_in, o_in, 0.],
+                Forward,
+                f32s,
+            )],
+        ),
+        ("10-bit depths", vec![input(u10), mid.clone(), output(u10)]),
+        (
+            "mixed depths",
+            vec![
+                input((BitDepth::Uint10, BitDepth::F16)),
+                mid.clone(),
+                output((BitDepth::Uint12, BitDepth::Uint8)),
+            ],
+        ),
+        (
+            "a 10-bit op after the input",
+            vec![input(f32s), matrix("m10", IDENTITY, [0.; 4], Forward, u10)],
+        ),
+        (
+            "a 14-bit output depth",
+            vec![input((BitDepth::F32, BitDepth::Uint14))],
+        ),
+        (
+            "a 14-bit input depth",
+            vec![input((BitDepth::Uint14, BitDepth::F32))],
+        ),
+        (
+            "a 32-bit output depth, last",
+            vec![mid.clone(), output((BitDepth::F32, BitDepth::Uint32))],
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (label, children) in &groups {
+        for format in [CTF, CLF] {
+            cases.push(group_case(label, children, &[], format));
+        }
+    }
+
+    // Files of noClamp ranges: ranges with bit depths and metadata, ranges of other bounds,
+    // and upstream's file.
+    let lut = "    <LUT1D inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+               \x20       <Array dim=\"2 1\">0 1</Array>\n    </LUT1D>\n";
+    let x = "xmlns=\"http://www.smpte-ra.org/ns/2136-1/2024\" compCLFversion=\"ST2136-1:2024\"";
+    for (label, first, last) in [
+        (
+            "10-bit noClamp ranges with metadata",
+            "    <Range id=\"r1\" name=\"in\" inBitDepth=\"10i\" outBitDepth=\"10i\" \
+             style=\"noClamp\">\n\
+             \x20       <Description>Input Scaling</Description>\n\
+             \x20       <Description language=\"fr\">entree</Description>\n\
+             \x20       <minInValue>0</minInValue>\n\
+             \x20       <maxInValue>1023</maxInValue>\n\
+             \x20       <minOutValue>64</minOutValue>\n\
+             \x20       <maxOutValue>940</maxOutValue>\n\
+             \x20   </Range>\n",
+            "    <Range id=\"r2\" inBitDepth=\"10i\" outBitDepth=\"12i\" style=\"noClamp\">\n\
+             \x20       <minInValue>64</minInValue>\n\
+             \x20       <maxInValue>940</maxInValue>\n\
+             \x20       <minOutValue>0</minOutValue>\n\
+             \x20       <maxOutValue>4095</maxOutValue>\n\
+             \x20   </Range>\n",
+        ),
+        (
+            "noClamp ranges of other bounds",
+            "    <Range inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"noClamp\">\n\
+             \x20       <minInValue>0</minInValue>\n\
+             \x20       <maxInValue>1</maxInValue>\n\
+             \x20       <minOutValue>0.0625</minOutValue>\n\
+             \x20       <maxOutValue>0.9375</maxOutValue>\n\
+             \x20   </Range>\n",
+            "    <Range inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"noClamp\">\n\
+             \x20       <minInValue>0.0625</minInValue>\n\
+             \x20       <maxInValue>0.9375</maxInValue>\n\
+             \x20       <minOutValue>0</minOutValue>\n\
+             \x20       <maxOutValue>1</maxOutValue>\n\
+             \x20   </Range>\n",
+        ),
+    ] {
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <ProcessList id=\"a\" {x}>\n{first}{lut}{last}</ProcessList>\n"
+        );
+        let dir = write_files(&[file("noclamp.clf", text.into_bytes())]);
+        for format in [CTF, CLF] {
+            for dir_ in [Forward, Inverse] {
+                cases.push(path_case(
+                    label,
+                    &format!("{dir}/noclamp.clf"),
+                    dir_,
+                    format,
+                ));
+            }
+        }
+    }
+    for dir in [Forward, Inverse] {
+        for format in [CTF, CLF] {
+            cases.push(processor_case(
+                "clf/smpte_only/broadcast_profile_lut33.clf",
+                dir,
+                format,
+            ));
+        }
+    }
+    check_writes(&cases);
+
+    // Coverage: the texts are the wheel's (checked above); some CLF writes hold noClamp
+    // Ranges and others don't.
+    let raw = Config::create_raw().unwrap();
+    let no_clamp = cases
+        .iter()
+        .filter(|c| c.request["format"] == CLF)
+        .filter_map(|c| {
+            let mut written = Vec::new();
+            let group = c.port.as_ref().ok()?;
+            group.write(&raw, CLF, &mut written).ok()?;
+            Some(
+                String::from_utf8_lossy(&written)
+                    .matches("style=\"noClamp\"")
+                    .count(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        no_clamp.iter().filter(|&&n| n == 2).count() >= 6
+            && no_clamp.iter().filter(|&&n| n == 1).count() >= 6
+            && no_clamp.iter().filter(|&&n| n == 0).count() >= 10,
+        "{no_clamp:?}"
+    );
 }

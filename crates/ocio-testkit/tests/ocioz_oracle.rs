@@ -8,7 +8,8 @@
 //! archive (through `with_files`) writes the same files, in the directories they need;
 //! extracting reports directories, links (and their attributes on Windows), the three times
 //! and the attributes minizip-ng sets, hidden files, unreadable files, alternate data streams
-//! (Windows), what was written outside the destination through a link, and what was written
+//! (Windows), what was written outside the destination through a link (and through a junction
+//! or link the request prepares first, with what it made), and what was written
 //! before a failure, sorted by the paths' bytes, request by request; archives whose links could
 //! leave the request's directory are refused; refusals report their stage; the requests it
 //! can't read are refused.
@@ -240,14 +241,14 @@ fn paths(result: &Value, key: &str) -> Vec<Vec<u8>> {
 
 /// Extracting reports directories, empty ones included, sorted by their paths' bytes; and
 /// each file's times and attributes as minizip-ng sets them: the entry's three NTFS times
-/// (mz_zip.c:344-372 @ 4.0.10, set by mz_zip_rw.c:756 through mz_os_set_file_date: on Windows
-/// all three, mz_os_win32.c:263-293; on Linux the modification and access times,
-/// mz_os_posix.c:230-241; 1,000,000,000, 1,100,000,000 and 1,200,000,000 seconds after 1970
+/// (mz_zip.c:346-374 @ 4.2.2, set by mz_zip_rw.c:786 through mz_os_set_file_date: on Windows
+/// all three, mz_os_win32.c:295-325; on Linux the modification and access times,
+/// mz_os_posix.c:240-251; 1,000,000,000, 1,100,000,000 and 1,200,000,000 seconds after 1970
 /// here), and its Windows attributes as they are on Windows (`SetFileAttributesW`,
-/// mz_os_win32.c:320-335) and as `mz_zip_attrib_win32_to_posix` gives them on Linux
+/// mz_os_win32.c:380-395) and as `mz_zip_attrib_win32_to_posix` gives them on Linux
 /// (mz_zip.c, read-only 0444, otherwise 0666). A hidden file is reported. A directory has the
 /// attributes (Windows) or the mode (Linux) of one this test makes as minizip-ng makes them
-/// (`mkdir(path, 0755)` on Linux, mz_os_posix.c:254-263).
+/// (`mkdir(path, 0755)` on Linux, mz_os_posix.c:264-273).
 #[test]
 fn extract_reports_directories_times_and_attributes() {
     let seconds = [1_000_000_000u64, 1_100_000_000, 1_200_000_000];
@@ -427,9 +428,9 @@ fn link<'a>(name: &'a [u8], target: &'a [u8]) -> Entry<'a> {
 
 /// A symbolic link is reported with its target, and isn't read through, even to a directory
 /// that exists: minizip-ng makes one from an entry of a Unix host whose mode is a link's, the
-/// entry's contents its target (mz_zip_rw.c:691-724 @ 4.0.10). On Windows a link also has its
+/// entry's contents its target (mz_zip_rw.c:715-751 @ 4.2.2). On Windows a link also has its
 /// attributes: a reparse point, and a directory where its target ends with a separator
-/// (`SYMBOLIC_LINK_FLAG_DIRECTORY`, mz_os_win32.c:516-517). On Windows a link needs a
+/// (`SYMBOLIC_LINK_FLAG_DIRECTORY`, mz_os_win32.c:596-597). On Windows a link needs a
 /// privilege the process may not have, and the extraction then fails: the links' assertions,
 /// their attributes among them, run only where the process can make links (elevated, as on
 /// GitHub's Windows runners).
@@ -481,23 +482,386 @@ fn extract_reports_links() {
     }
 }
 
-/// What an extraction writes through a link outside the destination, but inside the request's
-/// temporary directory, is reported as "outside": a link `esc` to `..`, then a file
-/// `esc/outside.txt`. Linux only: on Windows the process may not make links.
+/// An archive whose link leads out of the destination, but stays inside the request's
+/// temporary directory (a link `esc` to `..`, then a file `esc/outside.txt`): the 2.5.2 wheel
+/// extracted it and wrote `outside.txt` there, which the request reported as "outside"; the
+/// 2.6.0 wheel's minizip-ng refuses the link and extracts nothing ("Could not extract", also for
+/// links to `../side`, `../side/` and, from a directory, `../..`; probed in Rocky Linux 9,
+/// 2026-11-18). The request reports the exception at the extract stage, and that nothing was
+/// written, in the destination or outside it. Linux only: on Windows the process may not make
+/// links.
 #[cfg(unix)]
 #[test]
 fn extract_reports_what_is_written_outside() {
     let archive = zip(&[link(b"esc", b".."), entry(b"esc/outside.txt", b"out")]);
     let (result, blobs) = extract(&archive);
-    assert!(result.get("exception").is_none(), "{result}");
-    assert_eq!(paths(&result, "files"), Vec::<Vec<u8>>::new(), "{result}");
+    assert_eq!(result["stage"], "extract", "{result}");
     assert_eq!(
-        paths(&result["outside"], "files"),
-        [b"outside.txt"],
+        result["exception"]["message"], "Could not extract: $FILES/a.ocioz",
         "{result}"
     );
-    let f = &result["outside"]["files"][0];
-    assert_eq!(blobs[f["contents"].as_u64().unwrap() as usize], b"out");
+    for key in ["files", "dirs", "links"] {
+        assert_eq!(
+            paths(&result, key),
+            Vec::<Vec<u8>>::new(),
+            "{key}: {result}"
+        );
+        assert_eq!(
+            paths(&result["outside"], key),
+            Vec::<Vec<u8>>::new(),
+            "outside {key}: {result}"
+        );
+    }
+    assert!(blobs.is_empty(), "{result}");
+}
+
+/// The wheel extracting `archive` after making `prepare` in the request's directory: its
+/// result and blobs.
+fn extract_prepared(archive: &[u8], prepare: Value) -> (Value, Vec<Vec<u8>>) {
+    let response = Oracle::get().call(
+        "with_files",
+        json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+               "args": {"extract": {"archive": "$FILES/a.ocioz", "prepare": prepare}}}),
+        &[archive],
+    );
+    (response.result, response.blobs)
+}
+
+/// Whether this process can make a directory link as the oracle's `os.symlink` makes one
+/// (Rust's `symlink_dir`, as `os.symlink`, asks for an unprivileged link where Windows'
+/// Developer Mode allows it, and otherwise needs the privilege). On Linux, always.
+fn can_make_links() -> bool {
+    let dir = std::env::temp_dir().join(format!("ocioz_oracle_probe_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("t")).unwrap();
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_dir("t", dir.join("l")).is_ok();
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink("t", dir.join("l")).is_ok();
+    let _ = std::fs::remove_dir(dir.join("l"));
+    let _ = std::fs::remove_file(dir.join("l"));
+    std::fs::remove_dir_all(&dir).unwrap();
+    made
+}
+
+/// `prepare` makes its items in order before the extraction, and reports for each whether it
+/// was made: directories, a junction (Windows only; elsewhere not made) and a directory link
+/// (made where this process can make one, which the test probes itself and reports). What
+/// they made is reported with the rest: a junction as a link with `"junction": true`, which
+/// isn't walked into; a link with its target.
+#[test]
+fn extract_makes_what_prepare_lists() {
+    let archive = zip(&[entry(b"a.txt", b"a")]);
+    let (result, _) = extract_prepared(
+        &archive,
+        json!([
+            {"path": "side", "kind": "dir"},
+            {"path": "side/inner.txt.d", "kind": "dir"},
+            {"path": "extracted", "kind": "dir"},
+            {"path": "extracted/j", "kind": "junction", "target": "side"},
+            {"path": "extracted/l", "kind": "symlink", "target": "../side/"},
+        ]),
+    );
+    let links = can_make_links();
+    eprintln!("this process can make directory links: {links}");
+    assert_eq!(
+        result["prepared"],
+        json!([true, true, true, cfg!(windows), links]),
+        "{result}"
+    );
+    assert!(result.get("exception").is_none(), "{result}");
+    assert_eq!(paths(&result, "files"), [b"a.txt"], "{result}");
+    assert_eq!(paths(&result, "dirs"), Vec::<Vec<u8>>::new(), "{result}");
+    let listed: Vec<(Vec<u8>, bool)> = result["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| (bytes(&l["path"]), l.get("junction") == Some(&json!(true))))
+        .collect();
+    let mut expected = Vec::new();
+    if cfg!(windows) {
+        expected.push((b"j".to_vec(), true));
+    }
+    if links {
+        expected.push((b"l".to_vec(), false));
+    }
+    assert_eq!(listed, expected, "{result}");
+    if links {
+        let l = &result["links"].as_array().unwrap()[expected.len() - 1];
+        // The target with the platform's separators.
+        let target: &[u8] = if cfg!(windows) {
+            br"..\side\"
+        } else {
+            b"../side/"
+        };
+        assert_eq!(bytes(&l["target"]), target, "{result}");
+    }
+    assert_eq!(
+        paths(&result["outside"], "dirs"),
+        [&b"side"[..], b"side/inner.txt.d"]
+    );
+}
+
+/// Through a junction: on Windows minizip-ng 4.2.2 takes a junction in the destination for a
+/// link (`mz_os_is_symlink`, any reparse point) but reads no target from it (`mz_os_read_symlink`
+/// reads only `IO_REPARSE_TAG_SYMLINK`'s), so its check lets the entry through and the file is
+/// written outside the destination, which the request reports as "outside". On Linux the same
+/// layout through a symbolic link is refused (its target leaves the destination), and nothing
+/// is written.
+#[test]
+fn extract_reports_what_is_written_outside_through_a_prepared_link() {
+    let archive = zip(&[entry(b"j/x.txt", b"out")]);
+    let kind = if cfg!(windows) { "junction" } else { "symlink" };
+    let target = if cfg!(windows) { "side" } else { "../side" };
+    let (result, blobs) = extract_prepared(
+        &archive,
+        json!([
+            {"path": "side", "kind": "dir"},
+            {"path": "extracted", "kind": "dir"},
+            {"path": "extracted/j", "kind": kind, "target": target},
+        ]),
+    );
+    assert_eq!(result["prepared"], json!([true, true, true]), "{result}");
+    if cfg!(windows) {
+        assert!(result.get("exception").is_none(), "{result}");
+        assert_eq!(
+            paths(&result["outside"], "files"),
+            [b"side/x.txt"],
+            "{result}"
+        );
+        let file = &result["outside"]["files"][0];
+        let contents = file["contents"].as_u64().unwrap() as usize;
+        assert_eq!(blobs[contents], b"out", "{result}");
+        assert_eq!(paths(&result, "files"), Vec::<Vec<u8>>::new(), "{result}");
+    } else {
+        assert_eq!(result["stage"], "extract", "{result}");
+        assert_eq!(
+            result["exception"]["message"], "Could not extract: $FILES/a.ocioz",
+            "{result}"
+        );
+        assert_eq!(paths(&result["outside"], "files"), Vec::<Vec<u8>>::new());
+    }
+}
+
+/// `prepare` lists it can't take are refused: not a list; an unknown kind or key; a path or
+/// target that isn't text, is absolute or leads out of the request's directory; a path or a
+/// target through an earlier item's link; and an archive with link entries where the list
+/// makes a link.
+#[test]
+fn prepare_lists_that_could_leave_are_refused() {
+    let plain = zip(&[entry(b"a.txt", b"a")]);
+    let linked = zip(&[link(b"l", b"a.txt")]);
+    let (plain, linked) = (plain.as_slice(), linked.as_slice());
+    let mut cases: Vec<(Value, &[u8])> = vec![
+        (json!({"path": "d", "kind": "dir"}), plain),
+        (json!([{"path": "d", "kind": "file"}]), plain),
+        (json!([{"path": "d", "kind": "dir", "target": "x"}]), plain),
+        (json!([{"path": "d", "kind": "dir", "extra": 1}]), plain),
+        (json!([{"path": 1, "kind": "dir"}]), plain),
+        (json!([{"path": "", "kind": "dir"}]), plain),
+        (json!([{"path": ".", "kind": "dir"}]), plain),
+        (json!([{"path": "/tmp/d", "kind": "dir"}]), plain),
+        (json!([{"path": "../d", "kind": "dir"}]), plain),
+        (json!([{"path": "a/../../d", "kind": "dir"}]), plain),
+        (json!([{"path": "l", "kind": "symlink"}]), plain),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": "/tmp"}]),
+            plain,
+        ),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": ".."}]),
+            plain,
+        ),
+        (
+            json!([{"path": "a/l", "kind": "symlink", "target": "../.."}]),
+            plain,
+        ),
+        (
+            json!([{"path": "j", "kind": "junction", "target": ".."}]),
+            plain,
+        ),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": "x"},
+                   {"path": "l/m", "kind": "symlink", "target": "y"}]),
+            plain,
+        ),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": "x"},
+                   {"path": "m", "kind": "symlink", "target": "l/.."}]),
+            plain,
+        ),
+        (
+            json!([{"path": "j", "kind": "junction", "target": "x"},
+                   {"path": "k", "kind": "junction", "target": "j/y"}]),
+            plain,
+        ),
+        (
+            json!([{"path": "j", "kind": "junction", "target": "x"},
+                   {"path": "j/d", "kind": "dir"}]),
+            plain,
+        ),
+        (
+            json!([{"path": "j", "kind": "junction", "target": "x"}]),
+            linked,
+        ),
+        (
+            json!([{"path": "l", "kind": "symlink", "target": "x"}]),
+            linked,
+        ),
+    ];
+    if cfg!(windows) {
+        cases.push((json!([{"path": "C:d", "kind": "dir"}]), plain));
+        cases.push((
+            json!([{"path": "j", "kind": "junction", "target": "C:x"}]),
+            plain,
+        ));
+        cases.push((
+            json!([{"path": "j", "kind": "junction", "target": "x"},
+                   {"path": "J/d", "kind": "dir"}]),
+            plain,
+        ));
+    }
+    for (prepare, archive) in cases {
+        let refused = Oracle::get().try_call(
+            "with_files",
+            json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+                   "args": {"extract": {"archive": "$FILES/a.ocioz", "prepare": prepare}}}),
+            &[archive],
+        );
+        let error = refused.expect_err(&prepare.to_string());
+        assert!(error.contains("ocioz: "), "{prepare}: {error}");
+    }
+    // A link entry is fine where the list makes only directories; an item that fails (the
+    // same directory twice) is reported as not made.
+    let (result, _) = extract_prepared(
+        linked,
+        json!([{"path": "d", "kind": "dir"}, {"path": "d", "kind": "dir"}]),
+    );
+    assert_eq!(result["prepared"], json!([true, false]), "{result}");
+}
+
+/// Lists whose links the system resolves otherwise than their text says are refused, with
+/// the reason: on Windows a component that ends with a dot or a space, or holds `~` (an 8.3
+/// name), which the system takes for another name (a junction `k` reached as `k.` or by its
+/// short name); and, after the items are made, any link that doesn't lead, as the system
+/// resolves it, to a path strictly under the request's directory: one to the directory itself
+/// (a junction to `.` or `side/..`, a link to `.` or `..` from `extracted`), one to nothing, and on
+/// Linux a link checked before a link it goes through was made (`l` to `a/b/x/../../../`,
+/// then `a/b/x` to `../../../`). A junction's target is normalized (`./side`) before it is
+/// made, and leads where it says.
+#[test]
+fn prepare_lists_the_system_resolves_otherwise_are_refused() {
+    let plain = zip(&[entry(b"a.txt", b"a")]);
+    let mut cases: Vec<(Value, &str)> = Vec::new();
+    let spelled = "has a component Windows spells another way";
+    let out = "leads out of the request's directory or nowhere";
+    if cfg!(windows) {
+        cases.push((
+            json!([{"path": "a/b/c", "kind": "dir"},
+                   {"path": "a/b/c/k", "kind": "junction", "target": "a"},
+                   {"path": "a/b/c/k./l", "kind": "symlink", "target": r"..\..\..\..\"},
+                   {"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/j", "kind": "junction", "target": "a/l"}]),
+            spelled,
+        ));
+        cases.push((
+            json!([{"path": "a/b/c/longjunctionname", "kind": "dir"},
+                   {"path": "a/b/c/LONGJU~1/l", "kind": "symlink", "target": r"..\..\..\..\"}]),
+            spelled,
+        ));
+        cases.push((json!([{"path": "d ", "kind": "dir"}]), spelled));
+        cases.push((
+            json!([{"path": "x", "kind": "dir"},
+                   {"path": "j", "kind": "junction", "target": "x"},
+                   {"path": r"j\d", "kind": "dir"}]),
+            "goes through a link",
+        ));
+        // A junction must lead strictly under the request's directory, not to it.
+        cases.push((
+            json!([{"path": "j", "kind": "junction", "target": "."}]),
+            out,
+        ));
+        cases.push((
+            json!([{"path": "side", "kind": "dir"},
+                   {"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/j", "kind": "junction", "target": "side/.."}]),
+            out,
+        ));
+        // Where this process can make links: a symbolic link to nothing (as a file link and
+        // as a directory link), to the request's directory itself, or to it from extracted.
+        if can_make_links() {
+            cases.push((
+                json!([{"path": "l", "kind": "symlink", "target": "missing"}]),
+                out,
+            ));
+            cases.push((
+                json!([{"path": "l", "kind": "symlink", "target": "."}]),
+                out,
+            ));
+            cases.push((
+                json!([{"path": "extracted", "kind": "dir"},
+                       {"path": "extracted/l", "kind": "symlink", "target": r"..\"}]),
+                out,
+            ));
+            cases.push((
+                json!([{"path": "l", "kind": "symlink", "target": r"missing\"}]),
+                out,
+            ));
+        }
+    } else {
+        cases.push((
+            json!([{"path": "extracted/a/b", "kind": "dir"},
+                   {"path": "extracted/l", "kind": "symlink", "target": "a/b/x/../../../"},
+                   {"path": "extracted/a/b/x", "kind": "symlink", "target": "../../../"}]),
+            out,
+        ));
+        // A link must lead strictly under the request's directory, not to it, and to something.
+        cases.push((
+            json!([{"path": "l", "kind": "symlink", "target": "."}]),
+            out,
+        ));
+        cases.push((
+            json!([{"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/l", "kind": "symlink", "target": ".."}]),
+            out,
+        ));
+        cases.push((
+            json!([{"path": "l", "kind": "symlink", "target": "missing"}]),
+            out,
+        ));
+    }
+    for (prepare, fragment) in cases {
+        let refused = Oracle::get().try_call(
+            "with_files",
+            json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+                   "args": {"extract": {"archive": "$FILES/a.ocioz", "prepare": prepare}}}),
+            &[&plain],
+        );
+        let error = refused.expect_err(&prepare.to_string());
+        assert!(error.contains(fragment), "{prepare}: {error}");
+    }
+    if cfg!(windows) {
+        let (result, _) = extract_prepared(
+            &plain,
+            json!([{"path": "side", "kind": "dir"},
+                   {"path": "extracted", "kind": "dir"},
+                   {"path": "extracted/j", "kind": "junction", "target": "./side"}]),
+        );
+        assert_eq!(result["prepared"], json!([true, true, true]), "{result}");
+        assert_eq!(paths(&result, "files"), [b"a.txt"], "{result}");
+        // A junction to nothing isn't made (CreateJunction, or the check that it leads to a
+        // directory, fails), and nothing is left of it.
+        let (result, _) = extract_prepared(
+            &plain,
+            json!([{"path": "j", "kind": "junction", "target": "missing"}]),
+        );
+        assert_eq!(result["prepared"], json!([false]), "{result}");
+        assert_eq!(
+            paths(&result["outside"], "links"),
+            Vec::<Vec<u8>>::new(),
+            "{result}"
+        );
+    }
 }
 
 /// Archives whose links could make the extraction write outside the request's temporary

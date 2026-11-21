@@ -20,7 +20,7 @@ use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::format_metadata::FormatMetadataImpl;
-use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::hash_utils::cache_id_hash_uuid;
 use ocio_ops::logging::log_debug;
 use ocio_ops::op::OpVec;
 use ocio_ops::op_data::OpData;
@@ -407,9 +407,9 @@ impl Processor {
         self.ops.get_dynamic_property(type_)
     }
 
-    /// `<NOOP>` without ops, else the hash of the ops' cache IDs; computed once.
+    /// The UUID-shaped hash of the ops' cache IDs, an empty op list's too; computed once.
     ///
-    /// Port of `Processor::Impl::getCacheID` (Processor.cpp:331-348 @ v2.5.2).
+    /// Port of `Processor::Impl::getCacheID` (Processor.cpp:331-342 @ v2.6.0).
     #[doc(alias = "getCacheID")]
     pub fn cache_id(&self) -> Result<String> {
         let mut cache_id = self.cache_id.lock().unwrap_or_else(|e| e.into_inner());
@@ -417,12 +417,9 @@ impl Processor {
             return Ok(id.clone());
         }
 
-        let id = if self.ops.is_empty() {
-            "<NOOP>".to_string()
-        } else {
-            let fullstr = self.ops.get_cache_id()?;
-            cache_id_hash(&fullstr)
-        };
+        // Note: empty ops vector will also create a UUID.
+        let fullstr = self.ops.get_cache_id()?;
+        let id = cache_id_hash_uuid(&fullstr);
         *cache_id = Some(id.clone());
         Ok(id)
     }

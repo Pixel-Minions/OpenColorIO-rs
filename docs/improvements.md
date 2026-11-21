@@ -299,8 +299,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-100. YAML positions wrap after 2^31 characters or lines
 
 - **Upstream:** yaml-cpp counts the reader's position, line and column in C++ `int`s with `++`
-  (`Stream::get`, `AdvanceCurrent`, yaml-cpp 0.8.0 `src/stream.cpp:262-303`), and prints the
-  line and column plus one (`include/yaml-cpp/exceptions.h:173-181`). Past 2^31 characters or
+  (`Stream::get`, `AdvanceCurrent`, `src/stream.cpp:260-316` @ yaml-cpp-0.9.0; 262-303 in
+  0.8.0), and prints the line and column plus one (`include/yaml-cpp/exceptions.h:173-181`). Past 2^31 characters or
   lines the counters overflow, undefined behaviour that a plain machine addition resolves by
   wrapping. The port wraps them: marks turn negative, and a mark of -1 everywhere reads as
   "no mark".
@@ -772,6 +772,47 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   does.
 - **Status:** matched in `p9-config-utils` (9.1c, `config_utils.rs`, `invert_transform`); the
   wheel shows it only through merges, checked with the merge sweep (9.2j).
+
+### I-950. Written numbers keep the zeros of a cut, and are rounded on their shortest digits
+
+- **Upstream:** since yaml-cpp 0.9.0 (OCIO 2.6.0's wheels), the emitter writes a `float` or
+  `double` with `FpToString(value, precision)` (`include/yaml-cpp/emitter.h:161-197`,
+  `src/fptostring.cpp:76-228` @ yaml-cpp-0.9.0), at the precisions OCIO sets: 15 for doubles,
+  7 for floats (`OCIOYaml.cpp`, `SetDoublePrecision`/`SetFloatPrecision`). It takes the
+  value's shortest round-trip digits (dragonbox), cuts them to the precision, and rounds up
+  when the next of those digits is `'5'` or more. It never removes the zeros the cut leaves,
+  and it rounds the shortest decimal rather than the value itself. So `0.30000000000000004`
+  is written `0.300000000000000` (`%.15g`, 2.5.2's output, gives `0.3`),
+  `1.0000000000000002` is written `1.00000000000000`, the float `1.0000001` is written
+  `1.000000`, and a value whose shortest digits end in `...5` at the cut rounds up even when
+  it lies below the halfway point. Subnormals print their short form (`5e-324`, where
+  `%.15g` gives `4.94065645841247e-324`). Seen in the 2.6.0 wheel's fixtures: `1.13` written
+  `1.13000000000000`, `3.402823e+38` written `3.402824e+38`, `1.401298e-45` written `1e-45`.
+- **Who notices:** every config serialized from computed values (matrices, inverses, values
+  read with 16 or 17 significant digits): its text, its cache ID and the config inside an
+  `.ocioz` archive.
+- **A fix:** strip the trailing zeros after the cut, and round on the exact value (`%.*g`).
+- **Status:** matched in `ocio26-deps` (chunk 2, `crates/ocio/src/yaml_cpp/fptostring.rs`), with
+  yaml-cpp 0.9.0's `fptostring_test.cpp` ported, and checked through the wheel by the YAML
+  save tests.
+
+### I-951. The first line ending decides what starts a line, and a NUL byte does until then
+
+- **Upstream:** since yaml-cpp 0.9.0 (OCIO 2.6.0's wheels), the reader starts a new line, for
+  its marks and its indentation, only at the character its first line ending used: `\n` for
+  `\n` and `\r\n`, `\r` for a lone `\r` (`Stream::get`, `src/stream.cpp:260-290`, with
+  `m_lineEndingSymbol`, `src/stream.h:56` @ yaml-cpp-0.9.0). Before the first line ending the
+  symbol is 0, so a NUL byte starts a new line. So a config whose first line ends with a lone
+  `\r` and whose other lines end with `\n` reads as one long line after the first, and a NUL
+  byte before the first line break moves the line numbers of error messages. Seen through
+  the wheel: a file of one NUL byte fails "at line 2, column 2" (yaml-cpp 0.8.0 said line 1,
+  column 3). Configs with only `\r` line endings, which 0.8.0 couldn't read, read now.
+- **Who notices:** configs with mixed line endings or with NUL bytes before their first line
+  break: their parse, or the positions in their error messages.
+- **A fix:** start a line at any `\n`, `\r\n` or lone `\r`, and never at a NUL byte.
+- **Status:** matched in `ocio26-deps` (chunk 3, `crates/ocio/src/yaml_cpp/stream.rs`), with
+  yaml-cpp 0.9.0's `BlockCREncoded` test, and checked against the wheel by
+  `crates/ocio/tests/config_files_oracle.rs` (`tiny_files_read_as_in_the_wheel`).
 
 ## Numeric helpers
 
@@ -2733,12 +2774,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-170. expat counts a start tag's attribute values twice
 
-- **Upstream:** expat 2.7.2's billion laughs protection counts the bytes of each token it
-  reads, once. A start tag (`<e a='x&amp;y'>`, not an empty element) is counted as one token
-  in `doContent`, then `storeAtts` passes the same accounting class (`XML_ACCOUNT_DIRECT` in
+- **Upstream:** expat's billion laughs protection (2.7.2, and 2.8.4 with OCIO 2.6.0) counts the
+  bytes of each token it reads, once. A start tag (`<e a='x&amp;y'>`, not an empty element) is
+  counted as one token in `doContent`, then `storeAtts` passes the same accounting class (`XML_ACCOUNT_DIRECT` in
   the document) to `storeAttributeValue`, which counts the tokens of each value that needs
   normalizing (a reference, or white space other than single spaces) again
-  (`expat/lib/xmlparse.c:3321-3326, 3508-3509, 3956-3958, 6567-6571` @ R_2_7_2). An empty
+  (`expat/lib/xmlparse.c:3332-3337, 3529-3530, 4009-4011, 6693-6697` @ R_2_8_4). An empty
   element's tag passes `XML_ACCOUNT_NONE` there ("token spans whole start tag"). The direct
   count, the denominator of the amplification factor, grows by those values' bytes once more.
 - **Who notices:** documents over the protection's 8 MiB activation threshold whose
@@ -2748,18 +2789,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-xml` (4.4b, `crates/ocio-formats/src/expat/xmlparse.rs`,
   `do_content`).
 
-### I-171. The XML parser's memory limit is 40 bytes apart on Windows and Linux
+### I-171. The XML parser's memory limit is 32 bytes apart on Windows and Linux
 
-- **Upstream:** expat 2.7.2's allocation tracker fails an allocation, and with it the parse
-  (`XML_ERROR_NO_MEMORY`, "out of memory"), once the heap expat allocated reaches 64 MiB and
-  more than 100 times the document's direct bytes (`expat_heap_increase_tolerable`,
-  `expat_malloc`, `expat_realloc`, `expat/lib/xmlparse.c:812-1005` @ R_2_7_2; the defaults in
-  `internal.h:152-154`). It counts the sizes of expat's own blocks: its parser structure,
-  pools, hash tables, tags, attribute arrays, open entities and default attributes, each
-  with an 8-byte header. They are the same in both wheels but the parser structure's, which
-  holds `long` and `unsigned long` fields: 1,048 bytes as MSVC lays it out and 1,088 with GCC.
-  So a document within 40 bytes of the limit (a pool block of 32 MiB, say, filled to within
-  20 bytes of it) is refused on Linux and read on Windows.
+- **Upstream:** expat's allocation tracker (2.7.2, and 2.8.4 with OCIO 2.6.0) fails an
+  allocation, and with it the parse (`XML_ERROR_NO_MEMORY`, "out of memory"), once the heap
+  expat allocated reaches 64 MiB and more than 100 times the document's direct bytes
+  (`expat_heap_increase_tolerable`, `expat_malloc`, `expat_realloc`,
+  `expat/lib/xmlparse.c:870-1069` @ R_2_8_4; the defaults in `internal.h:149-151`). It counts
+  the sizes of expat's own blocks: its parser structure, pools, hash tables, tags, attribute
+  arrays, open entities, default attributes and their name tables, each with an 8-byte
+  header. They are the same in both wheels but the parser structure's, which holds `long` and
+  `unsigned long` fields: in expat 2.8.4, 1,072 bytes as MSVC lays it out and 1,104 with GCC
+  (2.7.2's were 1,048 and 1,088: 40 bytes apart). So a document within 32 bytes of the limit
+  (a pool block of 32 MiB, say, filled to within 16 bytes of it) is refused on Linux and read
+  on Windows.
 - **Who notices:** only documents at the limit: tens of MiB of parser memory from a document a
   hundred times smaller, which no LUT or CDL file comes near.
 - **A fix:** none needed; dropping the parser structure from the count would make the
@@ -2769,6 +2812,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/tests/xml_memory_oracle.rs` finds where families of documents start being
   refused, and both wheels agree to the byte). Before that chunk the port counted its own
   structures (the owner's decision of 2026-10-08, superseded once the exact count worked).
+  Moved to expat 2.8.4's sizes, its default-attribute name tables and its single free list of
+  open entities in `ocio26-deps` (chunk 5).
 
 ### I-172. The XML readers read a number out of range as 0 on Linux, and as infinity on Windows
 
@@ -2903,6 +2948,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** set `info2.bake_capabilities`.
 - **Status:** matched in `p4-ctf-read-1` (`crates/ocio/src/fileformats/file_format_ctf.rs`,
   `format_info`).
+- **2.6.0** (`ocio26-clf`): upstream sets the CTF info's bake capabilities
+  (`fileformats/FileFormatCTF.cpp:156-188` @ v2.6.0), and the port does too. Still no one
+  notices: the baker reads the first info only (`Baker.cpp:249-251` @ v2.6.0).
 
 ### I-181. A CTF LUT's raw halfs outside [0, 65536) keep the low 16 bits of their `int`
 
@@ -3413,9 +3461,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** where minizip-ng can't read an archive's central directory (a truncated
   `.ocioz`, say), OpenColorIO's reader rebuilds it from the local headers (`mz_zip_recover_cd`,
-  minizip-ng mz_zip.c:1236-1406 @ 4.0.10, recovery being the reader's default), and the
+  minizip-ng mz_zip.c:1239-1411 @ 4.2.2, recovery being the reader's default), and the
   archive still loads. The rebuilt headers are written by `mz_zip_entry_write_header`, which on
-  Windows only (`#if defined(_WIN32)`, mz_zip.c:792-805) writes each `\` of a name as `/`. The
+  Windows only (`#if defined(_WIN32)`, mz_zip.c:795-808) writes each `\` of a name as `/`. The
   names are compared ignoring the kind of slash, but the file hashes OpenColorIO builds from them
   (`getFastLutFileHash`: the name and the CRC) differ, and with them the config's cache ID. Once
   one entry's local header has a zip64 field, the data descriptors of all later entries are
@@ -3432,7 +3480,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `Config::archive` adds every file under the config's working directory whose
   extension a LUT format reads (`addSupportedFiles`, `src/OpenColorIO/OCIOZArchive.cpp:149-202`
   @ v2.5.2), whether the config uses it or not, following links to directories. It adds each
-  through minizip-ng's `mz_zip_writer_add_path` (mz_zip_rw.c:1649-1729 @ 4.0.10), which skips a
+  through minizip-ng's `mz_zip_writer_add_path` (mz_zip_rw.c:1723-1805 @ 4.2.2), which skips a
   symbolic link to a file (neither storing nor following links, as OpenColorIO sets it up)
   without an error: a config whose LUT is a link archives without it, and the archived config
   fails to find it.
@@ -3446,9 +3494,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-212. On Linux, extracting names with backslashes writes files whose names hold them
 
 - **Upstream:** `ExtractOCIOZArchive` saves each entry at its name joined to the destination
-  (`mz_zip_reader_save_all`, minizip-ng `mz_zip_rw.c:818-907` @ 4.0.10). On Linux minizip-ng
-  is built with `MZ_PRESERVE_NATIVE_STRUCTURE` (its default, `mz_os_posix.c:40-42`), so only
-  `/` separates directories (`mz_os_is_dir_separator`, `mz_os_posix.c:292-302`) and a
+  (`mz_zip_reader_save_all`, minizip-ng `mz_zip_rw.c:848-941` @ 4.2.2). On Linux minizip-ng
+  is built with `MZ_PRESERVE_NATIVE_STRUCTURE` (its default, `mz_os_posix.c:41-43`), so only
+  `/` separates directories (`mz_os_is_dir_separator`, `mz_os_posix.c:302-312`) and a
   backslash is part of a name: `shot1\lut1.clf` becomes a file of that name in the
   destination, and no `shot1` directory is made. On Windows both are separators, and the file
   is `lut1.clf` in the directory `shot1`. Archives written on Windows by older minizip
@@ -3462,14 +3510,15 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-213. A zip extra field shorter than 4 bytes wraps minizip-ng's search limit
 
-- **Upstream:** `mz_zip_extrafield_find` (minizip-ng `mz_zip.c:2583-2612` @ 4.0.10) counts its
+- **Upstream:** `mz_zip_extrafield_find` (minizip-ng `mz_zip.c:2603-2632` @ 4.2.2) counts its
   search limit down by each field's length less 4 (`max_seek -= field_length - 4`), so a field
   shorter than 4 bytes counts it up. Its callers that read a zipped central directory and an
-  entry's hashes pass `INT32_MAX` (`mz_zip_rw.c:272, 487, 527`), and a short field then
+  entry's hashes pass `INT32_MAX` (`mz_zip_rw.c:278, 505, 545`), and a short field then
   overflows the `int`: undefined behaviour, which both wheels resolve the same way, wrapping
   it to a negative limit and ending the search (`MZ_EXIST_ERROR`): Linux `sub ebx, eax; js`
-  (`libOpenColorIO.so` 0x5f81f2), Windows `add edi, ecx; js` (`OpenColorIO_2_5.dll`
-  0x180340248).
+  (`libOpenColorIO.so` 0x61bec2), Windows `add edi, ecx; js` (`OpenColorIO_2_6.dll`
+  0x18034d8f8); the same code as the 2.5.2 libraries' (0x5f81f2, `OpenColorIO_2_5.dll`
+  0x180340248), `tools/wheel-inspect`.
 - **Who notices:** applications reading archives whose zipped central directory entry has a
   short extra field before its `CDCD` field.
 - **A fix:** compute the limit in 64 bits, or refuse a field shorter than its header.
@@ -3479,7 +3528,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-214. A seek past the end of an archive leaves minizip-ng's buffered position behind
 
 - **Upstream:** minizip-ng reads an archive through a buffered stream that keeps its own idea
-  of the file position (`mz_strm_buf.c` @ 4.0.10). A seek forwards past what it has read adds
+  of the file position (`mz_strm_buf.c` @ 4.2.2). A seek forwards past what it has read adds
   the offset to that position (`buffered->position += offset`, `mz_strm_buf.c:301`) before it
   seeks the file; where the file's seek fails, the buffer is emptied and the next read reads
   on from where the file is, at the end of the last 32,767 bytes read, not where the seek
@@ -3490,8 +3539,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `mz_zip_recover_cd` seeks past an entry by its local header's size, and a zip64 size near
   `INT64_MAX` makes the sum overflow the 64-bit position: undefined
   behaviour, which both wheels resolve the same way, wrapping it (Linux
-  `add qword ptr [rdi + 0x10038], r12` at `libOpenColorIO.so` 0x5f6894, Windows
-  `add qword ptr [rbx + 0x10038], rdi` at `OpenColorIO_2_5.dll` 0x18033d179).
+  `add qword ptr [rdi + 0x10038], r12` at `libOpenColorIO.so` 0x61a514, Windows
+  `add qword ptr [rbx + 0x10038], rdi` at `OpenColorIO_2_6.dll` 0x18034a819; the same code as
+  the 2.5.2 libraries', at 0x5f6894 and `OpenColorIO_2_5.dll` 0x18033d179, `tools/wheel-inspect`).
 - **Who notices:** applications reading damaged archives that minizip-ng recovers.
 - **A fix:** check the seek's result, and the sum for overflow.
 - **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_strm.rs`, the buffered
@@ -3502,16 +3552,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-215. Extracting a link, then a file of the same name, writes outside the destination
 
 - **Upstream:** `ExtractOCIOZArchive` makes a link entry's link as its target says
-  (`mz_zip_reader_entry_save_file`, minizip-ng `mz_zip_rw.c:696-724` @ 4.0.10), with no check
-  of the target: `../outside.txt` and absolute targets are taken. A later file entry of the
-  same name opens the link and writes through it (`mz_stream_os_open`, `fopen(path, "wb")` on
-  Linux, `CreateFile` on Windows): on Linux an archive with a link `l.txt` to
-  `../outside.txt` and then a file `l.txt` writes `outside.txt` next to the destination (both
-  wheels where they make links, probed 2026-10-17).
+  (`mz_zip_reader_entry_save_file`, minizip-ng `mz_zip_rw.c:720-751` @ 4.2.2). A later file
+  entry of the same name opens the link and writes through it (`mz_stream_os_open`). With
+  minizip-ng 4.0.10 (OCIO 2.5.2) the target wasn't checked: on Linux an archive with a link
+  `l.txt` to `../outside.txt` and then a file `l.txt` wrote `outside.txt` next to the
+  destination (both wheels where they make links, probed 2026-10-17). minizip-ng 4.2.2
+  (OCIO 2.6.0) refuses a target that starts with a separator or resolves outside the
+  destination, lexically from the link's directory (`mz_path_is_symlink_target_safe`,
+  `mz_os.c:280-341`), so that archive now fails. The check is on the text, so links that
+  go through links still can (not probed: the oracle refuses such archives): a link `y` to
+  `.`, then a link `y/l` to `../x`, which the check reads as inside (`y/../x`) and the system
+  makes as the link `l` to `../x`, outside. On Windows see also I-952.
 - **Who notices:** applications extracting archives from untrusted sources.
-- **A fix:** refuse link targets outside the destination, or don't write through links.
-- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`);
-  `crates/ocio/tests/ocioz_extract_oracle.rs`, `links` (Linux).
+- **A fix:** resolve targets through the links already made, or don't make links at all.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`), with 4.2.2's
+  checks in `ocio26-deps` (chunk 7b); `crates/ocio/tests/ocioz_extract_oracle.rs`, `links`
+  (Linux).
 
 ### I-216. Iterating a mixing manager's encodings raises a TypeError in Python
 
@@ -3604,7 +3660,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `Config::archive` lists the config's directory and its subdirectories with
   minizip-ng's `mz_os_open_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng
-  `mz_os_win32.c:362-399` @ 4.0.10), which builds `FindFirstFileW`'s pattern in a buffer of
+  `mz_os_win32.c:422-459` @ 4.2.2), which builds `FindFirstFileW`'s pattern in a buffer of
   320 bytes: the path cut to 319 bytes (`strncpy`), a separator only where
   `mz_path_append_slash` has room (a path of 317 bytes or fewer), and the `*` only where
   `mz_path_combine` has room. A path of 318 bytes gives `<path>*`, which lists the parent's
@@ -3627,8 +3683,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-222. Archiving reads a long name with the bytes earlier names left, on Windows
 
 - **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
-  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
-  4.0.10), which converts each name into the same 256 bytes of `d_name`. A name longer than
+  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:461-481` @
+  4.2.2), which converts each name into the same 256 bytes of `d_name`. A name longer than
   255 UTF-8 bytes doesn't fit with its NUL: `WideCharToMultiByte` writes the whole characters
   that fit and fails, and OpenColorIO reads `d_name` up to its first NUL, past the cut into
   what earlier names of the listing wrote, or to the `end` flag's 0 where the 256 bytes hold
@@ -3923,6 +3979,91 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   fileformats/ctf/ctf_reader_helper.rs` and `ctf_writer.rs`, `GradingPrimaryWriter`); checked
   against the wheel (`crates/ocio/tests/file_format_ctf_write_oracle.rs`,
   `processors_of_exposure_contrast_and_grading_files_write_as_in_the_wheel`, `gp.ctf`).
+
+### I-952. On Windows, extracting checks a link's target as text, and junctions not at all
+
+- **Upstream:** minizip-ng 4.2.2 (OCIO 2.6.0) refuses link entries whose target leaves the
+  destination, and entries whose directory goes through an existing link that leads out of
+  it (`mz_path_is_symlink_target_safe`, `mz_dir_has_unsafe_symlink`, `mz_os.c:280-420` @
+  4.2.2, called from `mz_zip_reader_entry_save_file`, `mz_zip_rw.c:700-704`, 732 and 755).
+  The check works on the text: a target is absolute only where it starts with a separator, so
+  on Windows a target with a drive letter (`C:\elsewhere`, `C:x`) is joined to the link's
+  directory as a relative one, resolves inside the destination and passes. And on Windows
+  every reparse point is a link (`mz_os_is_symlink`, `mz_os_win32.c:522-541`), but its target
+  is read only from a symbolic link (`mz_os_read_symlink`, `mz_os_win32.c:612-714`, the print
+  name of an `IO_REPARSE_TAG_SYMLINK`): for a junction it reads nothing and the check sees an
+  empty target (or the previous link's, in the same path), which passes. So an archive
+  extracted where the destination holds a junction to a directory outside it writes through
+  the junction, outside the destination (the 2.6.0 wheel, probed 2026-11-18).
+- **Who notices:** applications extracting archives from untrusted sources on Windows, into
+  directories that hold junctions, or where the process may make symbolic links.
+- **A fix:** take a drive letter (and `\\`) as absolute; read a junction's target too, or
+  refuse every reparse point below the destination.
+- **Status:** matched in `ocio26-deps` (chunk 7b, `crates/ocio/src/minizip/mz_os.rs`), with
+  the target read in safe Rust (deviation D-22); `crates/ocio/tests/ocioz_extract_oracle.rs`,
+  `prepared_links` (Windows).
+
+### I-1030. A CLF description's `language` is read from its first attribute's name
+
+- **Upstream:** `CTFReaderDescElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:859-879` @
+  v2.6.0), which reads the ProcessList's, an operator's and a CDL's Description,
+  InputDescriptor, OutputDescriptor, InputDescription and ViewingDescription, walks the
+  attributes with `i` but compares `*atts`, the first attribute's name, with `language` at
+  every step. When the first attribute is `language`, every attribute's value is taken as the
+  language in turn: the last one's wins (`language="en" a="x"` reads as language `x`), and an
+  empty value of any later attribute fails with "Attribute 'language' does not have a value.".
+  When the first attribute is another one, a `language` after it is ignored.
+- **Who notices:** SMPTE ST 2136-1 files whose descriptions carry another attribute beside
+  `language`: the language is lost or replaced in the processor's metadata and in a file
+  written from it.
+- **A fix:** compare `atts[i]`.
+- **Status:** ported as upstream in `ocio26-clf` (`crates/ocio/src/fileformats/ctf/
+  ctf_reader_helper.rs`, `CtfReaderDescElt`); checked against the wheel
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`, `smpte_files_read_as_in_the_wheel`: "a
+  language as the second attribute", "a language and another attribute", "a language, then an
+  empty attribute").
+
+### I-1031. A CLF Info element with a namespace prefix can't be closed
+
+- **Upstream:** the CTF reader strips an element name's namespace prefix (past its last
+  `:`) in the start and end handlers, except inside an Info element, whose children keep
+  their prefixes (`m_keepNamespaces`, `fileformats/FileFormatCTF.cpp:552-558, 867-872,
+  1105-1111, 1167-1171` @ v2.6.0). The Info's own start tag is stripped before the counter
+  goes up, so `<c:Info>` opens an element named `Info`; its end tag is read with the counter
+  still up, so `</c:Info>` keeps its prefix, doesn't match, and the parse fails with "Tag
+  'c:Info' is missing.". An empty `<c:Info/>` fails the same way.
+- **Who notices:** CLF files that put every element in a prefixed namespace, as
+  `clf/smpte_only/namespaces.clf` does, and also have an Info.
+- **A fix:** decrement the counter before stripping the end tag's name when the element on
+  top of the stack is the Info, or strip the Info's end tag always.
+- **Status:** ported as upstream in `ocio26-clf` (`crates/ocio/src/fileformats/
+  file_format_ctf.rs`, `strip_namespace`); checked against the wheel
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`, `smpte_files_read_as_in_the_wheel`: "a
+  prefixed Info", "an empty prefixed Info").
+
+### I-1032. A CLF Id element is read under any element
+
+- **Upstream:** the CTF reader makes a `CTFReaderIdElt` for an `Id` (ignoring case) under any
+  container (`SupportedElement(name, pElt, TAG_ID, "", ...)`, `fileformats/FileFormatCTF.cpp:
+  787-794` @ v2.6.0), and its end appends it to its parent's metadata
+  (`CTFReaderIdElt::end`, `fileformats/ctf/CTFReaderHelper.cpp:302-318`), as the SMPTE
+  ProcessList's Id. Under an operator it becomes an `Id` child of the op's metadata, which no
+  writer writes back; under a CDL's SOPNode or SatNode the node renames it
+  (`XmlReaderSOPNodeBaseElt::appendMetadata`, `XmlReaderSatNodeBaseElt::appendMetadata`,
+  `xmlutils/XMLReaderHelper.h:396-401, 456-461`) into an `SOPDescription` or
+  `SATDescription`, which a CTF or CLF writes back as a Description of that node. Each one
+  that isn't a SMPTE Id is also logged as "is not a SMPTE ST 2136-1 compliant Id value.".
+  2.5.2 logged such an `Id` as an unknown element and dropped it.
+- **Who notices:** files with an `Id` element inside an operator (no SMPTE schema puts one
+  there): a CDL node's Id turns into a description in the processor's metadata and in files
+  written from it.
+- **A fix:** accept the Id element under the ProcessList only, as the Info.
+- **Status:** ported as upstream in `ocio26-clf` (`crates/ocio/src/fileformats/
+  file_format_ctf.rs`, `CtfReaderIdElt`); checked against the wheel
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`, `smpte_files_read_as_in_the_wheel` and
+  `smpte_files_log_as_in_the_wheel`: "an Id in an operator", "an Id in a SOPNode and a
+  SatNode"; `file_format_ctf_write_oracle.rs`, `smpte_metadata_writes_as_in_the_wheel`: "an
+  Id in an operator").
 
 ## App helpers
 
@@ -5018,7 +5159,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   The GPU writer reads the ACES 1.3 gamut compression's parameters the same way in `p2-ff-gpu`
   (2.3f, `fixed_function_op_gpu.rs`), and the Rec.2100 surround's, the gamma-log's and the
   double-log's (2.3g1, 2.3g2), and ACES 2.0's (`p2-aces2-gpu`, 2.4f1-2.4h);
-  `fixed_function_op_gpu.rs` checks their errors.
+  `fixed_function_op_gpu.rs` checks their errors. 2.6.0's RGB to HMJ renderer and shaders
+  (`ocio26-ops`) read their eight primaries the same way (`FixedFunctionOpCPU.cpp:1260-1282`,
+  `FixedFunctionOpGPU.cpp:1494-1518` @ v2.6.0); both files' tests check their errors.
 
 ### U-32. ACES 2.0's hue table past its arrays
 
@@ -5422,6 +5565,27 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   alone and through the processor with its cache on and off, on a 1 MiB thread. A nightly job of `.github/workflows/sde.yml` runs them, with
   `chains_of_references_stop_at_the_limit` (U-76) and `deep_groups_fit_a_small_stack` (U-60),
   at opt-level 0 on Windows and Rocky Linux 9.
+- **2.6.0** (`ocio26-base`): upstream now guards both recursions itself (PR #2318:
+  `Transform.cpp:52-71`, `ContextVariableUtils.cpp:187-204` @ v2.6.0): each keeps a
+  thread-local depth and throws "Cycle detected while building ops from transform." or "Cycle
+  detected while collecting context variables." once 33 calls nest, groups included, cycle or
+  not. The port matches that (`DepthGuard` in `crates/ocio/src/transform.rs`), so a color
+  space that refers to itself, directly or through a look or a view, is now upstream's own
+  error, and the wheel refuses the chains above (hundreds of links) too. The port's
+  256-transform limit and its weights (`MAX_TRANSFORM_NESTING`, `MAX_NESTING_WEIGHT`) could no
+  longer be reached and are removed; the tables above describe 2.5.2. The chain of CTF
+  references keeps its own limit (U-76): references recurse in `BuildFileTransformOps`, outside
+  the guards, after the 33 levels they let through. Tests: `transforms_that_refer_to_themselves_are_refused_as_in_the_wheel`
+  and `the_deepest_chains_match_the_wheel` (`crates/ocio/tests/config_processors_oracle.rs`:
+  the longest chain of each kind the port accepts, alone and then 256 CTF files, is the wheel's
+  processor both ways, and one link more the wheel's error at the same stage),
+  `the_deepest_chains_build_on_a_1_mib_thread` (the same chains on a 1 MiB thread, the
+  processor cache on and off), `chains_past_the_limit_throw_as_the_wheel_does`
+  (`crates/ocio/tests/transform_cycles_oracle.rs`: chains of 12 to 38 links of four kinds,
+  `getProcessor` with the cache on and off and `isColorSpaceLinear`, which builds ops without
+  collecting context variables first), `the_deepest_nesting_builds_on_a_1_mib_thread`
+  (`crates/ocio/src/transform_tests.rs`: the most groups the guard lets through around a file
+  transform of 256 CTF files), and upstream's five `Config/cyclic_*` tests.
 
 ### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
 
@@ -5646,8 +5810,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-78. An archive entry named `..` reads uninitialized memory when extracted
 
 - **Upstream:** `ExtractOCIOZArchive` resolves each entry's name with minizip-ng's
-  `mz_path_resolve` (`mz_os.c:129-200` @ 4.0.10, called by `mz_zip_reader_save_all`,
-  `mz_zip_rw.c:818-907`) into a buffer it `realloc`s from entry to entry. A `..` at the start
+  `mz_path_resolve` (`mz_os.c:129-200` @ 4.2.2, called by `mz_zip_reader_save_all`,
+  `mz_zip_rw.c:848-941`) into a buffer it `realloc`s from entry to entry. A `..` at the start
   of a name makes it test the buffer's first byte (`mz_os_is_dir_separator(*target)`), which
   nothing may have written yet: on the first entry it is memory `malloc` left uninitialized.
   Where the name goes on after the `..` the byte's value doesn't matter. Where the name is
@@ -5669,10 +5833,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-79. A directory entry whose name is longer than 255 UTF-8 bytes, on Windows
 
 - **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
-  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
-  4.0.10), which converts each name of the listing (`.` and `..` first) from UTF-16 into the
+  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:461-481` @
+  4.2.2), which converts each name of the listing (`.` and `..` first) from UTF-16 into the
   same 256 bytes of `d_name` (`WideCharToMultiByte`); the byte after `d_name` is the listing's
-  `end` flag (0, and 1 once the last entry is read; `DIR_int`, `mz_os_win32.c:30-35`), then
+  `end` flag (0, and 1 once the last entry is read; `DIR_int`, `mz_os_win32.c:33-38`), then
   the structure's padding. `malloc` left all of it uninitialized. A name longer than 255
   bytes doesn't fit with its NUL: the conversion writes the whole characters that fit in the
   256 bytes and fails, and the bytes after them stay as they were. OpenColorIO reads
@@ -5695,8 +5859,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-80. Archiving a config next to a dangling link whose name holds `*` overflows the stack
 
 - **Upstream:** `Config::archive` adds each LUT file it lists with minizip-ng's
-  `mz_zip_writer_add_path` (`OCIOZArchive.cpp:183-187` @ v2.5.2; `mz_zip_rw.c:1649-1729` @
-  4.0.10). A path with a `*` anywhere (in a directory's name too) that doesn't exist is taken
+  `mz_zip_writer_add_path` (`OCIOZArchive.cpp:183-187` @ v2.5.2; `mz_zip_rw.c:1723-1805` @
+  4.2.2). A path with a `*` anywhere (in a directory's name too) that doesn't exist is taken
   for a wildcard: the function lists the path's directory and adds each entry whose name
   matches the path's last component. On Linux a dangling link with a LUT extension in a
   directory whose name holds a `*`, or whose own name holds one, is such a path, and it
@@ -7006,6 +7170,70 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** the port prints what the wheel printed, then "ERROR: the display profile's table is
   read past its end: the ICC profile can't be written.", and exits with 1 (`Stop::OutOfBounds`).
 
+### U-730. A link entry whose directory is 1,024 bytes or longer writes past a buffer
+
+- **Upstream:** `mz_path_is_symlink_target_safe` (minizip-ng `mz_os.c:280-341` @ 4.2.2)
+  copies the link's directory into a buffer of 1,024 bytes with `strncpy(combined, link_path,
+  parent_len)` and writes a NUL at `combined[parent_len]`: a directory of 1,024 bytes or more
+  writes past the buffer (heap corruption). `ExtractOCIOZArchive` reaches it with a link
+  entry whose path in the destination is that long (Linux allows 4,096 bytes), or with a
+  file entry under an existing link of such a path.
+- **Who notices:** archives with very long link names, which no config needs.
+- **A fix:** size the buffer from the path, or refuse paths that don't fit.
+- **Status:** the port refuses such a link (`MZ_EXIST_ERROR`, so `ExtractOCIOZArchive` fails
+  as for an unsafe target) instead of writing past a buffer, in `ocio26-deps` (chunk 7b,
+  `crates/ocio/src/minizip/mz_os.rs`, `mz_path_is_symlink_target_safe`).
+
+### U-750. `Config::CreateFromFile` with a path that isn't ASCII, on Windows
+
+- **Upstream:** 2.6.0 checks the path with `std::filesystem::exists(filename)` before opening it
+  (src/OpenColorIO/Config.cpp:1296-1302 @ v2.6.0, PR #2310). MSVC builds that
+  `std::filesystem::path` from the narrow string in the process's ANSI code page, while OCIO opens
+  the file through its own UTF-8 conversion (`Platform::CreateInputFileStream`). So on Windows a
+  UTF-8 path that isn't ASCII names another file, or none, by the machine's settings: with code
+  page 1252, an existing `.../é.ocio` passed as a Python `str` gives ExceptionMissingFile
+  "'...' file does not exist." (2.5.2 read it), and a Latin-1 path passes the check and then
+  fails to open. On Linux the bytes are the path; `exists` there throws `filesystem_error`
+  ("filesystem error: status: File name too long [path]", RuntimeError in Python) for errors
+  other than ENOENT and ENOTDIR, which the port matches.
+- **Who notices:** Windows users with config files whose path isn't ASCII.
+- **A fix:** build the path from the UTF-16 of OCIO's own UTF-8 conversion
+  (`std::filesystem::path(Platform::Utf8ToUtf16(filename))`), as the reader opens it.
+- **Status:** on Windows the port refuses such a path with "The config file path isn't ASCII,
+  which the wheel checks through the ANSI code page (docs/improvements.md, U-750)." (waiver
+  W0028, owner, 2026-11-18); ASCII paths on Windows and every path on Linux answer as the
+  wheel, in `ocio26-config` (`Config::create_from_file`, crates/ocio/src/config.rs;
+  `config_files_oracle.rs`). On Windows the wheel reports a missing file, a name with `<`, `?` or
+  `:` and a 300-character name alike as missing; other errors of the check (access denied, a
+  sharing violation) were not probed, and the port reports them as the missing file too.
+
+### U-790. A CTF curve operator that ends where it starts, whose start fails, sets null curves
+
+- **Upstream:** since 2.6.0 the CTF reader's expat handlers keep a handler's exception and
+  stop the parser (`XMLParserHelper::StartElementHandler`,
+  src/OpenColorIO/fileformats/FileFormatCTF.cpp:457-479 @ v2.6.0, PR #2350). For an element
+  that ends where it starts (`<GradingRGBCurve .../>`) expat still makes the element's end
+  call before it honors the stop, and the end handler calls the element's `end()`. When
+  `CTFReaderGradingRGBCurveElt::start` or `CTFReaderGradingHueCurveElt::start` threw before
+  it made the loading curves (the `style` attribute missing or invalid, or the operator's own
+  `start` refusing a bit depth), `m_loadingRGBCurve` or `m_loadingHueCurve` is still null and
+  `end()` passes it to the op data's `setValue`, which dereferences it
+  (fileformats/ctf/CTFReaderHelper.cpp:2685-2743, 2764-2822 @ v2.6.0;
+  DynamicProperty.cpp:216-223, 315-322). Both wheels crash, Windows with an access violation
+  and Linux with SIGSEGV (probed 2026-11-20 with the attribute sets of the test below,
+  GradingRGBCurve in CTF 2 and 2.6, GradingHueCurve in CTF 2.5 (Windows) and 2.6); 2.5.2
+  stopped at the start's exception and never made that end call.
+- **Who notices:** applications reading a malformed CTF file (a CLF doesn't take these
+  operators): the process dies instead of getting the reader's error.
+- **A fix:** check the loading curves in `end()`, or make them in the constructors.
+- **Status:** the port fails where upstream dereferences the null curves (the owner's general
+  rule, `docs/deviations.md`): its `end()` returns an error, which the parser drops as it
+  drops any error after the first, so the read fails with the start's error, as the wheel's
+  read of the same element closed by an end tag does. In `ocio26-clf`
+  (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`, `grading_rgb_curve_end` and
+  `grading_hue_curve_end`); `curves_whose_start_fails_fail_as_with_an_end_tag`
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`).
+
 ### I-542. CPU/GPU special-value differences in the llvmpipe harness
 
 - **Upstream:** OglApp::initImage selects GL_LINEAR (`oglapp.cpp:65-66 @ v2.5.2`).
@@ -7067,3 +7295,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   the ported test callers use consuming log-message patterns.
 - **Status:** preserved in the private test helper. No public OCIO API or numerical
   comparison is changed. A future fix could reject empty spans or advance the search.
+
+### I-980. Merging configs drops view aliases and `use_display_aliases`
+
+- **Upstream:** the config merger copies views with the `addDisplayView` and `addSharedView`
+  overloads that take no aliases (`DisplayViewMerger`,
+  src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.cpp:885, 987, 1000, 1039, 1184, 1221,
+  1231, 1543 and 1569 @ v2.6.0), and no merger reads or sets `use_display_aliases`
+  (`GeneralMerger` copies the strict parsing and family separator only). A view the merger
+  copies from either config loses its aliases (OCIO 2.6, PR #2341), and the merged config
+  keeps `use_display_aliases` only when it started as a copy of a config that had it.
+- **Who notices:** pipelines that merge 2.6 configs whose displays or views were renamed
+  and keep their old names as aliases: a `DisplayViewTransform` with an old name no longer
+  resolves in the merged config.
+- **A fix:** copy each view's aliases (`getNumDisplayViewAliases`/`getDisplayViewAlias`) with
+  the alias overloads, and merge `use_display_aliases` with the other general settings.
+- **Status:** matched in `ocio26-config` (the port's merger calls the same overloads,
+  `crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs`).

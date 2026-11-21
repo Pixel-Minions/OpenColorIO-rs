@@ -13,9 +13,9 @@
 //! compiles CPUInfo.cpp against the library's generated `CPUInfoConfig.h`, prints `1` for every
 //! `has*()` line on a CPU with all the features (spike S4, `docs/spikes/s4.md`).
 //!
-//! **No EPYC 9V45 quirk.** Upstream `main` blocks AVX-512 on AMD EPYC 9V45 (commit `c2bd98f7`,
-//! PR #2324, July 2026). That change is not in v2.5.2, and the 2.5.2 wheels' binaries contain no
-//! "EPYC" string, so this port does not block it either.
+//! **The EPYC 9V45 quirk.** OCIO 2.6.0 clears AVX-512 on an AMD CPU whose brand string holds
+//! "EPYC 9V45" (AMD erratum #1485; PR #2324, commit `c2bd98f7`), which 2.5.2 didn't
+//! ([`epyc_9v45_quirk`]).
 //!
 //! `unsafe` is allowed in this module only for the `cpuid` and `xgetbv` instructions.
 #![allow(unsafe_code)]
@@ -319,6 +319,8 @@ impl CpuInfo {
             }
         }
 
+        flags = epyc_9v45_quirk(flags, &vendor, &name);
+
         CpuInfo {
             flags,
             family,
@@ -482,6 +484,23 @@ fn detect(build: BuildConfig) -> CpuInfo {
     info
 }
 
+/// `flags` without AVX-512 for the one SKU seen to hit AMD erratum #1485 (Zen4 with SMT on and
+/// STIBP off can raise a spurious illegal-instruction fault): an `AuthenticAMD` vendor whose
+/// brand string, up to its first NUL as `strstr` reads it, holds "EPYC 9V45".
+///
+/// Port of src/OpenColorIO/CPUInfo.cpp:185-195 @ v2.6.0.
+#[cfg(target_arch = "x86_64")]
+fn epyc_9v45_quirk(flags: u32, vendor: &[u8], name: &[u8]) -> u32 {
+    let c_str = |s: &[u8]| -> usize { s.iter().position(|&b| b == 0).unwrap_or(s.len()) };
+    let name = &name[..c_str(name)];
+    let amd = vendor.len() >= 12 && &vendor[..12] == b"AuthenticAMD";
+    if amd && name.windows(9).any(|w| w == b"EPYC 9V45") {
+        flags & !X86_CPU_FLAG_AVX512
+    } else {
+        flags
+    }
+}
+
 #[cfg(not(target_arch = "x86_64"))]
 fn unknown_cpu(name: &[u8], vendor: &[u8]) -> CpuInfo {
     let mut info = CpuInfo {
@@ -500,6 +519,25 @@ fn unknown_cpu(name: &[u8], vendor: &[u8]) -> CpuInfo {
 #[cfg(all(test, target_arch = "x86_64"))]
 mod tests {
     use super::*;
+
+    /// The EPYC 9V45 quirk (CPUInfo.cpp:185-195 @ v2.6.0) clears only AVX-512, only for an AMD
+    /// vendor, and reads the brand string as C does, up to its first NUL.
+    #[test]
+    fn the_epyc_9v45_quirk_clears_avx512() {
+        let all = X86_CPU_FLAG_AVX512 | X86_CPU_FLAG_AVX2;
+        let amd = b"AuthenticAMD\0";
+        let intel = b"GenuineIntel\0";
+        let mut name = [0u8; 65];
+        name[..24].copy_from_slice(b"AMD EPYC 9V45 96-Core   ");
+        assert_eq!(epyc_9v45_quirk(all, amd, &name), X86_CPU_FLAG_AVX2);
+        assert_eq!(epyc_9v45_quirk(all, intel, &name), all);
+        let mut other = name;
+        other[12] = b'4';
+        assert_eq!(epyc_9v45_quirk(all, amd, &other), all);
+        let mut cut = name;
+        cut[6] = 0;
+        assert_eq!(epyc_9v45_quirk(all, amd, &cut), all);
+    }
 
     /// The CPUID bits OCIO decodes agree with the Rust standard library's own CPUID and XCR0
     /// decoding. (The slow-CPU quirks and the brand string are compared with the wheel's

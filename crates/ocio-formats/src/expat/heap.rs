@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from expat 2.7.2 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
-// Ltd and Clark Cooper, Copyright (c) 2001-2025 Expat maintainers); see mod.rs.
+// Ported from expat 2.8.4 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
+// Ltd and Clark Cooper, Copyright (c) 2001-2026 Expat maintainers); see mod.rs.
 
 //! What expat's allocation tracker counts: the blocks `xmlparse.c` allocates with `MALLOC` and
 //! `REALLOC`, block for block, so that the tracker (`MALLOC_TRACKER`, new in 2.7.2) refuses
@@ -11,52 +11,65 @@
 //! them, the sizes expat would have allocated for its: the string pools' blocks
 //! (`STRING_POOL`, `poolGrow`), the hash tables' arrays and entries (`lookup`), the open tags'
 //! name buffers, the attribute array, the open entities, the elements' default attributes and
-//! the group connector. The sizes are those of the C structures as the wheels' compilers lay
-//! them out (x86-64: 8-byte pointers and `size_t`, 4-byte `int`; `long` is 4 bytes on Windows
-//! and 8 on Linux, which only the parser's own structure holds); they were checked with
-//! `sizeof` and `offsetof` on the expat 2.7.2 sources, built as the wheels build them, with
-//! MinGW-w64 GCC (Windows' LLP64 layout, as MSVC's) and with GCC on Rocky Linux 9.
+//! their name tables, and the group connector. The sizes are those of the C structures as the
+//! wheels' compilers lay them out (x86-64: 8-byte pointers and `size_t`, 4-byte `int`; `long`
+//! is 4 bytes on Windows and 8 on Linux, which only the parser's own structure holds); they
+//! were checked with `sizeof` and `offsetof` on the expat 2.8.4 sources, built as the wheels
+//! build them, with MinGW-w64 GCC (Windows' LLP64 layout, as MSVC's) and with GCC on Rocky
+//! Linux 9 (the same probe gives the sizes this module had for 2.7.2), and the parser's
+//! structure also with the immediates of each 2.6.0 wheel's `parserCreate` (`malloc(8 +
+//! sizeof)` and the size it records).
+//!
+//! Every citation here is to expat 2.8.4 (`@ R_2_8_4`), the tracker's version since
+//! OpenColorIO 2.6.0 (`docs/ocio-2.6-deps-triage.md`, X3).
 
 use super::xmlparse::XmlError;
 
 /// `sizeof(size_t)`: the size `expat_malloc` records before each block.
 pub(crate) const SIZE_T: u64 = 8;
+/// `EXPAT_MALLOC_PADDING` (internal.h:153-156 @ R_2_8_4): `sizeof(long long) - sizeof(size_t)`,
+/// 0 on x86-64 with both compilers.
+pub(crate) const EXPAT_MALLOC_PADDING: u64 = 0;
 
-/// `sizeof(struct XML_ParserStruct)` (xmlparse.c:663-785) as the wheel's compiler lays it out:
-/// it holds `unsigned long` and `long` fields (`m_hash_secret_salt`, `XML_Index`, `XML_Size`,
-/// the accounting's and the tracker's debug levels), 4 bytes with MSVC and 8 with GCC.
+/// `sizeof(struct XML_ParserStruct)` (xmlparse.c:719-843) as the wheel's compiler lays it out:
+/// it holds `unsigned long` and `long` fields (`XML_Index`, `XML_Size`, the accounting's and
+/// the tracker's debug levels), 4 bytes with MSVC and 8 with GCC. The 2.6.0 DLL's
+/// `parserCreate` allocates 0x438 bytes and records 0x430.
 #[cfg(windows)]
-pub(crate) const SIZEOF_PARSER: u64 = 1048;
-/// `sizeof(struct XML_ParserStruct)` (xmlparse.c:663-785) with GCC on x86-64 Linux.
+pub(crate) const SIZEOF_PARSER: u64 = 1072;
+/// `sizeof(struct XML_ParserStruct)` (xmlparse.c:719-843) with GCC on x86-64 Linux: the 2.6.0
+/// wheel's `parserCreate` allocates 0x458 bytes and records 0x450.
 #[cfg(not(windows))]
-pub(crate) const SIZEOF_PARSER: u64 = 1088;
-/// `sizeof(DTD)` (xmlparse.c:393-420).
-pub(crate) const SIZEOF_DTD: usize = 360;
-/// `sizeof(TAG)` (xmlparse.c:308-316).
-pub(crate) const SIZEOF_TAG: usize = 88;
-/// `sizeof(ENTITY)` (xmlparse.c:318-334).
+pub(crate) const SIZEOF_PARSER: u64 = 1104;
+/// `sizeof(DTD)` (xmlparse.c:419-447).
+pub(crate) const SIZEOF_DTD: usize = 368;
+/// `sizeof(TAG)` (xmlparse.c:314-325).
+pub(crate) const SIZEOF_TAG: usize = 96;
+/// `sizeof(ENTITY)` (xmlparse.c:327-343).
 pub(crate) const SIZEOF_ENTITY: usize = 64;
-/// `sizeof(ELEMENT_TYPE)` (xmlparse.c:384-391).
-pub(crate) const SIZEOF_ELEMENT_TYPE: usize = 40;
-/// `sizeof(ATTRIBUTE_ID)` (xmlparse.c:365-370).
+/// `sizeof(ELEMENT_TYPE)` (xmlparse.c:409-417): with its `defaultAttForName` table.
+pub(crate) const SIZEOF_ELEMENT_TYPE: usize = 88;
+/// `sizeof(ATTRIBUTE_ID)` (xmlparse.c:374-379).
 pub(crate) const SIZEOF_ATTRIBUTE_ID: usize = 24;
-/// `sizeof(PREFIX)` (xmlparse.c:281-284).
+/// `sizeof(PREFIX)` (xmlparse.c:287-290).
 pub(crate) const SIZEOF_PREFIX: usize = 16;
-/// `sizeof(DEFAULT_ATTRIBUTE)` (xmlparse.c:372-376).
+/// `sizeof(DEFAULT_ATTRIBUTE)` (xmlparse.c:381-385).
 pub(crate) const SIZEOF_DEFAULT_ATTRIBUTE: usize = 24;
-/// `sizeof(OPEN_INTERNAL_ENTITY)` (xmlparse.c:428-436).
+/// `sizeof(NAME_AND_DEFAULT_ATTRIBUTE)` (xmlparse.c:389-401): an entry of `defaultAttForName`.
+pub(crate) const SIZEOF_NAME_AND_DEFAULT_ATTRIBUTE: usize = 24;
+/// `sizeof(OPEN_INTERNAL_ENTITY)` (xmlparse.c:455-463).
 pub(crate) const SIZEOF_OPEN_INTERNAL_ENTITY: usize = 48;
 /// `sizeof(ATTRIBUTE)` (xmltok.h).
 pub(crate) const SIZEOF_ATTRIBUTE: usize = 32;
 /// `sizeof(NAMED *)`: a hash table's slot.
 const SIZEOF_NAMED_PTR: usize = 8;
-/// `offsetof(BLOCK, s)` (xmlparse.c:348-352): a pool block's header.
+/// `offsetof(BLOCK, s)` (xmlparse.c:357-361): a pool block's header.
 const OFFSETOF_BLOCK_S: usize = 12;
-/// `INIT_TAG_BUF_SIZE` (xmlparse.c:262).
+/// `INIT_TAG_BUF_SIZE` (xmlparse.c:268).
 const INIT_TAG_BUF_SIZE: usize = 32;
-/// `INIT_BLOCK_SIZE` (xmlparse.c:266).
+/// `INIT_BLOCK_SIZE` (xmlparse.c:272).
 const INIT_BLOCK_SIZE: i32 = 1024;
-/// `INIT_POWER` (xmlparse.c:7776): a hash table's first size is `1 << INIT_POWER`.
+/// `INIT_POWER` (xmlparse.c:7947): a hash table's first size is `1 << INIT_POWER`.
 const INIT_POWER: u8 = 6;
 
 /// A block `expat_malloc` counted: the size it recorded in the `size_t` before the block.
@@ -67,9 +80,9 @@ pub(crate) struct Block {
 
 /// The allocation tracker, and the direct bytes its amplification is computed from.
 ///
-/// Port of `MALLOC_TRACKER` (xmlparse.c:455-461), without the debug fields, and of
+/// Port of `MALLOC_TRACKER` (xmlparse.c:482-488), without the debug fields, and of
 /// `expat_heap_increase_tolerable`, `expat_malloc`, `expat_free` and `expat_realloc`
-/// (xmlparse.c:812-1005), without the allocations themselves.
+/// (xmlparse.c:870-1069), without the allocations themselves.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MallocTracker {
     /// `bytesAllocated`.
@@ -85,7 +98,7 @@ pub(crate) struct MallocTracker {
 impl MallocTracker {
     /// Whether the tracker allows `increase` more bytes.
     ///
-    /// Port of `expat_heap_increase_tolerable` (xmlparse.c:812-844), without the report.
+    /// Port of `expat_heap_increase_tolerable` (xmlparse.c:870-902), without the report.
     pub(crate) fn increase_tolerable(&self, increase: u64) -> bool {
         // Detect integer overflow
         if u64::MAX - self.bytes_allocated < increase {
@@ -104,13 +117,13 @@ impl MallocTracker {
 
     /// Counts a block of `size` bytes, or refuses it (`NULL`, out of memory).
     ///
-    /// Port of `expat_malloc` (xmlparse.c:846-898).
+    /// Port of `expat_malloc` (xmlparse.c:908-956).
     pub(crate) fn malloc(&mut self, size: usize) -> Result<Block, XmlError> {
         // Detect integer overflow
-        if usize::MAX - size < SIZE_T as usize {
+        if usize::MAX - size < (SIZE_T + EXPAT_MALLOC_PADDING) as usize {
             return Err(XmlError::NoMemory);
         }
-        let bytes_to_allocate = SIZE_T + size as u64;
+        let bytes_to_allocate = SIZE_T + EXPAT_MALLOC_PADDING + size as u64;
         if u64::MAX - self.bytes_allocated < bytes_to_allocate {
             return Err(XmlError::NoMemory); // i.e. signal integer overflow as out-of-memory
         }
@@ -122,15 +135,15 @@ impl MallocTracker {
         Ok(Block { size })
     }
 
-    /// Port of `expat_free` (xmlparse.c:900-933).
+    /// Port of `expat_free` (xmlparse.c:962-992).
     pub(crate) fn free(&mut self, block: Block) {
-        self.bytes_allocated -= SIZE_T + block.size as u64;
+        self.bytes_allocated -= SIZE_T + EXPAT_MALLOC_PADDING + block.size as u64;
     }
 
     /// Resizes a counted block to `size` bytes (not 0); refused, the block unchanged, when the
     /// tracker refuses the increase.
     ///
-    /// Port of `expat_realloc` (xmlparse.c:935-1005) for a block (`ptr` not null).
+    /// Port of `expat_realloc` (xmlparse.c:998-1069) for a block (`ptr` not null).
     pub(crate) fn realloc(&mut self, block: &mut Block, size: usize) -> Result<(), XmlError> {
         let prev_size = block.size;
         // Classify upcoming change
@@ -177,10 +190,13 @@ struct PoolBlock {
 /// current string starts and ends in the current block. The bytes themselves live in the
 /// port's own strings.
 ///
-/// Port of `STRING_POOL` (xmlparse.c:354-361) and its functions (`poolInit`, `poolClear`,
-/// `poolGrow`, `poolAppend`, `poolStoreString`, `poolCopyString`, `poolCopyStringN`,
-/// `poolAppendString`, and the macros `poolAppendChar`, `poolFinish`, `poolDiscard`,
-/// `poolChop`; xmlparse.c:643-652, 7943-8191), for `XML_Char` of one byte.
+/// Port of `STRING_POOL` (xmlparse.c:363-370) and its functions (`poolInit`, `poolClear`,
+/// `poolGrow`, `poolGrowUntil`, `poolAppend`, `poolStoreString`, `poolCopyString`,
+/// `poolCopyStringN`, `poolAppendString`, `poolAppendChar`, `poolAppendChars`, and the macros
+/// `poolFinish`, `poolDiscard`, `poolChop`; xmlparse.c:675-708, 8167-8439), for `XML_Char` of
+/// one byte. `poolAppendChars` grows the pool with `poolGrowUntil` where 2.7.2 appended one
+/// character at a time: the same `poolGrow` calls, as `poolGrow` depends on `end - start` and
+/// not on `ptr`.
 #[derive(Debug, Default)]
 pub(crate) struct PoolModel {
     /// `blocks`: the head last.
@@ -216,7 +232,7 @@ impl PoolModel {
         self.ptr -= 1;
     }
 
-    /// Port of `poolClear` (xmlparse.c:7953-7970): the blocks become free blocks.
+    /// Port of `poolClear` (xmlparse.c:8177-8194): the blocks become free blocks.
     pub(crate) fn clear(&mut self) {
         if self.free_blocks.is_empty() {
             self.free_blocks = std::mem::take(&mut self.blocks);
@@ -231,7 +247,7 @@ impl PoolModel {
         self.end = 0;
     }
 
-    /// Port of `poolGrow` (xmlparse.c:8090-8191).
+    /// Port of `poolGrow` (xmlparse.c:8323-8426).
     pub(crate) fn grow(&mut self, tracker: &mut MallocTracker) -> Result<(), XmlError> {
         if let Some(free_size) = self.free_blocks.last().map(|b| b.size) {
             if !self.has_ptr {
@@ -308,7 +324,7 @@ impl PoolModel {
         Ok(())
     }
 
-    /// `poolAppendChar(pool, c)` (xmlparse.c:649-652): one byte.
+    /// `poolAppendChar(pool, c)` (xmlparse.c:686-692): one byte.
     pub(crate) fn append_char(&mut self, tracker: &mut MallocTracker) -> Result<(), XmlError> {
         // The macro tests ptr == end: both NULL before the first block.
         if !self.has_ptr || self.ptr == self.end {
@@ -318,7 +334,7 @@ impl PoolModel {
         Ok(())
     }
 
-    /// `poolAppend(pool, enc, ptr, end)` (xmlparse.c:7988-8003) of text whose UTF-8 form is
+    /// `poolAppend(pool, enc, ptr, end)` (xmlparse.c:8212-8227) of text whose UTF-8 form is
     /// `utf8`: the conversion stores whole characters only, so a character that doesn't fit
     /// in the block makes it grow.
     pub(crate) fn append(
@@ -348,7 +364,7 @@ impl PoolModel {
         Ok(())
     }
 
-    /// `poolStoreString(pool, enc, ptr, end)` (xmlparse.c:8051-8060): the text and a NUL.
+    /// `poolStoreString(pool, enc, ptr, end)` (xmlparse.c:8285-8293): the text and a NUL.
     pub(crate) fn store_string(
         &mut self,
         tracker: &mut MallocTracker,
@@ -362,8 +378,8 @@ impl PoolModel {
         Ok(())
     }
 
-    /// `poolCopyString(pool, s)` (xmlparse.c:8005-8014): the string, its NUL, then
-    /// `poolFinish`.
+    /// `poolCopyString(pool, s)` (xmlparse.c:8229-8236): the string and its NUL
+    /// (`poolAppendChars`), then `poolFinish`.
     pub(crate) fn copy_string(
         &mut self,
         tracker: &mut MallocTracker,
@@ -376,7 +392,8 @@ impl PoolModel {
         Ok(())
     }
 
-    /// `poolAppendString(pool, s)` (xmlparse.c:8041-8049): `len` bytes, no NUL.
+    /// `poolAppendString(pool, s)` (xmlparse.c:8278-8283): `len` bytes, no NUL
+    /// (`poolAppendChars`).
     pub(crate) fn append_string(
         &mut self,
         tracker: &mut MallocTracker,
@@ -405,7 +422,7 @@ fn utf8_char_len(lead: u8) -> usize {
     }
 }
 
-/// Port of `poolBytesToAllocateFor` (xmlparse.c:8062-8088) for `XML_Char` of one byte: 0 for
+/// Port of `poolBytesToAllocateFor` (xmlparse.c:8295-8321) for `XML_Char` of one byte: 0 for
 /// a size that can't be allocated.
 fn pool_bytes_to_allocate_for(block_size: i32) -> usize {
     if block_size <= 0 {
@@ -420,8 +437,9 @@ fn pool_bytes_to_allocate_for(block_size: i32) -> usize {
 
 /// What a hash table's allocations depend on: its array and its entries.
 ///
-/// Port of `HASH_TABLE` (xmlparse.c:232-238) and of the allocations of `lookup`
-/// (xmlparse.c:7811-7898) and `hashTableClear` (7900-7908).
+/// Port of `HASH_TABLE` (xmlparse.c:238-244) and of the allocations of `lookup`
+/// (`lookupWithLength`, xmlparse.c:8012-8102), `hashTableClear` (8124-8132) and
+/// `hashTableDestroy` (8134-8140).
 #[derive(Debug, Default)]
 pub(crate) struct HashModel {
     /// `power`.
@@ -475,13 +493,21 @@ impl HashModel {
         Ok(())
     }
 
-    /// Port of `hashTableClear` (xmlparse.c:7900-7908): the entries are freed, the array
+    /// Port of `hashTableClear` (xmlparse.c:8124-8132): the entries are freed, the array
     /// kept.
     pub(crate) fn clear(&mut self, tracker: &mut MallocTracker) {
         for entry in self.entries.drain(..) {
             tracker.free(entry);
         }
         self.used = 0;
+    }
+
+    /// Port of `hashTableDestroy` (xmlparse.c:8134-8140): the entries and the array are freed.
+    pub(crate) fn destroy(mut self, tracker: &mut MallocTracker) {
+        self.clear(tracker);
+        if let Some(v) = self.v.take() {
+            tracker.free(v);
+        }
     }
 }
 
@@ -501,7 +527,8 @@ struct TagMem {
 }
 
 /// The lists of open entities the document reaches: `ENTITY_INTERNAL` and `ENTITY_ATTRIBUTE`
-/// (`ENTITY_VALUE`'s, opened only from parameter entities, is not).
+/// (`ENTITY_VALUE`'s, opened only from parameter entities, is not). Since 2.8.0 their records
+/// share one free list, `m_freeEntities`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum EntityList {
     Internal = 0,
@@ -543,11 +570,13 @@ pub(crate) struct Heap {
     /// `m_tagStack` (the innermost last) and `m_freeTagList` (its head last).
     tag_stack: Vec<TagMem>,
     free_tags: Vec<TagMem>,
-    /// The open entities of each list, and the free ones (heads last).
+    /// The open entities of each list, and `m_freeEntities` (heads last).
     open_entities: [Vec<Block>; 2],
-    free_entities: [Vec<Block>; 2],
+    free_entities: Vec<Block>,
     /// Each element type's `defaultAtts` and `allocDefaultAtts`, by the port's index.
     default_atts: Vec<Option<(Block, usize)>>,
+    /// Each element type's `defaultAttForName`, by the port's index.
+    default_att_for_name: Vec<HashModel>,
     /// `m_groupConnector`.
     pub(crate) group_connector: Option<Block>,
 }
@@ -556,12 +585,12 @@ impl Heap {
     /// The parser's first allocations: the `XML_ParserStruct` (counted without
     /// `expat_malloc`), `m_atts`, `m_dataBuf`, then the `DTD`.
     ///
-    /// Port of the allocations of `parserCreate` (xmlparse.c:1333-1523: 1340-1426,
-    /// 1435-1466) and `dtdCreate` (7474-7505).
+    /// Port of the allocations of `parserCreate` (xmlparse.c:1310-1502: 1316-1373,
+    /// 1415-1444) and `dtdCreate` (7627-7658).
     pub(crate) fn new(tracker: MallocTracker) -> Heap {
         let mut tracker = tracker;
         // Record XML_ParserStruct allocation we did a few lines up before
-        tracker.bytes_allocated += SIZE_T + SIZEOF_PARSER;
+        tracker.bytes_allocated += SIZE_T + EXPAT_MALLOC_PADDING + SIZEOF_PARSER;
         // Nothing is parsed yet: the default thresholds can't be reached.
         let atts = tracker
             .malloc(16 * SIZEOF_ATTRIBUTE)
@@ -585,29 +614,34 @@ impl Heap {
             tag_stack: Vec::new(),
             free_tags: Vec::new(),
             open_entities: Default::default(),
-            free_entities: Default::default(),
+            free_entities: Vec::new(),
             default_atts: Vec::new(),
+            default_att_for_name: Vec::new(),
             group_connector: None,
         }
     }
 
-    /// The allocations of `XML_ParserReset` (xmlparse.c:1626-1683): the open tags and
-    /// entities go to the free lists, the temporary pools are cleared, the accounting starts
-    /// over, and `dtdReset` (7506-7545) frees the default attributes and the hash tables'
-    /// entries (keeping their arrays) and clears the DTD's pools.
+    /// The allocations of `XML_ParserReset` (xmlparse.c:1620-1658): the open tags and
+    /// entities go to the free lists (`moveEntityList`, 1610-1618), the temporary pools are
+    /// cleared, the accounting starts over, and `dtdReset` (7660-7700) frees the default
+    /// attributes and their name tables and the hash tables' entries (keeping their arrays)
+    /// and clears the DTD's pools.
     pub(crate) fn reset(&mut self) {
         while let Some(tag) = self.tag_stack.pop() {
             self.free_tags.push(tag);
         }
         for list in 0..2 {
             while let Some(entity) = self.open_entities[list].pop() {
-                self.free_entities[list].push(entity);
+                self.free_entities.push(entity);
             }
         }
         self.temp_pool.clear();
         self.temp2_pool.clear();
         // parserInit: the accounting starts over.
         self.tracker.count_bytes_direct = 0;
+        for table in std::mem::take(&mut self.default_att_for_name) {
+            table.destroy(&mut self.tracker);
+        }
         for (block, _) in self.default_atts.drain(..).flatten() {
             self.tracker.free(block);
         }
@@ -631,13 +665,13 @@ impl Heap {
         (pool, &mut self.tracker)
     }
 
-    /// The `m_atts` reallocation of `storeAtts` (xmlparse.c:3850-3882): `size` `ATTRIBUTE`s.
+    /// The `m_atts` reallocation of `storeAtts` (xmlparse.c:3903-3926): `size` `ATTRIBUTE`s.
     pub(crate) fn realloc_atts(&mut self, size: usize) -> Result<(), XmlError> {
         self.tracker
             .realloc(&mut self.atts, size * SIZEOF_ATTRIBUTE)
     }
 
-    /// A start tag's `TAG` and name buffer (xmlparse.c:3451-3505): one of the free list, or a
+    /// A start tag's `TAG` and name buffer (xmlparse.c:3474-3527): one of the free list, or a
     /// new `TAG` with a buffer of `INIT_TAG_BUF_SIZE` (32) bytes; the buffer doubles until the
     /// name, `str_len` bytes in UTF-8, fits with a byte to spare.
     pub(crate) fn push_tag(
@@ -678,18 +712,21 @@ impl Heap {
                 tag.str_len = str_len;
                 return Ok(());
             }
-            let buf_size = ((tag.buf.size as i32) << 1) as usize;
+            if usize::MAX / 2 < tag.buf.size {
+                return Err(XmlError::NoMemory);
+            }
+            let buf_size = tag.buf.size * 2;
             self.tracker.realloc(&mut tag.buf, buf_size)?;
         }
     }
 
-    /// An end tag: the innermost tag goes to the free list (xmlparse.c:3580-3582).
+    /// An end tag: the innermost tag goes to the free list (xmlparse.c:3606-3608).
     pub(crate) fn pop_tag(&mut self) {
         let tag = self.tag_stack.pop().expect("an open tag");
         self.free_tags.push(tag);
     }
 
-    /// Port of the allocations of `storeRawNames` (xmlparse.c:3111-3158): from the innermost
+    /// Port of the allocations of `storeRawNames` (xmlparse.c:3122-3169): from the innermost
     /// tag to the first whose raw name is already in its buffer, the buffer grows to hold the
     /// name, its NUL and the raw name.
     pub(crate) fn store_raw_names(&mut self) -> Result<(), XmlError> {
@@ -700,7 +737,7 @@ impl Heap {
             let name_len = tag.str_len + 1;
             let raw_name_len = tag.raw_name_length;
             // Detect and prevent integer overflow.
-            if raw_name_len > i32::MAX as usize - name_len {
+            if raw_name_len > usize::MAX - name_len {
                 return Err(XmlError::NoMemory);
             }
             let buf_size = name_len + raw_name_len;
@@ -712,10 +749,10 @@ impl Heap {
         Ok(())
     }
 
-    /// An entity opened on `list` (`processEntity`, xmlparse.c:6358-6365): an
-    /// `OPEN_INTERNAL_ENTITY` of the list's free list, or a new one.
+    /// An entity opened on `list` (`processEntity`, xmlparse.c:6451-6508): an
+    /// `OPEN_INTERNAL_ENTITY` of the free list, or a new one.
     pub(crate) fn open_entity(&mut self, list: EntityList) -> Result<(), XmlError> {
-        let block = match self.free_entities[list as usize].pop() {
+        let block = match self.free_entities.pop() {
             Some(block) => block,
             None => self.tracker.malloc(SIZEOF_OPEN_INTERNAL_ENTITY)?,
         };
@@ -723,16 +760,17 @@ impl Heap {
         Ok(())
     }
 
-    /// The innermost entity on `list` closed: its `OPEN_INTERNAL_ENTITY` goes to the free list.
+    /// The innermost entity on `list` closed: its `OPEN_INTERNAL_ENTITY` goes to the free list
+    /// (`internalEntityProcessor`, `storeAttributeValue`).
     pub(crate) fn close_entity(&mut self, list: EntityList) {
         let block = self.open_entities[list as usize]
             .pop()
             .expect("an open entity");
-        self.free_entities[list as usize].push(block);
+        self.free_entities.push(block);
     }
 
     /// Room for one more default attribute of the element type `index`, which has `n` (the
-    /// allocations of `defineAttribute`, xmlparse.c:7154-7190): 8 at first, then twice as
+    /// allocations of `defineAttribute`, xmlparse.c:7303-7325): 8 at first, then twice as
     /// many.
     pub(crate) fn grow_default_atts(&mut self, index: usize, n: usize) -> Result<(), XmlError> {
         if self.default_atts.len() <= index {
@@ -747,10 +785,14 @@ impl Heap {
                 self.default_atts[index] = Some((block, 8));
             } else {
                 // Detect and prevent integer overflow
-                if alloc > i32::MAX as usize / 2 {
+                if alloc > usize::MAX / 2 {
                     return Err(XmlError::NoMemory);
                 }
                 let count = alloc * 2;
+                // Detect and prevent integer overflow.
+                if count > usize::MAX / SIZEOF_DEFAULT_ATTRIBUTE {
+                    return Err(XmlError::NoMemory);
+                }
                 let (block, alloc) = self.default_atts[index].as_mut().expect("allocated");
                 self.tracker
                     .realloc(block, count * SIZEOF_DEFAULT_ATTRIBUTE)?;
@@ -758,5 +800,18 @@ impl Heap {
             }
         }
         Ok(())
+    }
+
+    /// The insertion of a name not yet in the element type `index`'s `defaultAttForName`
+    /// (`lookup(parser, &(type->defaultAttForName), attId->name,
+    /// sizeof(NAME_AND_DEFAULT_ATTRIBUTE))`, xmlparse.c:7333-7338): its array on the first
+    /// one, a bigger one when half full, and the entry.
+    pub(crate) fn insert_default_att_name(&mut self, index: usize) -> Result<(), XmlError> {
+        if self.default_att_for_name.len() <= index {
+            self.default_att_for_name
+                .resize_with(index + 1, HashModel::default);
+        }
+        self.default_att_for_name[index]
+            .insert(&mut self.tracker, SIZEOF_NAME_AND_DEFAULT_ATTRIBUTE)
     }
 }

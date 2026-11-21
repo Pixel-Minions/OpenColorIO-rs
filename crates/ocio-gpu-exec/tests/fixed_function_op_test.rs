@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/gpu/FixedFunctionOp_test.cpp` @ v2.5.2, 36 other cases (7.3e).
+//! Port of `tests/gpu/FixedFunctionOp_test.cpp` @ v2.5.2 and v2.6.0 (the cases marked so), 36
+//! other cases (7.3e).
 //! Original inputs and settings; actual wheel CPU/shader references; no retests.
 #![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
@@ -405,7 +406,7 @@ const CASES: &[Case] = &[
         raw_input_digest: "3711207f649539f0911cec62dae05a59d2b7b14ce9209688564df22bad030434",
         padded_input_digest: "a1e10b53e849db3bf7c233cb4e5da58e826f66fd7f1189bf4c66e5540e2a21e6",
     },
-    // FixedFunctionOp_test.cpp:243-307 @ v2.5.2.
+    // FixedFunctionOp_test.cpp:243-308 @ v2.6.0.
     Case {
         name: "style_aces_gamutcomp13_inv",
         build: Build::Fixed {
@@ -572,7 +573,7 @@ const CASES: &[Case] = &[
             0.35839819908,
             0.0,
         ]),
-        threshold: 3e-6,
+        threshold: 3e-5,
         relative: false,
         minimum: 1e-6,
         nan: true,
@@ -1506,7 +1507,7 @@ fn style_aces_glow10_inv() {
 fn style_aces_gamutcomp13_fwd() {
     run_case(8, "style_aces_gamutcomp13_fwd");
 }
-/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces_gamutcomp13_inv)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(FixedFunction, style_aces_gamutcomp13_inv)` @ v2.6.0.
 #[test]
 fn style_aces_gamutcomp13_inv() {
     run_case(9, "style_aces_gamutcomp13_inv");
