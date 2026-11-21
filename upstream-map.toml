@@ -5261,8 +5261,8 @@ note = "P54: 5 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/ColorSpaceTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 21 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 1113-1152; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 21 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). 2.6.0: changed at v2.6.0 lines 1113-1152, the LocateBuiltinColorSpace checks at the end of test_processor_to_known_colorspace; no test function was added, so py-port/passing.txt still records 21. They run unmodified against ocio-py's Config.LocateBuiltinColorSpace (ocio26-config); the complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ColorSpaceTransformTest.py"
@@ -5275,22 +5275,22 @@ note = "P54: 6 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/ConfigCompatibilityHelpersTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "New in 2.6.0 (PR #2344); card ocio26-config."
+status = "done"
+note = "New in 2.6.0 (PR #2344): 1 upstream test function (test_check_compatibility), recorded in py-port/passing.txt by ocio26-config; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs) against ocio-py's ConfigCompatibilityHelpers (apphelpers/py_config_compatibility_helpers.rs). The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ConfigTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 25 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 801-1087, 1291-1292, 1298, 1301, 1566-1568, 1736-1756; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 25 upstream test functions (its three classes) recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). 2.6.0: changed at v2.6.0 lines 801-1087, 1291-1292, 1298, 1301, 1566-1568, 1736-1756: the new ConfigTest functions test_generate_local_id_for_color_space, test_find_color_space_for_id, test_use_display_aliases, test_display_view_aliases, test_display_description, test_resolved_display_view_color_space_name (801-1087) and test_cyclic_color_space_transform (1736-1756), and the 2.6 built-in configs (cg-config-v5.0.0_aces-v2.1_ocio-v2.6, 57 color spaces in the studio config, ExceptionMissingFile) in test_create_builtin_config (1291-1301) and test_resolve_config (1566-1568). ocio26-config recorded the 7 new functions in py-port/passing.txt: 32 at v2.6.0, was 25. The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ConstantsTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 1 upstream test function recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 50; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 1 upstream test function recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). 2.6.0: changed at v2.6.0 lines 50: test_string_constants checks METADATA_ID_ELEMENT ('Id'), which ocio26-clf added to py_types.rs; still 1 function. The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ContextTest.py"
@@ -5408,8 +5408,8 @@ note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/GroupTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 9 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 165; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 9 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs); inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 165: the CLF that test_write_clf expects has the SMPTE ST 2136-1 xmlns on ProcessList, as ocio26-clf's CLF writer at v2.6.0 does; still 9 functions. The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/LegacyViewingPipelineTest.py"
@@ -5506,8 +5506,8 @@ note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/OpenColorIOTestSuite.py"
 kind = "test-python"
 target = ["xtask/src/py.rs", "xtask/src/py_driver.rs"]
-status = "partial"
-note = "P54/P73: driver_modules/modules_of_driver consume the unchanged get_test_modules inventory (48 modules); py-suite runs those modules unmodified in fresh processes and verifies all 384 functions against the wheel. It also executes the original unmodified driver as one process against each package, checking the wheel-inventoried test IDs/multiplicities, successful unittest footer and exact run order. Its valid module-selection and unknown-module CLI paths are compared too; actual logs are retained in py-driver.json. Both-platform runtime qualification is required before the P73 chunk lands. 2.6.0: changed at v2.6.0 lines 60, 112; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54/P73: driver_modules/modules_of_driver consume the unchanged get_test_modules inventory; py-suite runs those modules unmodified in fresh processes and verifies every function against the wheel. It also executes the original unmodified driver as one process against each package, checking the wheel-inventoried test IDs/multiplicities, successful unittest footer and exact run order. Its valid module-selection and unknown-module CLI paths are compared too; actual logs are retained in py-driver.json. 2.6.0: changed at v2.6.0 lines 60, 112: the import and get_test_modules entry of the new ConfigCompatibilityHelpersTest; the driver code is unchanged, so xtask reads the v2.6.0 inventory, 49 modules and 392 functions, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ProcessorCacheTest.py"
@@ -5520,8 +5520,8 @@ note = "P54: 1 upstream test function recorded in py-port/passing.txt; source ru
 path = "tests/python/ProcessorTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 53; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). 2.6.0: changed at v2.6.0 lines 53: test_cache_id expects 2.6.0's UUID-shaped processor cache ID, which ocio26-base ported (HashUtils, Processor); still 7 functions. The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/RangeTransformTest.py"
