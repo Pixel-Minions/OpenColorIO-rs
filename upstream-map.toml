@@ -3758,8 +3758,8 @@ note = "New in 2.6.0 (PRs #2271, #2243): DirectX 12 / Vulkan GPU unit-test backe
 path = "src/libutils/oglapphelpers/glsl.cpp"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/glsl.rs"]
-status = "partial"
-note = "7.2b: test-only OpenGLBuilder, textures, dynamic uniforms, GLSL compile/link and texture limit query; EGL harness on Rocky llvmpipe (P7-2/P7-3). 2.6.0: changed at v2.6.0 lines 12-21, 23; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "7.2b: test-only OpenGLBuilder, textures, dynamic uniforms, GLSL compile/link and texture limit query; EGL harness on Rocky llvmpipe (P7-2/P7-3). 2.6.0: changed at v2.6.0 lines 12-21, 23: on Windows, WIN32_LEAN_AND_MEAN, NOMINMAX and windows.h before GL/glu.h, so that GLEW's macros let glu.h compile; build only, and glsl.rs doesn't link GLU. The OpenGLBuilder code is unchanged at v2.6.0."
 
 [[file]]
 path = "src/libutils/oglapphelpers/glsl.h"
@@ -3772,15 +3772,15 @@ note = "7.2b: OpenGLBuilder and its texture/uniform state."
 path = "src/libutils/oglapphelpers/graphicalapp.cpp"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
-status = "todo"
-note = "New in 2.6.0 (PR #2271): the backend-neutral GraphicalApp base that OglApp, DxApp and VulkanApp implement. The port executes only the OpenGL backend (crates/ocio-gpu-exec/src/oglapp.rs); decide with the tests/gpu port of card ocio26-base phase 1 whether anything here reaches it."
+status = "n/a"
+note = "New in 2.6.0 (PR #2271): GraphicalApp::CreateApp, the factory that picks the OpenGL (OglApp::CreateApp) or DirectX 12 (DxApp) backend of upstream's GPU unit tests. The DirectX 12 and Vulkan backends are not ported (docs/ocio-2.6-plan.md, Not ported; owner 2026-11-17). The port executes only the headless OpenGL backend, which oglapp.rs's HeadlessApp::new creates directly, as OglApp::CreateApp's OCIO_HEADLESS_ENABLED branch does."
 
 [[file]]
 path = "src/libutils/oglapphelpers/graphicalapp.h"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
-status = "todo"
-note = "New in 2.6.0 (PR #2271); see graphicalapp.cpp."
+status = "n/a"
+note = "New in 2.6.0 (PR #2271): GraphicalApp, the backend-neutral base class of upstream's GPU unit-test apps (OglApp, DxApp, VulkanApp). The base itself is not ported: only the OpenGL backend is (docs/ocio-2.6-plan.md, Not ported: the DirectX 12 and Vulkan backends; owner 2026-11-17). The members that 2.6.0 moved here from 2.5.2's OglApp stay in oglapp.rs's HeadlessApp with the same behaviour: Components, setYMirror/isYMirror (set_y_mirror) and setShaderVerbose/isShaderVerbose (set_print_shader, 2.5.2's setPrintShader). The pure virtual interface (initImage, updateImage, createBuffers, setShader, reshape, redisplay, readImage, printGraphicsInfo) is HeadlessApp's inherent methods."
 
 [[file]]
 path = "src/libutils/oglapphelpers/hlsl.cpp"
@@ -3834,15 +3834,15 @@ note = "OpenGL/Metal/image-IO helpers for upstream's apps"
 path = "src/libutils/oglapphelpers/oglapp.cpp"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
-status = "partial"
-note = "7.2b: OglApp image/FBO/shader/quad/readback and HeadlessApp's EGL context. ScreenApp's GLUT window is n/a: headless execution only, owner P7-3. 2.6.0: changed at v2.6.0 lines after 14 (deleted), 16-25, 43-51, 132, 181, 216, 246, 281, 298, 303, 309, 311, 316, 371, 376, 378, 382, 389; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "7.2b: OglApp image/FBO/shader/quad/readback and HeadlessApp's EGL context. ScreenApp's GLUT window is n/a: headless execution only, owner P7-3. 2.6.0: changed at v2.6.0 lines after 14 (deleted), 16-25, 43-51, 132, 181, 216, 246, 281, 298, 303, 309, 311, 316, 371, 376, 378, 382, 389: PR #2271's renames for the GraphicalApp base (ScreenApp and HeadlessApp became ScreenOglApp and HeadlessOglApp, createGLBuffers createBuffers, printGLInfo printGraphicsInfo, CreateOglApp CreateApp, m_yMirror and m_printShader the base's isYMirror and isShaderVerbose) and the freeglut include's NDEBUG guard (16-25, the GLUT window, n/a). The OpenGL calls, the image and FBO setup, the shader setup, the quad and the readback are unchanged, so oglapp.rs (HeadlessApp, ported at v2.5.2) runs the same code; its names and citations stay 2.5.2's."
 
 [[file]]
 path = "src/libutils/oglapphelpers/oglapp.h"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
-status = "partial"
-note = "7.2b: HeadlessApp/OglApp state; ScreenApp is n/a (P7-3). 2.6.0: changed at v2.6.0 lines 12, 19, 26-27, 29, 34-35, 55, 59-60, after 66 (deleted), 68-70, 72-73, 76, 83, 86, 90, 92-93, 95, 97, after 112 (deleted), after 119 (deleted), 124, 128, 131-133, 135, 137, 140, 151, 154, 156, 158, 160; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "7.2b: HeadlessApp/OglApp state; ScreenApp is n/a (P7-3). 2.6.0: changed at v2.6.0 lines 12, 19, 26-27, 29, 34-35, 55, 59-60, after 66 (deleted), 68-70, 72-73, 76, 83, 86, 90, 92-93, 95, 97, after 112 (deleted), after 119 (deleted), 124, 128, 131-133, 135, 137, 140, 151, 154, 156, 158, 160: OglApp now derives from GraphicalApp, which took over Components, setYMirror and the shader-printing flag (setPrintShader became setShaderVerbose), and the classes and methods were renamed as in oglapp.cpp. No state or behaviour changed: oglapp.rs's HeadlessApp keeps the OglApp/HeadlessOglApp state and the members that moved to the base (see graphicalapp.h)."
 
 [[file]]
 path = "src/libutils/oglapphelpers/vulkanapp.cpp"
