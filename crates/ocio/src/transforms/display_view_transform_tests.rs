@@ -1637,8 +1637,7 @@ colorspaces:
     );
 }
 
-/// Port of `OCIO_ADD_TEST(DisplayViewTransform, context_variables_with_resolved_display_view)`
-/// @ v2.6.0.
+/// Port of `OCIO_ADD_TEST(DisplayViewTransform, context_variables_with_resolved_display_view)` @ v2.6.0.
 #[test]
 fn context_variables_with_resolved_display_view() {
     let _env = EnvGuard::new();
