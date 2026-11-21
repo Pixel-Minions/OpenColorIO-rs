@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright Contributors to the OpenColorIO Project.
-"""`wheel-inspect selftest`: reproduce the spikes' findings from the pinned wheels' machine
+"""`wheel-inspect selftest`: reproduce the spikes' findings from the 2.5.2 wheels' machine
 code. Any mismatch fails. The expectations are the spikes' reports, quoted with their source.
+The spikes read opencolorio 2.5.2, so the selftest always reads those wheels
+(`tools/wheel-inspect/locks/opencolorio-2.5.2.toml` once the oracle pins a later release): it
+proves the tool, not facts about the pinned release.
 
 Both libraries come from the pinned wheels on every platform, so the whole test runs on
 Windows and in Rocky Linux 9 alike; `--win` or `--linux` keeps one library's checks.
@@ -14,6 +17,9 @@ from collections import Counter
 
 from . import known, names, wheels
 from .image import rip_target
+
+# The release whose libraries the spikes (and known.py) describe.
+RELEASE = "2.5.2"
 
 # Where two NaNs can meet, the operand order each wheel compiled (docs/spikes/s2-s5.md, "Two
 # NaN operands"): (function, upstream source, {platform: (cited address, instructions from it)}).
@@ -128,7 +134,7 @@ def run(image, platforms: list[str]) -> int:
     r = Report()
     imgs = {p: image(p) for p in platforms}
 
-    r.section("The pinned wheels (oracle/uv.lock)")
+    r.section(f"The {RELEASE} wheels")
     for p in platforms:
         w = wheels.locate(p)
         r.check(

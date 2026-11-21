@@ -178,12 +178,14 @@ def print_function(img: Image, f: Function, args, mark: int | None = None) -> No
 
 
 def cmd_locate(args) -> int:
-    print(f"oracle/uv.lock pins {wheels.PACKAGE}=={wheels.VERSION}; tools: {versions()}")
+    pinned = wheels.pinned_release(wheels.repo_root())
+    print(f"oracle/uv.lock pins {wheels.PACKAGE}=={pinned}; reading {wheels.release()}; tools: {versions()}")
     for platform in PLATFORMS:
         w = wheels.locate(platform, log)
         print(f"{platform}: {w.locked.filename}")
         print(f"  wheel    {w.wheel}")
-        print(f"           sha256 {w.locked.sha256}, {w.locked.size} bytes: matches oracle/uv.lock")
+        lock = "oracle/uv.lock" if w.locked.oracle else "tools/wheel-inspect/locks"
+        print(f"           sha256 {w.locked.sha256}, {w.locked.size} bytes: matches {lock}")
         for kind, m in (("library", w.library), ("module", w.module)):
             print(f"  {kind:<8} {m.path}")
             print(f"           sha256 {m.sha256}, {m.size} bytes: matches the wheel's RECORD")
@@ -361,13 +363,22 @@ def cmd_scan(args) -> int:
 def cmd_selftest(args) -> int:
     from . import selftest
 
+    # The spikes' findings are facts about the 2.5.2 libraries (known.py's addresses too).
+    if args.wheel not in (None, selftest.RELEASE):
+        raise wheels.WheelError(f"selftest checks the {selftest.RELEASE} wheels, not {args.wheel}")
+    wheels.select(selftest.RELEASE)
     return selftest.run(image, selected(args))
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="wheel-inspect",
-        description="Read the machine code of the pinned opencolorio==2.5.2 wheel (docs/wheel-inspect.md).",
+        description="Read the machine code of the opencolorio wheel oracle/uv.lock pins (docs/wheel-inspect.md).",
+    )
+    parser.add_argument(
+        "--wheel",
+        metavar="RELEASE",
+        help="read an earlier release's wheels (tools/wheel-inspect/locks), e.g. 2.5.2",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -414,6 +425,7 @@ def main(argv=None) -> int:
     platform_flags(p)
 
     args = parser.parse_args(argv)
+    wheels.select(args.wheel)
     commands = {
         "locate": cmd_locate,
         "find": cmd_find,

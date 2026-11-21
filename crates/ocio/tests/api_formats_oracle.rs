@@ -65,7 +65,7 @@ use ocio::{
 };
 use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
-use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::hash_utils::cache_id_hash_uuid;
 use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
@@ -837,7 +837,8 @@ fn apply_to(
 }
 
 /// [`port`] for a class the port builds from op data: the processor's ops; its cache ID
-/// (`<NOOP>` without ops, else the hash of the ops' cache IDs); and its CPU processor, made as
+/// (the UUID-shaped hash of the ops' cache IDs, Processor.cpp:331-342 @ v2.6.0); and its CPU
+/// processor, made as
 /// the port's `Processor` makes it (`Processor::optimized_cpu_processor_with_bit_depths`,
 /// crates/ocio/src/processor.rs, a port of `Processor::Impl::getOptimizedCPUProcessor`,
 /// src/OpenColorIO/Processor.cpp:537-582 @ v2.5.2, without `OCIO_OPTIMIZATION_FLAGS`, which no
@@ -846,11 +847,7 @@ fn port_of_ops(ops_of: &OpsOf, job: &Job) -> PortOutcome {
     let fail =
         |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
     let ops = ops_of(job.case, job.dir).map_err(fail("processor"))?;
-    let processor_cache_id = if ops.is_empty() {
-        "<NOOP>".to_string()
-    } else {
-        cache_id_hash(&ops.get_cache_id().map_err(fail("processor"))?)
-    };
+    let processor_cache_id = cache_id_hash_uuid(&ops.get_cache_id().map_err(fail("processor"))?);
     let (input, output) = (port_depth(job.combo.input), port_depth(job.combo.output));
     let flags = match job.combo.level {
         None => OptimizationFlags::DEFAULT,

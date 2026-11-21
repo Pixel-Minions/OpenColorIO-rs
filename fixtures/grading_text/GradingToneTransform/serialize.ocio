@@ -1,4 +1,4 @@
-ocio_profile_version: 2.5
+ocio_profile_version: 2.6
 
 environment:
   {}
@@ -40,8 +40,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.5, pivot: 0}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.6}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.3, pivot: 1}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.4, width: 0.5}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: 0.3, pivot: 1}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0.4, width: 0.5}
       s_contrast: 1.3
 
   - !<ColorSpace>
@@ -65,8 +65,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.5, pivot: 0}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.6}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.3, pivot: 1}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.4, width: 0.5}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: 0.3, pivot: 1}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0.4, width: 0.5}
       s_contrast: 1.3
 
   - !<ColorSpace>
@@ -90,8 +90,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.5, pivot: 0}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.6}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.3, pivot: 1}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.4, width: 0.5}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: 0.3, pivot: 1}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0.4, width: 0.5}
       s_contrast: 1.3
       direction: inverse
 
@@ -116,8 +116,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.5, pivot: 0}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.6}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.3, pivot: 1}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.4, width: 0.5}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: 0.3, pivot: 1}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0.4, width: 0.5}
       s_contrast: 1.3
       direction: inverse
 
@@ -142,8 +142,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0, width: 4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 2, pivot: -7}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0, width: 8}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: -2, pivot: 9}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0, width: 8}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: -2, pivot: 9}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0, width: 8}
       s_contrast: 1.3
 
   - !<ColorSpace>
@@ -167,8 +167,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0, width: 4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 2, pivot: -7}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0, width: 8}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: -2, pivot: 9}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0, width: 8}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: -2, pivot: 9}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0, width: 8}
       s_contrast: 1.3
 
   - !<ColorSpace>
@@ -192,8 +192,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0, width: 4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 2, pivot: -7}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0, width: 8}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: -2, pivot: 9}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0, width: 8}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: -2, pivot: 9}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0, width: 8}
       s_contrast: 1.3
       direction: inverse
 
@@ -218,8 +218,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0, width: 4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 2, pivot: -7}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0, width: 8}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: -2, pivot: 9}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0, width: 8}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: -2, pivot: 9}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0, width: 8}
       s_contrast: 1.3
       direction: inverse
 
@@ -244,8 +244,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.6, pivot: 0}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.7}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.2, pivot: 1}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.5, width: 0.5}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: 0.2, pivot: 1}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0.5, width: 0.5}
       s_contrast: 1.3
 
   - !<ColorSpace>
@@ -269,8 +269,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.6, pivot: 0}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.7}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.2, pivot: 1}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.5, width: 0.5}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: 0.2, pivot: 1}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0.5, width: 0.5}
       s_contrast: 1.3
 
   - !<ColorSpace>
@@ -294,8 +294,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.6, pivot: 0}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.7}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.2, pivot: 1}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.5, width: 0.5}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: 0.2, pivot: 1}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0.5, width: 0.5}
       s_contrast: 1.3
       direction: inverse
 
@@ -320,8 +320,8 @@ colorspaces:
       blacks: {rgb: [1.1, 0.9, 1.2], master: 1.05, start: 0.4, width: 0.4}
       shadows: {rgb: [1.08, 0.88, 1.18], master: 1.03, start: 0.6, pivot: 0}
       midtones: {rgb: [1.06, 0.86, 1.16], master: 1.01, center: 0.4, width: 0.7}
-      highlights: {rgb: [1.04, 0.84, 1.14], master: 0.99, start: 0.2, pivot: 1}
-      whites: {rgb: [1.02, 0.82, 1.12], master: 0.97, start: 0.5, width: 0.5}
+      highlights: {rgb: [1.04, 0.840000000000000, 1.14], master: 0.99, start: 0.2, pivot: 1}
+      whites: {rgb: [1.02, 0.820000000000000, 1.12], master: 0.970000000000000, start: 0.5, width: 0.5}
       s_contrast: 1.3
       direction: inverse
 
@@ -1933,7 +1933,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingToneTransform>
       style: log
-      shadows: {rgb: [1, 1, 1], master: 1, start: 0.5, pivot: 4.94065645841247e-324}
+      shadows: {rgb: [1, 1, 1], master: 1, start: 0.5, pivot: 5e-324}
 
   - !<ColorSpace>
     name: t0165
@@ -2138,7 +2138,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingToneTransform>
       style: video
-      whites: {rgb: [1, 1, 1], master: 1, start: 1, width: 0.5}
+      whites: {rgb: [1, 1, 1], master: 1, start: 1.00000000000000, width: 0.5}
       direction: inverse
 
   - !<ColorSpace>
@@ -2150,7 +2150,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingToneTransform>
       style: log
-      shadows: {rgb: [1, 1, 1], master: 1, start: 1, pivot: 0}
+      shadows: {rgb: [1, 1, 1], master: 1, start: 1.00000000000000, pivot: 0}
 
   - !<ColorSpace>
     name: t0184

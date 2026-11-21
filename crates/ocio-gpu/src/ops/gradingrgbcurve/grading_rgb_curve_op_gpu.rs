@@ -249,23 +249,38 @@ fn add_curve_eval_method_text_to_shader_program(
     }
 
     st.new_line().put("");
+    let inverse = gc_data.get_direction() == TransformDirection::Inverse;
     let lang = shader_creator.language();
-    if lang == GpuLanguage::Osl1 || lang == GpuLanguage::Msl2_0 {
+    let no_in_qualifier = lang == GpuLanguage::Osl1 || lang == GpuLanguage::Msl2_0;
+    let in_ = if no_in_qualifier { "" } else { "in " };
+    // The inverse eval omits identity_x (returns the input when there is no curve), matching
+    // the CPU evalCurveRev signature.
+    if inverse {
         st.new_line()
             .put(st.float_keyword())
             .put(" ")
             .put(&props.eval)
-            .put("(int curveIdx, float x, float identity_x)");
+            .put("(")
+            .put(in_)
+            .put("int curveIdx, ")
+            .put(in_)
+            .put("float x)");
     } else {
         st.new_line()
             .put(st.float_keyword())
             .put(" ")
             .put(&props.eval)
-            .put("(in int curveIdx, in float x, in float identity_x)");
+            .put("(")
+            .put(in_)
+            .put("int curveIdx, ")
+            .put(in_)
+            .put("float x, ")
+            .put(in_)
+            .put("float identity_x)");
     }
     st.new_line().put("{");
     st.indent();
-    if gc_data.get_direction() == TransformDirection::Inverse {
+    if inverse {
         add_shader_eval_rev(
             &st,
             &props.knots_offsets,
@@ -506,11 +521,18 @@ fn add_segment(st: &GpuShaderText, knots: &[u8], coefs: &[u8]) {
         .put("[knotsOffs + i];");
 }
 
-/// The calls of the evaluation for red, green and blue (`order` holds the curve indices).
-fn add_curve_calls(st: &GpuShaderText, pix: &[u8], eval: &[u8], order: [(u8, &str); 6]) {
+/// The calls of the evaluation for red, green and blue (`order` holds the curve indices): the
+/// forward eval also takes the channel as `identity_x`, the inverse one doesn't.
+fn add_curve_calls(
+    st: &GpuShaderText,
+    pix: &[u8],
+    eval: &[u8],
+    order: [(u8, &str); 6],
+    identity_x: bool,
+) {
     for (curve, channel) in order {
-        st.new_line()
-            .put(pix)
+        let mut line = st.new_line();
+        line.put(pix)
             .put(".rgb.")
             .put(channel)
             .put(" = ")
@@ -520,12 +542,11 @@ fn add_curve_calls(st: &GpuShaderText, pix: &[u8], eval: &[u8], order: [(u8, &st
             .put(", ")
             .put(pix)
             .put(".rgb.")
-            .put(channel)
-            .put(", ")
-            .put(pix)
-            .put(".rgb.")
-            .put(channel)
-            .put(");");
+            .put(channel);
+        if identity_x {
+            line.put(", ").put(pix).put(".rgb.").put(channel);
+        }
+        line.put(");");
     }
 }
 
@@ -567,7 +588,7 @@ fn add_gc_shader(
     } else {
         [RGB[0], RGB[1], RGB[2], MASTER[0], MASTER[1], MASTER[2]]
     };
-    add_curve_calls(st, pix, &props.eval, order);
+    add_curve_calls(st, pix, &props.eval, order, !inverse);
 
     if do_lin_to_log {
         st.new_line().put("");

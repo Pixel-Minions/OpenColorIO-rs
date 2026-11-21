@@ -98,6 +98,9 @@ pub struct Scanner<'a> {
     started_stream: bool,
     ended_stream: bool,
     pub(super) simple_key_allowed: bool,
+    /// `m_scalarValueAllowed` (scanner.h:180 @ yaml-cpp-0.9.0): false after a quoted scalar in
+    /// block context, until the next line break or `:`.
+    pub(super) scalar_value_allowed: bool,
     pub(super) can_be_json_flow: bool,
     pub(super) simple_keys: Vec<SimpleKey>,
     /// `m_indents`: indices into `indent_refs`.
@@ -117,6 +120,7 @@ impl<'a> Scanner<'a> {
             started_stream: false,
             ended_stream: false,
             simple_key_allowed: false,
+            scalar_value_allowed: false,
             can_be_json_flow: false,
             simple_keys: Vec::new(),
             indents: Vec::new(),
@@ -197,7 +201,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// `ScanNextToken()` (scanner.cpp:82-174): scans one token, branching on the next few
+    /// `ScanNextToken()` (scanner.cpp:83-193 @ yaml-cpp-0.9.0): scans one token, branching on the next few
     /// characters.
     fn scan_next_token(&mut self) -> Result<()> {
         if self.ended_stream {
@@ -252,6 +256,23 @@ impl<'a> Scanner<'a> {
         }
 
         if self.input.peek() == keys::FLOW_ENTRY {
+            // values starting with `,` are not allowed.
+            // eg: reject `,foo`
+            if self.input.column() == 0 {
+                return Err(Exception::parser(
+                    self.input.mark(),
+                    error_msg::UNEXPECTED_FLOW,
+                ));
+            }
+            // if we already parsed a quoted scalar value and we are not in a flow,
+            // then `,` is not a valid character.
+            // eg: reject `"foo",`
+            if !self.scalar_value_allowed {
+                return Err(Exception::parser(
+                    self.input.mark(),
+                    error_msg::UNEXPECTED_SCALAR,
+                ));
+            }
             self.scan_flow_entry();
             return Ok(());
         }
@@ -292,6 +313,16 @@ impl<'a> Scanner<'a> {
             return self.scan_block_scalar();
         }
 
+        // if we already parsed a quoted scalar value in this line,
+        // another scalar value is an error.
+        // eg: reject `"foo" "bar"`
+        if !self.scalar_value_allowed {
+            return Err(Exception::parser(
+                self.input.mark(),
+                error_msg::UNEXPECTED_SCALAR,
+            ));
+        }
+
         if self.input.peek() == b'\'' || self.input.peek() == b'"' {
             return self.scan_quoted_scalar();
         }
@@ -313,7 +344,7 @@ impl<'a> Scanner<'a> {
         ))
     }
 
-    /// `ScanToNextToken()` (scanner.cpp:176-211): eats blanks, comments and line breaks. A
+    /// `ScanToNextToken()` (scanner.cpp:195-233 @ yaml-cpp-0.9.0): eats blanks, comments and line breaks. A
     /// tab in block context forbids a simple key; a line break invalidates the pending one.
     fn scan_to_next_token(&mut self) {
         loop {
@@ -345,6 +376,9 @@ impl<'a> Scanner<'a> {
             // oh yeah, and let's get rid of that simple key
             self.invalidate_simple_key();
 
+            // new line - we accept a scalar value now
+            self.scalar_value_allowed = true;
+
             // new line - we may be able to accept a simple key now
             if self.in_block_context() {
                 self.simple_key_allowed = true;
@@ -369,16 +403,17 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    /// `StartStream()` (scanner.cpp:245-252): the base indentation, at column -1.
+    /// `StartStream()` (scanner.cpp:267-275 @ yaml-cpp-0.9.0): the base indentation, at column -1.
     fn start_stream(&mut self) {
         self.started_stream = true;
         self.simple_key_allowed = true;
+        self.scalar_value_allowed = true;
         self.indent_refs
             .push(IndentMarker::new(-1, IndentType::None));
         self.indents.push(self.indent_refs.len() - 1);
     }
 
-    /// `EndStream()` (scanner.cpp:254-265): closes every block.
+    /// `EndStream()` (scanner.cpp:277-289 @ yaml-cpp-0.9.0): closes every block.
     fn end_stream(&mut self) {
         // force newline
         if self.input.column() > 0 {
@@ -389,6 +424,7 @@ impl<'a> Scanner<'a> {
         self.pop_all_simple_keys();
 
         self.simple_key_allowed = false;
+        self.scalar_value_allowed = false;
         self.ended_stream = true;
     }
 

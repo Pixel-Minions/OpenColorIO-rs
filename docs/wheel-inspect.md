@@ -3,9 +3,10 @@
 Some of what the port must reproduce is decided by how the official wheel was *compiled*, not
 by the C++ source: the operand order where two NaNs meet, float or double arithmetic, calls to
 libm or SVML, fused multiply-adds. `tools/wheel-inspect` reads both pinned libraries,
-`OpenColorIO_2_5.dll` (Windows, MSVC) and `libOpenColorIO.so` (Linux, GCC), and answers these
-questions in a few commands. The worked examples below are the spikes' findings
-(`docs/spikes/s2-s5.md`, `docs/spikes/s4.md`); `wheel-inspect selftest` reproduces all of them.
+`OpenColorIO_2_6.dll` (Windows, MSVC) and `libOpenColorIO.so` (Linux, GCC), and answers these
+questions in a few commands. The worked examples below are the spikes' findings on the 2.5.2
+libraries (`docs/spikes/s2-s5.md`, `docs/spikes/s4.md`); `wheel-inspect selftest` reproduces
+all of them. Their addresses are 2.5.2's: add `--wheel 2.5.2` to read them as shown.
 
 ## Running it
 
@@ -16,9 +17,15 @@ tools/wheel-inspect/rocky.sh <command>                         # Rocky Linux 9 (
 
 - **Both libraries on both platforms.** The first run downloads the two wheels that
   `oracle/uv.lock` pins, from the URLs in the lock and nowhere else, into
-  `<target>/wheel-inspect/`. Every run checks their SHA-256 against the lock, and the
-  extracted libraries against the wheels' `RECORD`. `locate` shows where everything is and
-  whether the oracle environment's copy is the same file.
+  `<target>/wheel-inspect/wheels/`, and extracts the libraries to
+  `<target>/wheel-inspect/<release>/<platform>/`. Every run checks the wheels' SHA-256 against
+  the lock, and the extracted libraries against the wheels' `RECORD`. `locate` shows where
+  everything is and whether the oracle environment's copy is the same file.
+- **An earlier release.** `--wheel 2.5.2` (before the command) reads the 2.5.2 wheels instead,
+  pinned by `tools/wheel-inspect/locks/opencolorio-2.5.2.toml` (the 2.5.2 entry of
+  `oracle/uv.lock`, kept when the oracle moved to 2.6.0), to compare the releases' machine code.
+  `known.py` names code only in the 2.5.2 DLL (its SHA-256), so on 2.6.0 those functions are
+  `sub_<address>` until someone identifies them again.
 - **Addresses** are the ones the spikes cite: Windows virtual addresses with the image base
   (`0x180210d18`), Linux addresses as in the `.so` (`0x3f26c0`).
 - **Output is stable text**: Intel syntax (`--att` for objdump's AT&T), one instruction per
@@ -188,9 +195,11 @@ library. capstone does no symbolization, so the tool does its own from the symbo
 ## selftest
 
 `wheel-inspect selftest` (and `tools/wheel-inspect/rocky.sh selftest`) checks, on both
-libraries:
+2.5.2 libraries (the spikes read 2.5.2, so the selftest always reads those wheels, whatever
+the oracle pins; it proves the tool, not facts about the pinned release):
 
-- the wheels' hashes, and that the oracle environment's copy is the same file;
+- the wheels' hashes, and, while the oracle pinned 2.5.2, that its environment's copy is the
+  same file;
 - the operand order at every site of s2-s5.md's table, and that `find` names the function
   holding it in both builds;
 - `GetLogSideBreak`'s float and double arithmetic and calls on each platform, and that the
@@ -200,4 +209,5 @@ libraries:
   glibc symbol versions;
 - every `known.py` entry.
 
-It ends with `43 passed, 0 failed` on both platforms and exits non-zero on any failure.
+It ends with `42 passed, 0 failed` on both platforms (43 while the oracle pinned 2.5.2, with
+the environment check) and exits non-zero on any failure.

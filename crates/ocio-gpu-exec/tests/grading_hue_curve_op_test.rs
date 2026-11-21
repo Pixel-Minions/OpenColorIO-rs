@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/gpu/GradingHueCurveOp_test.cpp` @ v2.5.2.
+//! Port of `tests/gpu/GradingHueCurveOp_test.cpp` @ v2.6.0 (2.6.0 adds the video style's
+//! tests, `GradingHueCurveVid`, GradingHueCurveOp_test.cpp:106-178).
 //! Original curve/input data; actual uncached wheel CPU and shader references.
 #![cfg(any(target_os = "linux", feature = "shader-corpus"))]
 #![forbid(unsafe_code)]
@@ -23,6 +24,8 @@ mod reference;
 #[derive(Clone, Copy, Debug)]
 enum Kind {
     Log,
+    /// The video style with the log style's curves (`GradingHueCurveVid`, 2.6.0).
+    Vid,
     Lin,
     Draw,
     Bypass,
@@ -94,17 +97,17 @@ fn point_data(kind: Kind) -> [&'static [[f32; 2]]; 8] {
 }
 
 fn style(case: Case) -> GradingStyle {
-    if matches!(case.kind, Kind::Log) {
-        GradingStyle::Log
-    } else {
-        GradingStyle::Lin
+    match case.kind {
+        Kind::Log => GradingStyle::Log,
+        Kind::Vid => GradingStyle::Video,
+        _ => GradingStyle::Lin,
     }
 }
 fn style_name(case: Case) -> &'static str {
-    if matches!(case.kind, Kind::Log) {
-        "GRADING_LOG"
-    } else {
-        "GRADING_LIN"
+    match case.kind {
+        Kind::Log => "GRADING_LOG",
+        Kind::Vid => "GRADING_VIDEO",
+        _ => "GRADING_LIN",
     }
 }
 
@@ -121,7 +124,7 @@ fn curve(points: &[[f32; 2]], kind: HueCurveType) -> GradingBSplineCurve {
 fn transform(case: Case) -> Transform {
     let mut hc = GradingHueCurveTransform::new(style(case));
     let value = match case.kind {
-        Kind::Log | Kind::Lin => {
+        Kind::Log | Kind::Vid | Kind::Lin => {
             let data = point_data(case.kind);
             let curves: Vec<_> = data
                 .iter()
@@ -179,7 +182,7 @@ fn curve_spec(points: &[[f32; 2]], kind: &str) -> Value {
 
 fn value_spec(case: Case) -> Value {
     match case.kind {
-        Kind::Log | Kind::Lin => {
+        Kind::Log | Kind::Vid | Kind::Lin => {
             let data = point_data(case.kind);
             let args: Vec<_> = data
                 .iter()
@@ -240,7 +243,7 @@ fn input_grid() -> Vec<f32> {
 fn prepared_test(case: Case) -> GpuUnitTest {
     let mut test = GpuUnitTest::new("GradingHueCurve", case.name);
     match case.kind {
-        Kind::Log | Kind::Lin => {
+        Kind::Log | Kind::Vid | Kind::Lin => {
             let values = input_grid();
             assert_eq!(values.len(), 37044);
             assert_eq!(input_digest(&values), GRID_RAW_DIGEST);
@@ -248,7 +251,7 @@ fn prepared_test(case: Case) -> GpuUnitTest {
                 input_values: values,
                 ..CustomValues::default()
             });
-            test.comparison.error_threshold = if matches!(case.kind, Kind::Log) {
+            test.comparison.error_threshold = if matches!(case.kind, Kind::Log | Kind::Vid) {
                 2e-5
             } else {
                 4e-4
@@ -267,7 +270,7 @@ fn prepared_test(case: Case) -> GpuUnitTest {
     test.set_processor_transform(&transform(case)).unwrap();
     test.prepare_values().unwrap();
     match case.kind {
-        Kind::Log | Kind::Lin => {
+        Kind::Log | Kind::Vid | Kind::Lin => {
             assert_eq!(test.values.original_input_value_size, 37044);
             assert_eq!(test.values.input_values.len(), 256 * 256 * 4);
             assert_eq!(comparison_dimensions(37044), Ok((256, 37)));
@@ -295,8 +298,8 @@ fn prepared_test(case: Case) -> GpuUnitTest {
 fn references() -> &'static [Vec<ReferenceRun>] {
     static REFERENCES: OnceLock<Vec<Vec<ReferenceRun>>> = OnceLock::new();
     REFERENCES.get_or_init(|| {
-        assert_eq!(CASES.len(), 16);
-        assert_eq!(CASES.iter().filter(|case| case.dynamic).count(), 8);
+        assert_eq!(CASES.len(), 20);
+        assert_eq!(CASES.iter().filter(|case| case.dynamic).count(), 10);
         let plans: Vec<_> = CASES
             .iter()
             .map(|&case| {
@@ -315,15 +318,18 @@ fn references() -> &'static [Vec<ReferenceRun>] {
             })
             .collect();
         let result = reference::batch(&plans);
-        assert_eq!(result.len(), 16);
+        assert_eq!(result.len(), 20);
         assert!(result.iter().all(|frames| frames.len() == 1));
         result
     })
 }
 
-fn run_case(index: usize, name: &str) {
+fn run_case(name: &str) {
+    let index = CASES
+        .iter()
+        .position(|case| case.name == name)
+        .unwrap_or_else(|| panic!("{name}"));
     let case = CASES[index];
-    assert_eq!(case.name, name);
     let mut test = prepared_test(case);
     assert_eq!(references()[index].len(), 1);
     assert!(test.run(&references()[index]).unwrap());
@@ -359,6 +365,34 @@ const CASES: &[Case] = &[
     Case {
         name: "style_log_rev_dynamic",
         kind: Kind::Log,
+        inverse: true,
+        dynamic: true,
+    },
+    // GradingHueCurveOp_test.cpp:160-163 @ v2.6.0.
+    Case {
+        name: "style_vid_fwd",
+        kind: Kind::Vid,
+        inverse: false,
+        dynamic: false,
+    },
+    // GradingHueCurveOp_test.cpp:165-168 @ v2.6.0.
+    Case {
+        name: "style_vid_fwd_dynamic",
+        kind: Kind::Vid,
+        inverse: false,
+        dynamic: true,
+    },
+    // GradingHueCurveOp_test.cpp:170-173 @ v2.6.0.
+    Case {
+        name: "style_vid_rev",
+        kind: Kind::Vid,
+        inverse: true,
+        dynamic: false,
+    },
+    // GradingHueCurveOp_test.cpp:175-178 @ v2.6.0.
+    Case {
+        name: "style_vid_rev_dynamic",
+        kind: Kind::Vid,
         inverse: true,
         dynamic: true,
     },
@@ -451,80 +485,100 @@ const CASES: &[Case] = &[
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_log_fwd)` @ v2.5.2.
 #[test]
 fn style_log_fwd() {
-    run_case(0, "style_log_fwd");
+    run_case("style_log_fwd");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_log_fwd_dynamic)` @ v2.5.2.
 #[test]
 fn style_log_fwd_dynamic() {
-    run_case(1, "style_log_fwd_dynamic");
+    run_case("style_log_fwd_dynamic");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_log_rev)` @ v2.5.2.
 #[test]
 fn style_log_rev() {
-    run_case(2, "style_log_rev");
+    run_case("style_log_rev");
 }
-/// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_log_rev_dynamic)` @ v2.5.2.
+/// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_log_rev_dynamic)` @ v2.6.0.
 #[test]
 fn style_log_rev_dynamic() {
-    run_case(3, "style_log_rev_dynamic");
+    run_case("style_log_rev_dynamic");
+}
+/// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_vid_fwd)` @ v2.6.0.
+#[test]
+fn style_vid_fwd() {
+    run_case("style_vid_fwd");
+}
+/// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_vid_fwd_dynamic)` @ v2.6.0.
+#[test]
+fn style_vid_fwd_dynamic() {
+    run_case("style_vid_fwd_dynamic");
+}
+/// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_vid_rev)` @ v2.6.0.
+#[test]
+fn style_vid_rev() {
+    run_case("style_vid_rev");
+}
+/// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_vid_rev_dynamic)` @ v2.6.0.
+#[test]
+fn style_vid_rev_dynamic() {
+    run_case("style_vid_rev_dynamic");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_lin_fwd)` @ v2.5.2.
 #[test]
 fn style_lin_fwd() {
-    run_case(4, "style_lin_fwd");
+    run_case("style_lin_fwd");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_lin_fwd_dynamic)` @ v2.5.2.
 #[test]
 fn style_lin_fwd_dynamic() {
-    run_case(5, "style_lin_fwd_dynamic");
+    run_case("style_lin_fwd_dynamic");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_lin_rev)` @ v2.5.2.
 #[test]
 fn style_lin_rev() {
-    run_case(6, "style_lin_rev");
+    run_case("style_lin_rev");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, style_lin_rev_dynamic)` @ v2.5.2.
 #[test]
 fn style_lin_rev_dynamic() {
-    run_case(7, "style_lin_rev_dynamic");
+    run_case("style_lin_rev_dynamic");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, draw_lin_fwd)` @ v2.5.2.
 #[test]
 fn draw_lin_fwd() {
-    run_case(8, "draw_lin_fwd");
+    run_case("draw_lin_fwd");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, draw_lin_fwd_dynamic)` @ v2.5.2.
 #[test]
 fn draw_lin_fwd_dynamic() {
-    run_case(9, "draw_lin_fwd_dynamic");
+    run_case("draw_lin_fwd_dynamic");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, draw_lin_rev)` @ v2.5.2.
 #[test]
 fn draw_lin_rev() {
-    run_case(10, "draw_lin_rev");
+    run_case("draw_lin_rev");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, draw_lin_rev_dynamic)` @ v2.5.2.
 #[test]
 fn draw_lin_rev_dynamic() {
-    run_case(11, "draw_lin_rev_dynamic");
+    run_case("draw_lin_rev_dynamic");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, bypass_rgbtohsy_fwd)` @ v2.5.2.
 #[test]
 fn bypass_rgbtohsy_fwd() {
-    run_case(12, "bypass_rgbtohsy_fwd");
+    run_case("bypass_rgbtohsy_fwd");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, bypass_rgbtohsy_fwd_dynamic)` @ v2.5.2.
 #[test]
 fn bypass_rgbtohsy_fwd_dynamic() {
-    run_case(13, "bypass_rgbtohsy_fwd_dynamic");
+    run_case("bypass_rgbtohsy_fwd_dynamic");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, bypass_rgbtohsy_rev)` @ v2.5.2.
 #[test]
 fn bypass_rgbtohsy_rev() {
-    run_case(14, "bypass_rgbtohsy_rev");
+    run_case("bypass_rgbtohsy_rev");
 }
 /// Port of `OCIO_ADD_GPU_TEST(GradingHueCurve, bypass_rgbtohsy_rev_dynamic)` @ v2.5.2.
 #[test]
 fn bypass_rgbtohsy_rev_dynamic() {
-    run_case(15, "bypass_rgbtohsy_rev_dynamic");
+    run_case("bypass_rgbtohsy_rev_dynamic");
 }

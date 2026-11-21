@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Displays and views: a port of `src/OpenColorIO/Display.h` and `Display.cpp` @ v2.5.2. A
+//! Displays and views: a port of `src/OpenColorIO/Display.h` and `Display.cpp` @ v2.6.0. A
 //! config keeps its displays in their order, each with its own views and the names of the
 //! shared views it uses, and the shared views themselves.
 //!
@@ -9,7 +9,7 @@
 
 use ocio_ops::parse_utils::intersect_string_vecs_case_ignore;
 use ocio_ops::platform::strcasecmp;
-use ocio_ops::utils::string_utils::{StringVec, c_str};
+use ocio_ops::utils::string_utils::{StringVec, c_str, compare, contain};
 
 /// A shared view using this for the color space name will use a display color space that has
 /// the same name as the display the shared view is used by.
@@ -19,7 +19,7 @@ pub const OCIO_VIEW_USE_DISPLAY_NAME: &str = "<USE_DISPLAY_NAME>";
 
 /// A view: of a display, or one of the config's shared views.
 ///
-/// Port of `View` (src/OpenColorIO/Display.h:22-57 @ v2.5.2).
+/// Port of `View` (src/OpenColorIO/Display.h:22-85 @ v2.6.0).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct View {
     /// `m_name`.
@@ -34,13 +34,16 @@ pub(crate) struct View {
     pub(crate) rule: Vec<u8>,
     /// `m_description`: might be empty.
     pub(crate) description: Vec<u8>,
+    /// `m_aliases`: might be empty. Each is a `std::string`, kept whole as upstream keeps it
+    /// (a NUL included); upstream reads it through `c_str()`.
+    pub(crate) aliases: StringVec,
 }
 
 impl View {
     /// A view of these strings, each up to its first NUL (upstream's null pointers are empty
-    /// strings).
+    /// strings), and of these aliases, as they are.
     ///
-    /// Port of `View::View(const char *, ...)` (src/OpenColorIO/Display.h:33-46 @ v2.5.2).
+    /// Port of `View::View(const char *, ...)` (src/OpenColorIO/Display.h:35-49 @ v2.6.0).
     pub(crate) fn new(
         name: &[u8],
         view_transform: &[u8],
@@ -48,6 +51,7 @@ impl View {
         looks: &[u8],
         rule: &[u8],
         description: &[u8],
+        aliases: &[Vec<u8>],
     ) -> View {
         View {
             name: c_str(name).to_vec(),
@@ -56,19 +60,58 @@ impl View {
             looks: c_str(looks).to_vec(),
             rule: c_str(rule).to_vec(),
             description: c_str(description).to_vec(),
+            aliases: aliases.to_vec(),
         }
     }
 
     /// Whether `csname` is `<USE_DISPLAY_NAME>`, ignoring case.
     ///
-    /// Port of `View::UseDisplayName` (src/OpenColorIO/Display.h:48-52 @ v2.5.2).
+    /// Port of `View::UseDisplayName` (src/OpenColorIO/Display.h:51-55 @ v2.6.0).
     pub(crate) fn use_display_name(csname: &[u8]) -> bool {
         strcasecmp(csname, OCIO_VIEW_USE_DISPLAY_NAME).is_eq()
     }
 
-    /// Port of `View::useDisplayNameForColorspace` (src/OpenColorIO/Display.h:53-56 @ v2.5.2).
+    /// Port of `View::useDisplayNameForColorspace` (src/OpenColorIO/Display.h:56-59 @ v2.6.0).
     pub(crate) fn use_display_name_for_colorspace(&self) -> bool {
         View::use_display_name(&self.colorspace)
+    }
+
+    /// Whether `alias` (up to its first NUL; never an empty one) is one of the view's aliases,
+    /// ignoring case.
+    ///
+    /// Port of `View::hasAlias` (src/OpenColorIO/Display.h:61-65 @ v2.6.0).
+    pub(crate) fn has_alias(&self, alias: &[u8]) -> bool {
+        let alias = c_str(alias);
+        if alias.is_empty() {
+            return false;
+        }
+        contain(&self.aliases, alias)
+    }
+
+    /// The name or alias of this view that is also the name or an alias of `other`, ignoring
+    /// case; empty when the two views' names and aliases don't overlap. The name is checked
+    /// against `other`'s name, then each alias against it, then the name against `other`'s
+    /// aliases, then each alias against them.
+    ///
+    /// Port of `View::FindNamingCollision` (src/OpenColorIO/Display.h:67-84 @ v2.6.0).
+    pub(crate) fn find_naming_collision(&self, other: &View) -> Vec<u8> {
+        if compare(&self.name, &other.name) {
+            return self.name.clone();
+        }
+        for alias in &self.aliases {
+            if compare(alias, &other.name) {
+                return alias.clone();
+            }
+        }
+        if other.has_alias(&self.name) {
+            return self.name.clone();
+        }
+        for alias in &self.aliases {
+            if other.has_alias(alias) {
+                return alias.clone();
+            }
+        }
+        Vec::new()
     }
 }
 
@@ -84,10 +127,11 @@ pub(crate) fn find_view(vec: &[View], name: &[u8]) -> Option<usize> {
 }
 
 /// Adds a view to `views`, or replaces everything but the name of the view of that name
-/// (ignoring case). A color space spelled `<USE_DISPLAY_NAME>` in any case is stored in upper
-/// case.
+/// (ignoring case), its aliases included. A color space spelled `<USE_DISPLAY_NAME>` in any case
+/// is stored in upper case.
 ///
-/// Port of `AddView` (src/OpenColorIO/Display.cpp:51-71 @ v2.5.2).
+/// Port of `AddView` (src/OpenColorIO/Display.cpp:51-75 @ v2.6.0).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn add_view(
     views: &mut ViewVec,
     name: &[u8],
@@ -96,6 +140,7 @@ pub(crate) fn add_view(
     looks: &[u8],
     rule: &[u8],
     description: &[u8],
+    aliases: &[Vec<u8>],
 ) {
     let mut display_color_space = c_str(display_color_space);
     if View::use_display_name(display_color_space) {
@@ -109,6 +154,7 @@ pub(crate) fn add_view(
             looks,
             rule,
             description,
+            aliases,
         )),
         Some(i) => {
             let view = &mut views[i];
@@ -117,13 +163,14 @@ pub(crate) fn add_view(
             view.looks = c_str(looks).to_vec();
             view.rule = c_str(rule).to_vec();
             view.description = c_str(description).to_vec();
+            view.aliases = aliases.to_vec();
         }
     }
 }
 
 /// A display of a config.
 ///
-/// Port of `Display` (src/OpenColorIO/Display.h:67-77 @ v2.5.2).
+/// Port of `Display` (src/OpenColorIO/Display.h:97-107 @ v2.6.0).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Display {
     /// `m_temporary`: used to not save displays that originate by instantiating a virtual

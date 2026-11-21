@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 //
-// Ported from minizip-ng 4.0.10 (see `mod.rs` for its notice): an altered version.
+// Ported from minizip-ng 4.2.2 (see `mod.rs` for its notice): an altered version.
 
 //! minizip-ng's zlib stream for reading (`mz_strm_zlib.c`), with zlib's `inflate` done by
 //! `flate2` on its `zlib-rs` backend, a port of zlib (owner decision 2026-10-17).
@@ -14,14 +14,14 @@ use super::mz_strm::{MZ_BUF_ERROR, MZ_OK, Stream};
 const Z_DATA_ERROR: i32 = -3;
 
 /// The size of the stream's input buffer (`uint8_t buffer[INT16_MAX]`, mz_strm_zlib.c:51 @
-/// 4.0.10).
+/// 4.2.2).
 const BUFFER_SIZE: usize = i16::MAX as usize;
 
 /// A raw deflate stream read from a base stream.
 ///
-/// Port of `mz_stream_zlib` (mz_strm_zlib.c:43-63 @ 4.0.10) opened for reading
+/// Port of `mz_stream_zlib` (mz_strm_zlib.c:43-63 @ 4.2.2) opened for reading
 /// (`mz_stream_zlib_open`, 65-107: `inflateInit2` with `-MAX_WBITS`), over the raw stream of
-/// the entry's data (`mz_stream_raw`, mz_strm.c:442-460), both limited to `max_total_in`
+/// the entry's data (`mz_stream_raw`, mz_strm.c:445-463), both limited to `max_total_in`
 /// bytes when it isn't 0.
 pub(crate) struct Inflater {
     zstream: Decompress,
@@ -64,7 +64,7 @@ impl Inflater {
     /// Reads up to `buf.len()` bytes: as many as decode before the stream ends (fewer), or an
     /// error, where the bytes this read decoded are lost.
     ///
-    /// Port of `mz_stream_zlib_read` (mz_strm_zlib.c:116-193 @ 4.0.10).
+    /// Port of `mz_stream_zlib_read` (mz_strm_zlib.c:116-193 @ 4.2.2).
     pub(crate) fn read(&mut self, base: &mut dyn Stream, buf: &mut [u8]) -> i32 {
         let mut total_out = 0usize;
 

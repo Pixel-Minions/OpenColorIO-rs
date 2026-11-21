@@ -334,7 +334,7 @@ fn name(prefix: &str, i: usize) -> String {
 }
 
 /// The fallback: with it, every group's processor is the first one (they all have the cache
-/// ID `<NOOP>`); without it, each text gets its own, and the same text the same one; once
+/// ID of an empty op list); without it, each text gets its own, and the same text the same one; once
 /// several are cached, the fallback picks the one of the smallest key, which is the platform's
 /// `std::hash`.
 #[test]
@@ -675,7 +675,7 @@ fn processor_of(name: &str, (spec, port): (Value, Transform)) -> Step {
     )
 }
 
-/// Processors of ops, whose cache IDs differ (the groups' are all `<NOOP>`):
+/// Processors of ops, whose cache IDs differ (the groups' are all an empty op list's):
 /// - the fallback reuses only a processor of the same cache ID (a group of one matrix and the
 ///   matrix), not any cached one (Config.cpp:4850-4872 @ v2.5.2);
 /// - an optimized processor computes its own cache ID, which differs from the processor's when

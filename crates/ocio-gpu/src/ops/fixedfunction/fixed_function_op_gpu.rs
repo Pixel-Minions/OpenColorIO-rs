@@ -2,14 +2,15 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.h` and
-//! `FixedFunctionOpGPU.cpp` @ v2.5.2: the FixedFunction op's GPU writer.
+//! `FixedFunctionOpGPU.cpp` @ v2.6.0: the FixedFunction op's GPU writer.
 //!
 //! Every style: the ACES 1.x ones (chunk 2.3f); the Rec.2100 surround, RGB to and from HSV and
 //! the three HSYs, and XYZ to and from xyY, u'v'Y and CIELUV (2.3g1); PQ, the gamma-log and the
 //! double-log curves (2.3g2), with `double` parameters as upstream reads them; ACES 2.0's RGB
 //! to and from JMh (2.4f1), its tone scale and chroma compression, with the reach table as a
 //! texture (2.4f2), its gamut compression, with the cusp table as a texture and the hues as a
-//! constant array (2.4g), and its output transform (2.4h).
+//! constant array (2.4g), and its output transform (2.4h); 2.6.0's RGB to and from HMJ
+//! (ocio26-ops).
 //!
 //! Upstream writes `float` values into the text with `operator<<`, which formats them with
 //! `getFloatString` (`GpuShaderText`'s stream operators); the constants it derives from them
@@ -88,7 +89,10 @@ fn add_hue_weight_shader(pxl: &[u8], st: &GpuShaderText, width: f32) -> Result<(
         .put(" = clamp(2. + hue * float(")
         .put(inv_width)
         .put("), 0., 4.);");
-    st.new_line().put("int j = int(min(knot_coord, 3.));");
+    st.new_line()
+        .put("int j = ")
+        .put(st.int_cast("min(knot_coord, 3.)"))
+        .put(";");
     st.new_line()
         .put(st.float_decl("t")?)
         .put(" = knot_coord - float(j);");
@@ -2532,6 +2536,44 @@ fn add_jmh_to_rgb_shader(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpD
     add_jmh_to_rgb_shader_(pxl, st, &p)
 }
 
+/// `pxl` followed by `suffix`, as upstream's `pxl + ".b / 360.0"`.
+fn pxl_expr(pxl: &[u8], suffix: &str) -> Vec<u8> {
+    [pxl, suffix.as_bytes()].concat()
+}
+
+/// Port of `Add_RGB_to_HMJ_Shader` (FixedFunctionOpGPU.cpp:1494-1505 @ v2.6.0).
+fn add_rgb_to_hmj_shader(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
+    // Compute JMh (in pxl.rgb) and then repack it as HMJ, scaled for a [0,1]-ish range.
+    add_rgb_to_jmh_shader(pxl, st, func)?;
+
+    st.new_line()
+        .put(pxl)
+        .put(".rgb = ")
+        .put(st.float3_const(
+            pxl_expr(pxl, ".b / 360.0"),
+            pxl_expr(pxl, ".g / 200.0"),
+            pxl_expr(pxl, ".r / 100.0"),
+        ))
+        .put(";");
+    Ok(())
+}
+
+/// Port of `Add_HMJ_to_RGB_Shader` (FixedFunctionOpGPU.cpp:1507-1518 @ v2.6.0).
+fn add_hmj_to_rgb_shader(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
+    // Unpack HMJ back into JMh (in pxl.rgb) and reuse the existing JMh to RGB conversion.
+    st.new_line()
+        .put(pxl)
+        .put(".rgb = ")
+        .put(st.float3_const(
+            pxl_expr(pxl, ".b * 100.0"),
+            pxl_expr(pxl, ".g * 200.0"),
+            pxl_expr(pxl, ".r * 360.0"),
+        ))
+        .put(";");
+
+    add_jmh_to_rgb_shader(pxl, st, func)
+}
+
 /// The models and parameters the tone scale's shaders use, for the peak luminance.
 fn aces2_tonescale_params(
     func: &FixedFunctionOpData,
@@ -2650,37 +2692,32 @@ fn add_cusp_table(
     st.new_line()
         .put(st.int_decl("i")?)
         .put(" = ")
-        .put(st.int_keyword())
-        .put("(h) + ")
+        .put(st.int_cast("h"))
+        .put(" + ")
         .put(table_base::BASE_INDEX as u32)
         .put(";");
 
+    // `std::to_string` of the unsigned and int constants: their decimal digits.
     st.new_line()
         .put(st.int_decl("i_lo")?)
         .put(" = ")
-        .put(st.int_keyword())
-        .put("(max(")
-        .put(st.float_keyword())
-        .put("(")
-        .put(table_base::LOWER_WRAP_INDEX as u32)
-        .put("), ")
-        .put(st.float_keyword())
-        .put("(i + ")
-        .put(g.hue_linearity_search_range[0])
-        .put(")));");
+        .put(st.int_cast(format!(
+            "max({float}({}), {float}(i + {}))",
+            table_base::LOWER_WRAP_INDEX as u32,
+            g.hue_linearity_search_range[0],
+            float = st.float_keyword(),
+        )))
+        .put(";");
     st.new_line()
         .put(st.int_decl("i_hi")?)
         .put(" = ")
-        .put(st.int_keyword())
-        .put("(min(")
-        .put(st.float_keyword())
-        .put("(")
-        .put(table_base::UPPER_WRAP_INDEX as u32)
-        .put("), ")
-        .put(st.float_keyword())
-        .put("(i + ")
-        .put(g.hue_linearity_search_range[1])
-        .put(")));");
+        .put(st.int_cast(format!(
+            "min({float}({}), {float}(i + {}))",
+            table_base::UPPER_WRAP_INDEX as u32,
+            g.hue_linearity_search_range[1],
+            float = st.float_keyword(),
+        )))
+        .put(";");
 
     st.new_line().put("while (i_lo + 1 < i_hi)");
     st.new_line().put("{");
@@ -3365,7 +3402,7 @@ fn aces2_gamut_params(
 }
 
 /// Port of `Add_Gamut_Compress_Fwd_Shader` and `Add_Gamut_Compress_Inv_Shader`
-/// (FixedFunctionOpGPU.cpp:1550-1634 @ v2.5.2).
+/// (FixedFunctionOpGPU.cpp:1576-1658 @ v2.6.0).
 fn add_gamut_compress_shader(
     shader_creator: &mut GpuShaderDesc,
     st: &GpuShaderText,
@@ -3380,8 +3417,7 @@ fn add_gamut_compress_shader(
     let reach_name = add_reach_table(shader_creator, resource_index, &s.reach_m_table)?;
 
     add_wrap_hue_channel_shader(&pxl, st)?;
-    add_sin_cos_shader(&pxl, st)?;
-
+    // No _Add_SinCos_Shader: gamut-compress stays in JMh space, so cos_hr/sin_hr would be unused.
     st.new_line()
         .put(st.float_decl("reachMaxM")?)
         .put(" = ")
@@ -3534,7 +3570,7 @@ pub fn get_fixed_function_gpu_shader_program(
 /// Writes the code of a FixedFunction op into `st`: a comment naming the style, then the
 /// style's shader in a block.
 ///
-/// Port of `GetFixedFunctionGPUProcessingText` (FixedFunctionOpGPU.cpp:2233-2491 @ v2.5.2).
+/// Port of `GetFixedFunctionGPUProcessingText` (FixedFunctionOpGPU.cpp:2257-2525 @ v2.6.0).
 pub fn get_fixed_function_gpu_processing_text(
     shader_creator: &mut GpuShaderDesc,
     st: &GpuShaderText,
@@ -3598,6 +3634,8 @@ pub fn get_fixed_function_gpu_processing_text(
         DoubleLogToLin => add_double_log_to_lin(&pxl, st, func)?,
         AcesRgbToJmh20 => add_rgb_to_jmh_shader(&pxl, st, func)?,
         AcesJmhToRgb20 => add_jmh_to_rgb_shader(&pxl, st, func)?,
+        AcesRgbToHmj20 => add_rgb_to_hmj_shader(&pxl, st, func)?,
+        AcesHmjToRgb20 => add_hmj_to_rgb_shader(&pxl, st, func)?,
         AcesTonescaleCompress20Fwd => {
             add_tonescale_compress_shader(shader_creator, st, func, false)?
         }
@@ -3664,6 +3702,8 @@ mod tests {
             (AcesTonescaleCompress20Inv, &vec![1000.0]),
             (AcesRgbToJmh20, &ap0),
             (AcesJmhToRgb20, &ap0),
+            (AcesRgbToHmj20, &ap0),
+            (AcesHmjToRgb20, &ap0),
         ] {
             let mut data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();
             assert!(shader_of(&data).0.is_ok(), "{style:?}");

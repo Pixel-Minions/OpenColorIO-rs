@@ -68,6 +68,7 @@ fn apply_rows<I: Generic, O: Generic>(
             &mut rgba,
             width as c_int,
             start,
+            input,
         )?;
         for op in ops {
             op.apply(&mut rgba);

@@ -571,6 +571,39 @@ fn aces_2_styles_match_the_wheel() {
     });
 }
 
+/// ACES 2.0's RGB to HMJ (2.6.0): the JMh model of the primaries, repacked as hue / 360,
+/// M / 200 and J / 100. Its renderer calls the same `RGB_to_JMh` and `JMh_to_RGB` as RGB to
+/// JMh's in both wheels; AP0 (upstream's aces_rgb_to_jmh_20), AP1 and the outputs' primaries.
+#[test]
+fn aces_2_rgb_to_hmj_matches_the_wheel() {
+    use FixedFunctionStyle::*;
+    let ap0 = Case::new("AcesRgbToHmj20 AP0", Fixed::new(AcesRgbToHmj20, &AP0));
+    let bases = vec![ap0.clone()];
+    let mut cases = vec![ap0];
+    let ap1 = [0.713, 0.293, 0.165, 0.830, 0.128, 0.044, 0.32168, 0.33767];
+    for (i, primaries) in std::iter::once(&ap1).chain(&ACES2_PRIMARIES).enumerate() {
+        cases.push(Case::new(
+            format!("AcesRgbToHmj20 {i}"),
+            Fixed::new(AcesRgbToHmj20, primaries),
+        ));
+    }
+    // Refusals: one parameter short and one too many.
+    cases.push(Case::new(
+        "refused AcesRgbToHmj20 7 parameters",
+        Fixed::new(AcesRgbToHmj20, &AP0[..7]),
+    ));
+    cases.push(Case::new(
+        "refused AcesRgbToHmj20 9 parameters",
+        Fixed::new(AcesRgbToHmj20, &peak_and(1000.0, &AP0)),
+    ));
+
+    battery::run(&FixedFamily {
+        name: "ACES 2.0 HMJ",
+        cases,
+        bases,
+    });
+}
+
 #[test]
 fn pq_matches_the_wheel() {
     use FixedFunctionStyle::*;
@@ -756,6 +789,7 @@ fn nan_combinations_match_the_wheel() {
         Fixed::new(XyzToLuv, &[]),
         Fixed::new(AcesTonescaleCompress20, &[1000.0]),
         Fixed::new(AcesRgbToJmh20, &AP0),
+        Fixed::new(AcesRgbToHmj20, &AP0),
         Fixed::new(
             AcesOutputTransform20,
             &peak_and(1000.0, &ACES2_PRIMARIES[1]),

@@ -355,7 +355,7 @@ fn aces_lin_to_gammalog_style() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(FixedFunctionOpData, is_inverse)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpData, is_inverse)` @ v2.6.0.
 #[test]
 fn is_inverse() {
     let params: Params = vec![2.0];
@@ -402,6 +402,17 @@ fn is_inverse() {
     let f_gm_inv = FixedFunctionOpData::with_params(AcesGamutComp13Inv, p7).unwrap();
     assert!(!f_gm_inv.is_inverse(&f_gm).unwrap());
     assert!(!f_gm.is_inverse(&f_gm_inv).unwrap());
+
+    let p8: Params = vec![
+        0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+    ];
+    let f_hmj = FixedFunctionOpData::with_params(AcesRgbToHmj20, p8.clone()).unwrap();
+    let f_hmj_inv = FixedFunctionOpData::with_params(AcesHmjToRgb20, p8).unwrap();
+    assert!(f_hmj.is_inverse(&f_hmj_inv).unwrap());
+    assert!(f_hmj_inv.is_inverse(&f_hmj).unwrap());
+    assert!(!f_hmj.is_inverse(&f_hmj).unwrap());
+    assert!(!f_hmj_inv.is_inverse(&f_hmj_inv).unwrap());
+    assert!(!f_hmj.is_inverse(&f_gm).unwrap());
 }
 
 /// U-31: a Rec.2100 surround compared with another of its style reads both first parameters

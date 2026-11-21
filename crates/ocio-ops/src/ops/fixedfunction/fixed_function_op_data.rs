@@ -5,7 +5,7 @@
 //! the parameters of the styles that take some.
 //!
 //! Port of `FixedFunctionOpData` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.h and
-//! FixedFunctionOpData.cpp @ v2.5.2).
+//! FixedFunctionOpData.cpp @ v2.6.0).
 
 use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
@@ -17,7 +17,7 @@ use crate::platform::strcasecmp;
 /// The styles of the op: each algorithm in each direction. The discriminants are upstream's.
 ///
 /// Port of `FixedFunctionOpData::Style`
-/// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.h:28-72 @ v2.5.2).
+/// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.h:27-73 @ v2.6.0).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FixedFunctionOpStyle {
     /// `ACES_RED_MOD_03_FWD`: red modifier (ACES 0.3/0.7).
@@ -84,6 +84,10 @@ pub enum FixedFunctionOpStyle {
     AcesRgbToJmh20,
     /// `ACES_JMh_TO_RGB_20`: ACES2 JMh to RGB.
     AcesJmhToRgb20,
+    /// `ACES_RGB_TO_HMJ_20`: ACES2 RGB to HMJ (h/360, M/200, J/100).
+    AcesRgbToHmj20,
+    /// `ACES_HMJ_TO_RGB_20`: ACES2 HMJ to RGB.
+    AcesHmjToRgb20,
     /// `ACES_TONESCALE_COMPRESS_20_FWD`: ACES2 tonescale and chroma compression.
     AcesTonescaleCompress20Fwd,
     /// `ACES_TONESCALE_COMPRESS_20_INV`: ACES2 tonescale and chroma compression (inverse).
@@ -106,7 +110,7 @@ pub enum FixedFunctionOpStyle {
     HsyVidToRgb,
 }
 
-// The styles' names in CTF files (FixedFunctionOpData.cpp:43-84 @ v2.5.2).
+// The styles' names in CTF files (FixedFunctionOpData.cpp:43-86 @ v2.6.0).
 const ACES_RED_MOD_03_FWD_STR: &str = "RedMod03Fwd";
 const ACES_RED_MOD_03_REV_STR: &str = "RedMod03Rev";
 const ACES_RED_MOD_10_FWD_STR: &str = "RedMod10Fwd";
@@ -123,6 +127,8 @@ const ACES_OUTPUT_TRANSFORM_20_FWD_STR: &str = "ACESOutputTransform20Fwd";
 const ACES_OUTPUT_TRANSFORM_20_INV_STR: &str = "ACESOutputTransform20Inv";
 const ACES_RGB_TO_JMH_20_STR: &str = "RGB_TO_JMh_20";
 const ACES_JMH_TO_RGB_20_STR: &str = "JMh_TO_RGB_20";
+const ACES_RGB_TO_HMJ_20_STR: &str = "RGB_TO_HMJ_20";
+const ACES_HMJ_TO_RGB_20_STR: &str = "HMJ_TO_RGB_20";
 const ACES_TONESCALE_COMPRESS_20_FWD_STR: &str = "ToneScaleCompress20Fwd";
 const ACES_TONESCALE_COMPRESS_20_INV_STR: &str = "ToneScaleCompress20Inv";
 const ACES_GAMUT_COMPRESS_20_FWD_STR: &str = "GamutCompress20Fwd";
@@ -152,9 +158,9 @@ const HSY_LOG_TO_RGB_STR: &str = "HSY_LOG_TO_RGB";
 const HSY_LIN_TO_RGB_STR: &str = "HSY_LIN_TO_RGB";
 const HSY_VID_TO_RGB_STR: &str = "HSY_VID_TO_RGB";
 
-/// The names `GetStyle` recognizes, in its order of tests (FixedFunctionOpData.cpp:191-361 @
-/// v2.5.2).
-const STYLE_NAMES: [(&str, FixedFunctionOpStyle); 43] = {
+/// The names `GetStyle` recognizes, in its order of tests (FixedFunctionOpData.cpp:197-375 @
+/// v2.6.0).
+const STYLE_NAMES: [(&str, FixedFunctionOpStyle); 45] = {
     use FixedFunctionOpStyle::*;
     [
         (ACES_RED_MOD_03_FWD_STR, AcesRedMod03Fwd),
@@ -173,6 +179,8 @@ const STYLE_NAMES: [(&str, FixedFunctionOpStyle); 43] = {
         (ACES_OUTPUT_TRANSFORM_20_INV_STR, AcesOutputTransform20Inv),
         (ACES_RGB_TO_JMH_20_STR, AcesRgbToJmh20),
         (ACES_JMH_TO_RGB_20_STR, AcesJmhToRgb20),
+        (ACES_RGB_TO_HMJ_20_STR, AcesRgbToHmj20),
+        (ACES_HMJ_TO_RGB_20_STR, AcesHmjToRgb20),
         (
             ACES_TONESCALE_COMPRESS_20_FWD_STR,
             AcesTonescaleCompress20Fwd,
@@ -215,7 +223,7 @@ impl FixedFunctionOpStyle {
     /// the Rec.2100 surround have a detailed name; the others give their CTF name either way.
     ///
     /// Port of `FixedFunctionOpData::ConvertStyleToString`
-    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:92-186 @ v2.5.2). Its
+    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:94-192 @ v2.6.0). Its
     /// "Unknown FixedFunction style" for a value outside the enum can't happen.
     pub fn to_str(self, detailed: bool) -> &'static str {
         use FixedFunctionOpStyle::*;
@@ -242,6 +250,8 @@ impl FixedFunctionOpStyle {
             ),
             AcesRgbToJmh20 => (ACES_RGB_TO_JMH_20_STR, ACES_RGB_TO_JMH_20_STR),
             AcesJmhToRgb20 => (ACES_JMH_TO_RGB_20_STR, ACES_JMH_TO_RGB_20_STR),
+            AcesRgbToHmj20 => (ACES_RGB_TO_HMJ_20_STR, ACES_RGB_TO_HMJ_20_STR),
+            AcesHmjToRgb20 => (ACES_HMJ_TO_RGB_20_STR, ACES_HMJ_TO_RGB_20_STR),
             AcesTonescaleCompress20Fwd => (
                 "ACES_ToneScaleCompress20 (Forward)",
                 ACES_TONESCALE_COMPRESS_20_FWD_STR,
@@ -292,7 +302,7 @@ impl FixedFunctionOpStyle {
     /// its message, which is undefined behaviour (`docs/improvements.md` U-30).
     ///
     /// Port of `FixedFunctionOpData::GetStyle`
-    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:189-368 @ v2.5.2).
+    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:195-382 @ v2.6.0).
     pub fn from_name(name: Option<&str>) -> Result<FixedFunctionOpStyle> {
         let name = name.map_or("", |s| s.split('\0').next().unwrap_or(""));
         if !name.is_empty() {
@@ -312,7 +322,7 @@ impl FixedFunctionOpStyle {
     /// upstream doesn't implement are refused ([`UNIMPLEMENTED_GAMUTMAP`]).
     ///
     /// Port of `FixedFunctionOpData::ConvertStyle(FixedFunctionStyle, TransformDirection)`
-    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:371-492 @ v2.5.2). Its
+    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:385-511 @ v2.6.0). Its
     /// "Unknown FixedFunction transform style" for a value outside the enum can't happen.
     pub fn from_transform_style(
         style: FixedFunctionStyle,
@@ -333,6 +343,7 @@ impl FixedFunctionOpStyle {
                 pick(AcesOutputTransform20Fwd, AcesOutputTransform20Inv)
             }
             FixedFunctionStyle::AcesRgbToJmh20 => pick(AcesRgbToJmh20, AcesJmhToRgb20),
+            FixedFunctionStyle::AcesRgbToHmj20 => pick(AcesRgbToHmj20, AcesHmjToRgb20),
             FixedFunctionStyle::AcesTonescaleCompress20 => {
                 pick(AcesTonescaleCompress20Fwd, AcesTonescaleCompress20Inv)
             }
@@ -359,7 +370,7 @@ impl FixedFunctionOpStyle {
     /// The transform style of the op style, in either direction.
     ///
     /// Port of `FixedFunctionOpData::ConvertStyle(Style)`
-    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:495-589 @ v2.5.2). Its
+    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:514-612 @ v2.6.0). Its
     /// "Unknown FixedFunction style" for a value outside the enum can't happen.
     pub fn to_transform_style(self) -> FixedFunctionStyle {
         use FixedFunctionOpStyle::*;
@@ -374,6 +385,7 @@ impl FixedFunctionOpStyle {
                 FixedFunctionStyle::AcesOutputTransform20
             }
             AcesRgbToJmh20 | AcesJmhToRgb20 => FixedFunctionStyle::AcesRgbToJmh20,
+            AcesRgbToHmj20 | AcesHmjToRgb20 => FixedFunctionStyle::AcesRgbToHmj20,
             AcesTonescaleCompress20Fwd | AcesTonescaleCompress20Inv => {
                 FixedFunctionStyle::AcesTonescaleCompress20
             }
@@ -526,7 +538,7 @@ impl FixedFunctionOpData {
     /// Checks the number of parameters the style takes and, for some styles, their values.
     ///
     /// Port of `FixedFunctionOpData::validate` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:617-840 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:640-864 @ v2.6.0).
     pub fn validate(&self) -> Result<()> {
         use FixedFunctionOpStyle::*;
         use Part::{Text, Value};
@@ -560,7 +572,7 @@ impl FixedFunctionOpData {
                 check_param_bounds("peak_luminance", p[0], 1.0, 10000.0)?;
                 check_param_no_frac("peak_luminance", p[0])?;
             }
-            AcesRgbToJmh20 | AcesJmhToRgb20 => {
+            AcesRgbToJmh20 | AcesJmhToRgb20 | AcesRgbToHmj20 | AcesHmjToRgb20 => {
                 self.check_size(8, "8 parameters")?;
             }
             AcesTonescaleCompress20Fwd | AcesTonescaleCompress20Inv => {
@@ -747,7 +759,7 @@ impl FixedFunctionOpData {
     /// Swaps the style's direction. The data is assumed to be validated.
     ///
     /// Port of `FixedFunctionOpData::invert` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:856-1088 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:880-1122 @ v2.6.0).
     fn invert(&mut self) {
         use FixedFunctionOpStyle::*;
         let inverse = match self.style {
@@ -767,6 +779,8 @@ impl FixedFunctionOpData {
             AcesOutputTransform20Inv => AcesOutputTransform20Fwd,
             AcesRgbToJmh20 => AcesJmhToRgb20,
             AcesJmhToRgb20 => AcesRgbToJmh20,
+            AcesRgbToHmj20 => AcesHmjToRgb20,
+            AcesHmjToRgb20 => AcesRgbToHmj20,
             AcesTonescaleCompress20Fwd => AcesTonescaleCompress20Inv,
             AcesTonescaleCompress20Inv => AcesTonescaleCompress20Fwd,
             AcesGamutCompress20Fwd => AcesGamutCompress20Inv,
@@ -827,7 +841,7 @@ impl FixedFunctionOpData {
     /// The direction the style encodes.
     ///
     /// Port of `FixedFunctionOpData::getDirection` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:1098-1149 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:1132-1185 @ v2.6.0).
     pub fn direction(&self) -> TransformDirection {
         use FixedFunctionOpStyle::*;
         match self.style {
@@ -839,6 +853,7 @@ impl FixedFunctionOpData {
             | AcesGamutComp13Fwd
             | AcesOutputTransform20Fwd
             | AcesRgbToJmh20
+            | AcesRgbToHmj20
             | AcesTonescaleCompress20Fwd
             | AcesGamutCompress20Fwd
             | Rec2100SurroundFwd
@@ -861,6 +876,7 @@ impl FixedFunctionOpData {
             | AcesGamutComp13Inv
             | AcesOutputTransform20Inv
             | AcesJmhToRgb20
+            | AcesHmjToRgb20
             | AcesTonescaleCompress20Inv
             | AcesGamutCompress20Inv
             | Rec2100SurroundInv

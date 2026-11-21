@@ -1,4 +1,4 @@
-ocio_profile_version: 2.5
+ocio_profile_version: 2.6
 
 environment:
   {}
@@ -1382,7 +1382,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingRGBCurveTransform>
       style: log
-      master: {control_points: [1.401298e-45, 0, 0.5, 0.5, 1, 1]}
+      master: {control_points: [1e-45, 0, 0.5, 0.5, 1, 1]}
 
   - !<ColorSpace>
     name: t0123
@@ -1393,7 +1393,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingRGBCurveTransform>
       style: linear
-      master: {control_points: [-7, -7, 0, 0, 7, 3.402823e+38]}
+      master: {control_points: [-7, -7, 0, 0, 7, 3.402824e+38]}
       direction: inverse
 
   - !<ColorSpace>
@@ -1405,7 +1405,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingRGBCurveTransform>
       style: video
-      red: {control_points: [0, -3.402823e+38, 0.5, 0.5, 1, 1]}
+      red: {control_points: [0, -3.402824e+38, 0.5, 0.5, 1, 1]}
       direction: inverse
 
   - !<ColorSpace>
@@ -1554,7 +1554,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingRGBCurveTransform>
       style: video
-      master: {control_points: [0, 0, 0.5, 0.5, 1, 1]}
+      master: {control_points: [0, 0, 0.5, 0.5, 1.000000, 1]}
       direction: inverse
 
   - !<ColorSpace>

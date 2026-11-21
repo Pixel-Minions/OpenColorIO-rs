@@ -1,4 +1,4 @@
-ocio_profile_version: 2.5
+ocio_profile_version: 2.6
 
 environment:
   {}
@@ -139,8 +139,8 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: linear
-      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
-      exposure: {rgb: [1.14, 0.94, -0.25], master: 1.09}
+      offset: {rgb: [1.13000000000000, -0.02, 1.23], master: 1.08}
+      exposure: {rgb: [1.14000000000000, 0.940000000000000, -0.25], master: 1.09}
       contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
       saturation: 1.3
       pivot: {contrast: 0.123456789}
@@ -164,8 +164,8 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: linear
-      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
-      exposure: {rgb: [1.14, 0.94, -0.25], master: 1.09}
+      offset: {rgb: [1.13000000000000, -0.02, 1.23], master: 1.08}
+      exposure: {rgb: [1.14000000000000, 0.940000000000000, -0.25], master: 1.09}
       contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
       saturation: 1.3
       pivot: {contrast: 0.123456789}
@@ -189,8 +189,8 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: linear
-      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
-      exposure: {rgb: [1.14, 0.94, -0.25], master: 1.09}
+      offset: {rgb: [1.13000000000000, -0.02, 1.23], master: 1.08}
+      exposure: {rgb: [1.14000000000000, 0.940000000000000, -0.25], master: 1.09}
       contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
       saturation: 1.3
       pivot: {contrast: 0.123456789}
@@ -215,8 +215,8 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: linear
-      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
-      exposure: {rgb: [1.14, 0.94, -0.25], master: 1.09}
+      offset: {rgb: [1.13000000000000, -0.02, 1.23], master: 1.08}
+      exposure: {rgb: [1.14000000000000, 0.940000000000000, -0.25], master: 1.09}
       contrast: {rgb: [1.11, 0.91, 1.21], master: 1.06}
       saturation: 1.3
       pivot: {contrast: 0.123456789}
@@ -241,10 +241,10 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: video
-      lift: {rgb: [1.15, 0.95, 1.25], master: 0.02}
+      lift: {rgb: [1.15000000000000, 0.950000000000000, 1.25], master: 0.02}
       gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
-      gain: {rgb: [1.16, 0.96, 1.26], master: 1.11}
-      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      gain: {rgb: [1.16000000000000, 0.96, 1.26], master: 1.11}
+      offset: {rgb: [1.13000000000000, -0.02, 1.23], master: 1.08}
       saturation: 1.3
       pivot: {black: 0.05, white: 0.95}
       clamp: {black: -0.1, white: 1.2}
@@ -267,10 +267,10 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: video
-      lift: {rgb: [1.15, 0.95, 1.25], master: 0.02}
+      lift: {rgb: [1.15000000000000, 0.950000000000000, 1.25], master: 0.02}
       gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
-      gain: {rgb: [1.16, 0.96, 1.26], master: 1.11}
-      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      gain: {rgb: [1.16000000000000, 0.96, 1.26], master: 1.11}
+      offset: {rgb: [1.13000000000000, -0.02, 1.23], master: 1.08}
       saturation: 1.3
       pivot: {black: 0.05, white: 0.95}
       clamp: {black: -0.1, white: 1.2}
@@ -293,10 +293,10 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: video
-      lift: {rgb: [1.15, 0.95, 1.25], master: 0.02}
+      lift: {rgb: [1.15000000000000, 0.950000000000000, 1.25], master: 0.02}
       gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
-      gain: {rgb: [1.16, 0.96, 1.26], master: 1.11}
-      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      gain: {rgb: [1.16000000000000, 0.96, 1.26], master: 1.11}
+      offset: {rgb: [1.13000000000000, -0.02, 1.23], master: 1.08}
       saturation: 1.3
       pivot: {black: 0.05, white: 0.95}
       clamp: {black: -0.1, white: 1.2}
@@ -320,10 +320,10 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: video
-      lift: {rgb: [1.15, 0.95, 1.25], master: 0.02}
+      lift: {rgb: [1.15000000000000, 0.950000000000000, 1.25], master: 0.02}
       gamma: {rgb: [1.12, 0.92, 1.22], master: 1.07}
-      gain: {rgb: [1.16, 0.96, 1.26], master: 1.11}
-      offset: {rgb: [1.13, -0.02, 1.23], master: 1.08}
+      gain: {rgb: [1.16000000000000, 0.96, 1.26], master: 1.11}
+      offset: {rgb: [1.13000000000000, -0.02, 1.23], master: 1.08}
       saturation: 1.3
       pivot: {black: 0.05, white: 0.95}
       clamp: {black: -0.1, white: 1.2}
@@ -3540,7 +3540,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: linear
-      offset: {rgb: [0, 0, 0], master: -4.94065645841247e-324}
+      offset: {rgb: [0, 0, 0], master: -5e-324}
 
   - !<ColorSpace>
     name: t0323
@@ -3551,7 +3551,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: video
-      saturation: -4.94065645841247e-324
+      saturation: -5e-324
       direction: inverse
 
   - !<ColorSpace>
@@ -3563,7 +3563,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: video
-      lift: {rgb: [0, 0, 2.2250738585072e-308], master: 0}
+      lift: {rgb: [0, 0, 2.22507385850720e-308], master: 0}
 
   - !<ColorSpace>
     name: t0325
@@ -3574,7 +3574,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: log
-      brightness: {rgb: [0, 2.2250738585072e-308, 0], master: 0}
+      brightness: {rgb: [0, 2.22507385850720e-308, 0], master: 0}
       direction: inverse
 
   - !<ColorSpace>
@@ -4016,7 +4016,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: log
-      contrast: {rgb: [1, 1, 1e+15], master: 1}
+      contrast: {rgb: [1, 1, 1.00000000000000e+15], master: 1}
       pivot: {contrast: -0.2}
 
   - !<ColorSpace>
@@ -4028,7 +4028,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingPrimaryTransform>
       style: linear
-      exposure: {rgb: [0, 0, 0], master: 1e+15}
+      exposure: {rgb: [0, 0, 0], master: 1.00000000000000e+15}
       direction: inverse
 
   - !<ColorSpace>

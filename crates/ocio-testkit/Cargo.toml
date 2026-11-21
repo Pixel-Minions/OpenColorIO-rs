@@ -1,6 +1,6 @@
 [package]
 name = "ocio-testkit"
-description = "Test support: the live oracle (opencolorio==2.5.2), locked fixtures, exact comparators, probe inputs"
+description = "Test support: the live oracle (the pinned opencolorio wheel), locked fixtures, exact comparators, probe inputs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

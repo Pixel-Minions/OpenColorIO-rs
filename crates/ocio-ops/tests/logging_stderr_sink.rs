@@ -4,7 +4,7 @@
 //! What the library writes to stderr, with and without `set_stderr_sink`, which the tools set.
 //!
 //! Without a sink the bytes go to stderr as they are: the expected text is upstream's
-//! (`InitLogging` and the default logging function, src/OpenColorIO/Logging.cpp:30-68 @ v2.5.2),
+//! (`InitLogging` and the default logging function, src/OpenColorIO/Logging.cpp:30-68 @ v2.6.0),
 //! with `\n` line ends on every platform, and `logging_oracle.rs` compares the same stderr with
 //! the wheel's. With a sink, the same bytes reach the sink and stderr stays empty.
 //!
@@ -21,7 +21,7 @@ use ocio_ops::platform::{MapEnv, set_env_provider};
 const CASE: &str = "OCIO_RS_LOGGING_STDERR_SINK_CASE";
 const SINK: &str = "sink received: ";
 
-const DEBUG_LINE: &str = "[OpenColorIO Debug]: Using OpenColorIO version: 2.5.2\n";
+const DEBUG_LINE: &str = "[OpenColorIO Debug]: Using OpenColorIO version: 2.6.0\n";
 const INVALID_LINE: &str = "[OpenColorIO Warning]: Invalid $OCIO_LOGGING_LEVEL specified. \
                             Options: none (0), warning (1), info (2), debug (3)\n";
 const MESSAGE_LINE: &str = "[OpenColorIO Warning]: a message\n";

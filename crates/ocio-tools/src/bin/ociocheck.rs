@@ -3,16 +3,16 @@
 
 //! `ociocheck`: validates an OpenColorIO configuration.
 //!
-//! Port of `src/apps/ociocheck/main.cpp` @ v2.5.2.
+//! Port of `src/apps/ociocheck/main.cpp` @ v2.6.0.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use ocio::{
-    ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, EnvironmentMode, Exception,
-    FixedFunctionStyle, FixedFunctionTransform, NamedTransformVisibility, ProcessorCacheFlags,
-    ReferenceSpaceType, SearchReferenceSpaceType, Transform, TransformDirection, ViewType,
-    get_env_variable,
+    ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, ConfigCompatibility,
+    EnvironmentMode, Exception, FixedFunctionStyle, FixedFunctionTransform,
+    NamedTransformVisibility, ProcessorCacheFlags, ReferenceSpaceType, SearchReferenceSpaceType,
+    Transform, TransformDirection, ViewType, config_compatibility, get_env_variable,
 };
 use ocio_ops::logging::set_logging_level;
 use ocio_ops::open_color_types::LoggingLevel;
@@ -27,7 +27,7 @@ use ocio_tools::is_ocio_exception;
 use ocio_tools::log_guard::LogGuard;
 use ocio_tools::stdio::{self, OutputFile, cout, cout_endl, cout_line};
 
-/// Port of `DESC_STRING` (src/apps/ociocheck/main.cpp:19-28 @ v2.5.2).
+/// Port of `DESC_STRING` (src/apps/ociocheck/main.cpp:19-28 @ v2.6.0).
 const DESC_STRING: &str = "\n\n\
 Ociocheck is useful to validate that the specified OCIO configuration\n\
 is valid, and that all the color transforms are defined and loadable.\n\
@@ -37,9 +37,9 @@ Unlike the config validate method, ociocheck parses all required LUTs.\n\
 All display/view pairs, color spaces, and named transforms are checked,\n\
 regardless of whether they are active or inactive.\n\n\
 Ociocheck can also be used to clean up formatting on an existing profile\n\
-that has been manually edited, using the '-o' option.\n";
+that has been manually edited, using the '--oconfig' option.\n";
 
-/// Port of `cifTextureIDs` and `cifDisplayIDs` (src/apps/ociocheck/main.cpp:36-68 @ v2.5.2).
+/// Port of `cifTextureIDs` and `cifDisplayIDs` (src/apps/ociocheck/main.cpp:36-68 @ v2.6.0).
 fn is_color_interop_forum_id(id: &[u8]) -> bool {
     const IDS: [&[u8]; 28] = [
         b"lin_ap1_scene",
@@ -76,7 +76,7 @@ fn is_color_interop_forum_id(id: &[u8]) -> bool {
 
 /// Returns true if the interopID is valid.
 ///
-/// Port of `isValidInteropID` (src/apps/ociocheck/main.cpp:32-105 @ v2.5.2).
+/// Port of `isValidInteropID` (src/apps/ociocheck/main.cpp:32-105 @ v2.6.0).
 fn is_valid_interop_id(id: &[u8]) -> bool {
     // See https://github.com/AcademySoftwareFoundation/ColorInterop for the details.
 
@@ -135,7 +135,7 @@ fn try_load(config: &Config, transform: Option<&Transform>) -> Result<Option<Vec
 /// Prints what loading an item's two directions gave, and counts an error.
 ///
 /// Port of the end of each loop of the color spaces, named transforms and looks
-/// (src/apps/ociocheck/main.cpp:433-453, 523-543, 602-622 @ v2.5.2).
+/// (src/apps/ociocheck/main.cpp:436-456, 526-546, 605-625 @ v2.6.0).
 fn print_loaded(
     name: &[u8],
     first: Option<Vec<u8>>,
@@ -159,8 +159,8 @@ fn print_loaded(
 
 /// `getProcessor` for one (display, view) pair.
 ///
-/// Port of the body of the loops over the views (src/apps/ociocheck/main.cpp:250-266, 274-290
-/// @ v2.5.2).
+/// Port of the body of the loops over the views (src/apps/ociocheck/main.cpp:253-269, 277-293
+/// @ v2.6.0).
 fn check_view(
     display_test_config: &Config,
     src_color_space: &[u8],
@@ -195,12 +195,13 @@ fn check_view(
 /// The part of `main` that upstream runs in its outer `try` block: `Ok` holds the exit code
 /// of an early return, or nothing to go on.
 ///
-/// Port of `main` (src/apps/ociocheck/main.cpp:141-681 @ v2.5.2). `GetEnvVariable` never gives
+/// Port of `main` (src/apps/ociocheck/main.cpp:144-696 @ v2.6.0). `GetEnvVariable` never gives
 /// a null pointer, so the branch that asks for a config is dead (docs/improvements.md, I-602),
 /// and isn't ported.
 fn check(
     inputconfig: &[u8],
     outputconfig: &[u8],
+    verbose: bool,
     errorcount: &mut i32,
     warningcount: &mut i32,
 ) -> Result<(), Exception> {
@@ -533,6 +534,22 @@ fn check(
     }
 
     cout_endl();
+    cout_line(b"** Compatibility **");
+
+    // As upstream's, the guard lives to the end of the outer `try`: the rest runs with the
+    // logging level at debug, and what it logs is trapped and dropped.
+    let compat_log_guard = LogGuard::new()?;
+    let hdr_display_support_26 = config_compatibility::check_compatibility(
+        &config,
+        ConfigCompatibility::HdrDisplaySupport26,
+    );
+    cout(b"HDR Display Support (OCIO 2.6): ");
+    cout_line(if hdr_display_support_26 { "yes" } else { "no" });
+    if verbose && !compat_log_guard.empty() {
+        cout(compat_log_guard.output());
+    }
+
+    cout_endl();
     cout_line(b"** Miscellaneous **");
     cout(b"CacheID: ");
     cout_line(cache_id);
@@ -559,9 +576,10 @@ fn check(
     Ok(())
 }
 
-/// Port of `main` (src/apps/ociocheck/main.cpp:107-711 @ v2.5.2).
+/// Port of `main` (src/apps/ociocheck/main.cpp:107-727 @ v2.6.0).
 fn run(argv: &[Vec<u8>]) -> i32 {
     let help = Cell::new(false);
+    let verbose = Cell::new(false);
     let inputconfig = RefCell::new(Vec::new());
     let outputconfig = RefCell::new(Vec::new());
 
@@ -579,6 +597,12 @@ fn run(argv: &[Vec<u8>]) -> i32 {
         "--oconfig %s",
         &[Param::Text(&outputconfig)],
         "Output .ocio file",
+    );
+    ap.option("-i %s", &[Param::Text(&inputconfig)], "Same as --iconfig");
+    ap.option(
+        "-v",
+        &[Param::Flag(&verbose)],
+        "Print detailed reasons for failed compatibility checks",
     );
 
     if ap.parse(argv) < 0 {
@@ -602,6 +626,7 @@ fn run(argv: &[Vec<u8>]) -> i32 {
     if let Err(exception) = check(
         &inputconfig.borrow(),
         &outputconfig.borrow(),
+        verbose.get(),
         &mut errorcount,
         &mut warningcount,
     ) {

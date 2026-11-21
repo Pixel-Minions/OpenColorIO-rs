@@ -7,7 +7,7 @@ use ocio_ops::open_color_types::{FixedFunctionStyle, TransformDirection};
 use serde_json::{Value, json};
 
 /// Every transform style, in upstream's order.
-pub(crate) const ALL_STYLES: [FixedFunctionStyle; 23] = {
+pub(crate) const ALL_STYLES: [FixedFunctionStyle; 24] = {
     use FixedFunctionStyle::*;
     [
         AcesRedMod03,
@@ -30,6 +30,7 @@ pub(crate) const ALL_STYLES: [FixedFunctionStyle; 23] = {
         AcesRgbToJmh20,
         AcesTonescaleCompress20,
         AcesGamutCompress20,
+        AcesRgbToHmj20,
         RgbToHsyLin,
         RgbToHsyLog,
         RgbToHsyVid,
@@ -60,6 +61,7 @@ pub(crate) fn style_name(style: FixedFunctionStyle) -> &'static str {
         AcesRgbToJmh20 => "FIXED_FUNCTION_ACES_RGB_TO_JMH_20",
         AcesTonescaleCompress20 => "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20",
         AcesGamutCompress20 => "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20",
+        AcesRgbToHmj20 => "FIXED_FUNCTION_ACES_RGB_TO_HMJ_20",
         RgbToHsyLin => "FIXED_FUNCTION_RGB_TO_HSY_LIN",
         RgbToHsyLog => "FIXED_FUNCTION_RGB_TO_HSY_LOG",
         RgbToHsyVid => "FIXED_FUNCTION_RGB_TO_HSY_VID",

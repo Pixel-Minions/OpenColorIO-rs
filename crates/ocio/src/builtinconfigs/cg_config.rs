@@ -2,17 +2,18 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The registration of the CG built-in configs: `CGConfig.cpp` and `CGConfig.h`
-//! (src/OpenColorIO/builtinconfigs @ v2.5.2).
+//! (src/OpenColorIO/builtinconfigs @ v2.6.0).
 
 use super::builtin_config_registry::BuiltinConfigRegistry;
 use super::cg::{
     CG_CONFIG_V100_ACES_V13_OCIO_V21, CG_CONFIG_V210_ACES_V13_OCIO_V23,
     CG_CONFIG_V220_ACES_V13_OCIO_V24, CG_CONFIG_V400_ACES_V20_OCIO_V25,
+    CG_CONFIG_V500_ACES_V21_OCIO_V26,
 };
 
 /// Adds the CG configs to `registry`; only the latest is recommended.
 ///
-/// Port of `CGCONFIG::Register` (src/OpenColorIO/builtinconfigs/CGConfig.cpp:18-49 @ v2.5.2).
+/// Port of `CGCONFIG::Register` (src/OpenColorIO/builtinconfigs/CGConfig.cpp:18-57 @ v2.6.0).
 pub(crate) fn register(registry: &mut BuiltinConfigRegistry) {
     // If a new built-in config is added, do not forget to update the LATEST_CG_BUILTIN_CONFIG_URI
     // variable (in BuiltinConfigRegistry.cpp).
@@ -42,6 +43,13 @@ pub(crate) fn register(registry: &mut BuiltinConfigRegistry) {
         b"cg-config-v4.0.0_aces-v2.0_ocio-v2.5",
         b"Academy Color Encoding System - CG Config [COLORSPACES v4.0.0] [ACES v2.0] [OCIO v2.5]",
         CG_CONFIG_V400_ACES_V20_OCIO_V25,
+        false,
+    );
+
+    registry.add_builtin(
+        b"cg-config-v5.0.0_aces-v2.1_ocio-v2.6",
+        b"Academy Color Encoding System - CG Config [COLORSPACES v5.0.0] [ACES v2.1] [OCIO v2.6]",
+        CG_CONFIG_V500_ACES_V21_OCIO_V26,
         true,
     );
 }

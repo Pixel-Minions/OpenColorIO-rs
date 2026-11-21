@@ -15,7 +15,7 @@ use ocio_ops::utils::string_utils::{find, replace_in_place, reverse_find};
 
 use crate::config::Config;
 use crate::context::Context;
-use crate::transform::{Nesting, Transform};
+use crate::transform::{DepthGuard, Transform, build_error};
 use crate::transforms::color_space_transform::collect_color_space_transform_context_variables;
 use crate::transforms::display_view_transform::collect_display_view_transform_context_variables;
 use crate::transforms::file_transform;
@@ -159,22 +159,20 @@ pub fn resolve_context_variables(str: &[u8], map: &EnvMap, used: &mut UsedEnvs) 
 /// it.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, ConstTransformRcPtr,
-/// ContextRcPtr &)` (src/OpenColorIO/ContextVariableUtils.cpp:179-206 @ v2.5.2) and its
+/// ContextRcPtr &)` (src/OpenColorIO/ContextVariableUtils.cpp:182-228 @ v2.6.0) and its
 /// `GroupTransform` overload (transforms/GroupTransform.cpp:206-223 @ v2.5.2). The other classes
-/// use none. Transforms nested deeper than
-/// [`MAX_TRANSFORM_NESTING`](crate::transform::MAX_TRANSFORM_NESTING) are an error, where
-/// upstream overflows the stack (docs/improvements.md, U-58).
+/// use none. Its cycle guard ([`DepthGuard`]) refuses the 34th nested call, groups included.
 pub(crate) fn collect_context_variables(
     config: &Config,
     context: &Context,
     transform: &Transform,
     used_context_vars: &mut Context,
 ) -> Result<bool> {
-    // A group names nothing, so it can't refer to itself, and the loader bounds its nesting
-    // (U-60): it counts only in the total, which groups multiply.
-    let _nesting = match Nesting::collect(transform) {
-        Ok(nesting) => nesting,
-        Err(too_deep) => return too_deep.error(),
+    // Guard against infinite recursion through cycles in the color space / look / view
+    // transform reference graph (e.g. a ColorSpace whose from_reference is a
+    // ColorSpaceTransform pointing back to itself).
+    let Some(_depth) = DepthGuard::collect() else {
+        return build_error("Cycle detected while collecting context variables.").map(|()| false);
     };
     match transform {
         Transform::Group(tr) => {

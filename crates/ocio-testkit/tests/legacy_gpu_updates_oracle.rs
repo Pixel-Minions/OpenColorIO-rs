@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! P87 native-client contracts. Both sides call the official OCIO 2.5.2 library;
+//! P87 native-client contracts. Both sides call the official OCIO 2.6.0 library;
 //! no Rust SDK output supplies an expectation. The script reads the same live
 //! descriptor before and after setters (OpenColorIO.h:2707-2709, 3476-3483;
 //! OpenColorTransforms.h:781-898 @ v2.5.2).

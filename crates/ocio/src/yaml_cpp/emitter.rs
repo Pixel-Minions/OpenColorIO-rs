@@ -24,6 +24,7 @@ use super::emitter_manip::{
 };
 use super::emitter_state::{EmitterState, FlowType, FmtScope, GroupType, error_msg};
 use super::emitter_utils::{self as utils, StringEscaping, StringFormat};
+use super::fptostring::{Fp, fp_to_string};
 use super::ostream_wrapper::OstreamWrapper;
 
 /// Port of `YAML::Emitter`, writing to its own buffer.
@@ -253,10 +254,11 @@ impl Emitter {
         self.state.started_group(GroupType::Seq);
     }
 
-    /// Port of `Emitter::EmitEndSeq` (emitter.cpp:204-227): an empty sequence is written in
-    /// flow style, `[]`.
+    /// Port of `Emitter::EmitEndSeq` (emitter.cpp:204-228 @ yaml-cpp-0.9.0): an empty sequence
+    /// is written in flow style, `[]`. Since 0.9.0 an empty flow sequence that has begun no
+    /// node doesn't indent before its `[` (yaml-cpp commit c67d701).
     fn emit_end_seq(&mut self) {
-        self.emit_end_group(GroupType::Seq, b'[', b']');
+        self.emit_end_group(GroupType::Seq, b'[', b']', true);
     }
 
     /// Port of `Emitter::EmitBeginMap` (emitter.cpp:229-237).
@@ -270,11 +272,19 @@ impl Emitter {
 
     /// Port of `Emitter::EmitEndMap` (emitter.cpp:239-262): an empty map is written `{}`.
     fn emit_end_map(&mut self) {
-        self.emit_end_group(GroupType::Map, b'{', b'}');
+        self.emit_end_group(GroupType::Map, b'{', b'}', false);
     }
 
-    /// The shared body of `EmitEndSeq` and `EmitEndMap`.
-    fn emit_end_group(&mut self, group_type: GroupType, open: u8, close: u8) {
+    /// The shared body of `EmitEndSeq` and `EmitEndMap`. `seq_indent_rule` is `EmitEndSeq`'s
+    /// `if (originalType == FlowType::Block || m_pState->HasBegunNode())` before `IndentTo`
+    /// (emitter.cpp:216-217 @ yaml-cpp-0.9.0), which `EmitEndMap` (240-263) doesn't have.
+    fn emit_end_group(
+        &mut self,
+        group_type: GroupType,
+        open: u8,
+        close: u8,
+        seq_indent_rule: bool,
+    ) {
         if !self.good() {
             return;
         }
@@ -288,7 +298,9 @@ impl Emitter {
             if self.stream.comment() {
                 self.stream.write_byte(b'\n');
             }
-            self.stream.indent_to(self.state.cur_indent());
+            if !seq_indent_rule || original_type == FlowType::Block || self.state.has_begun_node() {
+                self.stream.indent_to(self.state.cur_indent());
+            }
             // An empty group that was block-style, or a flow group that never wrote its
             // opening bracket, opens here.
             if original_type == FlowType::Block
@@ -948,9 +960,11 @@ impl Emitter {
         self
     }
 
-    /// Port of `Emitter::WriteStreamable` (emitter.h:153-188): `.nan`, `.inf`, `-.inf`, or
-    /// `stream << value` with the float or double precision.
-    fn write_streamable(&mut self, value: f64, is_nan: bool, is_inf: bool, precision: usize) {
+    /// Port of `Emitter::WriteStreamable` (emitter.h:161-197 @ yaml-cpp-0.9.0): `.nan`, `.inf`,
+    /// `-.inf`, or `stream << FpToString(value, stream.precision())` with the float or double
+    /// precision (`SetStreamablePrecision`, emitter.h:199-207). `value` keeps its own type,
+    /// whose shortest digits `FpToString` starts from.
+    fn write_streamable(&mut self, value: Fp, is_nan: bool, is_inf: bool, precision: usize) {
         if !self.good() {
             return;
         }
@@ -969,7 +983,7 @@ impl Emitter {
                 stream.put_str(".inf");
             }
         } else {
-            stream.put_f64(value);
+            stream.put_str(&fp_to_string(value, stream.precision as usize));
         }
         self.stream.write_bytes(stream.str());
 
@@ -980,7 +994,7 @@ impl Emitter {
     pub fn write_f32(&mut self, value: f32) -> &mut Self {
         let precision = self.state.float_precision();
         self.write_streamable(
-            f64::from(value),
+            Fp::F32(value),
             value.is_nan(),
             value.is_infinite(),
             precision,
@@ -991,7 +1005,12 @@ impl Emitter {
     /// `operator<<(Emitter &, double)`: `WriteStreamable<double>`, at the double precision.
     pub fn write_f64(&mut self, value: f64) -> &mut Self {
         let precision = self.state.double_precision();
-        self.write_streamable(value, value.is_nan(), value.is_infinite(), precision);
+        self.write_streamable(
+            Fp::F64(value),
+            value.is_nan(),
+            value.is_infinite(),
+            precision,
+        );
         self
     }
 

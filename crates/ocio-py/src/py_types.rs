@@ -210,8 +210,8 @@ const ENUMS: &[EnumDef] = &[
     EnumDef { name: "EnvironmentMode", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("ENV_ENVIRONMENT_UNKNOWN", 0), ("ENV_ENVIRONMENT_LOAD_PREDEFINED", 1), ("ENV_ENVIRONMENT_LOAD_ALL", 2)] },
     // py::enum_<RangeStyle> (PyTypes.cpp:568-576 @ v2.5.2), no fixed type.
     EnumDef { name: "RangeStyle", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("RANGE_NO_CLAMP", 0), ("RANGE_CLAMP", 1)] },
-    // py::enum_<FixedFunctionStyle> (PyTypes.cpp:578-628 @ v2.5.2), no fixed type.
-    EnumDef { name: "FixedFunctionStyle", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("FIXED_FUNCTION_ACES_RED_MOD_03", 0), ("FIXED_FUNCTION_ACES_RED_MOD_10", 1), ("FIXED_FUNCTION_ACES_GLOW_03", 2), ("FIXED_FUNCTION_ACES_GLOW_10", 3), ("FIXED_FUNCTION_ACES_DARK_TO_DIM_10", 4), ("FIXED_FUNCTION_REC2100_SURROUND", 5), ("FIXED_FUNCTION_RGB_TO_HSV", 6), ("FIXED_FUNCTION_XYZ_TO_xyY", 7), ("FIXED_FUNCTION_XYZ_TO_uvY", 8), ("FIXED_FUNCTION_XYZ_TO_LUV", 9), ("FIXED_FUNCTION_ACES_GAMUTMAP_02", 10), ("FIXED_FUNCTION_ACES_GAMUTMAP_07", 11), ("FIXED_FUNCTION_ACES_GAMUT_COMP_13", 12), ("FIXED_FUNCTION_LIN_TO_PQ", 13), ("FIXED_FUNCTION_LIN_TO_GAMMA_LOG", 14), ("FIXED_FUNCTION_LIN_TO_DOUBLE_LOG", 15), ("FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20", 16), ("FIXED_FUNCTION_ACES_RGB_TO_JMH_20", 17), ("FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20", 18), ("FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20", 19), ("FIXED_FUNCTION_RGB_TO_HSY_LIN", 20), ("FIXED_FUNCTION_RGB_TO_HSY_LOG", 21), ("FIXED_FUNCTION_RGB_TO_HSY_VID", 22)] },
+    // py::enum_<FixedFunctionStyle> (PyTypes.cpp:578-630 @ v2.6.0), no fixed type.
+    EnumDef { name: "FixedFunctionStyle", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("FIXED_FUNCTION_ACES_RED_MOD_03", 0), ("FIXED_FUNCTION_ACES_RED_MOD_10", 1), ("FIXED_FUNCTION_ACES_GLOW_03", 2), ("FIXED_FUNCTION_ACES_GLOW_10", 3), ("FIXED_FUNCTION_ACES_DARK_TO_DIM_10", 4), ("FIXED_FUNCTION_REC2100_SURROUND", 5), ("FIXED_FUNCTION_RGB_TO_HSV", 6), ("FIXED_FUNCTION_XYZ_TO_xyY", 7), ("FIXED_FUNCTION_XYZ_TO_uvY", 8), ("FIXED_FUNCTION_XYZ_TO_LUV", 9), ("FIXED_FUNCTION_ACES_GAMUTMAP_02", 10), ("FIXED_FUNCTION_ACES_GAMUTMAP_07", 11), ("FIXED_FUNCTION_ACES_GAMUT_COMP_13", 12), ("FIXED_FUNCTION_LIN_TO_PQ", 13), ("FIXED_FUNCTION_LIN_TO_GAMMA_LOG", 14), ("FIXED_FUNCTION_LIN_TO_DOUBLE_LOG", 15), ("FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20", 16), ("FIXED_FUNCTION_ACES_RGB_TO_JMH_20", 17), ("FIXED_FUNCTION_ACES_RGB_TO_HMJ_20", 20), ("FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20", 18), ("FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20", 19), ("FIXED_FUNCTION_RGB_TO_HSY_LIN", 21), ("FIXED_FUNCTION_RGB_TO_HSY_LOG", 22), ("FIXED_FUNCTION_RGB_TO_HSY_VID", 23)] },
     // py::enum_<ExposureContrastStyle> (PyTypes.cpp:630-640 @ v2.5.2), no fixed type.
     EnumDef { name: "ExposureContrastStyle", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("EXPOSURE_CONTRAST_LINEAR", 0), ("EXPOSURE_CONTRAST_VIDEO", 1), ("EXPOSURE_CONTRAST_LOGARITHMIC", 2)] },
     // py::enum_<CDLStyle> (PyTypes.cpp:642-652 @ v2.5.2), no fixed type.
@@ -236,6 +236,8 @@ const ENUMS: &[EnumDef] = &[
     EnumDef { name: "OptimizationFlags", scalar: Scalar::ULong, arithmetic: true, value_docs: true, entries: &[("OPTIMIZATION_NONE", 0), ("OPTIMIZATION_IDENTITY", 1), ("OPTIMIZATION_IDENTITY_GAMMA", 2), ("OPTIMIZATION_PAIR_IDENTITY_CDL", 64), ("OPTIMIZATION_PAIR_IDENTITY_EXPOSURE_CONTRAST", 128), ("OPTIMIZATION_PAIR_IDENTITY_FIXED_FUNCTION", 256), ("OPTIMIZATION_PAIR_IDENTITY_GAMMA", 512), ("OPTIMIZATION_PAIR_IDENTITY_LUT1D", 1024), ("OPTIMIZATION_PAIR_IDENTITY_LUT3D", 2048), ("OPTIMIZATION_PAIR_IDENTITY_LOG", 4096), ("OPTIMIZATION_PAIR_IDENTITY_GRADING", 8192), ("OPTIMIZATION_COMP_EXPONENT", 262144), ("OPTIMIZATION_COMP_GAMMA", 524288), ("OPTIMIZATION_COMP_MATRIX", 1048576), ("OPTIMIZATION_COMP_LUT1D", 2097152), ("OPTIMIZATION_COMP_LUT3D", 4194304), ("OPTIMIZATION_COMP_RANGE", 8388608), ("OPTIMIZATION_COMP_SEPARABLE_PREFIX", 16777216), ("OPTIMIZATION_LUT_INV_FAST", 33554432), ("OPTIMIZATION_FAST_LOG_EXP_POW", 67108864), ("OPTIMIZATION_SIMPLIFY_OPS", 134217728), ("OPTIMIZATION_NO_DYNAMIC_PROPERTIES", 268435456), ("OPTIMIZATION_ALL", 4294967295), ("OPTIMIZATION_LOSSLESS", 144457667), ("OPTIMIZATION_VERY_GOOD", 263995331), ("OPTIMIZATION_GOOD", 268189635), ("OPTIMIZATION_DRAFT", 4294967295), ("OPTIMIZATION_DEFAULT", 263995331)] },
     // py::enum_<ProcessorCacheFlags> (PyTypes.cpp:848-860 @ v2.5.2), underlying unsigned int.
     EnumDef { name: "ProcessorCacheFlags", scalar: Scalar::UInt, arithmetic: false, value_docs: true, entries: &[("PROCESSOR_CACHE_OFF", 0), ("PROCESSOR_CACHE_ENABLED", 1), ("PROCESSOR_CACHE_SHARE_DYN_PROPERTIES", 2), ("PROCESSOR_CACHE_DEFAULT", 3)] },
+    // py::enum_<ConfigCompatibility> (PyTypes.cpp:864-870 @ v2.6.0), no fixed type.
+    EnumDef { name: "ConfigCompatibility", scalar: Scalar::Unfixed, arithmetic: false, value_docs: true, entries: &[("CONFIG_HDR_DISPLAY_SUPPORT_26", 0)] },
 ];
 
 /// Declares a class as `py::class_<T>(m, name, DOC(T))` does (the wheel's docstrings are
@@ -311,7 +313,7 @@ pub(crate) fn bind_py_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "OCIO_VIEW_USE_DISPLAY_NAME",
         ocio::OCIO_VIEW_USE_DISPLAY_NAME,
     )?;
-    // FormatMetadata (967-973): ASCII names, held as bytes by the port.
+    // FormatMetadata (PyTypes.cpp:977-984 @ v2.6.0): ASCII names, held as bytes by the port.
     {
         use ocio_ops::format_metadata::*;
         for (name, value) in [
@@ -321,6 +323,7 @@ pub(crate) fn bind_py_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
             ("METADATA_OUTPUT_DESCRIPTOR", METADATA_OUTPUT_DESCRIPTOR),
             ("METADATA_NAME", METADATA_NAME),
             ("METADATA_ID", METADATA_ID),
+            ("METADATA_ID_ELEMENT", METADATA_ID_ELEMENT),
         ] {
             let text = std::str::from_utf8(value)
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -816,6 +819,7 @@ static CONVERSIONS: [Function; 32] = [
                 AcesRgbToJmh20,
                 AcesTonescaleCompress20,
                 AcesGamutCompress20,
+                AcesRgbToHmj20,
                 RgbToHsyLin,
                 RgbToHsyLog,
                 RgbToHsyVid,

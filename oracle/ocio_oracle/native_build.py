@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright Contributors to the OpenColorIO Project.
-"""Build the O7.1 client against this pinned wheel's own library and public v2.5.2 headers.
+"""Build the O7.1 client against this pinned wheel's own library and its release's public headers
+(the upstream submodule, pinned at the same release).
 
 No package is installed or downloaded. Windows uses VS's release /MD runtime and an import
 library generated from the wheel's actual exports; Linux selects the libstdc++ ABI its exported
@@ -19,6 +20,10 @@ import tempfile
 import PyOpenColorIO as OCIO
 
 from .child_env import allowed_environment
+
+# The release of the public headers the client compiles against (upstream/OpenColorIO, pinned
+# at v2.6.0); the wheel must be the same release, since the client links its library by name.
+HEADERS_VERSION = "2.6.0"
 
 
 def _run(command, cwd, timeout=300):
@@ -69,11 +74,14 @@ def executable():
     """The source-keyed helper executable and its wheel provenance, built only if absent."""
     from pathlib import Path
 
-    if OCIO.__version__ != "2.5.2":
-        raise RuntimeError(f"native legacy oracle requires wheel 2.5.2, not {OCIO.__version__}")
+    if OCIO.__version__ != HEADERS_VERSION:
+        raise RuntimeError(f"native legacy oracle requires wheel {HEADERS_VERSION} (the "
+                           f"upstream headers' release), not {OCIO.__version__}")
+    major, minor, patch = HEADERS_VERSION.split(".")
     root = Path(__file__).resolve().parents[2]
     package = Path(OCIO.__file__).resolve().parent
-    library = package / ("bin/OpenColorIO_2_5.dll" if os.name == "nt" else "libOpenColorIO.so")
+    dll = f"OpenColorIO_{major}_{minor}.dll"
+    library = package / (f"bin/{dll}" if os.name == "nt" else "libOpenColorIO.so")
     if not library.is_file():
         raise RuntimeError(f"the pinned wheel's own library was not found at {library}")
     native = root / "oracle/native"
@@ -102,9 +110,10 @@ def executable():
         for path in headers.glob("*.h"):
             shutil.copyfile(path, include / path.name)
         abi = (headers / "OpenColorABI.h.in").read_text(encoding="utf-8")
-        replacements = {"OCIO_NAMESPACE": "OpenColorIO_v2_5", "OpenColorIO_VERSION": "2.5.2",
-                        "OpenColorIO_VERSION_RELEASE_TYPE": "", "OpenColorIO_VERSION_MAJOR": "2",
-                        "OpenColorIO_VERSION_MINOR": "5", "OpenColorIO_VERSION_PATCH": "2"}
+        replacements = {"OCIO_NAMESPACE": f"OpenColorIO_v{major}_{minor}",
+                        "OpenColorIO_VERSION": HEADERS_VERSION,
+                        "OpenColorIO_VERSION_RELEASE_TYPE": "", "OpenColorIO_VERSION_MAJOR": major,
+                        "OpenColorIO_VERSION_MINOR": minor, "OpenColorIO_VERSION_PATCH": patch}
         for name, value in replacements.items():
             abi = abi.replace("@" + name + "@", value)
         if re.search(r"@\w+@", abi):
@@ -118,7 +127,7 @@ def executable():
             if not any("getOptimizedLegacyGPUProcessor" in name for name in names):
                 raise RuntimeError("the pinned wheel has no exported legacy GPU processor")
             definition = temporary / "wheel.def"
-            definition.write_text("LIBRARY OpenColorIO_2_5.dll\nEXPORTS\n" + "\n".join(names) + "\n", encoding="ascii")
+            definition.write_text(f"LIBRARY {dll}\nEXPORTS\n" + "\n".join(names) + "\n", encoding="ascii")
             import_library = temporary / "wheel.lib"
             _run(_windows_command(vcvars, f'lib /nologo /def:"{definition}" /machine:x64 /out:"{import_library}"'), temporary)
             kits = Path("C:/Program Files (x86)/Windows Kits/10")

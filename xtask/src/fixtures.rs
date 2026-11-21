@@ -10,7 +10,7 @@ use ocio_testkit::oracle::{Oracle, machine_description};
 use ocio_testkit::paths;
 use serde::Deserialize;
 
-const ORACLE_PACKAGE: &str = "opencolorio==2.5.2";
+const ORACLE_PACKAGE: &str = "opencolorio==2.6.0";
 
 #[derive(Deserialize)]
 struct RegenOutput {
@@ -199,5 +199,72 @@ pub(crate) fn verify() -> Result<(), String> {
             "fixture verification failed:\n  {}",
             problems.join("\n  ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod pin_tests {
+    use ocio_testkit::paths;
+
+    /// The opencolorio version `oracle/uv.lock` locks.
+    fn locked_version() -> String {
+        let text = std::fs::read_to_string(paths::workspace_root().join("oracle/uv.lock")).unwrap();
+        let lock: toml::Value = toml::from_str(&text).unwrap();
+        let found: Vec<_> = lock["package"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["name"].as_str() == Some("opencolorio"))
+            .map(|p| p["version"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(found.len(), 1, "{found:?}");
+        found[0].clone()
+    }
+
+    /// The verifier's L1 on 0e7952fe: the native oracle's `HEADERS_VERSION` (the headers it
+    /// compiles against) is the submodule's `project(OpenColorIO VERSION ...)`, and the
+    /// locked wheel's.
+    #[test]
+    fn native_headers_are_the_submodules_and_the_locked_wheels() {
+        let root = paths::workspace_root();
+        let native =
+            std::fs::read_to_string(root.join("oracle/ocio_oracle/native_build.py")).unwrap();
+        let headers: Vec<_> = native
+            .lines()
+            .filter_map(|l| l.strip_prefix("HEADERS_VERSION = \""))
+            .filter_map(|l| l.strip_suffix('"'))
+            .collect();
+        assert_eq!(headers.len(), 1, "{headers:?}");
+        let cmake = std::fs::read_to_string(paths::upstream_dir().join("CMakeLists.txt")).unwrap();
+        let project = &cmake[cmake.find("project(OpenColorIO").unwrap()..];
+        let version = project[project.find("VERSION").unwrap() + "VERSION".len()..]
+            .split_whitespace()
+            .next()
+            .unwrap();
+        assert_eq!(headers[0], version);
+        assert_eq!(headers[0], locked_version());
+    }
+
+    /// The verifier's L2 on 0e7952fe: the fixtures' manifest names the wheel `oracle/uv.lock`
+    /// locks, as its package and as every file's `ocio_version`.
+    #[test]
+    fn fixtures_name_the_locked_wheel() {
+        let version = locked_version();
+        let text = std::fs::read_to_string(paths::workspace_root().join("fixtures/MANIFEST.toml"))
+            .unwrap();
+        let manifest: toml::Value = toml::from_str(&text).unwrap();
+        assert_eq!(
+            manifest["oracle"]["package"].as_str(),
+            Some(format!("opencolorio=={version}").as_str())
+        );
+        let files = manifest["file"].as_array().unwrap();
+        assert!(!files.is_empty());
+        for file in files {
+            assert_eq!(
+                file["ocio_version"].as_str(),
+                Some(version.as_str()),
+                "{file}"
+            );
+        }
     }
 }

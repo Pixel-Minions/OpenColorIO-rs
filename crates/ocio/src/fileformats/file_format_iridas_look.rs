@@ -36,7 +36,9 @@ use std::ffi::c_ulong;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use ocio_formats::expat::xmlparse::{ParseError, Parser, XmlError, XmlStatus, xml_error_string};
+use ocio_formats::expat::xmlparse::{
+    ParseError, Parser, ParserHandle, XmlError, XmlStatus, xml_error_string,
+};
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, TransformDirection, combine_transform_directions};
@@ -101,7 +103,7 @@ pub fn hexasciitofloat(ascii: &[u8; 8]) -> Option<f32> {
 
 /// The parser's state, which expat's handlers change.
 ///
-/// The members of `XMLParserHelper` (FileFormatIridasLook.cpp:470-480 @ v2.5.2) but the
+/// The members of `XMLParserHelper` (FileFormatIridasLook.cpp:558-570 @ v2.6.0) but the
 /// parser.
 #[derive(Debug, Default)]
 struct State {
@@ -125,6 +127,9 @@ struct State {
     lut_size: i32,
     /// `m_lutString`.
     lut_string: Vec<u8>,
+    /// `m_pendingException`: the exception of a handler, deferred until the parse call
+    /// returns.
+    pending_exception: Option<Exception>,
 }
 
 type StateRc = Rc<RefCell<State>>;
@@ -132,7 +137,7 @@ type StateRc = Rc<RefCell<State>>;
 impl State {
     /// The error `error` with the file's name and the line being parsed.
     ///
-    /// Port of `XMLParserHelper::Throw` (FileFormatIridasLook.cpp:239-247 @ v2.5.2).
+    /// Port of `XMLParserHelper::Throw` (FileFormatIridasLook.cpp:253-261 @ v2.6.0).
     fn throw(&self, error: &[u8]) -> Exception {
         let mut os = OStringStream::new(Crt::NATIVE);
         os.put_str("Error parsing Iridas Look file (");
@@ -149,7 +154,7 @@ impl State {
 
 /// The .look parser: expat with the Iridas handlers.
 ///
-/// Port of `XMLParserHelper` (FileFormatIridasLook.cpp:132-481 @ v2.5.2).
+/// Port of `XMLParserHelper` (FileFormatIridasLook.cpp:133-571 @ v2.6.0).
 pub struct XmlParserHelper {
     state: StateRc,
     /// `m_parser`.
@@ -167,33 +172,41 @@ impl std::fmt::Debug for XmlParserHelper {
 impl XmlParserHelper {
     /// A parser of the file `file_name`, which names it in messages.
     ///
-    /// Port of `XMLParserHelper::XMLParserHelper` (FileFormatIridasLook.cpp:139-154 @
-    /// v2.5.2).
+    /// Port of `XMLParserHelper::XMLParserHelper` (FileFormatIridasLook.cpp:140-155 @
+    /// v2.6.0).
     pub fn new(file_name: &[u8]) -> XmlParserHelper {
         let state = Rc::new(RefCell::new(State {
             file_name: file_name.to_vec(),
             ..State::default()
         }));
         let mut parser = Parser::new();
-        let start_state = state.clone();
-        let end_state = state.clone();
+        let (start_state, start_parser) = (state.clone(), parser.handle());
+        let (end_state, end_parser) = (state.clone(), parser.handle());
         parser.set_element_handler(
             Some(Box::new(move |name, _atts| {
-                start_element_handler(&start_state, name)
+                let result = start_element_handler(&start_state, name);
+                keep_first_exception(&start_state, &start_parser, result);
+                Ok(())
             })),
-            Some(Box::new(move |name| end_element_handler(&end_state, name))),
+            Some(Box::new(move |name| {
+                let result = end_element_handler(&end_state, name);
+                keep_first_exception(&end_state, &end_parser, result);
+                Ok(())
+            })),
         );
-        let data_state = state.clone();
+        let (data_state, data_parser) = (state.clone(), parser.handle());
         parser.set_character_data_handler(Some(Box::new(move |s| {
-            character_data_handler(&data_state, s)
+            let result = character_data_handler(&data_state, s);
+            keep_first_exception(&data_state, &data_parser, result);
+            Ok(())
         })));
         XmlParserHelper { state, parser }
     }
 
     /// Parses `istream` line by line.
     ///
-    /// Port of `XMLParserHelper::Parse(std::istream &)` (FileFormatIridasLook.cpp:160-172 @
-    /// v2.5.2).
+    /// Port of `XMLParserHelper::Parse(std::istream &)` (FileFormatIridasLook.cpp:161-173 @
+    /// v2.6.0).
     pub fn parse(&mut self, istream: &mut InputStream) -> Result<()> {
         let mut line = Vec::new();
         self.state.borrow_mut().line_number = 0;
@@ -210,12 +223,22 @@ impl XmlParserHelper {
     /// Parses one buffer, the last one when `last_line`.
     ///
     /// Port of `XMLParserHelper::Parse(const std::string &, bool)`
-    /// (FileFormatIridasLook.cpp:173-191 @ v2.5.2).
+    /// (FileFormatIridasLook.cpp:174-205 @ v2.6.0).
     fn parse_buffer(&mut self, buffer: &[u8], last_line: bool) -> Result<()> {
         let status = match self.parser.parse(buffer, last_line) {
             Ok(status) => status,
             Err(ParseError::Handler(e)) => return Err(e),
         };
+
+        // A handler may have thrown a C++ exception. Rethrowing it here, rather than letting it
+        // escape the expat callback directly, keeps expat's own bookkeeping (see
+        // XML_ParserFree's isCalledFromInsideHandler guard) consistent; otherwise
+        // XML_ParserFree silently leaks the parser.
+        let pending_exception = self.state.borrow_mut().pending_exception.take();
+        if let Some(pending_exception) = pending_exception {
+            return Err(pending_exception);
+        }
+
         if status == XmlStatus::Error {
             let expat_error_code = self.parser.error_code();
             let state = self.state.borrow();
@@ -236,7 +259,7 @@ impl XmlParserHelper {
 
     /// The LUT's grid size, and its values decoded from the `data` text, in the file's order.
     ///
-    /// Port of `XMLParserHelper::getLut` (FileFormatIridasLook.cpp:193-235 @ v2.5.2).
+    /// Port of `XMLParserHelper::getLut` (FileFormatIridasLook.cpp:207-249 @ v2.6.0).
     pub fn get_lut(&self) -> Result<(i32, Vec<f32>)> {
         let state = self.state.borrow();
         if !state.lut_string.len().is_multiple_of(8) {
@@ -291,10 +314,29 @@ impl XmlParserHelper {
     }
 }
 
+/// What the handlers registered with expat do with the result of a handler: they keep the
+/// first exception and stop the parser, so that it doesn't escape into expat's C call stack
+/// (XML_ParserFree's isCalledFromInsideHandler guard). For a self-closing element, expat may
+/// still invoke the matching EndElementHandler before it honors XML_StopParser, and that
+/// call can itself throw: that secondary exception is dropped.
+///
+/// Port of the trampolines `XMLParserHelper::StartElementHandler`,
+/// `XMLParserHelper::EndElementHandler` and `XMLParserHelper::CharacterDataHandler`
+/// (FileFormatIridasLook.cpp:267-288, 375-395, 461-482 @ v2.6.0).
+fn keep_first_exception(state: &StateRc, parser: &ParserHandle, result: Result<()>) {
+    if let Err(e) = result {
+        let mut st = state.borrow_mut();
+        if st.pending_exception.is_none() {
+            st.pending_exception = Some(e);
+            parser.stop_parser();
+        }
+    }
+}
+
 /// Start the parsing of one element.
 ///
-/// Port of `XMLParserHelper::StartElementHandler` (FileFormatIridasLook.cpp:249-331 @
-/// v2.5.2). expat never gives an empty name, so its "Internal error" can't happen.
+/// Port of `XMLParserHelper::StartElementHandlerImpl` (FileFormatIridasLook.cpp:291-372 @
+/// v2.6.0). expat never gives an empty name, so its "Internal error" can't happen.
 fn start_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
     let mut p = state.borrow_mut();
     if name.is_empty() {
@@ -335,7 +377,8 @@ fn start_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
 
 /// End the parsing of one element.
 ///
-/// Port of `XMLParserHelper::EndElementHandler` (FileFormatIridasLook.cpp:333-395 @ v2.5.2).
+/// Port of `XMLParserHelper::EndElementHandlerImpl` (FileFormatIridasLook.cpp:397-458 @
+/// v2.6.0).
 /// expat never gives an empty name, so its "XML internal parsing error." can't happen.
 fn end_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
     let mut p = state.borrow_mut();
@@ -382,8 +425,8 @@ fn end_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
 /// Handle of strings within an element: the LUT's size, and the text of its data without
 /// spaces, quotes and line feeds.
 ///
-/// Port of `XMLParserHelper::CharacterDataHandler` (FileFormatIridasLook.cpp:397-458 @
-/// v2.5.2).
+/// Port of `XMLParserHelper::CharacterDataHandlerImpl` (FileFormatIridasLook.cpp:484-544 @
+/// v2.6.0).
 fn character_data_handler(state: &StateRc, s: &[u8]) -> Result<()> {
     let mut p = state.borrow_mut();
 

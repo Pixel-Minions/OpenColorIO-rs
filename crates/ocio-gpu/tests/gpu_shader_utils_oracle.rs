@@ -32,6 +32,18 @@ fn languages() -> impl Iterator<Item = (GpuLanguage, oracle_gpu::GpuLanguage)> {
         .zip(oracle_gpu::GpuLanguage::ALL)
 }
 
+/// The Metal wrapper's form of a uniform array's declaration `type name[size];`, which 2.6.0
+/// binds instead of copying: `constant type* name;` (`rewriteArrayDeclarations`,
+/// GpuShaderClassWrapper.cpp:355-385 @ v2.6.0).
+fn metal_bound(declaration: &str) -> String {
+    let line = declaration.trim_end_matches('\n');
+    let (indent, rest) = line.split_at(line.len() - line.trim_start().len());
+    let (ty, rest) = rest.split_once(' ').expect(line);
+    let name = &rest[..rest.find('[').expect(line)];
+    assert!(rest.ends_with("];"), "{line}");
+    format!("{indent}constant {ty}* {name};\n")
+}
+
 /// Panics unless `text` has the lines of `block`, in a row, each whole, or without its
 /// indentation when `trim` is set (the indentation is then the writer's, not the helpers').
 /// A block without a line that isn't blank is refused: it would match any blank line, so a
@@ -614,7 +626,12 @@ fn helpers_write_the_wheels_lines() {
                             check_line(format!("if (!{})", utf8(new().cast_to_bool(name))));
                         }
                     }
-                    check_block(&utf8(ss.string()));
+                    let block = utf8(ss.string());
+                    if lang == GpuLanguage::Msl2_0 && base != "localBypass" {
+                        check_block(&metal_bound(&block));
+                    } else {
+                        check_block(&block);
+                    }
                 }
             }
             // MatrixOpGPU.cpp:15-66 @ v2.5.2.

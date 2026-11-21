@@ -335,12 +335,12 @@ impl MetalShaderClassWrapper {
         Ok(())
     }
 
-    /// The class: its constructor takes the parameters and copies each into its member. An
-    /// array (`name[size]`) comes with its element count, and the elements past the count are
-    /// set to 0.
+    /// The class: its constructor takes the parameters and binds each to its member. An array
+    /// (`name[size]`) comes with its element count, and its member is a pointer into constant
+    /// memory ([`Self::rewrite_array_declarations`]), bound rather than copied.
     ///
     /// Port of `MetalShaderClassWrapper::generateClassWrapperHeader`
-    /// (GpuShaderClassWrapper.cpp:151-218 @ v2.5.2).
+    /// (GpuShaderClassWrapper.cpp:151-192 @ v2.6.0).
     fn generate_class_wrapper_header(&self, kw: &GpuShaderText) -> Result<Vec<u8>> {
         self.check_class_name()?;
 
@@ -374,58 +374,50 @@ impl MetalShaderClassWrapper {
 
         kw.indent();
         for param in &self.function_parameters {
-            let open_angled_bracket_pos = find_byte(&param.name, b'[');
-            if !param.is_array {
-                kw.new_line()
-                    .put("this->")
-                    .put(&param.name)
-                    .put(" = ")
-                    .put(&param.name)
-                    .put(";");
-            } else {
-                let close_angled_bracket_pos = find_byte(&param.name, b']');
-                let variable_name = substr(&param.name, 0, open_angled_bracket_pos);
-
-                kw.new_line()
-                    .put("for(int i = 0; i < ")
-                    .put(get_array_length_variable_name(&variable_name))
-                    .put("; ++i)");
-                kw.new_line().put("{");
-                kw.indent();
-                kw.new_line()
-                    .put("this->")
-                    .put(&variable_name)
-                    .put("[i] = ")
-                    .put(&variable_name)
-                    .put("[i];");
-                kw.dedent();
-                kw.new_line().put("}");
-
-                kw.new_line()
-                    .put("for(int i = ")
-                    .put(get_array_length_variable_name(&variable_name))
-                    .put("; i < ")
-                    .put(substr(
-                        &param.name,
-                        open_angled_bracket_pos + 1,
-                        close_angled_bracket_pos
-                            .wrapping_sub(open_angled_bracket_pos)
-                            .wrapping_sub(1),
-                    ))
-                    .put("; ++i)");
-                kw.new_line().put("{");
-                kw.indent();
-                kw.new_line()
-                    .put("this->")
-                    .put(&variable_name)
-                    .put("[i] = 0;");
-                kw.dedent();
-                kw.new_line().put("}");
-            }
+            // Array members are pointers into constant memory (see rewriteArrayDeclarations) so
+            // they are bound rather than copied, using the parameter name without its array
+            // size.
+            let variable_name = substr(&param.name, 0, find_byte(&param.name, b'['));
+            kw.new_line()
+                .put("this->")
+                .put(&variable_name)
+                .put(" = ")
+                .put(&variable_name)
+                .put(";");
         }
         kw.dedent();
         kw.new_line().put("}");
         Ok(kw.string())
+    }
+
+    /// The declarations with each array member `type name[size];` replaced by a pointer into
+    /// constant memory, `constant type* name;` (the first occurrence of each parameter's
+    /// declaration): the struct then binds the uniform array instead of copying it per pixel.
+    ///
+    /// Port of `MetalShaderClassWrapper::rewriteArrayDeclarations`
+    /// (GpuShaderClassWrapper.cpp:355-385 @ v2.6.0).
+    fn rewrite_array_declarations(&self, declarations: &[u8]) -> Vec<u8> {
+        let mut rewritten = declarations.to_vec();
+        for param in &self.function_parameters {
+            if !param.is_array {
+                continue;
+            }
+
+            let declaration = [param.ty.as_slice(), b" ", param.name.as_slice(), b";"].concat();
+            let pos = find(&rewritten, &declaration, 0);
+            if pos != NPOS {
+                let replacement = [
+                    b"constant ".as_slice(),
+                    param.ty.as_slice(),
+                    b"* ",
+                    substr(&param.name, 0, find_byte(&param.name, b'[')).as_slice(),
+                    b";",
+                ]
+                .concat();
+                rewritten.splice(pos..pos + declaration.len(), replacement);
+            }
+        }
+        rewritten
     }
 
     /// Closes the class, and writes the function that builds it from the parameters and calls
@@ -535,7 +527,7 @@ impl MetalShaderClassWrapper {
         let mut class_wrap_header = b"\n// Declaration of class wrapper\n\n".to_vec();
         class_wrap_header.extend_from_slice(&st.string());
 
-        class_wrap_header.extend_from_slice(original_header);
+        class_wrap_header.extend_from_slice(&self.rewrite_array_declarations(original_header));
         Ok(class_wrap_header)
     }
 

@@ -117,6 +117,11 @@ fn getters(c: &Config) -> Vec<Getter> {
             json!(c.is_strict_parsing_enabled()),
         ),
         g(
+            "getUseDisplayAliases",
+            vec![],
+            json!(c.use_display_aliases()),
+        ),
+        g(
             "getDefaultLumaCoefs",
             vec![],
             Value::Array(
@@ -290,6 +295,68 @@ fn getters(c: &Config) -> Vec<Getter> {
             vec![s(&name)],
             json!(c.is_inactive_color_space(&name)),
         ));
+        // 2.6: whether it is used, by its name and by each alias (either side resolves to the
+        // canonical name), and the display each names (with use_display_aliases, through the
+        // display color spaces) and its description.
+        let mut names = vec![name.clone()];
+        if let Some(cs) = c.color_space(&name) {
+            names.extend((0..cs.num_aliases()).map(|a| cs.alias(a).to_vec()));
+        }
+        for n in names {
+            // 2.6 Color Interop IDs: the local ID of the name or alias, and the color space of
+            // that ID, of the name and of the name under a namespace and under `local:`.
+            let mut ids = vec![n.clone(), [b"ns:".as_slice(), &n].concat()];
+            ids.push([b"local:".as_slice(), &n].concat());
+            out.push(g(
+                "generateLocalIDForColorSpace",
+                vec![s(&n)],
+                match c.generate_local_id_for_color_space(&n) {
+                    Ok(id) => {
+                        ids.push(id.clone());
+                        s(&id)
+                    }
+                    Err(e) => json!({"exception": s(e.what())}),
+                },
+            ));
+            for id in ids {
+                out.push(g(
+                    "findColorSpaceForID",
+                    vec![s(&id)],
+                    match c.find_color_space_for_id(&id) {
+                        Some(cs) => s(&cs.to_bytes()),
+                        None => Value::Null,
+                    },
+                ));
+            }
+            out.push(g(
+                "isColorSpaceUsed",
+                vec![s(&n)],
+                json!(c.is_color_space_used(&n)),
+            ));
+            out.push(g(
+                "getCanonicalDisplayName",
+                vec![s(&n)],
+                s(c.canonical_display_name(&n)),
+            ));
+            out.push(g(
+                "getDisplayDescription",
+                vec![s(&n)],
+                s(c.display_description(&n)),
+            ));
+        }
+    }
+    for i in 0..c.num_roles() {
+        let role = c.role_name(i).to_vec();
+        out.push(g(
+            "isColorSpaceUsed",
+            vec![s(&role)],
+            json!(c.is_color_space_used(&role)),
+        ));
+        out.push(g(
+            "getCanonicalDisplayName",
+            vec![s(&role)],
+            s(c.canonical_display_name(&role)),
+        ));
     }
     // The current context, then strings it resolves (the oracle stores it as `ctx`).
     out.push(g("getCurrentContext", vec![], Value::Null));
@@ -331,12 +398,43 @@ fn getters(c: &Config) -> Vec<Getter> {
         ));
         out.push(g(
             "getDisplayViewDescription",
-            args,
+            args.clone(),
             s(c.display_view_description(display, view)),
+        ));
+        // The view's aliases (2.6).
+        let aliases: Vec<Vec<u8>> = (0..c.num_display_view_aliases(display, view))
+            .map(|i| c.display_view_alias(display, view, i).to_vec())
+            .collect();
+        out.push(g(
+            "getDisplayViewAliases",
+            args.clone(),
+            list(aliases.iter().cloned()),
+        ));
+        // The names the display and view resolve to (2.6). The probes by other names of the
+        // view and of its display come from the wheel's dump of the config (`dump_probes`).
+        out.push(g(
+            "getCanonicalViewName",
+            args.clone(),
+            s(c.canonical_view_name(display, view)),
+        ));
+        out.push(g(
+            "getResolvedDisplayViewColorSpaceName",
+            args.clone(),
+            s(c.resolved_display_view_color_space_name(display, view)),
         ));
     };
     for i in 0..c.num_displays_all() {
         let display = c.display_all(i).to_vec();
+        out.push(g(
+            "getCanonicalDisplayName",
+            vec![s(&display)],
+            s(c.canonical_display_name(&display)),
+        ));
+        out.push(g(
+            "getDisplayDescription",
+            vec![s(&display)],
+            s(c.display_description(&display)),
+        ));
         out.push(g(
             "getViews",
             vec![s(&display)],
@@ -391,6 +489,148 @@ fn normalized(call: &Value) -> Value {
     }
 }
 
+/// A value of the wheel's dump as the port writes it: a string the binding couldn't decode as
+/// its bytes.
+fn dumped(value: &Value) -> Value {
+    match value.get("undecodable") {
+        Some(h) => json!({"bytes": h}),
+        None => value.clone(),
+    }
+}
+
+/// The port's answers to the 2.6 display and view probes of the wheel's dump of the config
+/// (`dump_config`, oracle/ocio_oracle/config_api.py): each display's `display_probes`
+/// (`getCanonicalDisplayName`), and each view's `hasDisplayViewAlias`, `by_probe` and
+/// `by_display` (`getCanonicalViewName` and `getResolvedDisplayViewColorSpaceName` of each
+/// probe, by the display and by each of its display probes), the shared views' with display
+/// "". Returns the differences.
+fn dump_probes(c: &Config, dump: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut compare = |what: String, wheel: &Value, port: Value| {
+        if dumped(wheel) != port {
+            out.push(format!("{what}\n  wheel {wheel}\n  port  {port}"));
+        }
+    };
+    let by_probe = |display: &[u8],
+                    view: &[u8],
+                    probes: &Value,
+                    compare: &mut dyn FnMut(String, &Value, Value)| {
+        for p in probes.as_array().expect("probes") {
+            let probe = bytes(&p[0]);
+            let at = |name: &str| {
+                format!(
+                    "{name}({:?}, {:?}) (view {:?})",
+                    String::from_utf8_lossy(display),
+                    String::from_utf8_lossy(&probe),
+                    String::from_utf8_lossy(view)
+                )
+            };
+            compare(
+                at("getCanonicalViewName"),
+                &p[1],
+                s(c.canonical_view_name(display, &probe)),
+            );
+            compare(
+                at("getResolvedDisplayViewColorSpaceName"),
+                &p[2],
+                s(c.resolved_display_view_color_space_name(display, &probe)),
+            );
+        }
+    };
+    let view_probes =
+        |display: &[u8], entry: &Value, compare: &mut dyn FnMut(String, &Value, Value)| {
+            let view = bytes(&entry["view"]);
+            for p in entry["hasDisplayViewAlias"]
+                .as_array()
+                .expect("hasDisplayViewAlias")
+            {
+                let probe = bytes(&p[0]);
+                compare(
+                    format!(
+                        "hasDisplayViewAlias({:?}, {:?}, {:?})",
+                        String::from_utf8_lossy(display),
+                        String::from_utf8_lossy(&view),
+                        String::from_utf8_lossy(&probe)
+                    ),
+                    &p[1],
+                    json!(c.has_display_view_alias(display, &view, &probe)),
+                );
+            }
+            by_probe(display, &view, &entry["by_probe"], compare);
+            // A display's view has its by_display list, a shared view's entry (display "")
+            // none: a dump without it fails rather than probing less.
+            match (display.is_empty(), entry.get("by_display")) {
+                (false, Some(by_display)) => {
+                    for d in by_display.as_array().expect("by_display") {
+                        by_probe(&bytes(&d[0]), &view, &d[1], compare);
+                    }
+                }
+                (true, None) => {}
+                (_, by_display) => panic!(
+                    "the dump's view {:?} of display {:?} has by_display {by_display:?}",
+                    String::from_utf8_lossy(&view),
+                    String::from_utf8_lossy(display)
+                ),
+            }
+        };
+    let mut probed = 0;
+    for display in dump["displays"].as_array().expect("displays") {
+        let name = bytes(&display["display"]);
+        for p in display["display_probes"]
+            .as_array()
+            .expect("display_probes")
+        {
+            let probe = bytes(&p[0]);
+            compare(
+                format!(
+                    "getCanonicalDisplayName({:?})",
+                    String::from_utf8_lossy(&probe)
+                ),
+                &p[1],
+                s(c.canonical_display_name(&probe)),
+            );
+        }
+        for view in display["views"].as_array().expect("views") {
+            view_probes(&name, view, &mut compare);
+            probed += 1;
+        }
+    }
+    for view in dump["shared_views"].as_array().expect("shared_views") {
+        view_probes(b"", view, &mut compare);
+        probed += 1;
+    }
+    // Every view of the port's config was probed: the dump lists each display's views of both
+    // types and its active ones (each once), and the shared views.
+    let port_views: usize = (0..c.num_displays_all())
+        .map(|i| {
+            let display = c.display_all(i).to_vec();
+            let mut views: Vec<Vec<u8>> = Vec::new();
+            for t in [ViewType::Shared, ViewType::DisplayDefined] {
+                for j in 0..c.num_views_of_type(t, &display) {
+                    let v = c.view_of_type(t, &display, j).to_vec();
+                    if !views.contains(&v) {
+                        views.push(v);
+                    }
+                }
+            }
+            for j in 0..c.num_views(&display) {
+                let v = c.view(&display, j).to_vec();
+                if !views.contains(&v) {
+                    views.push(v);
+                }
+            }
+            views.len()
+        })
+        .sum::<usize>()
+        + c.num_views_of_type(ViewType::Shared, b"") as usize;
+    compare(
+        "the views the dump probes".to_string(),
+        &json!(probed),
+        json!(port_views),
+    );
+    out
+}
+
 /// Checks each config against the wheel, both reading an empty environment; panics listing
 /// every difference.
 fn check(cases: &[(&str, Vec<u8>)]) {
@@ -416,7 +656,7 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
         .iter()
         .zip(&port_getters)
         .map(|((_, text), getters)| {
-            let calls: Vec<Value> = getters
+            let mut calls: Vec<Value> = getters
                 .iter()
                 .map(|(name, args, _)| {
                     if name == "getCurrentContext" {
@@ -428,6 +668,11 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
                     }
                 })
                 .collect();
+            // Last, so that the getters' calls keep and log what they did before it: the
+            // wheel's dump of the config, whose view probes the port answers too.
+            if !getters.is_empty() {
+                calls.push(json!({"dump": "config"}));
+            }
             BatchCall {
                 cmd: "config_calls",
                 args: json!({"config": {"yaml": {"bytes": hex(text)}}, "calls": calls,
@@ -476,7 +721,7 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
                     ));
                 }
             }
-            Ok(_) => {
+            Ok(port_config) => {
                 if !config.is_null() {
                     failures.push(format!("{label}: the wheel fails: {config}"));
                     continue;
@@ -497,6 +742,13 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
                         ));
                     }
                 }
+                assert_eq!(results.len(), port_getters_of.len() + 1, "{label}");
+                let dump = &results[port_getters_of.len()]["result"];
+                failures.extend(
+                    dump_probes(port_config, dump)
+                        .into_iter()
+                        .map(|d| format!("{label}: {d}")),
+                );
             }
         }
     }
@@ -535,6 +787,11 @@ fn configs_load_as_in_the_wheel() {
             "version 2.5",
             b"ocio_profile_version: 2.5\nroles: {default: raw}\n".to_vec(),
         ),
+        (
+            "version 2.6",
+            b"ocio_profile_version: 2.6\nroles: {default: raw}\n".to_vec(),
+        ),
+        ("version 2.7", b"ocio_profile_version: 2.7\n".to_vec()),
         ("no version", b"roles: {default: raw}\n".to_vec()),
         ("version x", b"ocio_profile_version: x\n".to_vec()),
         ("version 2.x", b"ocio_profile_version: 2.x\n".to_vec()),
@@ -1186,6 +1443,18 @@ fn configs_their_versions_cant_have_are_refused() {
         ),
         ("DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR", 4),
         ("display - cie-xyz-d65_to_displayp3-hdr", 4),
+        // The MIRROR NEGS styles of 2.5, whose check 2.6.0 added.
+        ("DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS", 5),
+        (
+            "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS",
+            5,
+        ),
+        ("DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS", 5),
+        ("display - cie-xyz-d65_to_srgb - mirror negs", 5),
+        ("DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS", 5),
+        // The style of 2.6.
+        ("APPLE_LOG-APPLEWG_to_ACES2065-1", 6),
+        ("apple_log-applewg_to_aces2065-1", 6),
     ] {
         for minor in [first - 1, first] {
             cases.push((
@@ -1205,9 +1474,14 @@ fn configs_their_versions_cant_have_are_refused() {
         ("RGB_TO_HSY_LIN", 5),
         ("RGB_TO_HSY_LOG", 5),
         ("RGB_TO_HSY_VID", 5),
+        ("ACES2_RGB_TO_HMJ", 6),
+        ("aces2_rgb_to_hmj", 6),
     ] {
         let params = match style {
             "ACES_GamutComp13" => ", params: [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2]",
+            "ACES2_RGB_TO_HMJ" | "aces2_rgb_to_hmj" => {
+                ", params: [0.7347, 0.2653, 0, 1, 0.0001, -0.077, 0.32168, 0.33767]"
+            }
             "ACES2_OutputTransform" => {
                 ", params: [100, 0.7347, 0.2653, 0, 1, 0.0001, -0.077, 0.3127, 0.329]"
             }
@@ -1415,4 +1689,336 @@ fn active_displays_from_the_environment_as_in_the_wheel() {
     for value in ["qq:d", "qq", " , "] {
         check_env(&[("OCIO_ACTIVE_DISPLAYS", value)], &[(value, text.clone())]);
     }
+}
+
+/// A version 2.6 config of the color spaces `raw` (the default role's), `cs` and the display
+/// color space `dcs` (alias `dcs_alias`), with `extra` after them.
+fn v26(extra: &str) -> Vec<u8> {
+    format!(
+        "ocio_profile_version: 2.6\nenvironment: {{}}\nroles: {{default: raw}}\ncolorspaces:\n  \
+         - !<ColorSpace> {{name: raw}}\n  - !<ColorSpace> {{name: cs}}\ndisplay_colorspaces:\n  \
+         - !<ColorSpace> {{name: dcs, aliases: [dcs_alias]}}\nview_transforms:\n  - \
+         !<ViewTransform> {{name: vt, from_scene_reference: !<MatrixTransform> {{}}}}\n{extra}"
+    )
+    .into_bytes()
+}
+
+/// View aliases and `use_display_aliases` (2.6): read, kept, written and validated as in the
+/// wheel, and the loader's refusals of colliding names and aliases, of aliases on the virtual
+/// display's views and of what a version before 2.6 can't have.
+#[test]
+fn view_aliases_load_as_in_the_wheel() {
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "aliases of views and shared views",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, view_transform: vt, display_colorspace: \
+                 <USE_DISPLAY_NAME>, aliases: [sv_a, sv_b]}\ndisplays:\n  dcs:\n    - !<View> \
+                 {name: v1, colorspace: raw, aliases: [v1_b, v1_a]}\n    - !<View> {name: v2, \
+                 colorspace: cs, looks: l, rule: r, description: d, aliases: [v2_a]}\n    - \
+                 !<Views> [sv]\n  other:\n    - !<View> {name: v3, colorspace: raw, aliases: \
+                 [v1_a]}\n",
+            ),
+        ),
+        (
+            "use_display_aliases true",
+            v26(
+                "use_display_aliases: true\ndisplays:\n  dcs:\n    - !<View> {name: v, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "use_display_aliases false",
+            v26(
+                "use_display_aliases: false\ndisplays:\n  dcs:\n    - !<View> {name: v, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "use_display_aliases not a bool",
+            v26("use_display_aliases: maybe\n"),
+        ),
+        (
+            "use_display_aliases in 2.5",
+            ver("2.5", "use_display_aliases: true\n"),
+        ),
+        (
+            "use_display_aliases false in 2.5",
+            ver("2.5", "use_display_aliases: false\n"),
+        ),
+        (
+            "aliases that need quotes",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: [\"a,b\", \
+                 \"c: d\", \"'q'\", \"\\\"dq\\\"\", \"x\\xe9\", \" sp \", \"\"]}\n",
+            ),
+        ),
+        (
+            "an alias with a NUL",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: [\"a\0b\", c]}\n",
+            ),
+        ),
+        (
+            "aliases empty",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: []}\n"),
+        ),
+        (
+            "aliases null",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: ~}\n"),
+        ),
+        (
+            "aliases a scalar",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: a}\n"),
+        ),
+        (
+            "aliases a map",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: {a: b}}\n"),
+        ),
+        (
+            "an alias that is the view's own name",
+            v26("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: [V, v]}\n"),
+        ),
+        (
+            "an alias naming a sibling view",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v1, colorspace: raw}\n    - !<View> \
+                 {name: v2, colorspace: raw, aliases: [V1]}\n",
+            ),
+        ),
+        (
+            "a name that is a sibling's alias",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v1, colorspace: raw, aliases: [a]}\n    \
+                 - !<View> {name: A, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "aliases shared by siblings",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v1, colorspace: raw, aliases: [x, a]}\n    \
+                 - !<View> {name: v2, colorspace: raw, aliases: [y, A]}\n",
+            ),
+        ),
+        (
+            "a view replaced with other aliases",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v1, colorspace: raw, aliases: [a]}\n    \
+                 - !<View> {name: v2, colorspace: raw, aliases: [b]}\n    - !<View> {name: V1, \
+                 colorspace: cs, aliases: [c]}\n",
+            ),
+        ),
+        (
+            "a view alias naming a shared view of the display",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [s]}\n\
+                 displays:\n  d:\n    - !<Views> [sv]\n    - !<View> {name: v, colorspace: raw, \
+                 aliases: [S]}\n",
+            ),
+        ),
+        (
+            "a shared view whose alias names a view of the display",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [v]}\n\
+                 displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n    - !<Views> \
+                 [sv]\n",
+            ),
+        ),
+        (
+            "shared views sharing an alias",
+            v26(
+                "shared_views:\n  - !<View> {name: sv1, colorspace: raw, aliases: [a]}\n  - \
+                 !<View> {name: sv2, colorspace: raw, aliases: [b, A]}\n",
+            ),
+        ),
+        (
+            "a shared view named as another's alias",
+            v26(
+                "shared_views:\n  - !<View> {name: sv1, colorspace: raw, aliases: [a]}\n  - \
+                 !<View> {name: a, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "a shared view replaced",
+            v26(
+                "shared_views:\n  - !<View> {name: sv1, colorspace: raw, aliases: [a]}\n  - \
+                 !<View> {name: sv1, colorspace: cs, aliases: [b]}\n",
+            ),
+        ),
+        (
+            "an unused shared view's alias names a view",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [v]}\n\
+                 displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "view aliases in 2.5",
+            ver(
+                "2.5",
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw, aliases: [a]}\n",
+            ),
+        ),
+        (
+            "shared view aliases in 2.5",
+            ver(
+                "2.5",
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [a]}\n\
+                 displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "virtual display view aliases",
+            v26(
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\nvirtual_display:\n  \
+                 - !<View> {name: vv, colorspace: raw, aliases: [a]}\n",
+            ),
+        ),
+        (
+            "virtual display shared view with aliases",
+            v26(
+                "shared_views:\n  - !<View> {name: sv, colorspace: raw, aliases: [a]}\n\
+                 displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\nvirtual_display:\n  \
+                 - !<Views> [sv]\n",
+            ),
+        ),
+    ];
+    check(&cases);
+}
+
+/// Display and view names resolved as in the wheel (2.6): canonical display names through the
+/// display color spaces and their aliases (with and without `use_display_aliases`), canonical
+/// view names through view aliases, the views' resolved color spaces (`<USE_DISPLAY_NAME>`,
+/// aliases, roles, named transforms, names that resolve to nothing), display descriptions, and
+/// whether each color space, alias and role is used.
+#[test]
+fn display_aliases_resolve_as_in_the_wheel() {
+    const DISPLAY_SPACES: &str = "  - !<ColorSpace> {name: d1, aliases: [d1_old, D1 alias], \
+                                  description: the first}\n  - !<ColorSpace> {name: d2_cs, \
+                                  aliases: [d2], description: the second}\n  - !<ColorSpace> \
+                                  {name: unused_dcs, aliases: [d3], description: unused}\n";
+    let config = |use_display_aliases: &str, extra: &str| {
+        format!(
+            "ocio_profile_version: 2.6\n{use_display_aliases}environment: {{}}\nroles: \
+             {{default: raw, cs_role: cs, d_role: d1, dr: d2_cs}}\ncolorspaces:\n  - !<ColorSpace> {{name: \
+             raw}}\n  - !<ColorSpace> {{name: cs, aliases: [cs_old]}}\n  - !<ColorSpace> \
+             {{name: d4, description: scene}}\n  - !<ColorSpace> {{name: s1, aliases: [sd]}}\n  \
+             - !<ColorSpace> {{name: x, aliases: [x_old]}}\n\
+             display_colorspaces:\n{DISPLAY_SPACES}\
+             view_transforms:\n  - !<ViewTransform> {{name: vt, from_scene_reference: \
+             !<MatrixTransform> {{}}}}\nnamed_transforms:\n  - !<NamedTransform> {{name: nt, \
+             aliases: [nt_old], transform: !<MatrixTransform> {{}}}}\n{extra}"
+        )
+        .into_bytes()
+    };
+    let displays = "shared_views:\n  - !<View> {name: sv, view_transform: vt, display_colorspace: \
+                    <USE_DISPLAY_NAME>, aliases: [sv_old]}\ndisplays:\n  d1:\n    - !<View> \
+                    {name: v1, view_transform: vt, display_colorspace: d1_old, aliases: [v1_old]}\n\
+                    \x20   - !<View> {name: v2, colorspace: cs_old}\n    - !<View> {name: v3, \
+                    colorspace: cs_role}\n    - !<View> {name: v4, colorspace: nt_old}\n    - \
+                    !<View> {name: v5, colorspace: x_old}\n    - \
+                    !<Views> [sv]\n  d2:\n    - !<Views> [sv]\n  d3:\n    - !<View> {name: v, \
+                    colorspace: raw}\n  d4:\n    - !<View> {name: v, colorspace: d4}\n  sd:\n    - \
+                    !<View> {name: v, colorspace: s1}\n  d_role:\n    \
+                    - !<View> {name: v, view_transform: vt, display_colorspace: nothing}\n";
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "display aliases on",
+            config("use_display_aliases: true\n", displays),
+        ),
+        ("display aliases off", config("", displays)),
+        (
+            "a display named by an alias",
+            config(
+                "use_display_aliases: true\n",
+                "displays:\n  D1 alias:\n    - !<View> {name: v, view_transform: vt, \
+                 display_colorspace: d1}\n  d1_old:\n    - !<View> {name: w, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "views of an inactive display",
+            config(
+                "use_display_aliases: true\n",
+                "displays:\n  d1:\n    - !<View> {name: v, colorspace: d1, aliases: [old]}\n  \
+                 other:\n    - !<View> {name: o, colorspace: raw}\nactive_displays: [other]\n\
+                 active_views: [o]\ninactive_colorspaces: [d1]\n",
+            ),
+        ),
+    ];
+    // Every config loads, so that the getters, not the reader's error, are compared.
+    for (label, text) in &cases {
+        assert!(Config::create_from_stream(text).is_ok(), "{label}");
+    }
+    check(&cases);
+}
+
+/// Color Interop IDs as in the wheel (2.6): the local ID of every color space name and alias
+/// and the color space each ID finds, in configs named for the sanitizing (upper case, spaces,
+/// punctuation, bytes past ASCII), the reserved ASWF config names (and names that only look
+/// like them), and a config named `local`.
+#[test]
+fn color_interop_ids_as_in_the_wheel() {
+    let spaces = "colorspaces:\n  - !<ColorSpace> {name: raw}\n  - !<ColorSpace> {name: ACES cg, \
+                  aliases: [lin_ap1, ACES CG alias]}\n  - !<ColorSpace> {name: \"Odd: name, \
+                  {x}\", aliases: [\"Also odd!\", clean_alias]}\n  - !<ColorSpace> {name: \"caf\
+                  \u{e9} \u{4e2d}\", aliases: [\"\t tab\"]}\n  - !<ColorSpace> {name: \"ns:raw\"}\
+                  \n  - !<ColorSpace> {name: \"My Color Space?\"}\n  - !<ColorSpace> {name: \
+                  \"My Color Space!\"}\n";
+    let named = |name: &str| {
+        format!(
+            "ocio_profile_version: 2.6\nname: {name}\nenvironment: {{}}\nroles: {{default: raw, \
+             r: ACES cg}}\n{spaces}"
+        )
+        .into_bytes()
+    };
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("no name", named("\"\"")),
+        ("My Studio!", named("My Studio!")),
+        ("mystudio*", named("mystudio*")),
+        ("ns", named("ns")),
+        ("local", named("local")),
+        ("a name with a colon", named("\"a:b\"")),
+        ("a name past ASCII", named("\"st\u{fc}dio\"")),
+        ("reserved cg", named("cg-config-v4.0.0_aces-v2.0_ocio-v2.5")),
+        (
+            "reserved upper case",
+            named("CG-config-v4.0.0_aces-v2.0_ocio-v2.5"),
+        ),
+        (
+            "reserved future",
+            named("studio-config-v5.1.2_aces-v2.2.1_ocio-v2.7"),
+        ),
+        (
+            "reserved v10",
+            named("cg-config-v10.0.0_aces-v2.0_ocio-v2.5"),
+        ),
+        (
+            "not reserved v3",
+            named("studio-config-v3.0.0_aces-v2.0_ocio-v2.4"),
+        ),
+        (
+            "not reserved suffix",
+            named("cg-config-v4.0.0_aces-v2.0_ocio-v2.5_custom"),
+        ),
+        (
+            "not reserved huge",
+            named("cg-config-v99999999999.0.0_aces-v2.0_ocio-v2.5"),
+        ),
+        (
+            "not reserved two digits",
+            named("cg-config-v4.0_aces-v2.0_ocio-v2.5"),
+        ),
+        (
+            "not reserved empty aces",
+            named("cg-config-v4.0.0_aces-v_ocio-v2.5"),
+        ),
+        ("reserved dots", named("cg-config-v4.0.0_aces-v..._ocio-v.")),
+        (
+            "reserved leading zeros",
+            named("cg-config-v0004.0.0_aces-v2_ocio-v2"),
+        ),
+    ];
+    // Every config loads, so that the getters, not the reader's error, are compared.
+    for (label, text) in &cases {
+        assert!(Config::create_from_stream(text).is_ok(), "{label}");
+    }
+    check(&cases);
 }

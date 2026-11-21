@@ -1,4 +1,4 @@
-ocio_profile_version: 2.5
+ocio_profile_version: 2.6
 
 environment:
   {}
@@ -3269,7 +3269,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingHueCurveTransform>
       style: video
-      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 1.401298e-45, 0, 0, 0, 0]}
+      hue_sat: {control_points: [0, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1], slopes: [0, 1e-45, 0, 0, 0, 0]}
       direction: inverse
 
   - !<ColorSpace>
@@ -3281,7 +3281,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingHueCurveTransform>
       style: log
-      hue_sat: {control_points: [0, 1.401298e-45, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      hue_sat: {control_points: [0, 1e-45, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
 
   - !<ColorSpace>
     name: t0292
@@ -3292,7 +3292,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingHueCurveTransform>
       style: log
-      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, 3.402823e+38, 0]}
+      sat_lum: {control_points: [0, 1, 0.5, 1, 1, 1], slopes: [0, 3.402824e+38, 0]}
 
   - !<ColorSpace>
     name: t0293
@@ -3303,7 +3303,7 @@ colorspaces:
     allocation: uniform
     to_scene_reference: !<GradingHueCurveTransform>
       style: linear
-      hue_sat: {control_points: [-3.402823e+38, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
+      hue_sat: {control_points: [-3.402824e+38, 1, 0.1666667, 1, 0.3333333, 1, 0.5, 1, 0.6666667, 1, 0.8333333, 1]}
 
   - !<ColorSpace>
     name: t0294

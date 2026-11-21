@@ -23,7 +23,7 @@ fn unhex(s: &str) -> Vec<u8> {
 }
 
 /// The matrix of `OCIO_ADD_TEST(CTFTransform, matrix3x3_clf)`
-/// (tests/cpu/fileformats/FileFormatCTF_tests.cpp:5653-5687 @ v2.5.2).
+/// (tests/cpu/fileformats/FileFormatCTF_tests.cpp:6138-6172 @ v2.6.0).
 fn matrix3x3() -> Value {
     let m = [
         1. / 3.,
@@ -52,7 +52,7 @@ fn matrix3x3() -> Value {
 
 /// Upstream's expected text of that test.
 const MATRIX3X3_CLF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<ProcessList compCLFversion="3" id="UID42">
+<ProcessList compCLFversion="3" xmlns="http://www.smpte-ra.org/ns/2136-1/2024" id="UID42">
     <Matrix inBitDepth="10i" outBitDepth="10i">
         <Array dim="3 3">
   0.333333333333333    3.33333333333333    33.3333333333333
@@ -79,7 +79,7 @@ fn text_mode(text: &[u8]) -> Vec<u8> {
     }
 }
 
-/// Port of the checks of `OCIO_ADD_TEST(CTFTransform, matrix3x3_clf)` @ v2.5.2, through the
+/// Port of the checks of `OCIO_ADD_TEST(CTFTransform, matrix3x3_clf)` @ v2.6.0, through the
 /// binding: the group with the id `UID42` written as CLF is upstream's text; the file
 /// overload writes it in text mode.
 #[test]

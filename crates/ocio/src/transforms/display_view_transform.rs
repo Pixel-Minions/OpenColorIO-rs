@@ -21,7 +21,6 @@ use crate::color_space::ColorSpace;
 use crate::config::Config;
 use crate::context::Context;
 use crate::context_variable_utils::collect_context_variables;
-use crate::display::View;
 use crate::look::collect_look_context_variables;
 use crate::look_parse::LookParseResult;
 use crate::named_transform::NamedTransform;
@@ -542,7 +541,9 @@ struct DisplayOps<'c> {
 /// aren't on the stack while the ops build (docs/improvements.md, U-58).
 ///
 /// Part of the port of `BuildDisplayOps` (src/OpenColorIO/transforms/
-/// DisplayViewTransform.cpp:295-427 @ v2.5.2).
+/// DisplayViewTransform.cpp:295-450 @ v2.6.0): the display and the view are resolved first
+/// ([`Config::canonical_display_name`], [`Config::canonical_view_name`]), the errors naming
+/// them as the transform spells them.
 #[inline(never)]
 fn display_ops<'c>(
     config: &'c Config,
@@ -570,17 +571,37 @@ fn display_ops<'c>(
     };
 
     let display = c_str(display_view_transform.display());
-    if config.num_views(display) == 0 {
+
+    // Config authors may opt-in to using display color space names/aliases as aliases for
+    // display names. Resolve those to the actual display name.
+    let canonical_display = config.canonical_display_name(display);
+    let resolved_display = if canonical_display.is_empty() {
+        display
+    } else {
+        canonical_display
+    };
+
+    if config.num_views(resolved_display) == 0 {
         return Err(dvt_error(&[b" Display '", display, b"' not found."]));
     }
     let view = c_str(display_view_transform.view());
 
+    // A view may have its own aliases. Resolving a view by one of its aliases is always active.
+    // Resolve those to the actual view name.
+    let canonical_view = config.canonical_view_name(resolved_display, view);
+    let resolved_view = if canonical_view.is_empty() {
+        view
+    } else {
+        canonical_view
+    };
+
     // Get the view transform if any: if it exists, it can be a view transform or a named
     // transform.
-    let view_transform_name = config.display_view_transform_name(display, view);
+    let view_transform_name = config.display_view_transform_name(resolved_display, resolved_view);
     let mut view_transform = None;
     let mut view_named_transform = None;
     if !view_transform_name.is_empty() {
+        // If there is both a VT and NT with that name, the ViewTransform takes priority.
         view_transform = config.view_transform(view_transform_name);
         if view_transform.is_none() {
             view_named_transform = config.named_transform(view_transform_name);
@@ -595,17 +616,18 @@ fn display_ops<'c>(
         }
     }
 
-    // Get the color space associated to the (display, view) pair.
-    // (Returns an empty string if the view does not exist.  This is trapped below.)
-    let cs_name = config.display_view_color_space_name(display, view);
+    // Get the color space associated to the (display, view) pair. This also takes care of the
+    // case of a shared view containing a view transform that sets the color space to
+    // <USE_DISPLAY_NAME>, by looking for a display color space with the same name as the
+    // display. (Returns an empty string if the view does not exist. This is trapped below.)
+    let display_color_space_name =
+        config.resolved_display_view_color_space_name(resolved_display, resolved_view);
 
-    // A shared view containing a view transform may set the color space to <USE_DISPLAY_NAME>,
-    // in which case we look for a display color space with the same name as the display.
-    let display_color_space_name = if View::use_display_name(cs_name) {
-        display
-    } else {
-        c_str(cs_name)
-    };
+    // At this point, displayColorSpaceName is typically one of the following strings:
+    //   1. The "colorspace" attribute of the View, if there is no "view_transform".
+    //   2. The display color space named after the View's display, if it's a shared_view and
+    //      the "display_colorspace" is "<USE_DISPLAY_NAME>".
+    //   3. Else, the "display_colorspace" string if it's a View with a "view_transform".
 
     let display_color_space = config.color_space(display_color_space_name);
     let mut cs_named_transform = None;
@@ -657,7 +679,7 @@ fn display_ops<'c>(
     // Get looks to be applied, if specified.
     let mut looks = LookParseResult::default();
     if !display_view_transform.looks_bypass() {
-        looks.parse(config.display_view_looks(display, view))?;
+        looks.parse(config.display_view_looks(resolved_display, resolved_view))?;
     }
 
     Ok(Some(Box::new(DisplayOps {
@@ -675,8 +697,8 @@ fn display_ops<'c>(
 /// space, through the view's looks, to the view's color space or through its view transform (or
 /// named transform) to its display color space; inverse, the other way.
 ///
-/// Port of `BuildDisplayOps` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:295-528 @
-/// v2.5.2). What it builds from, through and to comes from [`display_ops`], and each direction
+/// Port of `BuildDisplayOps` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:295-547 @
+/// v2.6.0). What it builds from, through and to comes from [`display_ops`], and each direction
 /// builds in its own function, so that the frames on the stack while the ops build are small
 /// (docs/improvements.md, U-58).
 pub(crate) fn build_display_ops(
@@ -904,7 +926,8 @@ fn build_display_ops_inverse<'c>(
 /// direction in use doesn't need.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, const DisplayViewTransform
-/// &, ContextRcPtr &)` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:530-600 @ v2.5.2).
+/// &, ContextRcPtr &)` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:549-636 @ v2.6.0),
+/// which resolves the display and the view as [`build_display_ops`] does.
 pub(crate) fn collect_display_view_transform_context_variables(
     config: &Config,
     context: &Context,
@@ -922,7 +945,24 @@ pub(crate) fn collect_display_view_transform_context_variables(
         found_context_vars = true;
     }
 
-    let cs_name = c_str(config.display_view_color_space_name(tr.display(), tr.view()));
+    // Resolve the display and view the same way BuildDisplayOps does, so that a
+    // DisplayViewTransform using an old display or view name still finds the right color space,
+    // view transform, and looks.
+    let mut display = c_str(tr.display()).to_vec();
+    let canonical_display = config.canonical_display_name(&display);
+    if !canonical_display.is_empty() {
+        display = canonical_display.to_vec();
+    }
+
+    let mut view = c_str(tr.view()).to_vec();
+    let canonical_view = config.canonical_view_name(&display, &view).to_vec();
+    if !canonical_view.is_empty() {
+        view = canonical_view;
+    }
+
+    // Note that this also handles a shared view whose display color space is
+    // <USE_DISPLAY_NAME>.
+    let cs_name = c_str(config.resolved_display_view_color_space_name(&display, &view));
     if !cs_name.is_empty() {
         let src = config.color_space(cs_name);
         if collect_color_space_context_variables(config, context, src, used_context_vars)? {
@@ -930,7 +970,7 @@ pub(crate) fn collect_display_view_transform_context_variables(
         }
     }
 
-    let vt_name = c_str(config.display_view_transform_name(tr.display(), tr.view()));
+    let vt_name = c_str(config.display_view_transform_name(&display, &view));
     if !vt_name.is_empty()
         && let Some(vt) = config.view_transform(vt_name)
     {
@@ -948,7 +988,7 @@ pub(crate) fn collect_display_view_transform_context_variables(
 
     // TODO: The LooksBypass must be a DynamicProperty to allow live on/off.
     if !tr.looks_bypass() {
-        let looks_str = config.display_view_looks(tr.display(), tr.view());
+        let looks_str = config.display_view_looks(&display, &view);
         let mut looks = LookParseResult::default();
         looks.parse(looks_str)?;
 

@@ -12,7 +12,7 @@ struct ExactPin {
     approved: bool,
     test_id: String,
     platform: String,
-    ocio_version: String,
+    ocio_version: Vec<String>,
     language: String,
     run: usize,
     width: usize,
@@ -48,11 +48,13 @@ pub(super) fn rule(
     entry: &toml::Value,
     raw: &toml::Value,
     test_id: &str,
+    wheel_version: &str,
 ) -> Result<Option<serde_json::Value>, String> {
     let rule: ExactPin = raw
         .clone()
         .try_into()
         .map_err(|e| format!("Exact GPU pin schema: {e}"))?;
+    let applies = super::applies_to(&rule.ocio_version, wheel_version)?;
     let id = entry
         .get("id")
         .and_then(toml::Value::as_str)
@@ -69,7 +71,6 @@ pub(super) fn rule(
     if rule.test_id != expected
         || !rule.approved
         || rule.platform != "linux"
-        || rule.ocio_version != "2.5.2"
         || rule.language != "GPU_LANGUAGE_GLSL_1_2"
         || rule.run != 0
         || (rule.width, rule.height, rule.components) != (256, 256, 4)
@@ -128,7 +129,7 @@ pub(super) fn rule(
         (None, None) if id != "W0014" => {}
         _ => return Err("Only nan_bug requires its observed GPU/CPU RGB bits".into()),
     }
-    if rule.test_id != test_id {
+    if rule.test_id != test_id || !applies {
         return Ok(None);
     }
     let mut value = serde_json::to_value(raw).map_err(|e| e.to_string())?;

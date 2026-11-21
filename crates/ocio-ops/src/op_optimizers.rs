@@ -72,58 +72,72 @@ fn is_combine_enabled(op_type: OpDataType, flags: OptimizationFlags) -> bool {
 
 /// The most passes the optimizer makes.
 ///
-/// Port of `MAX_OPTIMIZATION_PASSES` (src/OpenColorIO/OpOptimizers.cpp:72 @ v2.5.2).
+/// Port of `MAX_OPTIMIZATION_PASSES` (src/OpenColorIO/OpOptimizers.cpp:75 @ v2.6.0).
 const MAX_OPTIMIZATION_PASSES: i32 = 80;
 
 /// Removes the no-op types (allocation, file and look no-ops), and returns how many. Public for
 /// the file tests of the `ocio` crate (`opt_prefix_test1` calls it, as upstream's test file
-/// includes the optimizer's source).
+/// includes the optimizer's source). The flags are unused.
 ///
-/// Port of `RemoveNoOpTypes` (src/OpenColorIO/OpOptimizers.cpp:74-94 @ v2.5.2).
-pub fn remove_no_op_types(op_vec: &mut OpVec) -> i32 {
-    let mut count = 0;
-    let mut iter = 0;
-    while iter != op_vec.len() {
-        if op_vec[iter].data().get_type() == OpDataType::NoOp {
-            op_vec.erase(iter);
-            count += 1;
+/// Port of `RemoveNoOpTypes` (src/OpenColorIO/OpOptimizers.cpp:77-87 @ v2.6.0).
+pub fn remove_no_op_types(op_vec: &mut OpVec, _flags: OptimizationFlags) -> usize {
+    // `std::remove_if` keeps the order of the ops it keeps.
+    let before = op_vec.len();
+    let mut i = 0;
+    while i < op_vec.len() {
+        if op_vec[i].is_no_op_type() {
+            op_vec.erase(i);
         } else {
-            iter += 1;
+            i += 1;
         }
     }
-    count
+    before - op_vec.len()
 }
 
-/// Replaces each dynamic op with a copy whose dynamic properties are no longer dynamic.
+/// With `NO_DYNAMIC_PROPERTIES`, replaces each dynamic op with a copy whose dynamic properties
+/// are no longer dynamic, and returns how many.
 ///
-/// Port of `RemoveDynamicProperties` (src/OpenColorIO/OpOptimizers.cpp:96-111 @ v2.5.2).
-fn remove_dynamic_properties(op_vec: &mut OpVec) -> Result<()> {
+/// Port of `RemoveDynamicProperties` (src/OpenColorIO/OpOptimizers.cpp:89-110 @ v2.6.0).
+pub fn remove_dynamic_properties(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<usize> {
+    let mut count = 0;
+    let remove_dynamic = o_flags.has_flag(OptimizationFlags::NO_DYNAMIC_PROPERTIES);
+    if !remove_dynamic {
+        return Ok(count);
+    }
+
     for op in op_vec.iter_mut() {
         if op.is_dynamic() {
             // Optimization flag is tested before.
             let mut replaced_by = op.clone_op()?;
             replaced_by.remove_dynamic_properties();
             *op = replaced_by;
-        }
-    }
-    Ok(())
-}
-
-/// Removes the ops that are no-ops, identity matrices included, and returns how many.
-///
-/// Port of `RemoveNoOps` (src/OpenColorIO/OpOptimizers.cpp:113-130 @ v2.5.2).
-fn remove_no_ops(op_vec: &mut OpVec) -> Result<i32> {
-    let mut count = 0;
-    let mut iter = 0;
-    while iter != op_vec.len() {
-        if op_vec[iter].is_no_op()? {
-            op_vec.erase(iter);
             count += 1;
-        } else {
-            iter += 1;
         }
     }
     Ok(count)
+}
+
+/// With `IDENTITY`, removes the ops that are no-ops, identity matrices included, and returns
+/// how many.
+///
+/// Port of `RemoveNoOps` (src/OpenColorIO/OpOptimizers.cpp:112-129 @ v2.6.0).
+fn remove_no_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<usize> {
+    let optimize_identity = o_flags.has_flag(OptimizationFlags::IDENTITY);
+    if !optimize_identity {
+        return Ok(0);
+    }
+
+    // `std::remove_if` keeps the order of the ops it keeps.
+    let before = op_vec.len();
+    let mut i = 0;
+    while i < op_vec.len() {
+        if op_vec[i].is_no_op()? {
+            op_vec.erase(i);
+        } else {
+            i += 1;
+        }
+    }
+    Ok(before - op_vec.len())
 }
 
 /// Finalizes each op ([`Op::finalize`]): e.g. Matrix and Range ops become forward, and a
@@ -138,34 +152,46 @@ fn finalize_ops(op_vec: &mut OpVec) -> Result<()> {
     Ok(())
 }
 
-/// Replaces each op whose data has simpler ops that do the same (e.g. a CDL that doesn't use
-/// its power) with those, and returns how many it replaced.
+/// With `SIMPLIFY_OPS`, replaces each op whose data has simpler ops that do the same (e.g. a
+/// CDL that doesn't use its power) with those, and returns how many it replaced.
 ///
-/// Port of `ReplaceOps` (src/OpenColorIO/OpOptimizers.cpp:141-173 @ v2.5.2).
-fn replace_ops(op_vec: &mut OpVec) -> Result<i32> {
+/// Port of `ReplaceOps` (src/OpenColorIO/OpOptimizers.cpp:142-200 @ v2.6.0): it builds a new
+/// list from the first replacement on, so an op that replaces another isn't looked at again in
+/// the same call (2.5.2 inserted the replacement in place and looked at all but its first op).
+fn replace_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<usize> {
     let mut count = 0;
-    let mut firstindex = 0;
+    let replace_ops = o_flags.has_flag(OptimizationFlags::SIMPLIFY_OPS);
+    if !replace_ops {
+        return Ok(count);
+    }
 
     let mut tmpops = OpVec::new();
+    let mut new_op_vec = OpVec::new();
+    let mut rebuilding = false;
 
-    while firstindex < op_vec.len() {
+    for i in 0..op_vec.len() {
         tmpops.clear();
-        let op = op_vec[firstindex].clone();
-        op.get_simpler_replacement(&mut tmpops)?;
+        op_vec[i].get_simpler_replacement(&mut tmpops)?;
 
         if !tmpops.is_empty() {
+            if !rebuilding {
+                rebuilding = true;
+                // Catch up any unmodified elements prior to this replacement.
+                new_op_vec.insert(0, &op_vec[..i]);
+            }
+
             finalize_ops(&mut tmpops)?;
-
-            // Erase the initial op we've replaced.
-            op_vec.erase_range(firstindex, firstindex + 1);
-
-            // Insert the new ops at this location.
-            op_vec.insert(firstindex, &tmpops);
-
-            // We've done something so increment the count!
+            let end = new_op_vec.len();
+            new_op_vec.insert(end, &tmpops);
             count += 1;
+        } else if rebuilding {
+            let end = new_op_vec.len();
+            new_op_vec.insert(end, &op_vec[i..i + 1]);
         }
-        firstindex += 1;
+    }
+
+    if rebuilding {
+        *op_vec = new_op_vec;
     }
 
     Ok(count)
@@ -175,8 +201,8 @@ fn replace_ops(op_vec: &mut OpVec) -> Result<i32> {
 /// identity replacements, and returns how many. Gammas need `IDENTITY_GAMMA`, the others
 /// `IDENTITY`; a Range identity stays.
 ///
-/// Port of `ReplaceIdentityOps` (src/OpenColorIO/OpOptimizers.cpp:175-205 @ v2.5.2).
-fn replace_identity_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<i32> {
+/// Port of `ReplaceIdentityOps` (src/OpenColorIO/OpOptimizers.cpp:202-232 @ v2.6.0).
+fn replace_identity_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<usize> {
     let mut count = 0;
 
     // Remove any identity ops (other than gamma).
@@ -259,60 +285,62 @@ fn pair_identity_replacement(op1: &Op, op2: &Op) -> Result<Op> {
 
 /// Removes each pair of adjacent ops of one type where the second undoes the first and the
 /// flags allow it, or replaces it with an op that keeps the pair's clamping, and returns how
-/// many pairs.
+/// many pairs. The ops kept so far are a stack: removing a pair exposes the op before it to
+/// the next one, and a pair's replacement is compared with the op after the pair.
 ///
-/// Port of `RemoveInverseOps` (src/OpenColorIO/OpOptimizers.cpp:207-300 @ v2.5.2).
-fn remove_inverse_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<i32> {
+/// Port of `RemoveInverseOps` (src/OpenColorIO/OpOptimizers.cpp:234-328 @ v2.6.0).
+fn remove_inverse_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<usize> {
     let mut count = 0;
-    let mut firstindex: isize = 0; // this must be a signed int
+    let mut write_idx = 0;
+    let num_ops = op_vec.len();
 
-    while firstindex < (op_vec.len() as isize - 1) {
-        let index = firstindex as usize;
-        let op1 = &op_vec[index];
-        let op2 = &op_vec[index + 1];
-        let type1 = op1.data().get_type();
-        let type2 = op2.data().get_type();
-        // The common case of inverse ops is to have a deep nesting:
-        // ..., A, B, B', A', ...
-        //
-        // Consider the above, when firstindex reaches B:
-        //
-        //         |
-        // ..., A, B, B', A', ...
-        //
-        // We will remove B and B'.
-        // Firstindex remains pointing at the original location:
-        //
-        //         |
-        // ..., A, A', ...
-        //
-        // We then decrement firstindex by 1,
-        // to backstep and reconsider the A, A' case:
-        //
-        //      |            <-- firstindex decremented
-        // ..., A, A', ...
-        //
+    for read_idx in 0..num_ops {
+        if write_idx > 0 {
+            let last_op = &op_vec[write_idx - 1];
+            let const_op = &op_vec[read_idx];
+            let type1 = last_op.data().get_type();
+            let type2 = const_op.data().get_type();
 
-        if type1 == type2 && is_pair_inverse_enabled(type1, o_flags) && op1.is_inverse(op2) {
-            // When a pair of inverse ops is removed, we want the optimized ops to give the
-            // same result as the original. For certain ops such as Lut1D or Log this may
-            // mean inserting a Range to emulate the clamping done by the original ops.
-            let mut replaced_by = pair_identity_replacement(op1, op2)?;
+            // The common case of inverse ops is to have a deep nesting:
+            // ..., A, B, B', A', ...
+            //
+            // By treating the processed portion of the vector as a stack (`writeIdx`),
+            // popping an element automatically exposes `A` to be reconsidered against `A'`
+            // on the next loop iteration.
 
-            replaced_by.finalize()?;
-            if replaced_by.is_no_op()? {
-                op_vec.erase_range(index, index + 2);
-                firstindex = 0.max(firstindex - 1);
-            } else {
-                // Forward + inverse does clamp.
-                op_vec[index] = replaced_by;
-                op_vec.erase(index + 1);
-                firstindex += 1;
+            if type1 == type2
+                && is_pair_inverse_enabled(type1, o_flags)
+                && last_op.is_inverse(const_op)
+            {
+                // When a pair of inverse ops is removed, we want the optimized ops to give the
+                // same result as the original. For certain ops such as Lut1D or Log this may
+                // mean inserting a Range to emulate the clamping done by the original ops.
+                let mut replaced_by = pair_identity_replacement(last_op, const_op)?;
+
+                replaced_by.finalize()?;
+                if replaced_by.is_no_op()? {
+                    // Pop the last element off the stack to naturally backstep.
+                    write_idx -= 1;
+                } else {
+                    // Forward + inverse does clamp.
+                    op_vec[write_idx - 1] = replaced_by;
+                }
+                count += 1;
+                continue;
             }
-            count += 1;
-        } else {
-            firstindex += 1;
         }
+
+        // Push the current op to the stack if it wasn't cancelled out.
+        if write_idx != read_idx {
+            op_vec[write_idx] = op_vec[read_idx].clone();
+        }
+        write_idx += 1;
+    }
+
+    if count > 0 {
+        // Drop any unused elements at the tail in a single O(N) pass.
+        let len = op_vec.len();
+        op_vec.erase_range(write_idx, len);
     }
 
     Ok(count)
@@ -321,61 +349,45 @@ fn remove_inverse_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<
 /// Combines the first pair of adjacent ops that can be combined, where the flags allow it,
 /// and returns how many pairs (at most one per call).
 ///
-/// Port of `CombineOps` (src/OpenColorIO/OpOptimizers.cpp:302-367 @ v2.5.2).
-fn combine_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<i32> {
-    let mut count = 0;
-    let mut firstindex: isize = 0; // this must be a signed int
-
-    let mut tmpops = OpVec::new();
-
-    while firstindex < (op_vec.len() as isize - 1) {
-        let index = firstindex as usize;
-        let op1 = &op_vec[index];
-        let op2 = &op_vec[index + 1];
-        let type1 = op1.data().get_type();
-
-        if is_combine_enabled(type1, o_flags) && op1.can_combine_with(op2)? {
-            tmpops.clear();
-            op1.combine_with(&mut tmpops, op2)?;
-            finalize_ops(&mut tmpops)?;
-
-            // The tmpops may have any number of ops in it: (0, 1, 2, ...).
-            // (Size 0 would occur only if the combination results in a no-op,
-            //  for example, a pair of matrices that compose into a no-op are
-            //  returned as empty rather than as an identity matrix.)
-            //
-            // No matter the number, we need to swap them in for the original ops.
-
-            // Erase the initial two ops we've combined.
-            op_vec.erase_range(index, index + 2);
-
-            // Insert the new ops (which may be empty) at this location.
-            op_vec.insert(index, &tmpops);
-
-            // Decrement firstindex by 1,
-            // to backstep and reconsider the A, A' case.
-            // See RemoveInverseOps for the full discussion of
-            // why this is appropriate.
-            // (`firstindex = std::max(0, firstindex - 1);` upstream: the break below leaves
-            // the loop before it is read.)
-
-            // We've done something so increment the count!
-            count += 1;
-
-            // Break, since combining ops is less desirable than other optimization options.
-            // For example, it is preferable to remove a pair of ops using RemoveInverseOps
-            // rather than combining them. Consider this example:
-            // Lut1D A --> Matrix B --> Matrix C --> Lut1D Ainv
-            // If Matrix B & C are not pair inverses but do combine into an identity, then
-            // CombineOps would compose Lut1D A & Ainv, into a new Lut1D rather than
-            // allowing another round of optimization which would remove them as inverses.
+/// Port of `CombineOps` (src/OpenColorIO/OpOptimizers.cpp:330-388 @ v2.6.0): the first
+/// adjacent pair that combines (`std::adjacent_find`) is replaced by the ops it combines into,
+/// and the count is 1 even when the pair combines into nothing.
+fn combine_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<usize> {
+    // `std::adjacent_find`: the first pair whose first op may combine with the second.
+    let mut found = None;
+    for i in 1..op_vec.len() {
+        let op1 = &op_vec[i - 1];
+        if is_combine_enabled(op1.data().get_type(), o_flags) && op1.can_combine_with(&op_vec[i])? {
+            found = Some(i - 1);
             break;
-        } else {
-            firstindex += 1;
         }
     }
 
-    Ok(count)
+    let Some(it) = found else {
+        return Ok(0);
+    };
+
+    let mut tmpops = OpVec::new();
+    op_vec[it].combine_with(&mut tmpops, &op_vec[it + 1])?;
+    finalize_ops(&mut tmpops)?;
+
+    // The tmpops may have any number of ops in it: (0, 1, 2, ...).
+    // (Size 0 would occur only if the combination results in a no-op,
+    //  for example, a pair of matrices that compose into a no-op are
+    //  returned as empty rather than as an identity matrix.)
+    //
+    // No matter the number, we need to swap them in for the original ops.
+    op_vec.erase_range(it, it + 2);
+    op_vec.insert(it, &tmpops);
+
+    // Return 1 since combining ops is less desirable than other optimization options.
+    // For example, it is preferable to remove a pair of ops using RemoveInverseOps
+    // rather than combining them. Consider this example:
+    // Lut1D A --> Matrix B --> Matrix C --> Lut1D Ainv
+    // If Matrix B & C are not pair inverses but do combine into an identity, then
+    // CombineOps would compose Lut1D A & Ainv, into a new Lut1D rather than
+    // allowing another round of optimization which would remove them as inverses.
+    Ok(1)
 }
 
 /// Replaces each Lut1D or Lut3D evaluated inverse with a faster forward approximation, and
@@ -383,9 +395,14 @@ fn combine_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<i32> {
 /// ([`make_fast_lut1d_from_inverse`], [`make_fast_lut3d_from_inverse`]); no other op is
 /// replaced.
 ///
-/// Port of `ReplaceInverseLuts` (src/OpenColorIO/OpOptimizers.cpp:369-408 @ v2.5.2).
-fn replace_inverse_luts(op_vec: &mut OpVec) -> Result<i32> {
+/// Port of `ReplaceInverseLuts` (src/OpenColorIO/OpOptimizers.cpp:398-441 @ v2.6.0): only with
+/// `LUT_INV_FAST`.
+fn replace_inverse_luts(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<usize> {
     let mut count = 0;
+    let fast_lut = o_flags.has_flag(OptimizationFlags::LUT_INV_FAST);
+    if !fast_lut {
+        return Ok(count);
+    }
 
     let nb_ops = op_vec.len();
     for i in 0..nb_ops {
@@ -603,6 +620,28 @@ fn optimize_separable_prefix(ops: &mut OpVec, in_bit_depth: BitDepth) -> Result<
     Ok(())
 }
 
+/// Runs one step of the optimizer and returns its count; at the debug level, logs "<name> - <n>
+/// optimisations found" and, when it changed something, the list after it.
+///
+/// Port of `PerformOptimisation` (src/OpenColorIO/OpOptimizers.cpp:607-621 @ v2.6.0).
+fn perform_optimisation(
+    operation: impl FnOnce(&mut OpVec, OptimizationFlags) -> Result<usize>,
+    op_vec: &mut OpVec,
+    o_flags: OptimizationFlags,
+    debug_logging_enabled: bool,
+    operation_name: &str,
+) -> Result<usize> {
+    let ops_removed = operation(op_vec, o_flags)?;
+    if debug_logging_enabled {
+        let mut os = format!("{operation_name} - {ops_removed} optimisations found\n").into_bytes();
+        if ops_removed != 0 {
+            os.extend_from_slice(&serialize_op_vec(op_vec, 4)?);
+        }
+        log_debug(os);
+    }
+    Ok(ops_removed)
+}
+
 impl OpVec {
     /// Validates the ops, then finalizes each one: e.g. Matrix and Range ops become forward,
     /// and a Lut1D gets ready for inversion. Nothing happens to an empty list.
@@ -621,34 +660,47 @@ impl OpVec {
 
     /// Optimizes the ops as `o_flags` allow: removes the no-op types, then, pass after pass
     /// until nothing changes, removes no-ops, simplifies ops, replaces identities, removes
-    /// inverse pairs and combines a pair. At the debug level, it logs the list before and after.
+    /// inverse pairs and combines a pair. At the debug level, it logs the list before, each
+    /// step's count (and the list after a step that changed it), each pass, and the list after.
     ///
-    /// Port of `OpRcPtrVec::optimize` (src/OpenColorIO/OpOptimizers.cpp:611-756 @ v2.5.2).
+    /// Port of `OpRcPtrVec::optimize` (src/OpenColorIO/OpOptimizers.cpp:638-772 @ v2.6.0).
     pub fn optimize(&mut self, o_flags: OptimizationFlags) -> Result<()> {
         if self.is_empty() {
             return Ok(());
         }
 
-        if is_debug_logging_enabled() {
-            let mut oss = b"\n**\nOptimizing Op Vec...\n".to_vec();
-            oss.extend_from_slice(&serialize_op_vec(self, 4)?);
-            oss.push(b'\n');
-
-            log_debug(oss);
+        let debug_logging_enabled = is_debug_logging_enabled();
+        if debug_logging_enabled {
+            let mut message = b"\n**\nOptimizing Op Vec...\n".to_vec();
+            message.extend_from_slice(&serialize_op_vec(self, 4)?);
+            log_debug(message);
         }
 
         let original_size = self.len();
+        let mut total_noops = 0;
+        let mut total_replacedops = 0;
+        let mut total_identityops = 0;
+        let mut total_inverseops = 0;
+        let mut total_combines = 0;
+        let mut total_inverses = 0;
+        let mut passes: i32 = 1;
 
         // NoOpType can be removed (facilitates conversion to a CPU/GPUProcessor).
-        let total_nooptype = remove_no_op_types(self);
+        let total_nooptype = perform_optimisation(
+            |ops, flags| Ok(remove_no_op_types(ops, flags)),
+            self,
+            o_flags,
+            debug_logging_enabled,
+            "RemoveNoOpTypes",
+        )?;
 
         if o_flags == OptimizationFlags::NONE {
-            if is_debug_logging_enabled() {
+            if debug_logging_enabled {
                 let final_size = self.len();
 
                 let mut os = format!(
-                    "**\nOptimized {original_size}->{final_size}, 1 pass, {total_nooptype} \
-                     no-op types removed\n"
+                    "**\nOptimized {original_size}->{final_size}, {passes} pass, \
+                     {total_nooptype} no-op types removed\n"
                 )
                 .into_bytes();
                 os.extend_from_slice(&serialize_op_vec(self, 4)?);
@@ -660,80 +712,100 @@ impl OpVec {
 
         // Keep dynamic ops using their default values. Remove the ability to modify them
         // dynamically.
-        let remove_dynamic = o_flags.has_flag(OptimizationFlags::NO_DYNAMIC_PROPERTIES);
-        if remove_dynamic {
-            remove_dynamic_properties(self)?;
-        }
-
-        // As the input and output bit-depths represent the color processing request and they
-        // may be altered by the following optimizations, preserve their values.
-
-        let mut total_noops = 0;
-        let mut total_replacedops = 0;
-        let mut total_identityops = 0;
-        let mut total_inverseops = 0;
-        let mut total_combines = 0;
-        let mut total_inverses = 0;
-        let mut passes = 0;
-
-        let optimize_identity = o_flags.has_flag(OptimizationFlags::IDENTITY);
-        let replace_ops_enabled = o_flags.has_flag(OptimizationFlags::SIMPLIFY_OPS);
-
-        let fast_lut = o_flags.has_flag(OptimizationFlags::LUT_INV_FAST);
+        let total_dynamic_ops = perform_optimisation(
+            remove_dynamic_properties,
+            self,
+            o_flags,
+            debug_logging_enabled,
+            "RemoveDynamicProperties",
+        )?;
 
         while passes <= MAX_OPTIMIZATION_PASSES {
+            if debug_logging_enabled {
+                log_debug(format!("Starting pass {passes}"));
+            }
             // Remove all ops for which isNoOp is true, including identity matrices.
-            let noops = if optimize_identity {
-                remove_no_ops(self)?
-            } else {
-                0
-            };
+            let noops = perform_optimisation(
+                remove_no_ops,
+                self,
+                o_flags,
+                debug_logging_enabled,
+                "RemoveNoOps",
+            )?;
+            total_noops += noops;
 
             // Replace all complex ops with simpler ops (e.g., a CDL which only scales with a
             // matrix). Note this might increase the number of ops.
-            let replaced_ops = if replace_ops_enabled {
-                replace_ops(self)?
-            } else {
-                0
-            };
+            let replaced_ops = perform_optimisation(
+                replace_ops,
+                self,
+                o_flags,
+                debug_logging_enabled,
+                "ReplaceOps",
+            )?;
+            total_replacedops += replaced_ops;
 
             // Replace all complex identities with simpler ops (e.g., an identity Lut1D with a
             // range).
-            let identityops = replace_identity_ops(self, o_flags)?;
+            let identityops = perform_optimisation(
+                replace_identity_ops,
+                self,
+                o_flags,
+                debug_logging_enabled,
+                "ReplaceIdentityOps",
+            )?;
+            total_identityops += identityops;
 
             // Remove all adjacent pairs of ops that are inverses of each other.
-            let inverseops = remove_inverse_ops(self, o_flags)?;
+            let inverseops = perform_optimisation(
+                remove_inverse_ops,
+                self,
+                o_flags,
+                debug_logging_enabled,
+                "RemoveInverseOps",
+            )?;
+            total_inverseops += inverseops;
 
             // Combine a pair of ops, for example multiply two adjacent Matrix ops.
             // (Combines at most one pair on each iteration.)
-            let combines = combine_ops(self, o_flags)?;
+            let combines = perform_optimisation(
+                combine_ops,
+                self,
+                o_flags,
+                debug_logging_enabled,
+                "CombineOps",
+            )?;
+            total_combines += combines;
 
-            if noops + identityops + inverseops + combines == 0 {
+            if noops + replaced_ops + identityops + inverseops + combines == 0 {
                 // No optimization progress was made, so stop trying. If requested, replace
                 // any inverse LUTs with faster forward LUTs and do another pass to see if more
                 // optimization is possible.
-                if fast_lut {
-                    let inverses = replace_inverse_luts(self)?;
-                    if inverses == 0 {
-                        break;
-                    }
+                let inverses = perform_optimisation(
+                    replace_inverse_luts,
+                    self,
+                    o_flags,
+                    debug_logging_enabled,
+                    "ReplaceInverseLuts",
+                )?;
+                total_inverses += inverses;
 
-                    total_inverses += inverses;
-                } else {
+                if inverses == 0 {
                     break;
                 }
             }
 
-            total_noops += noops;
-            total_replacedops += replaced_ops;
-            total_identityops += identityops;
-            total_inverseops += inverseops;
-            total_combines += combines;
-
+            if debug_logging_enabled {
+                log_debug(format!(
+                    "Pass {passes} summary: {noops} no-op removed, {replaced_ops} ops replaced, \
+                     {identityops} identity ops replaced, {inverseops} inverse op pairs \
+                     removed, {combines} ops combined."
+                ));
+            }
             passes += 1;
         }
 
-        if passes == MAX_OPTIMIZATION_PASSES {
+        if debug_logging_enabled && passes == MAX_OPTIMIZATION_PASSES {
             log_debug(format!(
                 "The max number of passes, {passes}, was reached during optimization. This is \
                  likely a sign that either the complexity of the color transform is very high, \
@@ -742,15 +814,15 @@ impl OpVec {
             ));
         }
 
-        if is_debug_logging_enabled() {
+        if debug_logging_enabled {
             let final_size = self.len();
 
             let mut os = format!(
                 "**\nOptimized {original_size}->{final_size}, {passes} passes, \
-                 {total_nooptype} no-op types removed, {total_noops} no-ops removed, \
-                 {total_replacedops} ops replaced, {total_identityops} identity ops replaced, \
-                 {total_inverseops} inverse op pairs removed, {total_combines} ops combined, \
-                 {total_inverses} ops inverted\n"
+                 {total_nooptype} no-op types removed, {total_dynamic_ops} dynamic-ops made \
+                 static, {total_noops} no-ops removed, {total_replacedops} ops replaced, \
+                 {total_identityops} identity ops replaced, {total_inverseops} inverse op pairs \
+                 removed, {total_combines} ops combined, {total_inverses} ops inverted\n"
             )
             .into_bytes();
             os.extend_from_slice(&serialize_op_vec(self, 4)?);

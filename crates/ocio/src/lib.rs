@@ -61,7 +61,7 @@
 //!
 //! # Versions
 //!
-//! [`version`] is the OpenColorIO version this release matches, `"2.5.2"`, as
+//! [`version`] is the OpenColorIO version this release matches, `"2.6.0"`, as
 //! `OCIO::GetVersion()` reports it. [`PORT_VERSION`] is this crate's own version. A later
 //! OpenColorIO minor version is a new major version of this crate.
 //!
@@ -118,6 +118,7 @@ mod foreign_exception_tests;
 mod test_env;
 
 pub use apphelpers::color_space_helpers::{self, ColorSpaceMenuHelper, ColorSpaceMenuParameters};
+pub use apphelpers::config_compatibility;
 pub use apphelpers::display_view_helpers;
 pub use apphelpers::legacy_viewing_pipeline::LegacyViewingPipeline;
 pub use apphelpers::mergeconfigs::merge_configs_helpers::{
@@ -158,10 +159,10 @@ pub use ocio_ops::image_desc::{
 };
 pub use ocio_ops::open_color_types::{
     Allocation, BSplineType, BitDepth, CdlStyle, ChannelOrdering, ColorSpaceDirection,
-    ColorSpaceVisibility, DynamicPropertyType, EnvironmentMode, ExposureContrastStyle,
-    FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NamedTransformVisibility, NegativeStyle,
-    OptimizationFlags, ReferenceSpaceType, RgbCurveType, SearchReferenceSpaceType,
-    TransformDirection, ViewTransformDirection, ViewType,
+    ColorSpaceVisibility, ConfigCompatibility, DynamicPropertyType, EnvironmentMode,
+    ExposureContrastStyle, FixedFunctionStyle, GradingStyle, Lut1DHueAdjust,
+    NamedTransformVisibility, NegativeStyle, OptimizationFlags, ReferenceSpaceType, RgbCurveType,
+    SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
 };
 pub use ocio_ops::open_color_types::{HsyTransformStyle, HueCurveType};
 pub use ocio_ops::ops::gradinghuecurve::grading_hue_curve::GradingHueCurve;
@@ -213,12 +214,12 @@ pub use viewing_rules::ViewingRules;
 
 /// The OpenColorIO version this port matches, as `OCIO::GetVersion()` reports it.
 pub const fn version() -> &'static str {
-    "2.5.2"
+    "2.6.0"
 }
 
 /// The OpenColorIO version as a hex number, as `OCIO::GetVersionHex()` reports it.
 pub const fn version_hex() -> i32 {
-    0x0205_0200
+    0x0206_0000
 }
 
 /// This crate's own version, without the `+ocio.X.Y.Z` build metadata.
@@ -240,8 +241,9 @@ const fn port_version() -> &'static str {
 mod tests {
     #[test]
     fn versions() {
-        assert_eq!(super::version(), "2.5.2");
+        assert_eq!(super::version(), "2.6.0");
         assert!(!super::PORT_VERSION.contains('+'));
+        // The crates' versions move to `+ocio.2.6.0` with the 1.1.0 release (phase 7).
         assert!(env!("CARGO_PKG_VERSION").ends_with("+ocio.2.5.2"));
     }
 }

@@ -4,7 +4,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a624d3d571257d094f09fef9761a4790\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:6fcbb22c-0212-4398-29ea-c06885568987\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -12,7 +12,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"4e0108a37779538876b462df0ffaaf94\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:742f087e-ebd3-9217-a712-5900a42e736a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -20,7 +20,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3648def9cf693c8c3067451efce35313\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cab3d2ff-d94c-0a3e-f0a8-33e7e36aecf8\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -28,7 +28,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3648def9cf693c8c3067451efce35313\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cab3d2ff-d94c-0a3e-f0a8-33e7e36aecf8\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -36,7 +36,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"34ebe713b4dff759cf291baadc9637c9\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0cc14081-61d5-2487-b193-3272f9b30f80\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -44,7 +44,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"09b8eb14033a4d233b5071ecaf7ce1dd\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:6e3f2e89-28d3-c894-5c9a-a4ea16bf5864\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -52,7 +52,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfd981dd6e2d6c58a90b073cf2312163\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:15e5e80b-c178-f9aa-3072-9272a33da932\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -60,7 +60,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfd981dd6e2d6c58a90b073cf2312163\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:15e5e80b-c178-f9aa-3072-9272a33da932\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -68,7 +68,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5fe2958b58c48668b079e5a171b8d493\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:c499c458-65c7-4983-ff88-a197318fac37\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -83,7 +83,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1ef9b89d-591e-6218-f09c-84dd722c4ad0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -98,7 +98,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"71c051d815baa4714c74096ce03efa48\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:4391de54-537d-30dc-b2e3-43e3c5a2b3ec\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -113,7 +113,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:92ef3951-a5ab-4ae1-8232-cc0aded65b29\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -128,7 +128,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"6fcb576ad06347b9374c9b37fea975c6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:13a79bc0-90e3-507d-b088-3e6fe71e7fb3\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -136,7 +136,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5b385f4b69fd158a0a071906a9c486c9\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:758455af-6358-a093-2b1a-6b70d234d18c\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -144,7 +144,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffbdbf025487dcb9b54a83ede9d0f404\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0ccb34a5-b3ba-0101-b877-fb5adb78f622\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -152,7 +152,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffbdbf025487dcb9b54a83ede9d0f404\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0ccb34a5-b3ba-0101-b877-fb5adb78f622\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -160,7 +160,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"8182ca53ca4d6a24fefca7d3ca875e1e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:9facc3a6-33a8-0927-1eab-e93cd4090e2a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -168,7 +168,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"068d8c6425d1d42c4712add61da6f687\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:4d651493-a44f-c5fd-cc3e-8334ffd4f10e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -176,7 +176,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:b7f38163-191a-344b-c5ee-5bcd231f5018\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -184,7 +184,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:b7f38163-191a-344b-c5ee-5bcd231f5018\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -192,7 +192,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>, bypass_lintolog>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"90634987f23d7a4b0d4712c99c300a53\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\" bypassLinToLog=\"true\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:ea9f1cc9-d138-47d2-d608-ea259d4f3554\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\" bypassLinToLog=\"true\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -200,7 +200,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0.75><x=1, y=1, slp=0>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3648def9cf693c8c3067451efce35313\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Blue>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cab3d2ff-d94c-0a3e-f0a8-33e7e36aecf8\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Blue>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -208,7 +208,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>, bypass_lintolog>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"acaaa232781dcedcd7c28ce790a3b317\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\" bypassLinToLog=\"true\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:13d0e155-e3bf-f2dd-ce22-aff101ed64fd\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\" bypassLinToLog=\"true\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -216,7 +216,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0.75><x=1, y=1, slp=0>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfd981dd6e2d6c58a90b073cf2312163\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Blue>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:15e5e80b-c178-f9aa-3072-9272a33da932\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Blue>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -231,7 +231,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=0.75><x=7, y=7, slp=0>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Blue>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1ef9b89d-591e-6218-f09c-84dd722c4ad0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Blue>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -246,7 +246,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=0.75><x=7, y=7, slp=0>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Blue>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:92ef3951-a5ab-4ae1-8232-cc0aded65b29\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Blue>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -254,7 +254,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>, bypass_lintolog>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"294b4c42e484e8abe913dc93167c9e8f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\" bypassLinToLog=\"true\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:4ade6187-1d1e-1ae2-4694-10faacd80fd4\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\" bypassLinToLog=\"true\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -262,7 +262,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0.75><x=1, y=1, slp=0>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffbdbf025487dcb9b54a83ede9d0f404\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Blue>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0ccb34a5-b3ba-0101-b877-fb5adb78f622\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Blue>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -270,7 +270,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.6><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.4, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0.05><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=1.25><x=1, y=0.95, slp=0>]>>, bypass_lintolog>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"60368d3492730ab9bd4089930cf5a09a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\" bypassLinToLog=\"true\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0e01df28-7237-c428-93cb-eb583a411841\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\" bypassLinToLog=\"true\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.60000002\n                          1 1\n            </ControlPoints>\n        </Red>\n        <Green>\n            <ControlPoints>\n                          0 0\n                 0.40000001 0.5\n                          1 1\n            </ControlPoints>\n        </Green>\n        <Blue>\n            <ControlPoints>\n                          0 0.050000001\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Blue>\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 0.94999999\n            </ControlPoints>\n            <Slopes>\n                          0 1.25 0 \n            </Slopes>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -278,7 +278,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0.75><x=1, y=1, slp=0>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Blue>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:b7f38163-191a-344b-c5ee-5bcd231f5018\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Blue>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0.75 0 \n            </Slopes>\n        </Blue>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -286,7 +286,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=-0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3648def9cf693c8c3067451efce35313\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cab3d2ff-d94c-0a3e-f0a8-33e7e36aecf8\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -294,7 +294,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-0, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"72aaf2312c576512fa1ec4a0a005a19d\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -0 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:d5d0dfbc-aaf3-b0e5-696e-5fe0aa704e76\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -0 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -302,7 +302,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=-0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e78c0cab37a7bac2862d664e328ef4c3\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:f9d961a7-9e29-8180-9a7c-3b714711c245\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -331,7 +331,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=nan><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ff2dabf528b8f036b509b5dca9d667f7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:15e09886-91b1-2325-967f-1eea116c690a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -339,7 +339,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=nan><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"06de23d4dcaed37995a4ed13407886fe\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 nan\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:748d5af5-f6e1-51f5-a2e9-6f7a032ca99a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 nan\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -347,7 +347,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=nan><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"63cc05f0eacbf07f1218bf653a230cfe\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:2b0abdd8-6807-570b-a8f2-1dbc1ab7751b\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -355,7 +355,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=-0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"65c176a3ab4b736bdd73e451d1766886\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:3d5eb281-c17c-1d8a-6ade-5e707e2027ed\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -363,7 +363,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-0><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -0\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1ef9b89d-591e-6218-f09c-84dd722c4ad0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -0\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -371,7 +371,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=-0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e2a61e8f9f9fc4d3a81ba9d086ac5c75\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:519a39c0-0ae4-91b3-4289-fd87a1efc5d3\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -400,7 +400,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfd981dd6e2d6c58a90b073cf2312163\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:15e5e80b-c178-f9aa-3072-9272a33da932\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -408,7 +408,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=-0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3433d5141a90dc962b7399ab10a36cc4\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:7036bb8e-d880-0c96-5af6-6122017abf34\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -416,7 +416,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9dd46a836fb53f49f06a1ccba29c1085\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:bea86cb0-12a1-1b16-b26b-1650834c11d7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -445,7 +445,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=nan><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"01180df1fdd683f4d107f0242cd97c73\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:7291488f-df72-f0aa-ce36-25db3b55831f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -453,7 +453,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=nan><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"859602b588a78b451beca7c1426010e3\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 nan\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:00c451a5-4caa-7f40-ef44-de6f834a77c9\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 nan\n                          7 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -461,7 +461,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=nan><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"6c1565cea333229f2d4dc3258d2d9a72\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:21157887-27a2-3aa2-456d-7d506148b279\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -469,7 +469,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=-0><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"2911140edf4e506d7e4507b4c5fc3ae6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:21e534f2-14d1-73f4-a418-39c63189974b\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -477,7 +477,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=-0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:92ef3951-a5ab-4ae1-8232-cc0aded65b29\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -485,7 +485,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=-0><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5b48981493f13497063f5d4317ed8344\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:73eb1d80-4c23-6118-676f-fbf2e9f8036c\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -521,7 +521,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=-0, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"39cc70b13dc520a2267a662bd077da15\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                         -0 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:7ecdba1d-cc89-19d9-d2c9-2cd16cee080f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                         -0 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -536,7 +536,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5e546bb772691ebe15f31b6080211f56\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:13993bca-840d-7582-e7d7-d325f8b5eeda\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -544,7 +544,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=inf, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"55620e57bde4a3878feea75fb211b3d4\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                        inf 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:45b09780-18db-d4b1-70b1-755e78968294\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                        inf 7\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -552,7 +552,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:b7f38163-191a-344b-c5ee-5bcd231f5018\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -560,7 +560,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=nan>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"98bd464a6f1f30b148dd80d2371c7003\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:e56efd11-bcd5-b96b-965a-bbf2acd5a942\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -568,7 +568,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=nan>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"35795c8ec2e3de6663cd036eaac1f868\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 nan\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1916f5c2-ab36-171e-e325-d08d277f0bbf\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 nan\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -576,7 +576,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=nan>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfe4660799a714e512562bd0ad845ecd\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:e26a15ba-a86b-c8d3-2535-7182cbfbd38c\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -591,7 +591,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=-0>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1ef9b89d-591e-6218-f09c-84dd722c4ad0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Red>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -606,7 +606,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=inf>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"f1666f050eb7cb53cf1f2861029c9624\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:8c277c0b-da64-6a88-32b5-d23c89615856\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -614,7 +614,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=inf>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"4222df9cc50b1ff33c32c1d8e7d880d7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:2339d549-8caa-266d-07c8-004e18ad5b71\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -622,7 +622,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=inf>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"989bf471fe5f7ee4e725ace224b08a43\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:209e3550-7d41-490a-e5a8-5ee6a96f8641\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -630,7 +630,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=-0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfd981dd6e2d6c58a90b073cf2312163\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:15e5e80b-c178-f9aa-3072-9272a33da932\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -638,7 +638,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-0, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9f890f8fa58d7d847053c522203d17b1\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -0 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:a853b26a-4c3f-074d-c62c-b71c9783d9e2\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -0 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -646,7 +646,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=-0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"c8ac7dcd4ae338d5fde72b4e3ff2a467\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:d1f3602e-e490-9b0d-44e0-0dcf4e66170f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -675,7 +675,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=nan><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9396c8c8f61504dfab4a7bc106cde3de\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:ed95ba85-550e-e86b-fae8-1c178f214e12\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -683,7 +683,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=nan><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"595c85ccedb971d7b5dc1c039986e093\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 nan\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:a4ba84f5-92ef-83ae-4c5e-c3f2c9ef3385\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 nan\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -691,7 +691,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=nan><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9da76ceca3d171c0dde9a93f8ac862b3\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cc81e928-8ed8-166d-767c-b84c65e5c199\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -699,7 +699,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=-0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"2e290969e7023294f2440f4c2c9e83b0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:7f40ee4b-fa54-ff2e-af52-67a8f23ebf7c\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -707,7 +707,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-0><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -0\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:92ef3951-a5ab-4ae1-8232-cc0aded65b29\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -0\n                          0 0\n                          7 7\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -715,7 +715,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=-0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b5656c787b7af72a842bd5543e6381e1\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:ce9ec6af-1113-681b-c107-d14e04bdd854\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -744,7 +744,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3648def9cf693c8c3067451efce35313\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cab3d2ff-d94c-0a3e-f0a8-33e7e36aecf8\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -752,7 +752,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=-0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"9d4106e67215092c0a7b5e03e7c29903\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:35e95842-a9cb-47ba-ceb1-5bd9fc9688ec\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -760,7 +760,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=-0, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cc3a4ee2af8e6ac21e9d0ed24d8d9ef5\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:97eed7f7-384f-b5b9-4680-5a0b22531c87\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                         -0 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -789,7 +789,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=nan><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3ae8e9af6dbfead3251f5f0e531dfe15\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0a397a65-6d52-65f1-2bbb-7be6e290cee6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -797,7 +797,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=nan><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"65a33ac05fc3b06166f46b7c72d70573\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 nan\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:a6fe5577-f8d4-5b34-f15c-108bfa083ffa\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 nan\n                          7 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -805,7 +805,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=nan><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"0276dec572c6770089fa5e60be515f1f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:f03aae83-bde6-aa1a-f9d4-c271f75471ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 nan\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -813,7 +813,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=-0><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"fd085fcc45ca7a61bccafcf2f7a17930\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:5b99763e-0242-6c0d-8863-4cff3f8edbea\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -821,7 +821,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=-0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1ef9b89d-591e-6218-f09c-84dd722c4ad0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -829,7 +829,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=-0><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ee250b1b1c1e507b072e39475f4011d4\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:e70e7215-314b-bd28-215e-19d9e5968e73\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 -0\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -865,7 +865,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=-0, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b99bea200b7cb8629085f78b240aba6f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                         -0 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:9ed84616-18bf-3c28-dd88-fe4d87f2273a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                         -0 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -880,7 +880,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a03627c8d874cdb2de878efa22933d2d\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:ecb7f849-6ef1-6cf6-12eb-5ee4550bf1d5\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -888,7 +888,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=inf, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"7762d272ea42b9fa42daa9b5e5a1af4d\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                        inf 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:e9a302a5-c758-ee16-45f5-30cba0e0738a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                        inf 7\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -896,7 +896,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=inf, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffbdbf025487dcb9b54a83ede9d0f404\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0ccb34a5-b3ba-0101-b877-fb5adb78f622\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                        inf 1\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -904,7 +904,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=nan>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5796475c2d389fd31e9288125dcec2a4\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:baf668ed-7543-f5db-c029-47e14bdb0381\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -912,7 +912,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=nan>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"70cf1f328124ab92d6f284b0c320fe94\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:8158ddf4-e659-c2f8-6ca6-27ed9da74e0e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -920,7 +920,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=nan>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"fc37e4abab465b9b314f837722965cd2\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:a618d756-264d-df53-2665-e5c72b946225\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -935,7 +935,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=-0>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:92ef3951-a5ab-4ae1-8232-cc0aded65b29\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Master>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -950,7 +950,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=inf>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"fbc28c059a5eaab129fbb4e5156a2f3e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:7de7c36e-7987-e03e-d9d2-17ae74e7716a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -958,7 +958,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=inf>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"44d621e1950fd2d4f4becddf69169134\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 inf\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:5f4ba125-f159-9986-b27f-9b00d4ce6377\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 inf\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -966,7 +966,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=inf>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3c3f23a86ec8f89fa1b0ef860249a5d5\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1540c6fe-3eef-ee65-4482-10547201f92f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 inf\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -974,7 +974,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=nan><x=0.5, y=0.5, slp=0><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3648def9cf693c8c3067451efce35313\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        nan 0 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cab3d2ff-d94c-0a3e-f0a8-33e7e36aecf8\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        nan 0 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -982,7 +982,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=nan><x=0, y=0, slp=0><x=7, y=7, slp=0>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"96b06557d3cdf147e7d131cb2770cb0e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                        nan 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:6188b458-21d1-c9e7-8880-5a5c7289f668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                        nan 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -990,7 +990,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=nan><x=0.5, y=0.5, slp=0><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"da2a67a3f900ec6a144e01f43cf97249\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        nan 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cb092a3a-7629-0f4d-adb7-44d2c0c6224a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        nan 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -998,7 +998,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"34ebe713b4dff759cf291baadc9637c9\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0cc14081-61d5-2487-b193-3272f9b30f80\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1006,7 +1006,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5fe2958b58c48668b079e5a171b8d493\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:c499c458-65c7-4983-ff88-a197318fac37\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1014,7 +1014,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"dcf6f5e9668bac96d76337ed35a27668\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:b7f38163-191a-344b-c5ee-5bcd231f5018\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1022,7 +1022,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=inf><x=0.5, y=0.5, slp=0><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"51b431ae2f2e26329afe49a55e362483\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        inf 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:66e499c6-60fc-f968-fb3f-2036eff597aa\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        inf 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1030,7 +1030,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=inf><x=0, y=0, slp=0><x=7, y=7, slp=0>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cfef1d27489f245bf6d02d5c047ce621\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                        inf 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:fe23b3b0-5196-96ba-5c4a-95c21f59e9f2\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                        inf 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1038,7 +1038,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=inf><x=0.5, y=0.5, slp=0><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5034c203f46bd8dbdd306c9dc57ddd5c\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        inf 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:dd189df8-c26b-dde3-c399-5a36137a900f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                        inf 0 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1046,7 +1046,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=nan><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"0768906cd0d70502032ccdca318652a6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 nan 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cb2b5f7c-4eeb-1525-8996-7510d390b993\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 nan 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1054,7 +1054,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=nan><x=7, y=7, slp=0>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5054e570bd5792a3a7c8479fccfd84b6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 nan 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1ef9b89d-591e-6218-f09c-84dd722c4ad0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 nan 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1062,7 +1062,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=nan><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"41ee681a620c67b3f15a37247d2e5901\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 nan 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:9a8a1956-b146-476e-b461-ae64ed8177e5\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 nan 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1070,7 +1070,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a624d3d571257d094f09fef9761a4790\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:6fcbb22c-0212-4398-29ea-c06885568987\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1078,7 +1078,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"71c051d815baa4714c74096ce03efa48\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:4391de54-537d-30dc-b2e3-43e3c5a2b3ec\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1086,7 +1086,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"6fcb576ad06347b9374c9b37fea975c6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:13a79bc0-90e3-507d-b088-3e6fe71e7fb3\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1094,7 +1094,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=inf><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bfd981dd6e2d6c58a90b073cf2312163\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:15e5e80b-c178-f9aa-3072-9272a33da932\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1102,7 +1102,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=inf><x=7, y=7, slp=0>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ae7277f7e4d3a70bf7846db8d61758b0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1e416826-6054-f53e-4e0b-485c07429d1f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1110,7 +1110,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=inf><x=1, y=1, slp=0>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cbe5e8834a82d169d2a97b15e25ceb8a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:b99507d5-8165-896e-be4f-38790768c0cf\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 inf 0 \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1118,7 +1118,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0><x=1, y=1, slp=nan>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffa0be38b30a17bfc9667b599536549a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 nan \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:166fa606-92a3-3a9b-3819-bf52930cd75f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 nan \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1126,7 +1126,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=0><x=7, y=7, slp=nan>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d632e1c86b7dce6cea5a8c017142585c\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0 nan \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:426a2eb2-eaa2-e37d-8744-178daf6f86ff\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0 nan \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1134,7 +1134,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0><x=1, y=1, slp=nan>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ffbdbf025487dcb9b54a83ede9d0f404\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 nan \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0ccb34a5-b3ba-0101-b877-fb5adb78f622\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 nan \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1142,7 +1142,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"34ebe713b4dff759cf291baadc9637c9\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0cc14081-61d5-2487-b193-3272f9b30f80\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1150,7 +1150,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"5fe2958b58c48668b079e5a171b8d493\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:c499c458-65c7-4983-ff88-a197318fac37\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1158,7 +1158,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"8182ca53ca4d6a24fefca7d3ca875e1e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:9facc3a6-33a8-0927-1eab-e93cd4090e2a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1166,7 +1166,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0><x=1, y=1, slp=inf>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"f42598fc09a4d6c5a7fbafb9cb76b11f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 inf \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:4799b3e9-2172-99c6-f474-811919134c2f\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 inf \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1174,7 +1174,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7, slp=0><x=0, y=0, slp=0><x=7, y=7, slp=inf>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>, dynamic>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d64dc285b0d4049bc725a625b1d524ad\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0 inf \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:92ef3951-a5ab-4ae1-8232-cc0aded65b29\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Green>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 7\n            </ControlPoints>\n            <Slopes>\n                          0 0 inf \n            </Slopes>\n        </Green>\n        <DynamicParameter param=\"RGB_CURVE\" />\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1182,7 +1182,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0, slp=0><x=0.5, y=0.5, slp=0><x=1, y=1, slp=inf>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a7e5969e04f6b9c24dfeb14405bb0fbb\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 inf \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:b45402a4-169a-b3e4-6574-638b96f20c2b\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Green>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n            <Slopes>\n                          0 0 inf \n            </Slopes>\n        </Green>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1190,7 +1190,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=nan><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ff2dabf528b8f036b509b5dca9d667f7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:15e09886-91b1-2325-967f-1eea116c690a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Red>\n            <ControlPoints>\n                          0 nan\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1198,7 +1198,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=nan>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"998adc3f30e424aa817ac69b331f48cd\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0110b89d-d292-de8f-29d7-f99ee0c5dd81\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 nan\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1206,7 +1206,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=inf>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"deff1d85ec457d34b2f188d8ad409273\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cb690173-b7bc-2c28-843b-67da961a857e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 inf\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1235,7 +1235,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"34ebe713b4dff759cf291baadc9637c9\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0cc14081-61d5-2487-b193-3272f9b30f80\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1243,7 +1243,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=0>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"bdfee48928b3900885ab9727463eaaf0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:25b93dd5-8ef7-bd1e-a401-68aa02b51c3d\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1251,7 +1251,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=-0>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3cec0261327a0aee1cc9869459b12f9a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:2efd6e05-fac9-f35a-65b3-6148fdc160bf\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 -0\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1259,7 +1259,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=-0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"58a6ad8a339080ce62b0d4826e9ac98d\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:7c25261a-1be3-c3c2-3853-9932f03af754\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1274,7 +1274,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=1.4013e-45, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"d73cf0373886186e4b90d66091429d1e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                1.4012985e-45 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:83066cc2-b091-0ad6-1df5-3633b2b27fd7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                1.4012985e-45 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1289,7 +1289,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=3.40282e+38>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"802457c9ae326a1a21fa2a45275c80fd\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 3.4028235e+38\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:ec95f745-090e-7fce-b105-a0a6718c2531\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 3.4028235e+38\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1304,7 +1304,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=-3.40282e+38><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e19156d22eac98f1887d64037881fc52\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 -3.4028235e+38\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cea52723-d222-b97f-a774-151e8dcf3257\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 -3.4028235e+38\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1319,7 +1319,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=1.17549e-38, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b3fe07d153b48cffabe150dea05fd1b2\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                1.1754944e-38 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:8748d12a-19f9-118c-ce8e-1dd4daad7cf8\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                1.1754944e-38 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1327,7 +1327,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0.1, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"cc63c8114bd58c3193ccf2dd123912a6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                        0.1 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:bbb207a0-328d-f347-49c1-7fa22a6d86db\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Red>\n            <ControlPoints>\n                        0.1 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1335,7 +1335,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=0.1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"6072cb8d79e8f6b17c4bb6f963581ade\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:d0761563-c080-86cf-3a38-5ed7e64b8dc2\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1343,7 +1343,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=0.333333>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b625d7c1446f1390f60026aa04a6dda1\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.33333334\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:ad3ce9fb-b5fa-2578-4ac1-faff919c9cc6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.33333334\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1351,7 +1351,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0.333333><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"e1b110ae4f2221bcb235f4c5b0b02e07\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0.33333334\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:86a6c7fc-2086-3366-6892-480fddc01ba8\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0.33333334\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1366,7 +1366,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=1e-07, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"3b56c3e45c5844a2feff775948b7519e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                      1e-07 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:cdefc746-97d4-e1fd-47e0-32db5fc27983\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\">\n        <Master>\n            <ControlPoints>\n                      1e-07 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1381,7 +1381,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=123456>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"b918733b65bf38c3b3d5f8d4e6de24d1\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 123456.5\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:79b0fe50-46a4-062f-6f21-b1b8128d5cc6\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 123456.5\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1389,7 +1389,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=999999>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"2a85f181495205389607b204ed5fcce2\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 999999.38\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:eacc00a6-d85d-c02d-e2ac-3c97cc1aa9ee\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 999999.38\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1404,7 +1404,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1.23457e+06, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"0e873131a3127edc6d85534e281686e5\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                    1234567 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:d9d89ec9-9f6f-3a10-54bf-2db1cfc9571a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                    1234567 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1426,7 +1426,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=1.67772e+07>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"91a07ee98868d120f5d9396b13e3c871\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 16777216\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:d4554993-7eae-45dd-95e6-aa7da1698602\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 16777216\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1434,7 +1434,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=0.123457>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"22cdd40d94c680e6f75eded0ddc7b730\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.12345679\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:fc22bac4-d6a7-3046-62fa-5e654d5add50\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.12345679\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1442,7 +1442,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=video, values=<red=<control_points=[<x=0, y=0.123457><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a0005edf7937ab711643d7a5cf088825\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0.12345679\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:0f9b7677-c56c-3bfe-f8a6-9f36e84b9693\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"video\">\n        <Red>\n            <ControlPoints>\n                          0 0.12345679\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1450,7 +1450,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"8182ca53ca4d6a24fefca7d3ca875e1e\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                  1.0000001 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:9facc3a6-33a8-0927-1eab-e93cd4090e2a\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Master>\n            <ControlPoints>\n                          0 0\n                        0.5 0.5\n                  1.0000001 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1472,7 +1472,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a37be550a7b582ded489ed9144d3a883\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.99999994\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:eb87e1a8-38b0-5e09-8f65-2ad43e0ba994\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linearRev\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.99999994\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1480,7 +1480,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=0.5>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"da3337c669a88d0c61f0fd92dc796f48\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.5\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:80d40695-3267-f3db-e65c-8258858dfd80\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Red>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 0.5\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1488,7 +1488,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=video, values=<red=<control_points=[<x=0, y=0.5><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"a574d28d90c6bfd9146e724950e296b0\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0.5\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:295153ab-6e12-654b-3dee-300fd14d7eb7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"videoRev\">\n        <Red>\n            <ControlPoints>\n                          0 0.5\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Red>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1503,7 +1503,7 @@
   "repr": "<GradingRGBCurveTransform direction=inverse, style=log, values=<red=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, green=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, blue=<control_points=[<x=0, y=0><x=0.5, y=0.5><x=1, y=1>]>, master=<control_points=[<x=-1, y=0><x=0.5, y=0.5><x=1, y=1>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"c017d09fc5971a91f617c143cc84ef29\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                         -1 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:1ceb4493-4017-e8f2-4bdc-aa6c2fd4a218\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"logRev\">\n        <Master>\n            <ControlPoints>\n                         -1 0\n                        0.5 0.5\n                          1 1\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {
@@ -1518,7 +1518,7 @@
   "repr": "<GradingRGBCurveTransform direction=forward, style=linear, values=<red=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, green=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, blue=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=7>]>, master=<control_points=[<x=-7, y=-7><x=0, y=0><x=7, y=2>]>>>",
   "validate": null,
   "ctf": {
-   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"808c618f41e4d58b69ce20b3a5ce8300\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 2\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
+   "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"urn:uuid:3ae79c19-45ee-686f-f156-ae87c97ac5d7\">\n    <GradingRGBCurve inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"linear\">\n        <Master>\n            <ControlPoints>\n                         -7 -7\n                          0 0\n                          7 2\n            </ControlPoints>\n        </Master>\n    </GradingRGBCurve>\n</ProcessList>\n"
   }
  },
  {

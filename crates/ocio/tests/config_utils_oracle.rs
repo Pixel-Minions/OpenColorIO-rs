@@ -5,7 +5,7 @@
 //! `GetProcessorToBuiltinColorSpace` and `GetProcessorFromBuiltinColorSpace` (ConfigUtils'
 //! heuristics) against the wheel, through the oracle's `object_calls` (WP 9.1a).
 //!
-//! Source configs: the 8 built-in configs as they are (their interchange roles) and without
+//! Source configs: the built-in configs as they are (their interchange roles) and without
 //! their interchange roles (the heuristics); upstream's two test configs of
 //! `ConfigUtils/processor_to_known_colorspace*` with inactive lists that leave each heuristic
 //! its candidates; upstream's configs of `tests/data/files/configs`; and generated ones
@@ -378,13 +378,28 @@ fn source(label: impl Into<String>, load: Load, edits: Vec<Edit>) -> Source {
     }
 }
 
+/// `path` with forward slashes and without Windows' verbatim prefix (`\\?\`, which
+/// `ocio_testkit::paths::upstream_dir` gives on Windows): neither library locates a file
+/// through a search path that starts with `//?/`.
+fn plain_path(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    path.trim_start_matches("//?/").to_owned()
+}
+
 /// Upstream's test files directory (`GetTestFilesDir`), with forward slashes.
 fn test_files_dir() -> String {
-    ocio_testkit::paths::upstream_dir()
-        .join("tests/data/files")
-        .to_string_lossy()
-        .replace('\\', "/")
+    plain_path(&ocio_testkit::paths::upstream_dir().join("tests/data/files"))
 }
+
+/// The color spaces of the test configs whose transforms read a file of
+/// [`test_files_dir`]: the cases that build their processors prove the files are found.
+const FILE_SPACES: [&str; 5] = [
+    "File color space AP0 to linear rec.709",
+    "sRGB - curve 2",
+    "srgb clf",
+    "srgb spi1d",
+    "spimtx space",
+];
 
 /// Every name of a color space of `config`, inactive ones included, with its aliases.
 fn all_names(config: &Config) -> Vec<String> {
@@ -477,6 +492,8 @@ fn dynamic_sets(proc: &Processor) -> Vec<common::app_helpers::DynamicSet> {
 #[derive(Default)]
 struct Coverage {
     reached: Reached,
+    /// The color spaces of [`FILE_SPACES`] the port built a processor from.
+    file_spaces: BTreeSet<String>,
     names: usize,
     name_errors: usize,
     found: BTreeSet<String>,
@@ -631,16 +648,24 @@ fn check(
                         problems.push(format!("logs {} != {port_log:?}", wheel["log"]));
                     }
                 }
-                Outcome::Processor(made) => compare_processor_call(
-                    &response,
-                    results,
-                    at,
-                    &made,
-                    &port_log,
-                    applies,
-                    &mut coverage.reached,
-                    &mut problems,
-                ),
+                Outcome::Processor(made) => {
+                    if let (Ok(_), Case::ToBuiltin(src_name, _) | Case::FromBuiltin(_, src_name)) =
+                        (&made, case)
+                        && FILE_SPACES.contains(&src_name.as_str())
+                    {
+                        coverage.file_spaces.insert(src_name.clone());
+                    }
+                    compare_processor_call(
+                        &response,
+                        results,
+                        at,
+                        &made,
+                        &port_log,
+                        applies,
+                        &mut coverage.reached,
+                        &mut problems,
+                    )
+                }
             }
             if !problems.is_empty() {
                 failures.push(format!(
@@ -766,8 +791,11 @@ fn upstream_test_configs_match_the_wheel() {
         "mergeconfigs/merged3/base.ocio",
         "mergeconfigs/merged3/input.ocio",
     ] {
-        let path = configs.join(file).to_string_lossy().replace('\\', "/");
-        sources.push(source(file, Load::File(path), vec![]));
+        sources.push(source(
+            file,
+            Load::File(plain_path(&configs.join(file))),
+            vec![],
+        ));
     }
     let mut coverage = Coverage::default();
     let mut failures = Vec::new();
@@ -776,6 +804,16 @@ fn upstream_test_configs_match_the_wheel() {
     }
     report("config_utils_upstream", &failures);
     assert_eq!(coverage.reached.pixels, 2 * coverage.reached.made);
+    // The color spaces that read test files built processors, the CLF in a subdirectory of the
+    // search path among them: the files are found (a search path with Windows' verbatim prefix
+    // finds sRGB_to_linear.spi1d but not clf/lut3d_as_matrix.clf, on either side).
+    for name in ["File color space AP0 to linear rec.709", "sRGB - curve 2"] {
+        assert!(
+            coverage.file_spaces.contains(name),
+            "{name}: {:?}",
+            coverage.file_spaces
+        );
+    }
     assert!(
         coverage.names >= 200 && coverage.name_errors >= 100 && coverage.reached.made >= 40,
         "{} names, {} errors, {} processors",
@@ -816,6 +854,14 @@ fn generated_configs_match_the_wheel() {
     }
     report("config_utils_generated", &failures);
     assert_eq!(coverage.reached.pixels, 2 * coverage.reached.made);
+    // The color spaces that read test files built processors: the files are found.
+    for name in ["srgb spi1d", "spimtx space"] {
+        assert!(
+            coverage.file_spaces.contains(name),
+            "{name}: {:?}",
+            coverage.file_spaces
+        );
+    }
     for message in [
         "' refers to a color space that is missing in the source config.",
         "The supplied config does not have a color space for the reference.",
@@ -1015,4 +1061,433 @@ fn an_api_built_lut3d_space_matches_the_wheel() {
         "{:#?}",
         coverage.messages
     );
+}
+
+// LocateBuiltinColorSpace (2.6) ////////////////////////////////////////////////////////////////
+
+/// The configs `LocateBuiltinColorSpace` searches in the sweep, as the wheel and the port load
+/// them: built-in configs both have (the 2.6 default and latest ones, cg-config-v5.0.0 and
+/// studio-config-v5.0.0, among them), and the raw config, whose interchange spaces can't be
+/// identified.
+const LOCATE_TARGETS: [&str; 6] = [
+    "ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6",
+    "ocio://studio-config-v5.0.0_aces-v2.1_ocio-v2.6",
+    "ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5",
+    "ocio://studio-config-v2.2.0_aces-v1.3_ocio-v2.4",
+    "ocio://cg-config-v1.0.0_aces-v1.3_ocio-v2.1",
+    "raw",
+];
+
+/// A target of [`LOCATE_TARGETS`], on the port's side.
+fn locate_target(uri: &str) -> Config {
+    if uri == "raw" {
+        (*Config::create_raw().unwrap()).clone()
+    } else {
+        (*Config::create_from_file(uri).unwrap()).clone()
+    }
+}
+
+/// The wheel's call that loads a target of [`LOCATE_TARGETS`], stored as `name`.
+fn locate_target_call(uri: &str, name: &str) -> Value {
+    if uri == "raw" {
+        json!({"call": "CreateRaw", "on": "Config", "as": name})
+    } else {
+        json!({"call": "CreateFromFile", "on": "Config", "args": [uri], "as": name})
+    }
+}
+
+/// What the cases of `LocateBuiltinColorSpace` reached.
+#[derive(Default)]
+struct LocateCoverage {
+    found: usize,
+    empty: usize,
+    errors: usize,
+    names: BTreeSet<String>,
+    messages: BTreeSet<String>,
+}
+
+/// Compares one `LocateBuiltinColorSpace` call: the wheel's entry `wheel` with the port's
+/// outcome and log.
+fn compare_locate(
+    wheel: &Value,
+    port: &ocio::Result<String>,
+    port_log: &[Vec<u8>],
+    coverage: &mut LocateCoverage,
+    problems: &mut Vec<String>,
+) {
+    match (wheel.get("exception"), port) {
+        (Some(e), Err(p)) => {
+            assert!(wheel.get("result").is_none(), "{wheel}");
+            coverage.errors += 1;
+            let message = bytes(&e["message"]);
+            coverage
+                .messages
+                .insert(String::from_utf8_lossy(&message).into_owned());
+            if message != p.what() {
+                problems.push(format!(
+                    "messages {:?} != {:?}",
+                    String::from_utf8_lossy(&message),
+                    p.message()
+                ));
+            }
+        }
+        (None, Ok(p)) => {
+            if p.is_empty() {
+                coverage.empty += 1;
+            } else {
+                coverage.found += 1;
+                coverage.names.insert(p.clone());
+            }
+            if wheel["result"] != json!(p) {
+                problems.push(format!("wheel {wheel}, port {p:?}"));
+            }
+        }
+        _ => problems.push(format!(
+            "wheel {wheel}, port {:?}",
+            port.as_ref().map_err(|e| e.message())
+        )),
+    }
+    if log(&wheel["log"]) != port_log {
+        problems.push(format!("logs {} != {port_log:?}", wheel["log"]));
+    }
+}
+
+/// The port's `LocateBuiltinColorSpace`, as the binding returns it, and its log.
+fn port_locate(src: &Config, name: &str, builtin: &Config) -> (ocio::Result<String>, Vec<Vec<u8>>) {
+    capture(|| Config::locate_builtin_color_space(src, name, builtin).map(text))
+}
+
+/// `LocateBuiltinColorSpace` of every name of `source` (inactive and display-referred ones,
+/// aliases, roles, names cut by a NUL, a missing name and `""`) in each of
+/// [`LOCATE_TARGETS`], against the wheel: the name or the exception's message, and the log.
+fn check_locate(source: &Source, coverage: &mut LocateCoverage, failures: &mut Vec<String>) {
+    let (src, src_log) = source.port();
+    let mut names = all_names(&src);
+    if let Some(first) = names.first().cloned() {
+        names.push(format!("{first}\0tail"));
+    }
+    names.extend(
+        [
+            "scene_linear",
+            "aces_interchange",
+            "default",
+            "no_such_space",
+            "no_such_space\0tail",
+            "\0tail",
+            "",
+        ]
+        .map(String::from),
+    );
+    let mut calls = source.wheel("src");
+    let loaded = calls.len();
+    let mut plan = Vec::new();
+    for (j, uri) in LOCATE_TARGETS.iter().enumerate() {
+        let b = format!("b{j}");
+        let (builtin, builtin_log) = capture(|| locate_target(uri));
+        calls.push(locate_target_call(uri, &b));
+        plan.push((calls.len() - 1, None, Ok(String::new()), builtin_log));
+        for name in &names {
+            calls.push(json!({"call": "LocateBuiltinColorSpace", "on": "Config",
+                              "args": [{"ref": "src"}, name, {"ref": b}]}));
+            let (made, port_log) = port_locate(&src, name, &builtin);
+            plan.push((calls.len() - 1, Some((*uri, name.clone())), made, port_log));
+        }
+    }
+    let response = Oracle::get().call("object_calls", json!({"calls": calls}), &[]);
+    let results = response.result["calls"].as_array().expect("calls");
+    assert_eq!(results.len(), calls.len(), "{}", source.label);
+    let mut wheel_load_log = Vec::new();
+    for call in &results[..loaded] {
+        assert!(call.get("result").is_some(), "{}: {call}", source.label);
+        wheel_load_log.extend(log(&call["log"]));
+    }
+    assert_eq!(
+        wheel_load_log, src_log,
+        "{}: the source config's log",
+        source.label
+    );
+    for (at, case, made, port_log) in plan {
+        let wheel = &results[at];
+        let Some((uri, name)) = case else {
+            assert!(wheel.get("result").is_some(), "{}: {wheel}", source.label);
+            assert_eq!(
+                log(&wheel["log"]),
+                port_log,
+                "{}: the target's log",
+                source.label
+            );
+            continue;
+        };
+        let mut problems = Vec::new();
+        compare_locate(wheel, &made, &port_log, coverage, &mut problems);
+        if !problems.is_empty() {
+            failures.push(format!(
+                "{} {uri} {name:?}: {}",
+                source.label,
+                problems.join("\n    ")
+            ));
+        }
+    }
+}
+
+/// `LocateBuiltinColorSpace` against the wheel, from the built-in configs (with and without
+/// their interchange roles), upstream's test configs of `processor_to_known_colorspace*` (with
+/// the interchange roles, without them, and with inactive lists that leave the heuristics
+/// their candidates or none) and the generated configs.
+#[test]
+fn locate_builtin_color_space_matches_the_wheel() {
+    let files = test_files_dir();
+    let mut sources = Vec::new();
+    let registry = BuiltinConfigRegistry::get();
+    for i in 0..registry.num_builtin_configs() {
+        let name = format!("ocio://{}", text(registry.builtin_config_name(i).unwrap()));
+        sources.push(source(name.clone(), Load::Builtin(name.clone()), vec![]));
+        sources.push(source(
+            format!("{name} without roles"),
+            Load::Builtin(name),
+            vec![
+                Edit::Role("aces_interchange", ""),
+                Edit::Role("cie_xyz_d65_interchange", ""),
+            ],
+        ));
+    }
+    for (k, edits) in [
+        vec![
+            Edit::Role("aces_interchange", "ref_cs"),
+            Edit::Role("cie_xyz_d65_interchange", "CIE-XYZ-D65"),
+            Edit::Inactive(""),
+        ],
+        vec![
+            Edit::Role("aces_interchange", "ref_cs"),
+            Edit::Role("cie_xyz_d65_interchange", "CIE-XYZ-D65"),
+            Edit::Inactive("ref_cs"),
+        ],
+        vec![Edit::Role("aces_interchange", "Texture -- sRGB")],
+        vec![Edit::Inactive("")],
+        vec![Edit::Inactive(
+            "ACES cg, Linear ITU-R BT.709, Texture -- sRGB, OCIO v1 -- sRGB",
+        )],
+        vec![Edit::Inactive(
+            "ACES cg, Linear ITU-R BT.709, Texture -- sRGB, OCIO v1 -- sRGB, ref_cs",
+        )],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut all = vec![Edit::AddSearchPath(files.clone())];
+        all.extend(edits);
+        sources.push(source(
+            format!("known {k}"),
+            Load::Yaml(KNOWN_CS_CONFIG.to_string()),
+            all,
+        ));
+    }
+    for (k, inactive) in [
+        "",
+        "ACES2065-1",
+        "texture sRGB, scene-linear Rec.709-sRGB, ACES2065-1",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sources.push(source(
+            format!("alt {k}"),
+            Load::Yaml(ALT_CONFIG.to_string()),
+            vec![Edit::Inactive(inactive)],
+        ));
+    }
+    for (label, yaml) in generated_configs() {
+        sources.push(source(
+            label,
+            Load::Yaml(yaml),
+            vec![Edit::AddSearchPath(files.clone())],
+        ));
+    }
+    let mut coverage = LocateCoverage::default();
+    let mut failures = Vec::new();
+    for s in &sources {
+        check_locate(s, &mut coverage, &mut failures);
+    }
+    report("locate_builtin_color_space", &failures);
+    assert!(
+        coverage.found >= 500 && coverage.empty >= 100 && coverage.errors >= 200,
+        "{} found, {} empty, {} errors",
+        coverage.found,
+        coverage.empty,
+        coverage.errors
+    );
+    for name in [
+        "ACEScg",
+        "Raw",
+        "raw",
+        "sRGB - Display",
+        "sRGB Encoded Rec.709 (sRGB)",
+    ] {
+        assert!(
+            coverage.names.contains(name),
+            "{name}: {:#?}",
+            coverage.names
+        );
+    }
+    for message in [
+        "LocateBuiltinColorSpace: arguments must not be null.",
+        "LocateBuiltinColorSpace: Source config does not contain the requested color space: \
+         no_such_space.",
+        "Heuristics were not able to find an interchange space in the source config, so it is \
+         not possible to search for the color space: ",
+        "Heuristics were not able to find an interchange space in the built-in config.",
+    ] {
+        assert!(
+            coverage.messages.iter().any(|m| m.contains(message)),
+            "{message:?}: {:#?}",
+            coverage.messages
+        );
+    }
+}
+
+/// A step of a `LocateBuiltinColorSpace` script, on both sides; configs by name.
+#[derive(Clone, Debug)]
+enum Step {
+    /// `setRole` on the config.
+    Role(&'static str, &'static str, &'static str),
+    /// `setInactiveColorSpaces` on the config.
+    Inactive(&'static str, &'static str),
+    /// Renames a color space of the config: an editable copy of it renamed, the color space
+    /// removed and the copy added.
+    Rename(&'static str, &'static str, &'static str),
+    /// `createEditableCopy` of a config, stored as the second name.
+    Copy(&'static str, &'static str),
+    /// `LocateBuiltinColorSpace(src, name, builtin)`.
+    Locate(&'static str, &'static str, &'static str),
+}
+
+/// The cached test values and fingerprints follow the configs' changes, against the wheel:
+/// upstream's script of `processor_to_known_colorspace` (ColorSpace_tests.cpp:1927-2088 @
+/// v2.6.0), each step's result compared, with the built-in copy's interchange role moved too.
+#[test]
+fn locate_builtin_color_space_follows_edits() {
+    use Step::*;
+    const TARGET: &str = "ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5";
+    let steps = [
+        Role("src", "aces_interchange", "ref_cs"),
+        Role("src", "cie_xyz_d65_interchange", "CIE-XYZ-D65"),
+        Inactive("src", ""),
+        Locate("src", "ACES cg", "b"),
+        Locate("src", "sRGB - Display CS", "b"),
+        Role("src", "aces_interchange", "Texture -- sRGB"),
+        Locate("src", "ACES cg", "b"),
+        Role("src", "aces_interchange", "ref_cs"),
+        Locate("src", "ACES cg", "b"),
+        Copy("b", "b2"),
+        Locate("src", "ACES cg", "b2"),
+        Rename("b2", "ACEScg", "ACES cg 2"),
+        Locate("src", "ACES cg", "b2"),
+        Role("b2", "aces_interchange", "ACEScct"),
+        Locate("src", "ACES cg", "b2"),
+        Role("src", "aces_interchange", ""),
+        Role("src", "cie_xyz_d65_interchange", ""),
+        Locate("src", "ACES cg", "b"),
+        Locate("src", "sRGB - Display CS", "b"),
+        Rename("src", "CIE-XYZ-D65", "Not the interchange space"),
+        Locate("src", "sRGB - Display CS", "b"),
+        Locate("src", "ACES cg", "b"),
+        Rename("src", "Not the interchange space", "CIE-XYZ-D65"),
+        Locate("src", "sRGB - Display CS", "b"),
+        Inactive(
+            "src",
+            "ACES cg, Linear ITU-R BT.709, Texture -- sRGB, OCIO v1 -- sRGB, ref_cs",
+        ),
+        Locate("src", "ACES cg", "b"),
+        Inactive("src", ""),
+        Locate("src", "ACES cg", "b"),
+    ];
+    let src_source = source(
+        "known",
+        Load::Yaml(KNOWN_CS_CONFIG.to_string()),
+        vec![Edit::AddSearchPath(test_files_dir())],
+    );
+    let (src, _) = src_source.port();
+    let mut configs: std::collections::BTreeMap<&str, Config> =
+        [("src", (*src).clone()), ("b", locate_target(TARGET))]
+            .into_iter()
+            .collect();
+    let mut calls = src_source.wheel("src");
+    calls.push(locate_target_call(TARGET, "b"));
+    let mut plan = Vec::new();
+    for (k, step) in steps.iter().enumerate() {
+        match *step {
+            Role(c, role, cs) => {
+                calls.push(json!({"call": "setRole", "on": c, "args": [role, cs]}));
+                let config = configs.get_mut(c).unwrap();
+                config.set_role(role, Some(cs.as_bytes())).unwrap();
+            }
+            Inactive(c, list) => {
+                calls.push(json!({"call": "setInactiveColorSpaces", "on": c, "args": [list]}));
+                configs.get_mut(c).unwrap().set_inactive_color_spaces(list);
+            }
+            Rename(c, old, new) => {
+                let (got, copy) = (format!("cs{k}"), format!("copy{k}"));
+                calls.extend([
+                    json!({"call": "getColorSpace", "on": c, "args": [old], "as": got}),
+                    json!({"copy": got, "as": copy}),
+                    json!({"call": "setName", "on": copy, "args": [new]}),
+                    json!({"call": "removeColorSpace", "on": c, "args": [old]}),
+                    json!({"call": "addColorSpace", "on": c, "args": [{"ref": copy}]}),
+                ]);
+                let config = configs.get_mut(c).unwrap();
+                let mut renamed = config.color_space(old).unwrap().clone();
+                renamed.set_name(new);
+                config.remove_color_space(old);
+                config.add_color_space(&renamed).unwrap();
+            }
+            Copy(from, to) => {
+                calls.push(json!({"copy": from, "as": to}));
+                let copy = configs[from].create_editable_copy().unwrap();
+                configs.insert(to, copy);
+            }
+            Locate(s, name, b) => {
+                calls.push(json!({"call": "LocateBuiltinColorSpace", "on": "Config",
+                                  "args": [{"ref": s}, name, {"ref": b}]}));
+                let (made, port_log) = port_locate(&configs[s], name, &configs[b]);
+                plan.push((k, calls.len() - 1, made, port_log));
+            }
+        }
+    }
+    let response = Oracle::get().call("object_calls", json!({"calls": calls}), &[]);
+    let results = response.result["calls"].as_array().expect("calls");
+    assert_eq!(results.len(), calls.len());
+    let located: BTreeSet<usize> = plan.iter().map(|(_, at, _, _)| *at).collect();
+    for (at, call) in results.iter().enumerate() {
+        if !located.contains(&at) {
+            assert!(call.get("exception").is_none(), "call {at}: {call}");
+            assert!(call.get("result").is_some(), "call {at}: {call}");
+            assert!(log(&call["log"]).is_empty(), "call {at}: {call}");
+        }
+    }
+    let mut coverage = LocateCoverage::default();
+    let mut failures = Vec::new();
+    let mut outcomes = Vec::new();
+    for (k, at, made, port_log) in &plan {
+        let mut problems = Vec::new();
+        compare_locate(&results[*at], made, port_log, &mut coverage, &mut problems);
+        if !problems.is_empty() {
+            failures.push(format!(
+                "step {k} {:?}: {}",
+                steps[*k],
+                problems.join("\n    ")
+            ));
+        }
+        outcomes.push(match results[*at].get("exception") {
+            Some(_) => "error".to_string(),
+            None => results[*at]["result"].as_str().unwrap_or("?").to_string(),
+        });
+    }
+    report("locate_builtin_color_space_edits", &failures);
+    assert_eq!(plan.len(), 14);
+    // The steps reached each kind of outcome in the wheel: the moved role changed the answer,
+    // the renamed built-in space was found by its new name, and the source config lost its
+    // interchange spaces.
+    assert_ne!(outcomes[2], outcomes[3], "{outcomes:?}");
+    assert!(coverage.names.contains("ACES cg 2"), "{outcomes:?}");
+    assert!(coverage.errors >= 2, "{outcomes:?}");
 }

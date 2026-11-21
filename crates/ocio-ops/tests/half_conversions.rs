@@ -3,7 +3,7 @@
 
 //! Spike S4: OCIO's three half-float conversions, compared exhaustively.
 //!
-//! - Imath 3.2.1 ([`ocio_ops::imath_half`]): OCIO's scalar `half` type.
+//! - Imath 3.2.3 ([`ocio_ops::imath_half`]): OCIO's scalar `half` type.
 //! - SSE2's software conversion ([`ocio_ops::sse2`]): the SSE2 kernels' F16 packing.
 //! - F16C ([`ocio_ops::avx`]): the AVX, AVX2 and AVX-512 kernels' F16 packing.
 //!

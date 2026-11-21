@@ -11,21 +11,21 @@ use ocio_ops::exception::{Exception, Result};
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::string_utils::c_str;
 
-/// `OUT_OF_RANGE_EXCEPTION_TEXT` (BuiltinConfigRegistry.cpp:19 @ v2.5.2).
+/// `OUT_OF_RANGE_EXCEPTION_TEXT` (BuiltinConfigRegistry.cpp:20 @ v2.6.0).
 const OUT_OF_RANGE_EXCEPTION_TEXT: &str = "Config index is out of range.";
 
-/// `DEFAULT_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:21 @ v2.5.2).
-const DEFAULT_BUILTIN_CONFIG_URI: &[u8] = b"ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5";
-/// `LATEST_CG_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:22 @ v2.5.2).
-const LATEST_CG_BUILTIN_CONFIG_URI: &[u8] = b"ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5";
-/// `LATEST_STUDIO_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:23 @ v2.5.2).
-const LATEST_STUDIO_BUILTIN_CONFIG_URI: &[u8] = b"ocio://studio-config-v4.0.0_aces-v2.0_ocio-v2.5";
+/// `DEFAULT_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:24 @ v2.6.0).
+const DEFAULT_BUILTIN_CONFIG_URI: &[u8] = b"ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6";
+/// `LATEST_CG_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:25 @ v2.6.0).
+const LATEST_CG_BUILTIN_CONFIG_URI: &[u8] = b"ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6";
+/// `LATEST_STUDIO_BUILTIN_CONFIG_URI` (BuiltinConfigRegistry.cpp:26 @ v2.6.0).
+const LATEST_STUDIO_BUILTIN_CONFIG_URI: &[u8] = b"ocio://studio-config-v5.0.0_aces-v2.1_ocio-v2.6";
 
-/// `BUILTIN_DEFAULT_NAME` (BuiltinConfigRegistry.cpp:25 @ v2.5.2).
+/// `BUILTIN_DEFAULT_NAME` (BuiltinConfigRegistry.cpp:28 @ v2.6.0).
 const BUILTIN_DEFAULT_NAME: &[u8] = b"default";
-/// `BUILTIN_LATEST_CG_NAME` (BuiltinConfigRegistry.cpp:26 @ v2.5.2).
+/// `BUILTIN_LATEST_CG_NAME` (BuiltinConfigRegistry.cpp:29 @ v2.6.0).
 const BUILTIN_LATEST_CG_NAME: &[u8] = b"cg-config-latest";
-/// `BUILTIN_LATEST_STUDIO_NAME` (BuiltinConfigRegistry.cpp:27 @ v2.5.2).
+/// `BUILTIN_LATEST_STUDIO_NAME` (BuiltinConfigRegistry.cpp:30 @ v2.6.0).
 const BUILTIN_LATEST_STUDIO_NAME: &[u8] = b"studio-config-latest";
 
 /// The prefix of the URIs of the built-in configs.
@@ -76,6 +76,57 @@ pub fn resolve_config_path(original_path: &[u8]) -> &[u8] {
 
     // Return originalPath if no special path was used.
     uri
+}
+
+/// Whether `sanitized_config_name` (a config's name sanitized for a Color Interop ID) is the
+/// name of one of the ASWF OCIO configs for ACES of version 4.0.0 or later, whose color spaces
+/// already have interop IDs: it matches
+/// `^(?:cg-config|studio-config)-v(\d+)\.\d+\.\d+_aces-v[\d.]+_ocio-v[\d.]+$` (`std::regex`,
+/// whose `\d` is `0`-`9` in the classic locale `std::regex` uses), and its major version (the
+/// first group, read by `std::from_chars` into an `int`) is at least 4; a major version that
+/// doesn't fit an `int` makes it not reserved.
+///
+/// The pattern is matched by hand: each part is a fixed text or a run of a class the next part
+/// can't start with, so the match is deterministic, as `std::regex_match` finds it.
+///
+/// Port of `IsReservedConfigName` (src/OpenColorIO/builtinconfigs/BuiltinConfigRegistry.cpp:
+/// 64-84 @ v2.6.0).
+pub(crate) fn is_reserved_config_name(sanitized_config_name: &[u8]) -> bool {
+    /// The run of bytes of `class` at the start of `s` (at least one), and the rest.
+    fn run(s: &[u8], class: impl Fn(u8) -> bool) -> Option<(&[u8], &[u8])> {
+        let n = s.iter().take_while(|&&b| class(b)).count();
+        (n > 0).then(|| s.split_at(n))
+    }
+    let digit = |b: u8| b.is_ascii_digit();
+    let digit_or_dot = |b: u8| b.is_ascii_digit() || b == b'.';
+
+    let matched = (|| {
+        let s = sanitized_config_name
+            .strip_prefix(b"cg-config-v")
+            .or_else(|| sanitized_config_name.strip_prefix(b"studio-config-v"))?;
+        let (major, s) = run(s, digit)?;
+        let s = s.strip_prefix(b".")?;
+        let (_, s) = run(s, digit)?;
+        let s = s.strip_prefix(b".")?;
+        let (_, s) = run(s, digit)?;
+        let s = s.strip_prefix(b"_aces-v")?;
+        let (_, s) = run(s, digit_or_dot)?;
+        let s = s.strip_prefix(b"_ocio-v")?;
+        let (_, s) = run(s, digit_or_dot)?;
+        s.is_empty().then_some(major)
+    })();
+    let Some(major_version_str) = matched else {
+        return false;
+    };
+
+    // std::from_chars into an int: the digits' value, or an error when it doesn't fit.
+    let major_version = std::str::from_utf8(major_version_str)
+        .ok()
+        .and_then(|digits| digits.parse::<i32>().ok());
+    match major_version {
+        Some(major_version) => major_version >= 4,
+        None => false,
+    }
 }
 
 /// A built-in config: its name, its name for user interfaces, its text and whether it is

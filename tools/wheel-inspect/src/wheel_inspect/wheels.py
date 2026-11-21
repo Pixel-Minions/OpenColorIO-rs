@@ -5,9 +5,13 @@
 
 Each platform's wheel is downloaded once, from the URL in `oracle/uv.lock` and nowhere else,
 into `<target>/wheel-inspect/wheels/`, and its SHA-256 and size are checked against the lock on
-every run. The library and the Python module are extracted next to it and checked against the
-wheel's own `RECORD`. The oracle's installed copy, when this platform has one, is compared with
-them byte for byte.
+every run. The library and the Python module are extracted to
+`<target>/wheel-inspect/<version>/<platform>/` and checked against the wheel's own `RECORD`. The
+oracle's installed copy, when this platform has one, is compared with them byte for byte.
+
+`select("2.5.2")` (the command line's `--wheel 2.5.2`) reads an earlier release's wheels
+instead, pinned by `tools/wheel-inspect/locks/opencolorio-<version>.toml` (that release's entry
+of `oracle/uv.lock`, kept when the oracle moved on), to compare a release with the pinned one.
 """
 
 from __future__ import annotations
@@ -24,7 +28,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PACKAGE = "opencolorio"
-VERSION = "2.5.2"
+
+# The release `select` chose, or None for the one `oracle/uv.lock` pins.
+_selected: str | None = None
+
+
+def select(release: str | None) -> None:
+    """Reads `release`'s wheels (None: the ones `oracle/uv.lock` pins) from now on."""
+    global _selected
+    _selected = release
 
 
 @dataclass(frozen=True)
@@ -33,16 +45,21 @@ class PlatformSpec:
 
     name: str
     wheel_suffix: str
+    # The library's path in the wheel, with the release's `{major}` and `{minor}`.
     library: str
     module: str
     venv_site_packages: str
+
+    def library_member(self, release: str) -> str:
+        major, minor = release.split(".")[:2]
+        return self.library.format(major=major, minor=minor)
 
 
 PLATFORMS = {
     "windows": PlatformSpec(
         "windows",
         "-cp313-cp313-win_amd64.whl",
-        "PyOpenColorIO/bin/OpenColorIO_2_5.dll",
+        "PyOpenColorIO/bin/OpenColorIO_{major}_{minor}.dll",
         "PyOpenColorIO/PyOpenColorIO.pyd",
         "Lib/site-packages",
     ),
@@ -87,22 +104,58 @@ class LockedWheel:
     url: str
     sha256: str
     size: int
+    release: str
+    # From the oracle's own lock (its environment can hold this wheel), not an earlier release's.
+    oracle: bool
+
+
+def _lock_package(path: Path, what: str) -> dict:
+    lock = tomllib.loads(path.read_text(encoding="utf-8"))
+    packages = [p for p in lock.get("package", []) if p.get("name") == PACKAGE]
+    if len(packages) != 1 or not isinstance(packages[0].get("version"), str):
+        raise WheelError(f"{what} does not pin one {PACKAGE} version")
+    return packages[0]
+
+
+def pinned_release(root: Path) -> str:
+    """The release `oracle/uv.lock` pins."""
+    return _lock_package(root / "oracle" / "uv.lock", "oracle/uv.lock")["version"]
+
+
+def release(root: Path | None = None) -> str:
+    """The release this run reads."""
+    return _selected or pinned_release(root or repo_root())
 
 
 def locked_wheel(root: Path, spec: PlatformSpec) -> LockedWheel:
-    """The wheel `oracle/uv.lock` pins for this platform."""
-    lock = tomllib.loads((root / "oracle" / "uv.lock").read_text(encoding="utf-8"))
-    packages = [p for p in lock.get("package", []) if p.get("name") == PACKAGE]
-    if len(packages) != 1 or packages[0].get("version") != VERSION:
-        raise WheelError(f"oracle/uv.lock does not pin {PACKAGE}=={VERSION}")
-    wheels = [w for w in packages[0].get("wheels", []) if w["url"].endswith(spec.wheel_suffix)]
+    """The wheel `oracle/uv.lock` (or the selected release's lock) pins for this platform."""
+    pinned = pinned_release(root)
+    if _selected is None or _selected == pinned:
+        what = "oracle/uv.lock"
+        package = _lock_package(root / "oracle" / "uv.lock", what)
+    else:
+        path = root / "tools" / "wheel-inspect" / "locks" / f"{PACKAGE}-{_selected}.toml"
+        what = f"tools/wheel-inspect/locks/{path.name}"
+        if not path.is_file():
+            raise WheelError(f"no {what} (the oracle pins {pinned})")
+        package = _lock_package(path, what)
+        if package["version"] != _selected:
+            raise WheelError(f"{what} pins {package['version']}, not {_selected}")
+    wheels = [w for w in package.get("wheels", []) if w["url"].endswith(spec.wheel_suffix)]
     if len(wheels) != 1:
-        raise WheelError(f"oracle/uv.lock has {len(wheels)} wheels ending in {spec.wheel_suffix}")
+        raise WheelError(f"{what} has {len(wheels)} wheels ending in {spec.wheel_suffix}")
     w = wheels[0]
     algo, _, digest = w["hash"].partition(":")
     if algo != "sha256":
-        raise WheelError(f"unexpected hash algorithm in oracle/uv.lock: {w['hash']}")
-    return LockedWheel(w["url"].rsplit("/", 1)[1], w["url"], digest, int(w["size"]))
+        raise WheelError(f"unexpected hash algorithm in {what}: {w['hash']}")
+    return LockedWheel(
+        w["url"].rsplit("/", 1)[1],
+        w["url"],
+        digest,
+        int(w["size"]),
+        package["version"],
+        what == "oracle/uv.lock",
+    )
 
 
 def sha256_file(path: Path) -> str:
@@ -145,7 +198,7 @@ def _verified_wheel(store: Path, locked: LockedWheel, log) -> Path:
                 f"could not download {locked.url} ({e}); place the file at {path} by hand"
             ) from e
     if path.stat().st_size != locked.size or sha256_file(path) != locked.sha256:
-        raise WheelError(f"{path}: size or SHA-256 does not match oracle/uv.lock; delete it")
+        raise WheelError(f"{path}: size or SHA-256 does not match the lock; delete it")
     return path
 
 
@@ -189,24 +242,20 @@ def locate(platform: str, log=lambda msg: None) -> LocatedWheel:
     target = target_dir(root)
     locked = locked_wheel(root, spec)
     wheel = _verified_wheel(target / "wheel-inspect" / "wheels", locked, log)
-    out_dir = target / "wheel-inspect" / platform
+    out_dir = target / "wheel-inspect" / locked.release / platform
     members = []
     with zipfile.ZipFile(wheel) as zf:
-        for member in (spec.library, spec.module):
+        for member in (spec.library_member(locked.release), spec.module):
             digest = _record_digest(zf, member)
             path = out_dir / member.rsplit("/", 1)[1]
             if not path.is_file() or sha256_file(path) != digest:
                 data = zf.read(member)
                 _publish(path, lambda f, b=data: f.write(b), digest, f"{wheel}: {member} (RECORD)")
+            # Only the oracle's own lock describes what its environment installed.
             installed = target / "oracle-venv" / spec.venv_site_packages / member
-            identical = sha256_file(installed) == digest if installed.is_file() else None
+            present = locked.oracle and installed.is_file()
+            identical = sha256_file(installed) == digest if present else None
             members.append(
-                Member(
-                    path,
-                    digest,
-                    path.stat().st_size,
-                    installed if installed.is_file() else None,
-                    identical,
-                )
+                Member(path, digest, path.stat().st_size, installed if present else None, identical)
             )
     return LocatedWheel(spec, locked, wheel, members[0], members[1])

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
-// Ported from expat 2.7.2 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
-// Ltd and Clark Cooper, Copyright (c) 2001-2025 Expat maintainers); see mod.rs.
+// Ported from expat 2.8.4 (MIT License, Copyright (c) 1998-2000 Thai Open Source Software Center
+// Ltd and Clark Cooper, Copyright (c) 2001-2026 Expat maintainers); see mod.rs.
 
-//! The tokenizer's scanners: a port of `lib/xmltok_impl.c` and `xmltok_impl.h` (expat 2.7.2).
+//! The tokenizer's scanners: a port of `lib/xmltok_impl.c` and `xmltok_impl.h` (expat 2.8.4).
 //!
 //! expat compiles `xmltok_impl.c` three times, with macros that read one encoding's
 //! characters: `normal_` (one byte per character: UTF-8, ISO-8859-1, US-ASCII), `little2_` and

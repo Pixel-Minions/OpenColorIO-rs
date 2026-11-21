@@ -103,7 +103,7 @@ fn valid_params(style: FixedFunctionStyle) -> Vec<f64> {
                 100.0, 0.6400, 0.3300, 0.3000, 0.6000, 0.1500, 0.0600, 0.3127, 0.3290,
             ]
         }
-        AcesRgbToJmh20 => vec![
+        AcesRgbToJmh20 | AcesRgbToHmj20 => vec![
             0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
         ],
         AcesTonescaleCompress20 => vec![1000.0],
@@ -112,7 +112,7 @@ fn valid_params(style: FixedFunctionStyle) -> Vec<f64> {
 }
 
 /// Every implemented style.
-const STYLES: [FixedFunctionStyle; 21] = [
+const STYLES: [FixedFunctionStyle; 22] = [
     AcesRedMod03,
     AcesRedMod10,
     AcesGlow03,
@@ -131,6 +131,7 @@ const STYLES: [FixedFunctionStyle; 21] = [
     AcesRgbToJmh20,
     AcesTonescaleCompress20,
     AcesGamutCompress20,
+    AcesRgbToHmj20,
     RgbToHsyLin,
     RgbToHsyLog,
     RgbToHsyVid,
@@ -138,7 +139,7 @@ const STYLES: [FixedFunctionStyle; 21] = [
 
 /// The styles whose CPU renderers are ported (2.3b, 2.3c1, 2.3c2, 2.3d1, 2.4e1, 2.4e2): the
 /// processors' cases.
-const RENDERED: [FixedFunctionStyle; 20] = [
+const RENDERED: [FixedFunctionStyle; 21] = [
     AcesRedMod03,
     AcesRedMod10,
     AcesGlow03,
@@ -149,6 +150,7 @@ const RENDERED: [FixedFunctionStyle; 20] = [
     AcesRgbToJmh20,
     AcesTonescaleCompress20,
     AcesGamutCompress20,
+    AcesRgbToHmj20,
     Rec2100Surround,
     RgbToHsv,
     XyzToXyy,

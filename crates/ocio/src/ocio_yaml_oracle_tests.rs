@@ -177,6 +177,7 @@ fn fixed_function_style_name(style: FixedFunctionStyle) -> &'static str {
         AcesRgbToJmh20 => "FIXED_FUNCTION_ACES_RGB_TO_JMH_20",
         AcesTonescaleCompress20 => "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20",
         AcesGamutCompress20 => "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20",
+        AcesRgbToHmj20 => "FIXED_FUNCTION_ACES_RGB_TO_HMJ_20",
         RgbToHsyLin => "FIXED_FUNCTION_RGB_TO_HSY_LIN",
         RgbToHsyLog => "FIXED_FUNCTION_RGB_TO_HSY_LOG",
         RgbToHsyVid => "FIXED_FUNCTION_RGB_TO_HSY_VID",
@@ -980,49 +981,141 @@ fn groups_nested_too_deep_are_refused() {
     refused(b"\n      &t !<GroupTransform>\n      children: [*t]", 8);
 }
 
+/// The deepest group of [`aliased_groups`] whose processor the test builds: the wheel builds
+/// it and refuses the next (checked against the wheel in [`deep_groups_fit_a_small_stack`]).
+/// Since OCIO 2.6.0, collecting the context variables of a processor's transform throws past
+/// a depth of 32 (ContextVariableUtils.cpp:182-205 @ v2.6.0).
+const DEEPEST_PROCESSOR: usize = 32;
+
+/// The calls that build the processor of a case's transform `t` in a raw config, and then,
+/// with `cpu`, its CPU processor.
+fn processor_calls(cpu: bool) -> Vec<Value> {
+    let mut calls = vec![
+        json!({"call": "CreateRaw", "on": "Config", "as": "raw"}),
+        json!({"call": "getProcessor", "on": "raw", "args": [{"ref": "t"}], "as": "p"}),
+    ];
+    if cpu {
+        calls.push(json!({"call": "getDefaultCPUProcessor", "on": "p"}));
+    }
+    calls
+}
+
 /// Loading, copying, printing, validating, saving and dropping the deepest group the port
 /// loads, and refusing deeper groups and a group that holds itself, fit a thread of 1 MiB.
 /// Loading and copying walk the groups without recursion; printing, validating, saving and
 /// dropping recurse in small frames: at opt-level 0, where frames are largest, printing,
 /// validating and dropping fit 2,360 levels (four times the limit) on 1 MiB, saving 1,200
-/// (twice the limit), and building a CPU processor fits the limit.
+/// (twice the limit). The processor of a group is built (with its CPU processor) up to the
+/// depth the wheel builds, and refused past it with the wheel's error.
 #[test]
 fn deep_groups_fit_a_small_stack() {
+    // The wheel: the processors of the deepest group it builds, of one deeper and of the
+    // deepest the port loads, and the CPU processor of the first.
+    let depths = [DEEPEST_PROCESSOR, DEEPEST_PROCESSOR + 1, MAX_GROUP_DEPTH];
+    let mut requests: Vec<Value> = depths
+        .iter()
+        .map(|&n| request(&aliased_groups(n), &processor_calls(false)))
+        .collect();
+    requests.push(request(
+        &aliased_groups(DEEPEST_PROCESSOR),
+        &processor_calls(true),
+    ));
+    let wheel = run(requests);
+    let mut wheel_errors = Vec::new();
+    for (n, reply) in depths.iter().zip(&wheel) {
+        let calls = reply["calls"].as_array().expect("the calls");
+        assert_eq!(calls.len(), 4, "{n}: {reply}");
+        for call in &calls[..3] {
+            assert!(call.get("result").is_some(), "{n}: {reply}");
+        }
+        wheel_errors.push(if calls[3].get("exception").is_some() {
+            Some(bytes(&calls[3]["exception"]["message"]))
+        } else {
+            assert!(calls[3].get("result").is_some(), "{n}: {reply}");
+            None
+        });
+    }
+    let cpu = &wheel[3]["calls"];
+    assert_eq!(cpu.as_array().map(Vec::len), Some(5), "{cpu}");
+    assert!(
+        cpu[4].get("result").is_some(),
+        "the wheel's CPU processor: {cpu}"
+    );
+    assert!(
+        wheel_errors[0].is_none(),
+        "the wheel builds {DEEPEST_PROCESSOR}"
+    );
+    let refused = wheel_errors[1]
+        .clone()
+        .expect("the wheel refuses one deeper");
+    assert_eq!(
+        wheel_errors[2].as_ref(),
+        Some(&refused),
+        "the deepest the port loads"
+    );
+
     // Parsed here: yaml-cpp's parser recurses per level of the text, which isn't the loader's.
-    let nodes: Vec<Node> = [
-        aliased_groups(MAX_GROUP_DEPTH),
-        aliased_groups(MAX_GROUP_DEPTH + 1),
-        b"&t !<GroupTransform> {children: [*t, *t]}".to_vec(),
+    let nodes: Vec<(usize, Node)> = [
+        (DEEPEST_PROCESSOR, aliased_groups(DEEPEST_PROCESSOR)),
+        (DEEPEST_PROCESSOR + 1, aliased_groups(DEEPEST_PROCESSOR + 1)),
+        (MAX_GROUP_DEPTH, aliased_groups(MAX_GROUP_DEPTH)),
+        (MAX_GROUP_DEPTH + 1, aliased_groups(MAX_GROUP_DEPTH + 1)),
+        (0, b"&t !<GroupTransform> {children: [*t, *t]}".to_vec()),
     ]
-    .iter()
-    .map(|case| {
-        load(&config_text(case))
+    .into_iter()
+    .map(|(n, case)| {
+        let node = load(&config_text(&case))
             .and_then(|doc| doc.get("colorspaces"))
             .and_then(|n| n.get(0usize))
             .and_then(|n| n.get("to_scene_reference"))
-            .unwrap()
+            .unwrap();
+        (n, node)
     })
     .collect();
-    std::thread::Builder::new()
+    let failures = std::thread::Builder::new()
         .stack_size(1 << 20)
         .spawn(move || {
-            for node in nodes {
-                if let Ok(t) = load_transform(&node) {
-                    let copy = t.clone();
-                    assert!(!t.to_bytes().is_empty());
-                    let _ = t.validate();
-                    let mut out = crate::yaml_cpp::emitter::Emitter::new();
-                    save_transform(&mut out, &t, 2).unwrap();
-                    let config = crate::Config::create_raw().unwrap();
-                    let processor = config.processor(&t).unwrap();
-                    processor.default_cpu_processor().unwrap();
-                    drop(copy);
+            let mut failures = Vec::new();
+            let mut loaded = 0;
+            for (n, node) in nodes {
+                let Ok(t) = load_transform(&node) else {
+                    continue;
+                };
+                loaded += 1;
+                let copy = t.clone();
+                assert!(!t.to_bytes().is_empty());
+                let _ = t.validate();
+                let mut out = crate::yaml_cpp::emitter::Emitter::new();
+                save_transform(&mut out, &t, 2).unwrap();
+                let config = crate::Config::create_raw().unwrap();
+                let port = match config.processor(&t) {
+                    Ok(processor) => {
+                        processor.default_cpu_processor().unwrap();
+                        None
+                    }
+                    Err(e) => Some(e.what().to_vec()),
+                };
+                let wheel = if n <= DEEPEST_PROCESSOR {
+                    None
+                } else {
+                    Some(refused.clone())
+                };
+                if port != wheel {
+                    failures.push(format!(
+                        "{n}: port {:?}, wheel {:?}",
+                        port.map(|m| String::from_utf8_lossy(&m).into_owned()),
+                        wheel.map(|m| String::from_utf8_lossy(&m).into_owned())
+                    ));
                 }
+                drop(copy);
             }
+            assert_eq!(loaded, 3, "the port loads the groups up to its limit");
+            failures
         })
         .unwrap()
         .join()
         .unwrap();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// The BuiltinTransform's styles (any case), which it checks as it sets them, and its keys,
@@ -1134,6 +1227,7 @@ fn fixed_function_transforms_load_as_in_the_wheel() {
         "ACES_GamutComp13",
         "ACES2_OutputTransform",
         "ACES2_RGB_TO_JMh",
+        "ACES2_RGB_TO_HMJ",
         "ACES2_TonescaleCompress",
         "ACES2_GamutCompress",
         "REC2100_Surround",

@@ -19,10 +19,12 @@ use std::ffi::c_ulong;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use ocio_formats::expat::xmlparse::{ParseError, Parser, XmlError, XmlStatus, xml_error_string};
+use ocio_formats::expat::xmlparse::{
+    ParseError, Parser, ParserHandle, XmlError, XmlStatus, xml_error_string,
+};
 use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     ElementRcPtr, XmlReaderDescriptionElt, XmlReaderDummyElt, XmlReaderElementStack,
-    XmlReaderSaturationElt, XmlReaderSopValueElt,
+    XmlReaderPlainElt, XmlReaderSaturationElt, XmlReaderSopValueElt,
 };
 use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
     TAG_DESCRIPTION, TAG_OFFSET, TAG_POWER, TAG_SATNODE, TAG_SATNODEALT, TAG_SATURATION, TAG_SLOPE,
@@ -34,6 +36,7 @@ use ocio_ops::exception::{Exception, Result};
 use ocio_ops::format_metadata::{
     FormatMetadataImpl, METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR,
 };
+use ocio_ops::hash_utils::cache_id_hash_uuid;
 use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::math_utils::std_max;
 use ocio_ops::op::{OpVec, create_op_vec_from_op_data};
@@ -64,13 +67,13 @@ use crate::baking_utils::{
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::ctf::ctf_reader_helper::{
-    CtfReaderAcesParamsElt, CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderDynamicParamElt,
+    CtfReaderAcesParamsElt, CtfReaderArrayElt, CtfReaderDescElt, CtfReaderDynamicParamElt,
     CtfReaderEcParamsElt, CtfReaderGammaParamsElt, CtfReaderGradingCurveElt,
     CtfReaderGradingCurvePointsElt, CtfReaderGradingCurveSlopesElt,
-    CtfReaderGradingPrimaryParamElt, CtfReaderGradingToneParamElt, CtfReaderIndexMapElt,
-    CtfReaderLogParamsElt, CtfReaderMetadataElt, CtfReaderOpElt, CtfReaderOpType,
-    CtfReaderRangeValueElt, CtfReaderSatNodeElt, CtfReaderSopNodeElt, CtfReaderTransformElt,
-    CtfReaderTransformRc, Descriptor, equal_ignoring_case, get_reader,
+    CtfReaderGradingPrimaryParamElt, CtfReaderGradingToneParamElt, CtfReaderIdElt,
+    CtfReaderIndexMapElt, CtfReaderLogParamsElt, CtfReaderMetadataElt, CtfReaderOpElt,
+    CtfReaderOpType, CtfReaderRangeValueElt, CtfReaderSatNodeElt, CtfReaderSopNodeElt,
+    CtfReaderTransformElt, CtfReaderTransformRc, equal_ignoring_case, get_reader,
 };
 use crate::fileformats::ctf::ctf_reader_utils::{
     TAG_ACES, TAG_ACES_PARAMS, TAG_ARRAY, TAG_CDL, TAG_CURVE_CTRL_PNTS, TAG_CURVE_SLOPES,
@@ -78,8 +81,8 @@ use crate::fileformats::ctf::ctf_reader_utils::{
     TAG_FIXED_FUNCTION, TAG_FUNCTION, TAG_GAMMA, TAG_GAMMA_PARAMS, TAG_HUE_CURVE,
     TAG_HUE_CURVE_HUE_FX, TAG_HUE_CURVE_HUE_HUE, TAG_HUE_CURVE_HUE_LUM, TAG_HUE_CURVE_HUE_SAT,
     TAG_HUE_CURVE_LUM_LUM, TAG_HUE_CURVE_LUM_SAT, TAG_HUE_CURVE_SAT_LUM, TAG_HUE_CURVE_SAT_SAT,
-    TAG_INDEX_MAP, TAG_INFO, TAG_INVLUT1D, TAG_INVLUT3D, TAG_LOG, TAG_LOG_PARAMS, TAG_LUT1D,
-    TAG_LUT3D, TAG_MATRIX, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE,
+    TAG_ID, TAG_INDEX_MAP, TAG_INFO, TAG_INVLUT1D, TAG_INVLUT3D, TAG_LOG, TAG_LOG_PARAMS,
+    TAG_LUT1D, TAG_LUT3D, TAG_MATRIX, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE,
     TAG_MIN_OUT_VALUE, TAG_PRIMARY, TAG_PRIMARY_BRIGHTNESS, TAG_PRIMARY_CLAMP,
     TAG_PRIMARY_CONTRAST, TAG_PRIMARY_EXPOSURE, TAG_PRIMARY_GAIN, TAG_PRIMARY_GAMMA,
     TAG_PRIMARY_LIFT, TAG_PRIMARY_OFFSET, TAG_PRIMARY_PIVOT, TAG_PRIMARY_SATURATION,
@@ -88,7 +91,7 @@ use crate::fileformats::ctf::ctf_reader_utils::{
     TAG_TONE_HIGHLIGHTS, TAG_TONE_MIDTONES, TAG_TONE_SCONTRAST, TAG_TONE_SHADOWS, TAG_TONE_WHITES,
 };
 use crate::fileformats::ctf::ctf_transform::{CtfReaderTransform, CtfReaderTransformPtr};
-use crate::fileformats::ctf::ctf_writer::TransformWriter;
+use crate::fileformats::ctf::ctf_writer::{SubFormat, TransformWriter};
 use crate::fileformats::input_stream::InputStream;
 use crate::transform::create_transform;
 use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
@@ -152,25 +155,21 @@ impl LocalFileFormat {
 }
 
 impl FileFormat for LocalFileFormat {
-    /// The CLF and CTF infos. Upstream sets the CTF info's bake capabilities on the CLF info
-    /// a second time (`info.bake_capabilities = ...` after `info2.capabilities`), so the CTF
-    /// info has none (I-180).
+    /// The CLF (Academy/ASC and SMPTE use the same format) and CTF infos, both with every
+    /// bake capability (2.6.0 sets the CTF info's, which 2.5.2 left empty: I-180).
     ///
-    /// Port of `LocalFileFormat::getFormatInfo` (FileFormatCTF.cpp:147-170 @ v2.5.2).
+    /// Port of `LocalFileFormat::getFormatInfo` (FileFormatCTF.cpp:156-188 @ v2.6.0).
     fn format_info(&self) -> Vec<FormatInfo> {
         let all_bakes = FormatBakeCapabilities::LUT_3D
             | FormatBakeCapabilities::LUT_1D
             | FormatBakeCapabilities::LUT_1D_3D;
         let capabilities =
             FormatCapabilities::READ | FormatCapabilities::BAKE | FormatCapabilities::WRITE;
-        let info = FormatInfo::new(FILEFORMAT_CLF, "clf", capabilities, all_bakes);
-        let info2 = FormatInfo::new(
-            FILEFORMAT_CTF,
-            "ctf",
-            capabilities,
-            FormatBakeCapabilities::NONE,
-        );
-        vec![info, info2]
+        // CLF - Academy/ASC & SMPTE uses the same format
+        let clf = FormatInfo::new(FILEFORMAT_CLF, "clf", capabilities, all_bakes);
+        // CTF
+        let ctf = FormatInfo::new(FILEFORMAT_CTF, "ctf", capabilities, all_bakes);
+        vec![clf, ctf]
     }
 
     /// Port of `LocalFileFormat::read` (FileFormatCTF.cpp:1195-1216 @ v2.5.2).
@@ -183,10 +182,11 @@ impl FileFormat for LocalFileFormat {
         Ok(Arc::new(self.read_file(istream, file_name)?))
     }
 
-    /// The group's ops, finalized and without their no-ops, as a CLF (version 3) or a CTF (the
-    /// lowest version that fits), after the XML header.
+    /// The group's ops, finalized and without their no-ops, as a CLF (version 3, Academy/ASC
+    /// and SMPTE ST 2136-1 at once) or a CTF (the lowest version that fits), after the XML
+    /// header.
     ///
-    /// Port of `LocalFileFormat::write` (FileFormatCTF.cpp:1555-1590 @ v2.5.2).
+    /// Port of `LocalFileFormat::write` (FileFormatCTF.cpp:1723-1775 @ v2.6.0).
     fn write(
         &self,
         config: &Config,
@@ -195,17 +195,16 @@ impl FileFormat for LocalFileFormat {
         format_name: &[u8],
         ostream: &mut OStringStream,
     ) -> Result<()> {
-        let is_clf = if strcasecmp(c_str(format_name), FILEFORMAT_CLF.as_bytes()).is_eq() {
-            true
-        } else if strcasecmp(c_str(format_name), FILEFORMAT_CTF.as_bytes()).is_ne() {
-            // Neither a clf nor a ctf.
+        let sub_format = if strcasecmp(c_str(format_name), FILEFORMAT_CLF.as_bytes()).is_eq() {
+            SubFormat::FormatClf
+        } else if strcasecmp(c_str(format_name), FILEFORMAT_CTF.as_bytes()).is_eq() {
+            SubFormat::FormatCtf
+        } else {
             let mut os = OStringStream::new(Crt::NATIVE);
             os.put_str("Error: CLF/CTF writer does not also write format ");
             os.put_bytes(format_name);
             os.put_str(".");
             return Err(Exception::new(os.into_bytes()));
-        } else {
-            false
         };
 
         let mut ops = OpVec::new();
@@ -217,7 +216,7 @@ impl FileFormat for LocalFileFormat {
             TransformDirection::Forward,
         )?;
 
-        write_ops(&mut ops, group.format_metadata(), is_clf, ostream)
+        write_ops(&mut ops, group.format_metadata(), sub_format, ostream)
     }
 
     /// Appends the file's ops in the direction `dir` combined with the file transform's
@@ -249,7 +248,7 @@ impl FileFormat for LocalFileFormat {
         let new_dir = combine_transform_directions(dir, file_transform.direction());
 
         // Resolve reference path using context and load referenced files.
-        let op_data_vec = cached_file.transform.get_ops();
+        let op_data_vec = cached_file.transform.get_op_data_vec();
 
         // Try to use the FileTransform interpolation for any Lut1D or Lut3D that does not
         // specify an interpolation in the CTF itself. If the interpolation can not be used,
@@ -539,16 +538,17 @@ fn lut_with_interpolation(op_data: &OpDataRcPtr, file_interpolation: Interpolati
     op_data
 }
 
-/// Writes `ops` as a CLF (`is_clf`) or CTF ProcessList with the group metadata `metadata`:
-/// the ops finalized and without no-ops, after the XML header. The second half of
+/// Writes `ops` as a ProcessList of `sub_format` with the group metadata `metadata`: the ops
+/// finalized and without no-ops, after the XML header; a transform without an id gets
+/// `urn:uuid:` and the UUID-shaped hash of the ops' cache ID. The second half of
 /// [`LocalFileFormat::write`], apart so that a test can write the ops of a processor whose
 /// group the port can't build yet (`file_format_ctf_write_oracle_tests.rs`).
 ///
-/// Port of `LocalFileFormat::write` (FileFormatCTF.cpp:1577-1591 @ v2.5.2).
+/// Port of `LocalFileFormat::write` (FileFormatCTF.cpp:1750-1775 @ v2.6.0).
 pub(crate) fn write_ops(
     ops: &mut OpVec,
     metadata: &FormatMetadataImpl,
-    is_clf: bool,
+    sub_format: SubFormat,
     ostream: &mut OStringStream,
 ) -> Result<()> {
     ops.finalize()?;
@@ -557,14 +557,23 @@ pub(crate) fn write_ops(
     // have a CTF representation.
     ops.optimize(OptimizationFlags::NONE)?;
 
-    let transform = CtfReaderTransform::from_ops(ops, metadata)?;
+    let mut transform = CtfReaderTransform::from_ops(ops, metadata)?;
+
+    // It it doesn't have an id, create one based on the op list.
+    if transform.get_id().is_empty() {
+        let op_id = ops.get_cache_id()?;
+
+        let mut ss = b"urn:uuid:".to_vec();
+        ss.extend_from_slice(cache_id_hash_uuid(&op_id).as_bytes());
+        transform.set_id(c_str(&ss))?;
+    }
 
     // Write XML Header.
     ostream.put_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
     ostream.put_str("\n");
     let mut fmt = XmlFormatter::new(ostream);
 
-    let writer = TransformWriter::new(&transform, is_clf);
+    let writer = TransformWriter::new(&transform, sub_format);
     writer.write(&mut fmt)
 }
 
@@ -687,17 +696,21 @@ fn handle_lut(op_data: &mut OpDataRcPtr, file_interp: Interpolation) {
     }
 }
 
-/// Whether the first 5 KiB of lines of `istream` hold `<ProcessList`; the stream moves
-/// back to where it was (a failed stream doesn't move: `seekg` fails).
+/// Whether the first 5 KiB of lines of `istream` hold `<ProcessList` or `:ProcessList` (a
+/// ProcessList with a namespace prefix); the stream moves back to where it was (a failed
+/// stream doesn't move: `seekg` fails).
 ///
-/// Port of `isLoadableCTF` (FileFormatCTF.cpp:1166-1191 @ v2.5.2). The readers get a fresh
+/// Port of `isLoadableCTF` (FileFormatCTF.cpp:1325-1359 @ v2.6.0). The readers get a fresh
 /// stream, at its start, where `tellg` is 0.
 fn is_loadable_ctf(istream: &mut InputStream) -> bool {
     const LIMIT: u32 = 5 * 1024; // 5 kilobytes.
-    const PATTERN: &[u8] = b"<ProcessList";
+    const PATTERN1: &[u8] = b"<ProcessList";
+    const PATTERN2: &[u8] = b":ProcessList";
+    let contains = |line: &[u8], pattern: &[u8]| line.windows(pattern.len()).any(|w| w == pattern);
+
     let mut found_pattern = false;
     let mut size_processed: u32 = 0;
-    // `char line[limit + 1];` (FileFormatCTF.cpp:1174): `getline` stores up to `limit - 1`
+    // `char line[limit + 1];` (FileFormatCTF.cpp:1335): `getline` stores up to `limit - 1`
     // bytes and a NUL in it.
     let mut line = vec![0u8; LIMIT as usize + 1];
 
@@ -707,7 +720,7 @@ fn is_loadable_ctf(istream: &mut InputStream) -> bool {
         while istream.good() && !found_pattern && (size_processed < LIMIT) {
             istream.getline_buf(&mut line, LIMIT as usize);
             let line = c_str(&line);
-            if line.windows(PATTERN.len()).any(|w| w == PATTERN) {
+            if contains(line, PATTERN1) || contains(line, PATTERN2) {
                 found_pattern = true;
             }
             size_processed = size_processed.wrapping_add(line.len() as u32);
@@ -721,7 +734,7 @@ fn is_loadable_ctf(istream: &mut InputStream) -> bool {
 
 /// The data members of `XMLParserHelper` but the expat parser.
 ///
-/// Port of `XMLParserHelper` (FileFormatCTF.cpp:172-1164 @ v2.5.2).
+/// Port of `XMLParserHelper` (FileFormatCTF.cpp:190-1323 @ v2.6.0).
 #[derive(Debug)]
 struct State {
     /// `m_lineNumber`.
@@ -734,6 +747,11 @@ struct State {
     elms: XmlReaderElementStack,
     /// `m_transform`.
     transform: Option<CtfReaderTransformRc>,
+    /// `m_keepNamespaces`: if >0, name spaces will be preserved (inside an Info element).
+    keep_namespaces: i32,
+    /// `m_pendingException`: the exception of a handler, deferred until the parse call
+    /// returns.
+    pending_exception: Option<Exception>,
 }
 
 type StateRc = Rc<RefCell<State>>;
@@ -803,14 +821,14 @@ impl State {
                 .expect("the only element under an operator is the ProcessList's");
             (t.get_version(), t.get_clf_version(), t.is_clf())
         };
-        let Some(kind) = get_reader(op_type, version, is_clf) else {
+        let Some(kind) = get_reader(op_type, version.clone(), is_clf) else {
             let mut ss = OStringStream::new(Crt::NATIVE);
             if is_clf {
                 ss.put_str("CLF file version '");
-                ss.put_bytes(clf_version.to_string().as_bytes());
+                ss.put_bytes(&clf_version.to_bytes());
             } else {
                 ss.put_str("CTF file version '");
-                ss.put_bytes(version.to_string().as_bytes());
+                ss.put_bytes(&version.to_bytes());
             }
             ss.put_str("' does not support operator '");
             ss.put_c_str(xml_tag);
@@ -977,15 +995,32 @@ fn is_op_elt(elt: &ElementRcPtr) -> bool {
     elt.borrow().as_any().is::<CtfReaderOpElt>()
 }
 
+/// The element name the handlers use: past the last `:` of `name_full` (its namespace prefix
+/// stripped), unless the parse is inside an Info element, which keeps the prefixes.
+///
+/// The lines of `XMLParserHelper::StartElementHandlerImpl` and `EndElementHandlerImpl`
+/// (FileFormatCTF.cpp:552-558, 1105-1111 @ v2.6.0) that strip the name spaces.
+fn strip_namespace(st: &State, name_full: &[u8]) -> Vec<u8> {
+    if st.keep_namespaces <= 0 {
+        return match name_full.iter().rposition(|&b| b == b':') {
+            Some(colon) => name_full[colon + 1..].to_vec(),
+            None => name_full.to_vec(),
+        };
+    }
+    name_full.to_vec()
+}
+
 /// Start the parsing of one element.
 ///
-/// Port of `XMLParserHelper::StartElementHandler` (FileFormatCTF.cpp:422-991 @ v2.5.2).
+/// Port of `XMLParserHelper::StartElementHandlerImpl` (FileFormatCTF.cpp:481-1070 @ v2.6.0).
 /// expat never gives a null or empty name, which upstream checks.
-fn start_element_handler(state: &StateRc, name: &[u8], atts: &[&[u8]]) -> Result<()> {
+fn start_element_handler(state: &StateRc, name_full: &[u8], atts: &[&[u8]]) -> Result<()> {
     let back = {
         let mut st = state.borrow_mut();
         let st = &mut *st;
-        push_element(st, name)?;
+        // Strip the name spaces
+        let name = strip_namespace(st, name_full);
+        push_element(st, &name)?;
         st.elms.back().expect("an element was pushed")
     };
     back.borrow_mut().start(atts)
@@ -993,8 +1028,8 @@ fn start_element_handler(state: &StateRc, name: &[u8], atts: &[&[u8]]) -> Result
 
 /// The element `name` starts: pushes its reader.
 ///
-/// Port of the body of `XMLParserHelper::StartElementHandler` (FileFormatCTF.cpp:479-988 @
-/// v2.5.2), but its last line, the element's `start`.
+/// Port of the body of `XMLParserHelper::StartElementHandlerImpl` (FileFormatCTF.cpp:560-1067
+/// @ v2.6.0), but its last line, the element's `start`.
 fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
     if let Some(back) = st.elms.back() {
         // Check if we are still processing a metadata structure.
@@ -1132,7 +1167,14 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
         || supported_element(name, &p_elt, METADATA_INPUT_DESCRIPTION, TAG_CDL, r)
         || supported_element(name, &p_elt, METADATA_VIEWING_DESCRIPTION, TAG_CDL, r)
     {
-        Rc::new(RefCell::new(XmlReaderDescriptionElt::new(
+        Rc::new(RefCell::new(CtfReaderDescElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
+    } else if supported_element(name, &p_elt, TAG_ID, b"", r) {
+        Rc::new(RefCell::new(CtfReaderIdElt::new(
             name,
             p_container,
             st.get_xm_line_number(),
@@ -1202,6 +1244,8 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
             )))
         }
     } else if supported_element(name, &p_elt, TAG_INFO, TAG_PROCESS_LIST, r) {
+        st.keep_namespaces += 1;
+
         Rc::new(RefCell::new(CtfReaderMetadataElt::new_info(
             name,
             p_container,
@@ -1209,12 +1253,11 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
             st.get_xml_filename(),
         )?))
     } else if supported_element(name, &p_elt, METADATA_INPUT_DESCRIPTOR, TAG_PROCESS_LIST, r) {
-        Rc::new(RefCell::new(CtfReaderDescriptorElt::new(
+        Rc::new(RefCell::new(CtfReaderDescElt::new(
             name,
             p_container,
             st.get_xm_line_number(),
             st.get_xml_filename(),
-            Descriptor::Input,
         )))
     } else if supported_element(name, &p_elt, TAG_LOG_PARAMS, TAG_LOG, r) {
         let (style, v2_0) = {
@@ -1251,12 +1294,11 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
         TAG_PROCESS_LIST,
         r,
     ) {
-        Rc::new(RefCell::new(CtfReaderDescriptorElt::new(
+        Rc::new(RefCell::new(CtfReaderDescElt::new(
             name,
             p_container,
             st.get_xm_line_number(),
             st.get_xml_filename(),
-            Descriptor::Output,
         )))
     } else if supported_element_tags(name, &p_elt, &RANGE_SUB_ELEMENTS, TAG_RANGE, r) {
         Rc::new(RefCell::new(CtfReaderRangeValueElt::new(
@@ -1381,12 +1423,18 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
 
 /// End the parsing of one element.
 ///
-/// Port of `XMLParserHelper::EndElementHandler` (FileFormatCTF.cpp:994-1058 @ v2.5.2). The
-/// stack is never empty here (each start pushed an element); upstream's `back` of an empty
-/// one would be undefined.
-fn end_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
+/// Port of `XMLParserHelper::EndElementHandlerImpl` (FileFormatCTF.cpp:1096-1174 @ v2.6.0).
+/// The stack is never empty here: each start pushed an element, or (2.6.0: expat makes the
+/// end call of a self-closing element after its start threw) threw where the stack already
+/// held the ProcessList or the root's dummy element; upstream's `back` of an empty one would
+/// be undefined.
+fn end_element_handler(state: &StateRc, name_full: &[u8]) -> Result<()> {
     let elt = {
         let mut st = state.borrow_mut();
+
+        // Strip the name spaces
+        let name_buf = strip_namespace(&st, name_full);
+        let name = &name_buf[..];
 
         // Is the expected element present?
         let Some(elt) = st.elms.back() else {
@@ -1438,6 +1486,16 @@ fn end_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
                 return Err(st.throw_message(ss.str()));
             }
         }
+
+        // Exiting the info element; decrease keep namespace counter.
+        let is_info = elt
+            .borrow()
+            .as_any()
+            .downcast_ref::<CtfReaderMetadataElt>()
+            .is_some_and(CtfReaderMetadataElt::is_info);
+        if is_info {
+            st.keep_namespaces -= 1;
+        }
         elt
     };
 
@@ -1446,7 +1504,8 @@ fn end_element_handler(state: &StateRc, name: &[u8]) -> Result<()> {
 
 /// Handle of strings within an element.
 ///
-/// Port of `XMLParserHelper::CharacterDataHandler` (FileFormatCTF.cpp:1061-1140 @ v2.5.2).
+/// Port of `XMLParserHelper::CharacterDataHandlerImpl` (FileFormatCTF.cpp:1201-1294 @
+/// v2.6.0).
 /// expat gives character data only inside the root element, so the stack is never empty
 /// here.
 fn character_data_handler(state: &StateRc, s: &[u8]) -> Result<()> {
@@ -1474,12 +1533,23 @@ fn character_data_handler(state: &StateRc, s: &[u8]) -> Result<()> {
         (elt, st.get_xm_line_number())
     };
 
-    let is_description = elt.borrow().as_any().is::<XmlReaderDescriptionElt>();
-    if is_description {
+    // TODO: Fix this special case handling where description elements want leading and
+    // trailing white space retained.
+    if elt.borrow().as_any().is::<XmlReaderDescriptionElt>() {
+        // The CTF reader makes no XmlReaderDescriptionElt since 2.6.0 (descriptions are
+        // CTFReaderDescElts): upstream's branch, which then also takes the `else` below
+        // (its next test is an `if`, not an `else if`), is never taken.
         let mut elt = elt.borrow_mut();
         let desc_elt = elt
             .as_plain_mut()
             .expect("a description is a plain element");
+        desc_elt.set_raw_data(s, location)?;
+    }
+    if let Some(desc_elt) = elt
+        .borrow_mut()
+        .as_any_mut()
+        .downcast_mut::<CtfReaderDescElt>()
+    {
         return desc_elt.set_raw_data(s, location);
     }
 
@@ -1513,9 +1583,30 @@ fn character_data_handler(state: &StateRc, s: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// What the handlers registered with expat do with the result of a handler: they keep the
+/// first exception and stop the parser, so that it doesn't escape into expat's C call stack
+/// (which keeps expat's handler-depth bookkeeping consistent: XML_ParserFree's
+/// isCalledFromInsideHandler guard, which otherwise leaks the parser). For a self-closing
+/// element, expat may still invoke the matching EndElementHandler before it honors
+/// XML_StopParser, and that call can itself throw (since the element was never pushed onto
+/// m_elms): that secondary exception is dropped.
+///
+/// Port of the trampolines `XMLParserHelper::StartElementHandler`,
+/// `XMLParserHelper::EndElementHandler` and `XMLParserHelper::CharacterDataHandler`
+/// (FileFormatCTF.cpp:457-479, 1073-1094, 1177-1199 @ v2.6.0).
+fn keep_first_exception(state: &StateRc, parser: &ParserHandle, result: Result<()>) {
+    if let Err(e) = result {
+        let mut st = state.borrow_mut();
+        if st.pending_exception.is_none() {
+            st.pending_exception = Some(e);
+            parser.stop_parser();
+        }
+    }
+}
+
 /// The CTF/CLF parser: a file's ProcessList, line by line through expat.
 ///
-/// Port of `XMLParserHelper` (FileFormatCTF.cpp:172-1164 @ v2.5.2).
+/// Port of `XMLParserHelper` (FileFormatCTF.cpp:190-1323 @ v2.6.0).
 struct XmlParserHelper {
     state: StateRc,
     /// `m_parser`.
@@ -1525,7 +1616,7 @@ struct XmlParserHelper {
 impl XmlParserHelper {
     /// A parser of the file `file_name`, a CLF if its extension is `.clf` (ignoring case).
     ///
-    /// Port of `XMLParserHelper::XMLParserHelper` (FileFormatCTF.cpp:178-189 @ v2.5.2).
+    /// Port of `XMLParserHelper::XMLParserHelper` (FileFormatCTF.cpp:196-207 @ v2.6.0).
     fn new(file_name: &[u8]) -> XmlParserHelper {
         let (_root, extension) = os_path::splitext(file_name);
         let state = Rc::new(RefCell::new(State {
@@ -1534,19 +1625,29 @@ impl XmlParserHelper {
             is_clf: lower(&extension) == b".clf",
             elms: XmlReaderElementStack::new(),
             transform: None,
+            keep_namespaces: 0,
+            pending_exception: None,
         }));
         let mut parser = Parser::new();
-        let start_state = state.clone();
-        let end_state = state.clone();
+        let (start_state, start_parser) = (state.clone(), parser.handle());
+        let (end_state, end_parser) = (state.clone(), parser.handle());
         parser.set_element_handler(
             Some(Box::new(move |name, atts| {
-                start_element_handler(&start_state, name, atts)
+                let result = start_element_handler(&start_state, name, atts);
+                keep_first_exception(&start_state, &start_parser, result);
+                Ok(())
             })),
-            Some(Box::new(move |name| end_element_handler(&end_state, name))),
+            Some(Box::new(move |name| {
+                let result = end_element_handler(&end_state, name);
+                keep_first_exception(&end_state, &end_parser, result);
+                Ok(())
+            })),
         );
-        let data_state = state.clone();
+        let (data_state, data_parser) = (state.clone(), parser.handle());
         parser.set_character_data_handler(Some(Box::new(move |s| {
-            character_data_handler(&data_state, s)
+            let result = character_data_handler(&data_state, s);
+            keep_first_exception(&data_state, &data_parser, result);
+            Ok(())
         })));
         XmlParserHelper { state, parser }
     }
@@ -1554,8 +1655,8 @@ impl XmlParserHelper {
     /// Parses the stream, a line at a time, then checks every element closed and the
     /// transform has an operator.
     ///
-    /// Port of `XMLParserHelper::Parse(std::istream &)` (FileFormatCTF.cpp:196-236 @
-    /// v2.5.2).
+    /// Port of `XMLParserHelper::Parse(std::istream &)` (FileFormatCTF.cpp:214-254 @
+    /// v2.6.0).
     fn parse(&mut self, istream: &mut InputStream) -> Result<()> {
         let mut line = Vec::new();
         self.state.borrow_mut().line_number = 0;
@@ -1583,7 +1684,7 @@ impl XmlParserHelper {
             return Err(st.throw_message(b"CTF/CLF parsing error: Invalid transform."));
         };
 
-        if transform.borrow().get_ops().is_empty() {
+        if transform.borrow().get_op_data_vec().is_empty() {
             return Err(st.throw_message(b"CTF/CLF parsing error: No color operator in file."));
         }
         Ok(())
@@ -1591,13 +1692,23 @@ impl XmlParserHelper {
 
     /// Parses a line.
     ///
-    /// Port of `XMLParserHelper::Parse(const std::string &, bool)` (FileFormatCTF.cpp:238-274
-    /// @ v2.5.2).
+    /// Port of `XMLParserHelper::Parse(const std::string &, bool)` (FileFormatCTF.cpp:256-305
+    /// @ v2.6.0).
     fn parse_line(&mut self, buffer: &[u8], last_line: bool) -> Result<()> {
         let status = match self.parser.parse(buffer, last_line) {
             Ok(status) => status,
             Err(ParseError::Handler(e)) => return Err(e),
         };
+
+        // A handler may have thrown a C++ exception. Rethrowing it here, rather than letting it
+        // escape the expat callback directly, keeps expat's own bookkeeping (see
+        // XML_ParserFree's isCalledFromInsideHandler guard) consistent; otherwise
+        // XML_ParserFree silently leaks the parser.
+        let pending_exception = self.state.borrow_mut().pending_exception.take();
+        if let Some(pending_exception) = pending_exception {
+            return Err(pending_exception);
+        }
+
         if status == XmlStatus::Error {
             let expat_error_code = self.parser.error_code();
             let st = self.state.borrow();

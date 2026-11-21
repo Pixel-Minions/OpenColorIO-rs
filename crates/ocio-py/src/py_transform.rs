@@ -997,8 +997,8 @@ pub(crate) fn validate_ocio(rc: &TransformRc) -> PyResult<ocio::Result<()>> {
 
 /// The error of `Transform::validate` (Transform.cpp:30-40 @ v2.5.2) for a direction outside the
 /// enumerators, as each class's `validate` passes it on: its C++ class's `typeid` name, which
-/// the compiler writes (MSVC's `class OpenColorIO_v2_5::MatrixTransformImpl`, GCC's mangled
-/// `N16OpenColorIO_v2_519MatrixTransformImplE`), after the class's own prefix where its
+/// the compiler writes (MSVC's `class OpenColorIO_v2_6::MatrixTransformImpl`, GCC's mangled
+/// `N16OpenColorIO_v2_619MatrixTransformImplE`), after the class's own prefix where its
 /// `validate` adds one ("MatrixTransform validation failed: "; `BuiltinTransformImpl` has
 /// none). docs/improvements.md, I-261.
 pub(crate) fn invalid_direction(t: TransformType) -> String {
@@ -1048,9 +1048,9 @@ pub(crate) fn invalid_direction(t: TransformType) -> String {
 /// it.
 fn typeid_name(class: &str) -> String {
     if cfg!(windows) {
-        format!("class OpenColorIO_v2_5::{class}")
+        format!("class OpenColorIO_v2_6::{class}")
     } else {
-        format!("N16OpenColorIO_v2_5{}{class}E", class.len())
+        format!("N16OpenColorIO_v2_6{}{class}E", class.len())
     }
 }
 

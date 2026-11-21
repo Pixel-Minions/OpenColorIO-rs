@@ -6,7 +6,8 @@
 //! and the element stack.
 //!
 //! Port of `src/OpenColorIO/fileformats/xmlutils/XMLReaderHelper.h` and `XMLReaderHelper.cpp`
-//! (@ v2.5.2).
+//! (@ v2.5.2; where a citation says v2.6.0, of that release, whose readers append a
+//! description as a [`FormatMetadataImpl`]).
 //!
 //! **The class hierarchy.** Upstream's elements are C++ classes held by `shared_ptr`, which
 //! the readers cast with `dynamic_pointer_cast`. Here an element is an
@@ -254,11 +255,11 @@ impl std::fmt::Debug for dyn XmlReaderElement {
 
 /// An element that could contain sub-elements.
 ///
-/// Port of `XmlReaderContainerElt` (XMLReaderHelper.h:118-143 @ v2.5.2): its
+/// Port of `XmlReaderContainerElt` (XMLReaderHelper.h:118-143 @ v2.6.0): its
 /// `isContainer` is true.
 pub trait XmlReaderContainerElt: XmlReaderElement {
     /// `appendMetadata`.
-    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()>;
+    fn append_metadata(&mut self, metadata: FormatMetadataImpl) -> Result<()>;
 }
 
 /// A basic element, which holds text.
@@ -393,7 +394,7 @@ impl XmlReaderElement for DummyParent {
 }
 
 impl XmlReaderContainerElt for DummyParent {
-    fn append_metadata(&mut self, _name: &[u8], _value: &[u8]) -> Result<()> {
+    fn append_metadata(&mut self, _metadata: FormatMetadataImpl) -> Result<()> {
         Ok(())
     }
 }
@@ -544,16 +545,17 @@ impl XmlReaderElement for XmlReaderDescriptionElt {
         self.changed = false;
         Ok(())
     }
-    /// Port of `XmlReaderDescriptionElt::end` (XMLReaderHelper.cpp:98-106 @ v2.5.2).
+    /// Port of `XmlReaderDescriptionElt::end` (XMLReaderHelper.cpp:98-107 @ v2.6.0).
     fn end(&mut self) -> Result<()> {
         if self.changed {
             // Note: eXpat automatically replaces escaped characters with their original
             // values.
+            let metadata = FormatMetadataImpl::new(self.get_identifier(), &self.description)?;
             let mut parent = self.plain.get_parent().borrow_mut();
             parent
                 .as_container_mut()
                 .expect("a plain element's parent is a container")
-                .append_metadata(self.plain.element.get_name(), &self.description)?;
+                .append_metadata(metadata)?;
         }
         Ok(())
     }
@@ -675,17 +677,17 @@ impl XmlReaderSopNodeBase {
         self.is_power_init = status;
     }
 
-    /// Adds the description `value` to the CDL's metadata (the name is ignored).
+    /// Adds the description `metadata` to the CDL's metadata, renamed `SOPDescription`.
     ///
-    /// Port of `XmlReaderSOPNodeBaseElt::appendMetadata` (XMLReaderHelper.h:395-400 @
-    /// v2.5.2).
-    pub fn append_metadata(cdl: &CdlOpDataRcPtr, _name: &[u8], value: &[u8]) -> Result<()> {
+    /// Port of `XmlReaderSOPNodeBaseElt::appendMetadata` (XMLReaderHelper.h:396-401 @
+    /// v2.6.0).
+    pub fn append_metadata(cdl: &CdlOpDataRcPtr, mut metadata: FormatMetadataImpl) -> Result<()> {
         // Add description to parent and override name.
-        let item = FormatMetadataImpl::new(METADATA_SOP_DESCRIPTION, value)?;
+        metadata.set_element_name(Some(METADATA_SOP_DESCRIPTION))?;
         cdl.borrow_mut()
             .get_format_metadata_mut()
             .get_children_elements_mut()
-            .push(item);
+            .push(metadata);
         Ok(())
     }
 }
@@ -699,18 +701,21 @@ pub trait XmlReaderSatNodeBaseElt {
     fn get_cdl(&self) -> CdlOpDataRcPtr;
 }
 
-/// Adds the description `value` to the CDL's metadata (the name is ignored).
+/// Adds the description `metadata` to the CDL's metadata, renamed `SATDescription`.
 ///
-/// Port of `XmlReaderSatNodeBaseElt::appendMetadata` (XMLReaderHelper.h:455-460 @ v2.5.2).
+/// Port of `XmlReaderSatNodeBaseElt::appendMetadata` (XMLReaderHelper.h:456-461 @ v2.6.0).
 /// `XmlReaderSatNodeBaseElt`'s `start` and `end` do nothing, and its data members are
 /// [`XmlReaderComplexEltBase`]'s.
-pub fn sat_node_append_metadata(cdl: &CdlOpDataRcPtr, _name: &[u8], value: &[u8]) -> Result<()> {
+pub fn sat_node_append_metadata(
+    cdl: &CdlOpDataRcPtr,
+    mut metadata: FormatMetadataImpl,
+) -> Result<()> {
     // Add description to parent and override name.
-    let item = FormatMetadataImpl::new(METADATA_SAT_DESCRIPTION, value)?;
+    metadata.set_element_name(Some(METADATA_SAT_DESCRIPTION))?;
     cdl.borrow_mut()
         .get_format_metadata_mut()
         .get_children_elements_mut()
-        .push(item);
+        .push(metadata);
     Ok(())
 }
 

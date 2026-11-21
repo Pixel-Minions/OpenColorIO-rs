@@ -157,6 +157,23 @@ fn bad_arguments() {
         ("iconfig_missing_parameter", vec!["--iconfig"]),
         ("oconfig_missing_parameter", vec!["--oconfig"]),
         ("iconfig_one_dash_missing", vec!["-iconfig"]),
+        ("i_missing_parameter", vec!["-i"]),
+        ("i_missing_file", vec!["-i", "not_there.ocio"]),
+        (
+            "i_then_iconfig",
+            vec!["-i", "first.ocio", "--iconfig", "second.ocio"],
+        ),
+        (
+            "iconfig_then_i",
+            vec!["--iconfig", "first.ocio", "-i", "second.ocio"],
+        ),
+        ("i_joined", vec!["-inot_there.ocio"]),
+        ("v_with_parameter", vec!["-v", "not_there.ocio"]),
+        (
+            "v_twice_missing_file",
+            vec!["-v", "-v", "-i", "not_there.ocio"],
+        ),
+        ("verbose_long", vec!["--verbose"]),
         ("help_after_error", vec!["--bogus", "--help"]),
         ("error_after_help", vec!["--help", "--bogus"]),
         ("missing_file", vec!["--iconfig", "not_there.ocio"]),
@@ -167,7 +184,7 @@ fn bad_arguments() {
     .map(|(label, argv)| Case::new(label, &argv))
     .collect();
     let summary = sweep("ociocheck_bad_arguments", TOOL, PROGRAM, &cases);
-    assert!(summary.with_exit_code(1) >= 11);
+    assert!(summary.with_exit_code(1) >= 19);
 }
 
 #[test]
@@ -488,6 +505,180 @@ fn output_config() {
     assert!(summary.writing_files() >= 5, "{}", summary.writing_files());
 }
 
+/// `good()` with each (from, to) replaced once; each `from` must be there.
+fn good_with_all(replacements: &[(&str, &str)]) -> String {
+    let mut config = good();
+    for (from, to) in replacements {
+        assert!(config.contains(from), "{from}");
+        config = config.replacen(from, to, 1);
+    }
+    config
+}
+
+/// What makes `GOOD` meet `CONFIG_HDR_DISPLAY_SUPPORT_26`: an encoding on each display color
+/// space, an interop ID on `sRGB`, and an active view with a view transform.
+const HDR_26: [(&str, &str); 3] = [
+    ("active_views: [Raw]", "active_views: [Raw, Shared]"),
+    (
+        "    interop_id: srgb_rec709_display\n",
+        "    interop_id: srgb_rec709_display\n    encoding: sdr-video\n",
+    ),
+    (
+        "    name: sRGB\n    categories: [a]\n",
+        "    name: sRGB\n    categories: [a]\n    interop_id: g22_rec709_display\n    encoding: sdr-video\n",
+    ),
+];
+
+/// `HDR_26` and then `more`.
+fn hdr_26_with(more: &[(&str, &str)]) -> String {
+    let all: Vec<(&str, &str)> = HDR_26.iter().chain(more).copied().collect();
+    good_with_all(&all)
+}
+
+/// The Compatibility section of 2.6.0: each reason `CheckHDRDisplaySupport26` gives, with and
+/// without `-v`, which prints the reasons.
+#[test]
+fn compatibility() {
+    let case = |label: &str, verbose: bool, config: String| {
+        let argv: &[&str] = if verbose {
+            &["-v", "--iconfig", "a.ocio"]
+        } else {
+            &["--iconfig", "a.ocio"]
+        };
+        with_files(Case::new(label, argv).file("a.ocio", config))
+    };
+    let both = |label: &str, config: String| {
+        [
+            case(label, false, config.clone()),
+            case(&format!("{label}_verbose"), true, config),
+        ]
+    };
+    let no_display_colorspaces = "ocio_profile_version: 2\nroles:\n  default: raw\n  cie_xyz_d65_interchange: raw\ndisplays:\n  d:\n    - !<View> {name: v, colorspace: raw}\ncolorspaces:\n  - !<ColorSpace>\n    name: raw\n    isdata: true\n";
+    let mut cases: Vec<Case> = [
+        both("good", good()),
+        both("hdr_26", hdr_26_with(&[])),
+        both(
+            "no_interchange_role",
+            hdr_26_with(&[("  cie_xyz_d65_interchange: xyz\n", "")]),
+        ),
+        both(
+            "no_interop_id",
+            hdr_26_with(&[("    interop_id: g22_rec709_display\n", "")]),
+        ),
+        both(
+            "empty_encoding",
+            hdr_26_with(&[(
+                "    interop_id: g22_rec709_display\n    encoding: sdr-video\n",
+                "    interop_id: g22_rec709_display\n    encoding: \"\"\n",
+            )]),
+        ),
+        both(
+            "display_without_colorspace",
+            hdr_26_with(&[
+                ("active_displays: [sRGB]", "active_displays: [sRGB, other]"),
+                (
+                    "  xyz:\n",
+                    "  other:\n    - !<View> {name: Raw, colorspace: raw}\n  xyz:\n",
+                ),
+            ]),
+        ),
+        both(
+            "display_named_after_a_scene_colorspace",
+            hdr_26_with(&[
+                ("active_displays: [sRGB]", "active_displays: [sRGB, log]"),
+                (
+                    "  xyz:\n",
+                    "  log:\n    - !<View> {name: Raw, colorspace: raw}\n  xyz:\n",
+                ),
+            ]),
+        ),
+        both(
+            "view_without_view_transform",
+            hdr_26_with(&[("active_views: [Raw, Shared]", "active_views: [Raw, Look, Shared]")]),
+        ),
+        both(
+            "named_transform_view",
+            hdr_26_with(&[
+                ("active_views: [Raw, Shared]", "active_views: [Raw, NT, Shared]"),
+                (
+                    "    - !<View> {name: Look, colorspace: lut, looks: warm}\n",
+                    "    - !<View> {name: Look, colorspace: lut, looks: warm}\n    - !<View> {name: NT, colorspace: nt}\n",
+                ),
+            ]),
+        ),
+        both(
+            "no_view_transform",
+            hdr_26_with(&[("active_views: [Raw, Shared]", "active_views: [Raw]")]),
+        ),
+        both(
+            "no_active_view",
+            hdr_26_with(&[("active_views: [Raw, Shared]", "active_views: [Nope]")]),
+        ),
+        both("no_display_colorspaces", no_display_colorspaces.to_string()),
+        both(
+            "failed_validation",
+            hdr_26_with(&[("default: raw", "default: nope")]),
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    cases.extend([
+        with_files(Case::new("i_verbose", &["-i", "a.ocio", "-v"])).file("a.ocio", good()),
+        with_files(Case::new("verbose_from_env", &["-v"]))
+            .file("a.ocio", good())
+            .env("OCIO", "a.ocio"),
+        with_files(Case::new("verbose_logging_debug", &["-v", "-i", "a.ocio"]))
+            .file("a.ocio", good())
+            .env("OCIO_LOGGING_LEVEL", "debug"),
+        with_files(Case::new("verbose_logging_none", &["-v", "-i", "a.ocio"]))
+            .file("a.ocio", good())
+            .env("OCIO_LOGGING_LEVEL", "none"),
+        with_files(Case::new(
+            "verbose_output_config",
+            &["-v", "-i", "a.ocio", "--oconfig", "b.ocio"],
+        ))
+        .file("a.ocio", good()),
+        with_files(Case::new(
+            "verbose_output_config_fails",
+            &["-v", "-i", "a.ocio", "--oconfig", "no/b.ocio"],
+        ))
+        .file("a.ocio", good()),
+        with_files(Case::new(
+            "verbose_merged_streams",
+            &["-v", "-i", "a.ocio", "--oconfig", "b.ocio"],
+        ))
+        .file("a.ocio", good())
+        .env("OCIO_LOGGING_LEVEL", "debug")
+        .merged(),
+    ]);
+    let summary = sweep("ociocheck_compatibility", TOOL, PROGRAM, &cases);
+
+    // The cases do what they are for: both answers, and reasons that only -v prints.
+    let answer = |answer: &str| {
+        let line = format!("HDR Display Support (OCIO 2.6): {answer}");
+        summary
+            .outcomes
+            .iter()
+            .filter(|o| o.stdout.windows(line.len()).any(|w| w == line.as_bytes()))
+            .count()
+    };
+    assert!(answer("yes") >= 6, "{}", answer("yes"));
+    assert!(answer("no") >= 20, "{}", answer("no"));
+    let reason = b"HDR Display Support (2.6): ";
+    let with_reasons: Vec<&str> = cases
+        .iter()
+        .zip(&summary.outcomes)
+        .filter(|(_, o)| o.stdout.windows(reason.len()).any(|w| w == reason))
+        .map(|(c, _)| c.label.as_str())
+        .collect();
+    assert!(with_reasons.len() >= 12, "{with_reasons:?}");
+    assert!(
+        with_reasons.iter().all(|label| label.contains("verbose")),
+        "{with_reasons:?}"
+    );
+}
+
 /// Every config of upstream's test data.
 #[test]
 fn configs_of_upstream() {
@@ -537,18 +728,26 @@ fn builtin_configs() {
         "ocio://cg-config-v2.1.0_aces-v1.3_ocio-v2.3",
         "ocio://cg-config-v2.2.0_aces-v1.3_ocio-v2.4",
         "ocio://cg-config-v4.0.0_aces-v2.0_ocio-v2.5",
+        "ocio://cg-config-v5.0.0_aces-v2.1_ocio-v2.6",
         "ocio://studio-config-v1.0.0_aces-v1.3_ocio-v2.1",
         "ocio://studio-config-v2.1.0_aces-v1.3_ocio-v2.3",
         "ocio://studio-config-v2.2.0_aces-v1.3_ocio-v2.4",
         "ocio://studio-config-v4.0.0_aces-v2.0_ocio-v2.5",
+        "ocio://studio-config-v5.0.0_aces-v2.1_ocio-v2.6",
         "ocio://not-a-config",
     ];
+    // With -v too, which prints why a config fails the compatibility check (new in 2.6.0).
     let cases: Vec<Case> = names
         .iter()
-        .map(|name| Case::new(*name, &["--iconfig", name, "--oconfig", "out.ocio"]))
+        .flat_map(|name| {
+            [
+                Case::new(*name, &["--iconfig", name, "--oconfig", "out.ocio"]),
+                Case::new(format!("{name} -v"), &["-v", "--iconfig", name]),
+            ]
+        })
         .collect();
     let summary = sweep("ociocheck_builtin", TOOL, PROGRAM, &cases);
-    assert_eq!(summary.with_exit_code(0), names.len() - 1);
+    assert_eq!(summary.with_exit_code(0), 2 * (names.len() - 1));
     assert_eq!(summary.writing_files(), names.len() - 1);
 }
 

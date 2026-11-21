@@ -22,8 +22,9 @@ static LOGGING: Mutex<()> = Mutex::new(());
 /// What the wheel and the port log (at the default logging level) while the raw config
 /// builds the forward processor of each case, message by message. Both read the files anew:
 /// the wheel from empty caches (`with_files`), the port after `clear_all_caches`. The port's
-/// messages are those logged on this thread; others go to stderr, as by default.
-pub(crate) fn check_logs(cases: &[Case]) {
+/// messages are those logged on this thread; others go to stderr, as by default. Returns the
+/// wheel's messages, case by case, for the callers' coverage checks.
+pub(crate) fn check_logs(cases: &[Case]) -> Vec<Vec<String>> {
     let _logging = LOGGING.lock().unwrap_or_else(|e| e.into_inner());
     let cases: Vec<Case> = cases.iter().map(relocated).collect();
     let cases = cases.as_slice();
@@ -57,6 +58,7 @@ pub(crate) fn check_logs(cases: &[Case]) {
         }
     });
     let mut failures = Vec::new();
+    let mut wheel_logs = Vec::new();
     for (case, reply) in cases.iter().zip(replies) {
         let reply = ProcessorOpsReply::from_response(reply.unwrap_or_else(|e| panic!("{e}")));
         let wheel: Vec<String> = reply.result["log"]
@@ -83,8 +85,10 @@ pub(crate) fn check_logs(cases: &[Case]) {
                 case.label
             ));
         }
+        wheel_logs.push(wheel);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+    wheel_logs
 }
 
 /// `case` reading a copy of its file in a directory of its own: no other test of the binary

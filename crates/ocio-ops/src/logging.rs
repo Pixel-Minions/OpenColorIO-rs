@@ -34,9 +34,9 @@ pub type LoggingFunction = Arc<dyn Fn(&[u8]) + Send + Sync>;
 /// Port of `OCIO_LOGGING_LEVEL_ENVVAR` (Logging.cpp:21 @ v2.5.2).
 const OCIO_LOGGING_LEVEL_ENVVAR: &str = "OCIO_LOGGING_LEVEL";
 
-/// `GetVersion()` (src/OpenColorIO/Config.cpp:99-102 @ v2.5.2): `OCIO_VERSION_FULL_STR`, the
+/// `GetVersion()` (src/OpenColorIO/Config.cpp:100-103 @ v2.6.0): `OCIO_VERSION_FULL_STR`, the
 /// version with no release type.
-const OCIO_VERSION_FULL_STR: &str = "2.5.2";
+const OCIO_VERSION_FULL_STR: &str = "2.6.0";
 
 /// The global logging state, under `g_logmutex`.
 ///
@@ -98,7 +98,7 @@ impl State {
     /// Reads `OCIO_LOGGING_LEVEL` the first time it is called: sets the level, and whether the
     /// variable overrides [`set_logging_level`].
     ///
-    /// Port of `InitLogging` (Logging.cpp:30-62 @ v2.5.2).
+    /// Port of `InitLogging` (Logging.cpp:30-62 @ v2.6.0).
     fn init(&mut self) {
         if self.initialized {
             return;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 //
-// Ported from yaml-cpp 0.8.0 (https://github.com/jbeder/yaml-cpp), which is:
+// Ported from yaml-cpp 0.9.0 (https://github.com/jbeder/yaml-cpp), which is:
 //
 //   Copyright (c) 2008-2015 Jesse Beder.
 //
@@ -23,7 +23,7 @@
 //   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 //   THE SOFTWARE.
 
-//! A port of yaml-cpp 0.8.0, the YAML library OpenColorIO 2.5.2 is built with
+//! A port of yaml-cpp 0.9.0, the YAML library OpenColorIO 2.6.0 is built with
 //! (`share/cmake/modules/FindExtPackages.cmake`); its source is pinned at `upstream/yaml-cpp`.
 //!
 //! - **The emitter.** OCIO's `Config::serialize()` is a sequence of calls to it
@@ -37,10 +37,15 @@
 //!   column 5: ...") are part of what OCIO accepts and reports. The files mirror yaml-cpp's:
 //!   `stream.cpp`, `exceptions.h`, `mark.h`, and the scanner, parser and node files.
 //!
-//! Each item cites the yaml-cpp source it translates.
+//! Each item cites the yaml-cpp source it translates. The port moved from 0.8.0 to 0.9.0
+//! with OpenColorIO 2.6.0 (card `ocio26-deps`, `docs/ocio-2.6-deps-triage.md`, Y1-Y7): the
+//! code 0.9.0 changed cites its lines `@ yaml-cpp-0.9.0`; the other citations give 0.8.0's
+//! lines (tag `0.8.0`, still in the submodule's history), of code 0.9.0 left as it was.
+//! `contrib::dragonbox` is the dragonbox copy 0.9.0 vendors.
 //!
 //! yaml-cpp is MIT-licensed; its notice is above and applies to this module.
 
+pub mod contrib;
 pub mod convert;
 pub mod emitter;
 pub mod emitter_manip;
@@ -49,6 +54,7 @@ pub mod emitter_utils;
 pub mod event_handler;
 pub mod exceptions;
 pub mod exp;
+pub mod fptostring;
 pub mod mark;
 pub mod node;
 pub mod node_builder;

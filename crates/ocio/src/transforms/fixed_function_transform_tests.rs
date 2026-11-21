@@ -14,7 +14,7 @@ use ocio_testkit::upstream::check_throw_what;
 use super::*;
 use crate::transform::Transform;
 
-/// Port of `OCIO_ADD_TEST(FixedFunctionTransform, basic)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(FixedFunctionTransform, basic)` @ v2.6.0.
 #[test]
 fn basic() {
     let mut func = FixedFunctionTransform::new(FixedFunctionStyle::AcesRedMod03, &[]).unwrap();
@@ -87,6 +87,27 @@ fn basic() {
         "Unimplemented fixed function types: FIXED_FUNCTION_ACES_GAMUTMAP_02, \
          FIXED_FUNCTION_ACES_GAMUTMAP_07.",
     );
+
+    func.set_params(&values_7);
+    func.set_style(FixedFunctionStyle::AcesRgbToHmj20).unwrap();
+    assert_eq!(func.style(), FixedFunctionStyle::AcesRgbToHmj20);
+    func.set_direction(TransformDirection::Inverse);
+    assert_eq!(func.direction(), TransformDirection::Inverse);
+    check_throw_what(
+        func.validate(),
+        "The style 'HMJ_TO_RGB_20' must have 8 parameters but 7 found.",
+    );
+
+    let values_8 = [
+        0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+    ];
+    func.set_params(&values_8);
+    assert_eq!(func.params().len(), 8);
+    func.validate().unwrap();
+
+    func.set_direction(TransformDirection::Forward);
+    assert_eq!(func.style(), FixedFunctionStyle::AcesRgbToHmj20);
+    func.validate().unwrap();
 }
 
 /// Port of `OCIO_ADD_TEST(FixedFunctionTransform, createEditableCopy)` @ v2.5.2.

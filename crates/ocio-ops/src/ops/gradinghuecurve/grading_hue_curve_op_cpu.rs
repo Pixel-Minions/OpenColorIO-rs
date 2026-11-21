@@ -23,14 +23,17 @@
 //! which call `logf` and `powf`. The gains go through `std::max(0.f, gain)`, so they are never
 //! NaN, but they can be infinite: a product of an infinite gain and 0 is x86's default NaN,
 //! which can then meet a NaN pixel. Where two NaNs can meet, the operand orders are the
-//! machine code's (Windows `GradingHueCurveFwdOpCPU::apply` `0x1801cc890`, Linux `0x399060`):
-//! - the linear style's luma gain: Windows `(lum * hueLumGain) * satLumGain`, as the source;
-//!   Linux `satLumGain * (hueLumGain * lum)`;
-//! - the log and video styles' luma shift: both `((satLumGain + hueLumGain) - 2) * 0.1 +
-//!   lum`, for the source's `lum + (hueLumGain + satLumGain - 2) * 0.1`;
+//! machine code's (the 2.6.0 wheels, `GradingHueCurveFwdOpCPU::apply`: Windows `0x1801d6860`,
+//! Linux `0x3b54f0`; the 2.5.2 ones differed on Linux):
+//! - the linear and video styles' luma gain: Windows `(lum * hueLumGain) * satLumGain`, as the
+//!   source; Linux `(hueLumGain * lum) * satLumGain` (2.5.2: `satLumGain * (hueLumGain *
+//!   lum)`);
+//! - the log style's luma shift: Windows `((satLumGain + hueLumGain) - 2) * 0.1 + lum`, Linux
+//!   `((hueLumGain + satLumGain) - 2) * 0.1 + lum` (2.5.2: as Windows), for the source's
+//!   `lum + (hueLumGain + satLumGain - 2) * 0.1`;
 //! - the hue effect: both `HueFX(hue) + hue`, for the source's `hue + HueFX(hue)`.
 //!
-//! The reverse renderer (Windows `0x1801ccb20`, Linux `0x399350`) has no operation where two
+//! The reverse renderer (2.6.0: Windows `0x1801d6af0`, Linux `0x3b57d0`) has no operation where two
 //! NaNs meet: its saturation is clamped to 0 first, its gains are never NaN, and its luma
 //! shift and divisions keep their operands in order. Its two products of gains are written in
 //! each wheel's order (the gains' product can only be the default NaN, whatever the order).
@@ -116,14 +119,16 @@ fn log_lin(out: &mut [f32; 4]) {
 /// the style is linear, which grades luma in the log encoding.
 ///
 /// Port of `GradingHueCurveOpCPU` (src/OpenColorIO/ops/gradinghuecurve/
-/// GradingHueCurveOpCPU.cpp:55-160 @ v2.5.2). Its function pointers `m_applyLinLog` and
+/// GradingHueCurveOpCPU.cpp:55-160 @ v2.6.0). Its function pointers `m_applyLinLog` and
 /// `m_applyLogLin` are `NoOp` unless the style is linear: `is_linear` says which.
 #[derive(Debug)]
 struct GradingHueCurveOpCpu {
     /// `m_ghuecurve`.
     ghuecurve: DynamicPropertyGradingHueCurveImplRcPtr,
-    /// `m_isLinear`, and whether `m_applyLinLog` and `m_applyLogLin` are `LinLog` and `LogLin`.
+    /// Whether `m_applyLinLog` and `m_applyLogLin` are `LinLog` and `LogLin` (the linear style).
     is_linear: bool,
+    /// `m_isLog`: the log style grades luma by an offset, the others by a gain.
+    is_log: bool,
     /// `m_rgbToHsyOp`.
     rgb_to_hsy_op: Arc<dyn CpuOp>,
     /// `m_hsyToRgbOp`.
@@ -132,7 +137,7 @@ struct GradingHueCurveOpCpu {
 
 impl GradingHueCurveOpCpu {
     /// Port of `GradingHueCurveOpCPU::GradingHueCurveOpCPU` (GradingHueCurveOpCPU.cpp:78-128 @
-    /// v2.5.2).
+    /// v2.6.0).
     fn new(gc_data: &GradingHueCurveOpData) -> Result<Self> {
         let mut ghuecurve = gc_data.get_dynamic_property_internal();
         if ghuecurve.is_dynamic() {
@@ -175,6 +180,7 @@ impl GradingHueCurveOpCpu {
         Ok(GradingHueCurveOpCpu {
             ghuecurve,
             is_linear: style == GradingStyle::Lin,
+            is_log: style == GradingStyle::Log,
             rgb_to_hsy_op,
             hsy_to_rgb_op,
         })
@@ -241,7 +247,7 @@ impl GradingHueCurveOpCpu {
 
     /// The forward renderer's pixels.
     ///
-    /// Port of `GradingHueCurveFwdOpCPU::apply` (GradingHueCurveOpCPU.cpp:217-278 @ v2.5.2),
+    /// Port of `GradingHueCurveFwdOpCPU::apply` (GradingHueCurveOpCPU.cpp:217-278 @ v2.6.0),
     /// in the wheels' operand orders (module docs).
     fn apply_fwd(&self, rgba: &mut [f32]) {
         let state = self.ghuecurve.state();
@@ -281,16 +287,21 @@ impl GradingHueCurveOpCpu {
             // the hue becomes unknown (and is not invertible).
             hue_lum_gain = sse_sub(1.0, sse_mul(1.0 - hue_lum_gain, std_min(out[1], 1.0)));
 
-            // Apply lum gain.
-            out[2] = if self.is_linear {
-                if WINDOWS {
-                    sse_mul(sse_mul(out[2], hue_lum_gain), sat_lum_gain)
+            // Apply lum gain. The wheels' operand orders (GradingHueCurveFwdOpCPU::apply, read
+            // with tools/wheel-inspect @ v2.6.0): Windows `(out * hue) * sat` and `sat + hue`;
+            // Linux `(hue * out) * sat` and `hue + sat`.
+            out[2] = if self.is_log {
+                let sum = if WINDOWS {
+                    sse_add(sat_lum_gain, hue_lum_gain)
                 } else {
-                    sse_mul(sat_lum_gain, sse_mul(hue_lum_gain, out[2]))
-                }
-            } else {
-                let shift = sse_mul(sse_sub(sse_add(sat_lum_gain, hue_lum_gain), 2.0), 0.1);
+                    sse_add(hue_lum_gain, sat_lum_gain)
+                };
+                let shift = sse_mul(sse_sub(sum, 2.0), 0.1);
                 sse_add(shift, out[2])
+            } else if WINDOWS {
+                sse_mul(sse_mul(out[2], hue_lum_gain), sat_lum_gain)
+            } else {
+                sse_mul(sse_mul(hue_lum_gain, out[2]), sat_lum_gain)
             };
 
             // HUE-FX
@@ -303,7 +314,7 @@ impl GradingHueCurveOpCpu {
 
     /// The reverse renderer's pixels.
     ///
-    /// Port of `GradingHueCurveRevOpCPU::apply` (GradingHueCurveOpCPU.cpp:295-359 @ v2.5.2),
+    /// Port of `GradingHueCurveRevOpCPU::apply` (GradingHueCurveOpCPU.cpp:295-359 @ v2.6.0),
     /// in the wheels' operand orders (module docs).
     fn apply_rev(&self, rgba: &mut [f32]) {
         let state = self.ghuecurve.state();
@@ -338,11 +349,11 @@ impl GradingHueCurveOpCpu {
             } else {
                 sse_mul(sat_lum_gain, hue_lum_gain)
             };
-            out[2] = if self.is_linear {
-                out[2] / std_max(0.01, lum_gain)
-            } else {
+            out[2] = if self.is_log {
                 let shift = sse_mul(sse_sub(sse_add(sat_lum_gain, hue_lum_gain), 2.0), 0.1);
                 sse_sub(out[2], shift)
+            } else {
+                out[2] / std_max(0.01, lum_gain)
             };
 
             self.apply_lin_log(out);

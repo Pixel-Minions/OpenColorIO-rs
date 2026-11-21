@@ -22,7 +22,6 @@ use ocio_ops::utils::string_utils::c_str;
 
 use crate::config::Config;
 use crate::context::Context;
-use crate::display::OCIO_VIEW_USE_DISPLAY_NAME;
 use crate::processor::Processor;
 use crate::transform::Transform;
 use crate::transforms::color_space_transform::ColorSpaceTransform;
@@ -315,7 +314,8 @@ impl LegacyViewingPipeline {
     /// color space is no color space (a named transform).
     ///
     /// Port of `LegacyViewingPipelineImpl::getProcessor(const ConstConfigRcPtr &, const
-    /// ConstContextRcPtr &)` (LegacyViewingPipeline.cpp:180-381 @ v2.5.2), and of
+    /// ConstContextRcPtr &)` (LegacyViewingPipeline.cpp:180-394 @ v2.6.0: the display and the
+    /// view resolved first, as `BuildDisplayOps` resolves them), and of
     /// `getProcessor(const ConstConfigRcPtr &)` (175-178) for `None`.
     #[doc(alias = "getProcessor")]
     pub fn processor(&self, config: &Config, context: Option<&Context>) -> Result<Arc<Processor>> {
@@ -346,26 +346,37 @@ impl LegacyViewingPipeline {
             return Err(Exception::new(os));
         };
 
-        let display = display_view_transform.display().to_vec();
-        let view = display_view_transform.view().to_vec();
-
-        // Upstream looks the view transform up and never uses it.
-        let view_transform_name = config.display_view_transform_name(&display, &view);
-        if !view_transform_name.is_empty() {
-            let _view_transform = config.view_transform(view_transform_name);
+        // Resolve the display and view the same way BuildDisplayOps does, so that a display or
+        // view name that is aliased still finds the right color space and looks.
+        //
+        // Note this is not merely duplicating what the DisplayViewTransform appended below will
+        // do for itself. The looks lookup further down uses Config::getDisplayViewLooks, which
+        // reports what the config contains and so needs an up-to-date view name, and the color
+        // space found here decides whether color space conversions are skipped at all. The
+        // looks matter most: setDisplayViewTransform forces LooksBypass on the stored
+        // transform, so the looks are applied by this function or not at all.
+        let mut display = c_str(display_view_transform.display()).to_vec();
+        let canonical_display = config.canonical_display_name(&display);
+        if !canonical_display.is_empty() {
+            display = canonical_display.to_vec();
         }
 
-        // NB: If the viewTransform is present, then displayColorSpace is a true display color
-        // space rather than a traditional color space.
-        let name = config
-            .display_view_color_space_name(&display, &view)
+        // Ensure the view name is resolved (needed for getDisplayViewLooks below). The
+        // DisplayViewTransform will do the same name resolution, so need to stay in sync.
+        let mut view = c_str(display_view_transform.view()).to_vec();
+        let canonical_view = config.canonical_view_name(&display, &view).to_vec();
+        if !canonical_view.is_empty() {
+            view = canonical_view;
+        }
+
+        // NB: If the view has a view transform, then displayColorSpace is a true display color
+        // space rather than a traditional color space. Note that this also handles a shared view
+        // that sets its display color space to USE_DISPLAY_NAME, by looking for a display color
+        // space with the same name as the display.
+        let display_color_space_name = config
+            .resolved_display_view_color_space_name(&display, &view)
             .to_vec();
-        // A shared view containing a view transform may set the color space to
-        // USE_DISPLAY_NAME, in which case we look for a display color space with the same name
-        // as the display.
-        let name_from_display = name == OCIO_VIEW_USE_DISPLAY_NAME.as_bytes();
-        let display_color_space_name = if name_from_display { &display } else { &name };
-        let display_color_space = config.color_space(display_color_space_name);
+        let display_color_space = config.color_space(&display_color_space_name);
         // If this is not a color space it can be a named transform. Error handling (missing
         // color space or named transform) is handled by display view transform.
 

@@ -7,7 +7,8 @@
 //!
 //! Port of `ConfigUtils` (src/OpenColorIO/ConfigUtils.cpp, ConfigUtils.h @ v2.5.2), in part:
 //! `GetInterchangeRolesForColorSpaceConversion`, the heuristics (`IdentifyInterchangeSpace`,
-//! `IdentifyBuiltinColorSpace` and their helpers) and `SuspendCacheGuard`.
+//! `IdentifyBuiltinColorSpace` and their helpers) and `SuspendCacheGuard`; at v2.6.0, the
+//! fingerprints' test values (`TestVals`), `LocateBuiltinColorSpace` and the Color Interop IDs.
 
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
@@ -20,7 +21,9 @@ use ocio_ops::parse_utils::{ROLE_INTERCHANGE_DISPLAY, ROLE_INTERCHANGE_SCENE};
 use ocio_ops::utils::pystring::os_path;
 use ocio_ops::utils::string_utils::{c_str, find, lower};
 
+use crate::builtinconfigs::builtin_config_registry::is_reserved_config_name;
 use crate::color_space::ColorSpace;
+use crate::color_space_set::ColorSpaceSet;
 use crate::config::Config;
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
@@ -1200,8 +1203,7 @@ pub(crate) fn initialize_ref_space_converters(
 /// The fingerprint of a color space: its name, its reference space type, and its values of
 /// the test values.
 ///
-/// Port of `ConfigUtils::Fingerprint` (src/OpenColorIO/ConfigUtils.h:59-64 @ v2.5.2); the name
-/// is owned, where upstream points into the config.
+/// Port of `ConfigUtils::Fingerprint` (src/OpenColorIO/ConfigUtils.h:56-63 @ v2.6.0).
 #[derive(Debug, Clone, PartialEq)]
 // Config merging (WP 9.2) calls it.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1214,20 +1216,34 @@ pub(crate) struct Fingerprint {
     pub(crate) vals: Vec<f32>,
 }
 
-/// The fingerprints of a config's color spaces, and the test values they are made of.
+/// The test values of a config, in its reference spaces: all a color space's fingerprint
+/// needs. The flags tell whether the values were converted to the config's reference spaces
+/// (an interchange space was identified); fingerprints of two configs compare only where both
+/// flags of the reference space type are set.
 ///
-/// Port of `ConfigUtils::ColorSpaceFingerprints` (src/OpenColorIO/ConfigUtils.h:66-71 @
-/// v2.5.2).
+/// Port of `ConfigUtils::TestVals` (src/OpenColorIO/ConfigUtils.h:65-83 @ v2.6.0).
 #[derive(Debug, Clone, Default, PartialEq)]
-// Config merging (WP 9.2) calls it.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) struct ColorSpaceFingerprints {
-    /// `vec`.
-    pub(crate) vec: Vec<Fingerprint>,
+pub(crate) struct TestVals {
     /// `sceneRefTestVals`.
     pub(crate) scene_ref_test_vals: Vec<f32>,
     /// `displayRefTestVals`.
     pub(crate) display_ref_test_vals: Vec<f32>,
+    /// `sceneRefTestValsConverted`.
+    pub(crate) scene_ref_test_vals_converted: bool,
+    /// `displayRefTestValsConverted`.
+    pub(crate) display_ref_test_vals_converted: bool,
+}
+
+/// The fingerprints of a config's color spaces, and the test values they are made of.
+///
+/// Port of `ConfigUtils::ColorSpaceFingerprints` (src/OpenColorIO/ConfigUtils.h:85-95 @
+/// v2.6.0).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct ColorSpaceFingerprints {
+    /// `testVals`: a copy of the test values the fingerprints were computed from.
+    pub(crate) test_vals: TestVals,
+    /// `vec`.
+    pub(crate) vec: Vec<Fingerprint>,
 }
 
 /// Sends the test values of the color space's reference space type through its from-reference
@@ -1235,13 +1251,11 @@ pub(crate) struct ColorSpaceFingerprints {
 /// should not be considered: its processor or CPU processor can't be made (whatever the
 /// error).
 ///
-/// Port of `ConfigUtils::calcColorSpaceFingerprint` (src/OpenColorIO/ConfigUtils.cpp:1191-1229
-/// @ v2.5.2).
-// Config merging (WP 9.2) calls it.
-#[cfg_attr(not(test), allow(dead_code))]
+/// Port of `ConfigUtils::calcColorSpaceFingerprint` (src/OpenColorIO/ConfigUtils.cpp:1192-1234
+/// @ v2.6.0).
 pub(crate) fn calc_color_space_fingerprint(
     fingerprint_vals: &mut Vec<f32>,
-    fingerprints: &ColorSpaceFingerprints,
+    test_vals: &TestVals,
     config: &Config,
     cs: &ColorSpace,
 ) -> Result<bool> {
@@ -1259,9 +1273,9 @@ pub(crate) fn calc_color_space_fingerprint(
     };
 
     if cs.reference_space_type() == ReferenceSpaceType::Display {
-        fingerprint_vals.clone_from(&fingerprints.display_ref_test_vals);
+        fingerprint_vals.clone_from(&test_vals.display_ref_test_vals);
     } else {
-        fingerprint_vals.clone_from(&fingerprints.scene_ref_test_vals);
+        fingerprint_vals.clone_from(&test_vals.scene_ref_test_vals);
     }
     let n = fingerprint_vals.len();
     let mut desc = PackedImageDesc::with_channel_order(
@@ -1321,18 +1335,24 @@ fn common_color_space<'a>(
         .expect("a color space of the config"))
 }
 
-/// Sets the test values of the fingerprints of `config`: values slightly inside the Rec.709
-/// gamut in ACES2065-1 (scene-referred) and in CIE XYZ D65 (display-referred), converted to the
-/// config's reference spaces through its ACES2065-1 and CIE XYZ D65 spaces (by common names,
-/// else found by the heuristics); a conversion that fails, whatever the error, leaves the
-/// values as they are. Without display-referred color spaces the display values aren't
+/// Sets the test values of `config`: values slightly inside the Rec.709 gamut in ACES2065-1
+/// (scene-referred) and in CIE XYZ D65 (display-referred), converted to the config's reference
+/// spaces through its ACES2065-1 and CIE XYZ D65 spaces (by common names, else found by the
+/// heuristics), with the config's processor cache off meanwhile; a conversion that fails,
+/// whatever the error, leaves the values as they are, and each flag tells whether its
+/// conversion succeeded. Without display-referred color spaces the display values aren't
 /// converted.
 ///
-/// Port of `ConfigUtils::initializeTestVals` (src/OpenColorIO/ConfigUtils.cpp:1231-1365 @
-/// v2.5.2).
-// Config merging (WP 9.2) calls it.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn initialize_test_vals(fingerprints: &mut ColorSpaceFingerprints, config: &Config) {
+/// Port of `ConfigUtils::initializeTestVals` (src/OpenColorIO/ConfigUtils.cpp:1236-1370 @
+/// v2.6.0).
+pub(crate) fn initialize_test_vals(test_vals: &mut TestVals, config: &Config) {
+    // The heuristics used below to identify an interchange space create a lot of Processors,
+    // so avoid polluting the Processor cache with transforms that won't be reused.
+    let _guard = SuspendCacheGuard::new(config);
+
+    test_vals.scene_ref_test_vals_converted = false;
+    test_vals.display_ref_test_vals_converted = false;
+
     // Define a set of test values that are slightly inside the Rec.709 gamut for the most
     // common scene-referred and display-referred reference spaces.
     #[rustfmt::skip]
@@ -1358,8 +1378,8 @@ pub(crate) fn initialize_test_vals(fingerprints: &mut ColorSpaceFingerprints, co
 
     // Try to convert to the actual reference spaces of the config.
 
-    fingerprints.scene_ref_test_vals = aces_vals.clone();
-    fingerprints.display_ref_test_vals = xyz_vals.clone();
+    test_vals.scene_ref_test_vals = aces_vals.clone();
+    test_vals.display_ref_test_vals = xyz_vals.clone();
 
     // First check if the config recognizes one of the common names.
     let scene = common_color_space(
@@ -1368,7 +1388,13 @@ pub(crate) fn initialize_test_vals(fingerprints: &mut ColorSpaceFingerprints, co
         "aces_interchange",
     )
     .and_then(|cs| to_reference_values(config, cs, &aces_vals));
-    fingerprints.scene_ref_test_vals = scene.unwrap_or(aces_vals);
+    match scene {
+        Ok(out) => {
+            test_vals.scene_ref_test_vals = out;
+            test_vals.scene_ref_test_vals_converted = true;
+        }
+        Err(_) => test_vals.scene_ref_test_vals = aces_vals,
+    }
 
     let m =
         config.num_color_spaces_with(SearchReferenceSpaceType::Display, ColorSpaceVisibility::All);
@@ -1382,25 +1408,27 @@ pub(crate) fn initialize_test_vals(fingerprints: &mut ColorSpaceFingerprints, co
         "cie_xyz_d65_interchange",
     )
     .and_then(|cs| to_reference_values(config, cs, &xyz_vals));
-    fingerprints.display_ref_test_vals = display.unwrap_or(xyz_vals);
+    match display {
+        Ok(out) => {
+            test_vals.display_ref_test_vals = out;
+            test_vals.display_ref_test_vals_converted = true;
+        }
+        Err(_) => test_vals.display_ref_test_vals = xyz_vals,
+    }
 }
 
-/// The fingerprints of every color space of `config` ([`calc_color_space_fingerprint`]),
-/// inactive ones included, but data spaces, those of the category `is-unique`, those with
-/// both transforms, and those the fingerprint skips; with the config's processor cache off
-/// meanwhile.
+/// The fingerprints of every color space of `config` ([`calc_color_space_fingerprint`] of the
+/// test values already in `fingerprints`), inactive ones included, but data spaces, those of
+/// the category `is-unique`, those with both transforms, and those the fingerprint skips; with
+/// the config's processor cache off meanwhile.
 ///
-/// Port of `ConfigUtils::initializeColorSpaceFingerprints` (src/OpenColorIO/ConfigUtils.cpp:
-/// 1367-1418 @ v2.5.2).
-// Config merging (WP 9.2) calls it.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn initialize_color_space_fingerprints(
+/// Port of `ConfigUtils::initializeFingerprintVec` (src/OpenColorIO/ConfigUtils.cpp:1372-1425 @
+/// v2.6.0).
+pub(crate) fn initialize_fingerprint_vec(
     fingerprints: &mut ColorSpaceFingerprints,
     config: &Config,
 ) -> Result<()> {
     let _src_guard = SuspendCacheGuard::new(config);
-
-    initialize_test_vals(fingerprints, config);
 
     let n = config.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All);
     fingerprints.vec.clear();
@@ -1433,7 +1461,8 @@ pub(crate) fn initialize_color_space_fingerprints(
         }
 
         let mut fp = Vec::new();
-        let skip_color_space = calc_color_space_fingerprint(&mut fp, fingerprints, config, cs)?;
+        let skip_color_space =
+            calc_color_space_fingerprint(&mut fp, &fingerprints.test_vals, config, cs)?;
         if !skip_color_space {
             fingerprints.vec.push(Fingerprint {
                 cs_name: cs.name().to_vec(),
@@ -1445,21 +1474,55 @@ pub(crate) fn initialize_color_space_fingerprints(
     Ok(())
 }
 
-/// The name of the base config's color space equivalent to `input_cs` of `input_config`: the
-/// first fingerprint of the same reference space type whose values are all within 5e-3 of the
-/// input color space's; `""` for none, for a data space, or for a color space the fingerprint
-/// skips. The input color space must use the base config's reference space
-/// ([`update_reference_colorspace`]).
+/// The test values of `config` ([`initialize_test_vals`]), then the fingerprints of its color
+/// spaces ([`initialize_fingerprint_vec`]).
 ///
-/// Port of `ConfigUtils::findEquivalentColorspace` (src/OpenColorIO/ConfigUtils.cpp:1420-1478
-/// @ v2.5.2).
-// Config merging (WP 9.2) calls it.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn find_equivalent_colorspace<'f>(
+/// Port of `ConfigUtils::initializeColorSpaceFingerprints` (src/OpenColorIO/ConfigUtils.cpp:
+/// 1427-1431 @ v2.6.0).
+pub(crate) fn initialize_color_space_fingerprints(
+    fingerprints: &mut ColorSpaceFingerprints,
+    config: &Config,
+) -> Result<()> {
+    initialize_test_vals(&mut fingerprints.test_vals, config);
+    initialize_fingerprint_vec(fingerprints, config)
+}
+
+/// The name of the base config's color space equivalent to `input_cs` of `input_config`
+/// ([`find_equivalent_color_space_with`] of the fingerprints' own test values). The input
+/// color space must use the base config's reference space ([`update_reference_colorspace`]).
+///
+/// Port of `ConfigUtils::findEquivalentColorSpace` (src/OpenColorIO/ConfigUtils.cpp:1433-1446
+/// @ v2.6.0).
+pub(crate) fn find_equivalent_color_space<'f>(
     fingerprints: &'f ColorSpaceFingerprints,
     input_config: &Config,
     input_cs: &ColorSpace,
 ) -> Result<&'f [u8]> {
+    // NB: The inputConfig/inputCS must use the same reference space as the base config. In
+    // general, this means that updateReferenceColorspace must be called on inputCS before
+    // calling this function.
+    find_equivalent_color_space_with(
+        fingerprints,
+        &fingerprints.test_vals,
+        input_config,
+        input_cs,
+    )
+}
+
+/// The name of the base config's color space equivalent to `input_cs` of `input_config`, whose
+/// fingerprint is computed from `input_test_vals` (the input config's): the first fingerprint
+/// of the same reference space type whose values are all within 5e-3 of the input color
+/// space's; `""` for none, for a data space, or for a color space the fingerprint skips.
+///
+/// Port of the second `ConfigUtils::findEquivalentColorSpace` (src/OpenColorIO/
+/// ConfigUtils.cpp:1448-1508 @ v2.6.0).
+pub(crate) fn find_equivalent_color_space_with<'f>(
+    fingerprints: &'f ColorSpaceFingerprints,
+    input_test_vals: &TestVals,
+    input_config: &Config,
+    input_cs: &ColorSpace,
+) -> Result<&'f [u8]> {
+    // TODO: Should data spaces ever be replaced?
     if input_cs.is_data() {
         return Ok(b"");
     }
@@ -1467,7 +1530,7 @@ pub(crate) fn find_equivalent_colorspace<'f>(
     // Calculate the fingerprint of inputCS from inputConfig.
     let mut input_vals = Vec::new();
     let skip_color_space =
-        calc_color_space_fingerprint(&mut input_vals, fingerprints, input_config, input_cs)?;
+        calc_color_space_fingerprint(&mut input_vals, input_test_vals, input_config, input_cs)?;
     if skip_color_space {
         return Ok(b"");
     }
@@ -1488,7 +1551,7 @@ pub(crate) fn find_equivalent_colorspace<'f>(
             // fp.vals[i] for i below inputVals.size(): both hold the 24 test values.)
             if !equal_with_abs_error(*input, *val, abs_tolerance) {
                 match_found = false;
-                continue;
+                break;
             }
         }
         if match_found {
@@ -1497,6 +1560,265 @@ pub(crate) fn find_equivalent_colorspace<'f>(
     }
 
     Ok(b"")
+}
+
+/// The name of the color space of `builtin_config` equivalent to `src_color_space` of
+/// `src_config` ([`find_equivalent_color_space_with`] of the source config's test values and
+/// the built-in config's fingerprints), as the built-in config's color space holds it; `""`
+/// for none.
+///
+/// Port of `ConfigUtils::LocateBuiltinColorSpace` (src/OpenColorIO/ConfigUtils.cpp:1510-1532
+/// @ v2.6.0).
+pub(crate) fn locate_builtin_color_space<'b>(
+    src_config: &Config,
+    src_color_space: &ColorSpace,
+    builtin_config: &'b Config,
+    src_test_vals: &TestVals,
+    fingerprints: &ColorSpaceFingerprints,
+) -> Result<&'b [u8]> {
+    let name =
+        find_equivalent_color_space_with(fingerprints, src_test_vals, src_config, src_color_space)?;
+    if name.is_empty() {
+        return Ok(b"");
+    }
+
+    // Return the name owned by the color space object rather than the one owned by the
+    // fingerprints, since the latter may be removed from the cache if the config is edited.
+    Ok(builtin_config.color_space(name).map_or(b"", |cs| cs.name()))
+}
+
+// Color Interop IDs ///////////////////////////////////////////////////////////////////////////
+
+/// The characters a token keeps as they are (Annex C of the ASWF Color Interop Forum
+/// ColorInteropID recommendation).
+const ALLOWED_ID_CHARACTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789.-_~/*#%^+()[]|";
+
+/// `token` sanitized for a Color Interop ID, per Annex C of the ASWF Color Interop Forum
+/// ColorInteropID recommendation: white space becomes `_`, `{<` `(`, `}>` `)`, `,` `.`, `;:`
+/// `|`, quotes `#`, `\` `/`; the allowed characters stay; upper-case ASCII letters become lower
+/// case; any other ASCII byte becomes `*`; each UTF-8 sequence becomes one `^` (a lead byte
+/// takes only the continuation bytes that follow it, up to its length; any other byte past
+/// ASCII is one `^` of its own).
+///
+/// Port of `ConfigUtils::SanitizeIDToken` (src/OpenColorIO/ConfigUtils.cpp:1548-1616 @
+/// v2.6.0).
+pub(crate) fn sanitize_id_token(token: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(token.len());
+
+    let n = token.len();
+    let mut i = 0;
+    while i < n {
+        let c = token[i];
+
+        if c > 127 {
+            // Determine how many bytes the UTF-8 sequence starting here should occupy, then only
+            // consume as many of them as actually look like continuation bytes (0x80-0xBF).
+            let seq_len = if (c & 0xE0) == 0xC0 {
+                2
+            } else if (c & 0xF0) == 0xE0 {
+                3
+            } else if (c & 0xF8) == 0xF0 {
+                4
+            } else {
+                1
+            };
+
+            let mut consumed = 1;
+            while consumed < seq_len && i + consumed < n && (token[i + consumed] & 0xC0) == 0x80 {
+                consumed += 1;
+            }
+
+            result.push(b'^');
+            i += consumed;
+            continue;
+        }
+
+        let mapped = match c {
+            b' ' | b'\t' | b'\n' | b'\r' => Some(b'_'),
+            b'{' | b'<' => Some(b'('),
+            b'}' | b'>' => Some(b')'),
+            b',' => Some(b'.'),
+            b';' | b':' => Some(b'|'),
+            b'\'' | b'"' => Some(b'#'),
+            b'\\' => Some(b'/'),
+            _ => None,
+        };
+
+        if let Some(mapped) = mapped {
+            result.push(mapped);
+        } else if ALLOWED_ID_CHARACTERS.contains(&c) {
+            // std::string::find of the character: a NUL is not found, the string holds none.
+            result.push(c);
+        } else if c.is_ascii_uppercase() {
+            // std::isupper and std::tolower on ASCII: the same in every locale.
+            result.push(c.to_ascii_lowercase());
+        } else {
+            result.push(b'*');
+        }
+
+        i += 1;
+    }
+
+    result
+}
+
+/// The local Color Interop ID of the color space `src_color_space_name` (a name, role or
+/// alias) of `config`: `<CONFIG-NAME>:local:<BASE>`, the config's name sanitized
+/// ([`sanitize_id_token`]), and the color space's name, or the first of its aliases that
+/// sanitizing leaves unchanged when the name changes, sanitized. Refused for an empty name or
+/// config name, a config named as an ASWF config that has interop IDs
+/// ([`is_reserved_config_name`]), and a color space the config doesn't have.
+///
+/// Port of `ConfigUtils::GenerateLocalIDForColorSpace` (src/OpenColorIO/ConfigUtils.cpp:
+/// 1618-1682 @ v2.6.0).
+pub(crate) fn generate_local_id_for_color_space(
+    config: &Config,
+    src_color_space_name: &[u8],
+) -> Result<Vec<u8>> {
+    // Note: this intentionally ignores any interop ID already on the color space, in case it is
+    // necessary to calculate what the local ID would be, independent of that. Applications are
+    // expected to have already called getInteropID on the color space.
+
+    let src_color_space_name = c_str(src_color_space_name);
+    if src_color_space_name.is_empty() {
+        return Err(Exception::new(
+            "generateLocalIDForColorSpace: srcColorSpaceName must not be null or empty.",
+        ));
+    }
+
+    let config_name = c_str(config.name());
+    if config_name.is_empty() {
+        return Err(Exception::new(
+            "May not generate a local interop ID if the config name is empty.",
+        ));
+    }
+
+    let sanitized_config_name = sanitize_id_token(config_name);
+
+    // Disallow usage of config names for one of the OCIO configs for ACES that already contains
+    // interop IDs for all color spaces. Trying to avoid the situation where someone edits one of
+    // these configs but forgets to change the config name. This would result in a meaningless
+    // interop ID.
+    if is_reserved_config_name(&sanitized_config_name) {
+        let mut os = b"May not generate a local interop ID if the name matches an ACES config \
+                       that already has interop IDs: "
+            .to_vec();
+        os.extend_from_slice(config_name);
+        os.extend_from_slice(b".");
+        return Err(Exception::new(os));
+    }
+
+    // Note that this resolves roles and aliases and finds inactive color spaces.
+    let Some(cs) = config.color_space(src_color_space_name) else {
+        let mut os =
+            b"generateLocalIDForColorSpace: This config does not contain the requested color \
+              space: "
+                .to_vec();
+        os.extend_from_slice(src_color_space_name);
+        os.extend_from_slice(b".");
+        return Err(Exception::new(os));
+    };
+
+    // Use the color space's own canonical name (rather than the possibly aliased/role-based
+    // srcColorSpaceName argument) so that the generated ID is stable and may be resolved back by
+    // Config::findColorSpaceForID.
+    let mut base = c_str(cs.name());
+
+    // But if the name would require sanitization, prefer the first alias (in order) that does
+    // not require any sanitization, so the ID stays as readable as possible.
+    if sanitize_id_token(base) != base {
+        for i in 0..cs.num_aliases() {
+            let alias = c_str(cs.alias(i));
+            if sanitize_id_token(alias) == alias {
+                base = alias;
+                break;
+            }
+        }
+    }
+
+    let mut id = sanitized_config_name;
+    id.extend_from_slice(b":local:");
+    id.extend_from_slice(&sanitize_id_token(base));
+    Ok(id)
+}
+
+/// The color space of `config` the Color Interop ID `id_string` identifies, trying in order:
+/// `id_string` itself (a name, role or alias); `id_string` with its first namespace stripped
+/// (up to its first `:`), unless that namespace is `local`; and, for `NAMESPACE:local:BASE`
+/// (one colon after `local`) where `NAMESPACE` and the config's name sanitize alike, the first
+/// color space of `all_color_spaces` (the config's, in order) whose name, or else one of whose
+/// aliases, sanitizes to `BASE` sanitized. `None` for none, and for an empty ID.
+///
+/// Port of `ConfigUtils::FindColorSpaceForID` (src/OpenColorIO/ConfigUtils.cpp:1684-1768 @
+/// v2.6.0).
+pub(crate) fn find_color_space_for_id<'c>(
+    config: &'c Config,
+    all_color_spaces: &'c ColorSpaceSet,
+    id_string: &[u8],
+) -> Option<&'c ColorSpace> {
+    let id = c_str(id_string);
+    if id.is_empty() {
+        return None;
+    }
+
+    // Step 1: the full ID string.
+    if let Some(cs) = config.color_space(id) {
+        return Some(cs);
+    }
+
+    // Step 2: strip the leftmost namespace and one separator (only one level, regardless of how
+    // many colons remain in the result), and look up the remainder.
+    let first_colon = id.iter().position(|&b| b == b':')?;
+
+    let outer_namespace = &id[..first_colon];
+    let stripped = &id[first_colon + 1..];
+
+    // "local" is a reserved keyword that may only appear as the inner namespace of the mode 3
+    // form ("NAMESPACE:local:BASE"). It must not be treated as an ordinary outer namespace to
+    // strip off, so skip the plain lookup in that case.
+    if outer_namespace != b"local"
+        && let Some(cs) = config.color_space(stripped)
+    {
+        return Some(cs);
+    }
+
+    // Step 3: local mode. The stripped remainder must be exactly "local:BASE" (i.e. exactly one
+    // colon left), and the namespace removed in step 2 must match this config's own (sanitized)
+    // name.
+    let inner_colon = stripped.iter().position(|&b| b == b':')?;
+    if &stripped[..inner_colon] == b"local" && !stripped[inner_colon + 1..].contains(&b':') {
+        let config_name = c_str(config.name());
+        if !config_name.is_empty()
+            && sanitize_id_token(config_name) == sanitize_id_token(outer_namespace)
+        {
+            // Note that because the base name in the interop ID is sanitized, the comparison
+            // must sanitize the color space names and aliases in the config as well.
+
+            // The base should already be sanitized, but enforce that it must be in order to
+            // match.
+            let base = sanitize_id_token(&stripped[inner_colon + 1..]);
+
+            // This emulates getIndex in ColorSpaceSet.cpp, so it matches what getColorSpace
+            // does. If two names sanitize to the same string, the first one in the config wins.
+            for idx in 0..all_color_spaces.num_color_spaces() {
+                let Some(candidate) = all_color_spaces.color_space_by_index(idx) else {
+                    continue;
+                };
+
+                if sanitize_id_token(c_str(candidate.name())) == base {
+                    return Some(candidate);
+                }
+
+                for aidx in 0..candidate.num_aliases() {
+                    if sanitize_id_token(c_str(candidate.alias(aidx))) == base {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

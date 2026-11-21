@@ -1489,7 +1489,7 @@ colorspaces:
     }
 }
 
-/// Port of `OCIO_ADD_TEST(ConfigUtils, processor_to_known_colorspace)` @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(ConfigUtils, processor_to_known_colorspace)` @ v2.6.0.
 #[test]
 fn processor_to_known_colorspace() {
     use crate::config::Config;
@@ -1968,6 +1968,207 @@ colorspaces:
         let csname =
             Config::identify_builtin_color_space(&editable_cfg, &builtin_config, "ACEScg").unwrap();
         assert_eq!(csname, b"ACES cg");
+    }
+
+    //
+    // Test LocateBuiltinColorSpace.  (This is the inverse of IdentifyBuiltinColorSpace.)
+    //
+
+    // Set both interchange roles, so the heuristics are not needed yet.
+    editable_cfg
+        .set_role("aces_interchange", Some(b"ref_cs".as_slice()))
+        .unwrap();
+    editable_cfg
+        .set_role("cie_xyz_d65_interchange", Some(b"CIE-XYZ-D65".as_slice()))
+        .unwrap();
+    editable_cfg.set_inactive_color_spaces("");
+
+    {
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "ACES cg", &builtin_config).unwrap();
+        assert_eq!(csname, b"ACEScg");
+    }
+
+    {
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "Texture -- sRGB", &builtin_config)
+                .unwrap();
+        assert_eq!(csname, b"sRGB Encoded Rec.709 (sRGB)");
+    }
+
+    {
+        let csname = Config::locate_builtin_color_space(
+            &editable_cfg,
+            "Linear ITU-R BT.709",
+            &builtin_config,
+        )
+        .unwrap();
+        assert_eq!(csname, b"Linear Rec.709 (sRGB)");
+    }
+
+    {
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "not sRGB", &builtin_config).unwrap();
+        assert_eq!(csname, b"ACEScct");
+    }
+
+    // Display-referred color spaces work if the display interchange role is present.
+    {
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "sRGB - Display CS", &builtin_config)
+                .unwrap();
+        assert_eq!(csname, b"sRGB - Display");
+    }
+
+    // Roles may be used for the source color space name and inactive color spaces are found.
+    editable_cfg.set_inactive_color_spaces("ref_cs");
+    {
+        // The scene_linear role is set to "ref_cs", which is the reference space.
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "scene_linear", &builtin_config)
+                .unwrap();
+        assert_eq!(csname, b"ACES2065-1");
+    }
+    editable_cfg.set_inactive_color_spaces("");
+
+    // A color space with no equivalent in the built-in config returns an empty string.
+    {
+        // This is only the sRGB gamma curve, with no primary conversion.
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "sRGB - curve", &builtin_config)
+                .unwrap();
+        assert_eq!(csname, b"");
+    }
+
+    // A data space returns the name of the built-in config's "raw" data space.
+    {
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "raw data", &builtin_config).unwrap();
+        assert_eq!(csname, b"Raw");
+    }
+
+    // Test that a missing or empty source color space name throws.
+    {
+        check_throw_what(
+            Config::locate_builtin_color_space(&editable_cfg, "Foo", &builtin_config),
+            "Source config does not contain the requested color space: Foo.",
+        );
+
+        check_throw_what(
+            Config::locate_builtin_color_space(&editable_cfg, "", &builtin_config),
+            "LocateBuiltinColorSpace: arguments must not be null.",
+        );
+    }
+
+    // Test that the fingerprints are recalculated if the source config is modified.
+    // (Point the interchange role at the wrong color space and check that the previously
+    // cached test values are not reused.)
+    {
+        editable_cfg
+            .set_role("aces_interchange", Some(b"Texture -- sRGB".as_slice()))
+            .unwrap();
+
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "ACES cg", &builtin_config).unwrap();
+        assert!(csname != b"ACEScg");
+
+        editable_cfg
+            .set_role("aces_interchange", Some(b"ref_cs".as_slice()))
+            .unwrap();
+
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "ACES cg", &builtin_config).unwrap();
+        assert_eq!(csname, b"ACEScg");
+    }
+
+    // Test that the fingerprints are recalculated if the built-in config is modified.
+    {
+        let mut editable_builtin = builtin_config.create_editable_copy().unwrap();
+
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "ACES cg", &editable_builtin)
+                .unwrap();
+        assert_eq!(csname, b"ACEScg");
+
+        // Rename the color space that was found above.  If the fingerprints were not
+        // recalculated, the stale name would no longer be found in the config and an empty
+        // string would be returned.
+        let mut renamed_cs = editable_builtin.color_space("ACEScg").unwrap().clone();
+        renamed_cs.set_name("ACES cg 2");
+        editable_builtin.remove_color_space("ACEScg");
+        editable_builtin.add_color_space(&renamed_cs).unwrap();
+
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "ACES cg", &editable_builtin)
+                .unwrap();
+        assert_eq!(csname, b"ACES cg 2");
+    }
+
+    // Test that the heuristics are used if the interchange roles are not present.
+    editable_cfg
+        .set_role("aces_interchange", Some(b"".as_slice()))
+        .unwrap();
+    editable_cfg
+        .set_role("cie_xyz_d65_interchange", Some(b"".as_slice()))
+        .unwrap();
+    {
+        // The heuristics use the active color spaces to find the reference space.
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "ACES cg", &builtin_config).unwrap();
+        assert_eq!(csname, b"ACEScg");
+    }
+
+    // Display-referred color spaces are not supported by the heuristics, but note that in this
+    // config the display-referred interchange space is found by its name.
+    {
+        let csname =
+            Config::locate_builtin_color_space(&editable_cfg, "sRGB - Display CS", &builtin_config)
+                .unwrap();
+        assert_eq!(csname, b"sRGB - Display");
+    }
+
+    // Rename the color space that allowed the display-referred interchange space to be found by
+    // name above.  With no interchange role set and no name-based match possible, the
+    // heuristics cannot identify a display-referred interchange space (they only support
+    // scene-referred spaces), so an exception is thrown rather than proceeding with
+    // uncorrected test values.
+    //
+    // For scene-referred color spaces, there are heuristics that search the config for an sRGB
+    // or known linear color space, but those are not present for the display-referred case.
+    // If the interchange role is missing, only a simply check for a CIE XYZ color space is
+    // done.
+    {
+        let mut renamed_cs = editable_cfg.color_space("CIE-XYZ-D65").unwrap().clone();
+        renamed_cs.set_name("Not the interchange space");
+        editable_cfg.remove_color_space("CIE-XYZ-D65");
+        editable_cfg.add_color_space(&renamed_cs).unwrap();
+
+        check_throw_what(
+            Config::locate_builtin_color_space(&editable_cfg, "sRGB - Display CS", &builtin_config),
+            "Heuristics were not able to find an interchange space in the source config, so it \
+             is not possible to search for the color space: sRGB - Display CS.",
+        );
+
+        // Restore the color space for the remaining tests.
+        let mut restored_cs = editable_cfg
+            .color_space("Not the interchange space")
+            .unwrap()
+            .clone();
+        restored_cs.set_name("CIE-XYZ-D65");
+        editable_cfg.remove_color_space("Not the interchange space");
+        editable_cfg.add_color_space(&restored_cs).unwrap();
+    }
+
+    // Make the color spaces that the heuristics are able to use inactive, so that an
+    // interchange space can no longer be identified in the source config.
+    editable_cfg.set_inactive_color_spaces(
+        "ACES cg, Linear ITU-R BT.709, Texture -- sRGB, OCIO v1 -- sRGB, ref_cs",
+    );
+    {
+        check_throw_what(
+            Config::locate_builtin_color_space(&editable_cfg, "ACES cg", &builtin_config),
+            "Heuristics were not able to find an interchange space in the source config",
+        );
     }
 }
 

@@ -826,3 +826,125 @@ fn transforms_held_as_they_are() {
         "LegacyViewingPipeline: can't create a processor without a display transform.",
     );
 }
+
+/// Port of `OCIO_ADD_TEST(LegacyViewingPipeline, display_view_alias_fallback)` @ v2.6.0.
+#[test]
+fn display_view_alias_fallback() {
+    use ocio_testkit::upstream::check_close;
+
+    // A LegacyViewingPipeline resolves the display and view of its DisplayViewTransform, so
+    // that names that are out of date still produce the same pipeline.
+    //
+    // Note that this is not simply duplicating what the DisplayViewTransform does for itself
+    // when it is appended to the group. It matters most for the looks: setDisplayViewTransform
+    // forces LooksBypass on the stored transform, so the view's looks are applied by the
+    // pipeline itself rather than by BuildDisplayOps. If the view name did not resolve here,
+    // the looks lookup would come back empty and the looks would be silently dropped.
+
+    const CONFIG: &str = r#"
+ocio_profile_version: 2.6
+
+use_display_aliases: true
+
+roles:
+  default: raw
+  aces_interchange: raw
+  cie_xyz_d65_interchange: sRGB - Display
+  color_timing: raw
+  compositing_log: raw
+  scene_linear: source
+
+displays:
+  sRGB - Display:
+    - !<View> {name: view, view_transform: display_vt, display_colorspace: sRGB - Display,
+               looks: look1, aliases: [old_view]}
+
+looks:
+  - !<Look>
+    name: look1
+    process_space: source
+    transform: !<CDLTransform> {slope: [1.1, 1.2, 1.3]}
+
+view_transforms:
+  - !<ViewTransform>
+    name: display_vt
+    to_scene_reference: !<MatrixTransform> {offset: [0.3, 0.1, 0.1, 0]}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: sRGB - Display
+    aliases: [sRGB]
+    to_display_reference: !<MatrixTransform> {offset: [0.25, 0.15, 0.35, 0]}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+
+  - !<ColorSpace>
+    name: source
+    to_scene_reference: !<MatrixTransform> {offset: [0, 0.1, 0.2, 0]}
+"#;
+
+    let cfg = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    cfg.validate().unwrap();
+
+    // Build the pipeline for a (display, view) pair and run one pixel through it. Comparing
+    // the resulting values catches a dropped look, which a structural check on the transform
+    // list could easily miss.
+    let apply_pipeline = |display: &str, view: &str, bypass_looks: bool, rgb: &mut [f32; 3]| {
+        let mut dt = DisplayViewTransform::new();
+        dt.set_src("source");
+        dt.set_display(display);
+        dt.set_view(view);
+        dt.set_looks_bypass(bypass_looks);
+
+        let mut vp = LegacyViewingPipeline::new();
+        vp.set_display_view_transform(Some(&dt));
+
+        let context = cfg.current_context().get();
+        let proc = vp.processor(&cfg, Some(&context)).unwrap();
+        proc.default_cpu_processor()
+            .unwrap()
+            .apply_rgb(rgb)
+            .unwrap();
+    };
+
+    const SRC_PIXEL: [f32; 3] = [0.3, 0.5, 0.7];
+    const TOLERANCE: f32 = 1e-6;
+
+    // The reference result, using the display's and the view's current names.
+    let mut reference = SRC_PIXEL;
+    apply_pipeline("sRGB - Display", "view", false, &mut reference);
+
+    // Confirm the look actually changes the result, so that the comparisons below can't pass
+    // merely because the look happens to be a no-op. Setting LooksBypass before handing the
+    // transform to the pipeline is what makes it skip the looks (see m_dtOriginalLooksBypass).
+    {
+        let mut no_look = SRC_PIXEL;
+        apply_pipeline("sRGB - Display", "view", true, &mut no_look);
+
+        assert!(
+            (no_look[0] - reference[0]).abs() > 1e-4
+                || (no_look[1] - reference[1]).abs() > 1e-4
+                || (no_look[2] - reference[2]).abs() > 1e-4
+        );
+    }
+
+    // The display's old, alias-only name must give the same result. So must the view's old,
+    // alias-only name used as the view (the case that would silently lose the look if the view
+    // were not resolved), and both being out of date at once, since the view is resolved
+    // against the resolved display.
+    for (display, view) in [
+        ("sRGB", "view"),
+        ("sRGB - Display", "old_view"),
+        ("sRGB", "old_view"),
+    ] {
+        let mut aliased = SRC_PIXEL;
+        apply_pipeline(display, view, false, &mut aliased);
+
+        check_close(aliased[0], reference[0], TOLERANCE);
+        check_close(aliased[1], reference[1], TOLERANCE);
+        check_close(aliased[2], reference[2], TOLERANCE);
+    }
+}

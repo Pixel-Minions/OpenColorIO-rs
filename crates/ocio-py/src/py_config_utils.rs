@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! ConfigUtils statics (src/bindings/python/PyConfig.cpp:355-384, 810-963 @ v2.5.2).
+//! ConfigUtils statics (src/bindings/python/PyConfig.cpp:355-384, 810-963 @ v2.5.2; and
+//! LocateBuiltinColorSpace, PyConfig.cpp:381-390 @ v2.6.0).
 
 use ocio::{Config, Context};
 use ocio_ops::open_color_types::{ReferenceSpaceType, TransformDirection};
@@ -250,6 +251,38 @@ static IDENTIFY_BUILTIN: Function = static_def!(
     }
 );
 
+// .def_static("LocateBuiltinColorSpace", [](const ConstConfigRcPtr & srcConfig, const char *
+// srcColorSpaceName, const ConstConfigRcPtr & builtinConfig) {...}, "srcConfig"_a,
+// "srcColorSpaceName"_a, "builtinConfig"_a) (PyConfig.cpp:381-390 @ v2.6.0): a null config or
+// name (`None`) is the library's own error, which it checks before anything else.
+static LOCATE_BUILTIN: Function = static_def!(
+    "LocateBuiltinColorSpace",
+    [
+        Param::new("srcConfig", CONFIG),
+        Param::new("srcColorSpaceName", "str"),
+        Param::new("builtinConfig", CONFIG)
+    ],
+    "str",
+    |py, _, a, convert| {
+        let src = config!(a, 0, convert);
+        let name = text(arg!(a, 1, convert, CharPtr));
+        let builtin = config!(a, 2, convert);
+        let (Some(src), Some(builtin)) = (src, builtin) else {
+            return Err(to_py_err(
+                py,
+                &ocio::Exception::new("LocateBuiltinColorSpace: arguments must not be null."),
+            ));
+        };
+        let value = with_two(&src, &builtin, |src, builtin| {
+            py_result(
+                py,
+                Config::locate_builtin_color_space(src, &name, builtin).map(<[u8]>::to_vec),
+            )
+        })?;
+        string_out(py, &value)
+    }
+);
+
 // .def_static("IdentifyInterchangeSpace", lambda returning a copied string tuple)
 // (PyConfig.cpp:366-384 @ v2.5.2).
 static IDENTIFY_INTERCHANGE: Function = static_def!(
@@ -475,9 +508,10 @@ static FROM_CONFIGS: Function = Function {
     ],
 };
 
-/// Port of `bindPyConfig`'s identification statics (PyConfig.cpp:355-384 @ v2.5.2).
+/// Port of `bindPyConfig`'s identification statics (PyConfig.cpp:355-384 @ v2.5.2), with
+/// `LocateBuiltinColorSpace` between them (PyConfig.cpp:381-390 @ v2.6.0).
 pub(super) fn bind_identification(cls: &Bound<'_, PyType>) -> PyResult<()> {
-    for f in [&IDENTIFY_BUILTIN, &IDENTIFY_INTERCHANGE] {
+    for f in [&IDENTIFY_BUILTIN, &LOCATE_BUILTIN, &IDENTIFY_INTERCHANGE] {
         def_static(cls, f)?;
     }
     Ok(())

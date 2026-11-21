@@ -357,7 +357,7 @@ fn add_curve_eval_method_text_to_shader_program(
 /// quadratic solved (the hue-fx curve's with the diagonal added).
 ///
 /// Port of `GradingBSplineCurveImpl::AddShaderEvalRevHue` (src/OpenColorIO/ops/
-/// gradingrgbcurve/GradingBSplineCurve.cpp:1168-1246 @ v2.5.2).
+/// gradingrgbcurve/GradingBSplineCurve.cpp:1168-1244 @ v2.6.0).
 pub fn add_shader_eval_rev_hue(
     st: &GpuShaderText,
     knots_offsets: &[u8],
@@ -405,6 +405,9 @@ pub fn add_shader_eval_rev_hue(
         .put("float knStartY = ")
         .put(coefs)
         .put("[coefsOffs + coefsSets * 2];");
+    // HUE-FX (curve 7): offset start Y bound by its knot, matching CPU evalRevHue.
+    st.new_line()
+        .put("knStartY = (curveIdx == 7) ? knStartY + knStart : knStartY;");
     st.new_line().put("float knEndY;");
     st.new_line().put("{");
     st.new_line()
@@ -425,7 +428,6 @@ pub fn add_shader_eval_rev_hue(
         .put("[knotsOffs + knotsCnt - 2];");
     st.new_line().put("  float t = knEnd - kn;");
     st.new_line().put("  knEndY = ( A * t + B ) * t + C;");
-    // The HUE-FX curve is index 7 and requires special handling.
     st.new_line()
         .put("  knEndY = (curveIdx == 7) ? knEndY + knEnd : knEndY;");
     st.new_line().put("}");

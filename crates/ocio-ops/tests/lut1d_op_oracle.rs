@@ -26,7 +26,7 @@
 use core::ffi::c_ulong;
 
 use ocio_ops::exception::{Exception, Result};
-use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::hash_utils::cache_id_hash_uuid;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, OptimizationFlags, TransformDirection};
 use ocio_ops::ops::lut1d::Lut1DOpData;
@@ -179,12 +179,10 @@ fn port_raw_ops(chain: &[T]) -> Result<OpVec> {
     Ok(raw)
 }
 
-/// `Processor::Impl::getCacheID`: `<NOOP>` without ops, else the hash of their cache IDs.
+/// `Processor::Impl::getCacheID` (Processor.cpp:331-342 @ v2.6.0): the UUID-shaped hash of
+/// the ops' cache IDs, an empty list's too.
 fn processor_cache_id(ops: &OpVec) -> Result<String> {
-    if ops.is_empty() {
-        return Ok("<NOOP>".to_string());
-    }
-    Ok(cache_id_hash(&ops.get_cache_id()?))
+    Ok(cache_id_hash_uuid(&ops.get_cache_id()?))
 }
 
 /// The port's processor and optimized processor cache IDs.

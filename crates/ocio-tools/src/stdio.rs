@@ -254,13 +254,13 @@ pub fn init() {
 #[cfg_attr(windows, allow(dead_code))]
 fn demangled_type_name(exception: &Exception) -> &'static str {
     match exception.kind() {
-        ExceptionKind::MissingFile => "OpenColorIO_v2_5::ExceptionMissingFile",
+        ExceptionKind::MissingFile => "OpenColorIO_v2_6::ExceptionMissingFile",
         ExceptionKind::LengthError => "std::length_error",
         ExceptionKind::BadAlloc => "std::bad_alloc",
         ExceptionKind::RegexError => "std::regex_error",
         ExceptionKind::OutOfRange => "std::out_of_range",
         ExceptionKind::SystemError => "std::system_error",
-        _ => "OpenColorIO_v2_5::Exception",
+        _ => "OpenColorIO_v2_6::Exception",
     }
 }
 
