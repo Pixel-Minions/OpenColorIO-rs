@@ -261,7 +261,7 @@ static PROCESSOR_HEAPS: Mutex<ProcessorHeaps> = Mutex::new(Vec::new());
 fn processor_unchanged() -> PyErr {
     pyo3::exceptions::PyRuntimeError::new_err(
         "FormatMetadata: the metadata of a processor, which the port's processors hold \
-         unchanged; OCIO 2.5.2 changes it, for that processor and those sharing its ops \
+         unchanged; OCIO 2.6.0 changes it, for that processor and those sharing its ops \
          (docs/deviations.md, D-13)",
     )
 }

@@ -312,7 +312,7 @@ fn busy() -> PyErr {
 fn changed_while_making_a_processor() -> PyErr {
     pyo3::exceptions::PyRuntimeError::new_err(concat!(
         "Config: a callback of the making of a processor of this config changed the config, ",
-        "which locks the cache of processors that call holds: OCIO 2.5.2 ends the process, ",
+        "which locks the cache of processors that call holds: OCIO 2.6.0 ends the process, ",
         "which the port can't match (docs/improvements.md, U-184)",
     ))
 }
