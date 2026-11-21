@@ -6720,7 +6720,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **A fix:** treat the role as missing (fall back to the rendering and display spaces), or
   throw.
 - **Status:** the port returns an error ("MixingColorSpaceManager: the role 'color_picking'
-  refers to the color space '<name>', which doesn't exist: OCIO 2.5.2 reads a null color space
+  refers to the color space '<name>', which doesn't exist: OCIO 2.6.0 reads a null color space
   there, and its process dies (docs/improvements.md, U-152).") from
   `MixingColorSpaceManager::new` and `refresh`; a manager whose refresh fails is left as it was
   (owner decision 2026-10-22, P5-3 d: `new` and `refresh` return `Result`). In `p5-helpers-2`
@@ -6895,7 +6895,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   where upstream locks the mutex again (owner decision 2026-10-24, relayed by the coordinator:
   the Windows outcome is defined, matched per platform). On Linux, where the wheel hangs, it
   returns the error "ColorSpaceMenuHelper: a menu is made while this thread makes another one
-  (from a logging function its making calls): OCIO 2.5.2 locks its menus' mutex again on the
+  (from a logging function its making calls): OCIO 2.6.0 locks its menus' mutex again on the
   same thread, which is undefined behaviour (docs/improvements.md, U-181)." Both detect the
   case by a thread-local flag set while the menus' lock is held; other threads wait for the
   lock, as upstream's. In `p6-after-p5` (6.7c, `crates/ocio/src/apphelpers/color_space_helpers.rs`,
@@ -6930,7 +6930,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   Linux, where the wheel hangs, it returns the error "A cache's mutex is locked again by the
   thread that holds it (code the library calls while it makes a processor or loads a file,
   such as a config's I/O proxy, makes a processor of the same config or loads the same file):
-  OCIO 2.5.2 waits for itself, which is undefined behaviour (docs/improvements.md, U-182)."
+  OCIO 2.6.0 waits for itself, which is undefined behaviour (docs/improvements.md, U-182)."
   Both detect the case by a thread-local list of the caches' mutexes the thread holds, checked
   before each lock (`GenericCache::lock`, the file cache's entries); other threads wait for
   the lock, as upstream's. `GenericCache::clear` and `enable`, which upstream's
@@ -7004,7 +7004,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   rose while this thread holds the lock of the cache of one of the config's copies
   (`Config::processor_cache_is_held_by_this_thread`, the thread-local list of U-182), the call
   raises RuntimeError "Config: a callback of the making of a processor of this config changed
-  the config, which locks the cache of processors that call holds: OCIO 2.5.2 ends the
+  the config, which locks the cache of processors that call holds: OCIO 2.6.0 ends the
   process, which the port can't match (docs/improvements.md, U-184)". The change was made, as
   in upstream's call before it dies. The exact set of calls is the library's own (upstream's
   `resetCacheIDs` sites are ported), so the changes that don't lock the cache, and the cache
