@@ -1,12 +1,27 @@
 # Improvement candidates
 
 Upstream bugs and limitations that the port copies, so that its results match OpenColorIO
-2.5.2 byte for byte, but that could be fixed. Nothing here is fixed during the port. At the
-end, the owner decides on each one: keep it, or fix it as a deviation (`docs/deviations.md`),
-which changes the port's results for the inputs the entry names.
+byte for byte (2.5.2 up to release 1.0.0, 2.6.0 from 1.1.0), but that could be fixed. Nothing
+here is fixed during the port. At the end, the owner decides on each one: keep it, or fix it
+as a deviation (`docs/deviations.md`), which changes the port's results for the inputs the
+entry names.
 
 **The decision for 1.0.0** (owner, 2026-11-03): every entry stays as its status says. 1.0.0
 fixes none of them; fixes are considered after 1.0.0, each as a deviation.
+
+**The 2.6.0 review** (release 1.1.0, `ocio26-registers`). Every entry's upstream code was read
+again at v2.6.0 (and at the libraries the 2.6.0 wheels bundle: yaml-cpp 0.9.0, expat 2.8.4,
+minizip-ng 4.2.2).
+- A citation `@ v2.6.0` gives the code's lines in 2.6.0, and so do the entry's later
+  citations of the same file that name no version. Any other citation, `@ v2.5.2` or without
+  a version, names code that 2.6.0 kept at the same lines, unless the entry's `2.6.0` bullet
+  says otherwise.
+- An entry 2.6.0 fixed or changed keeps its number and its text about 2.5.2, and adds a
+  `- **2.6.0**` bullet: what 2.6.0 does, which the port follows, and what is left to fix. Its
+  status says so first.
+- Wheel addresses are those of the 2.5.2 libraries unless the entry names
+  `OpenColorIO_2_6.dll` or the 2.6.0 libraries. The functions whose source 2.6.0 didn't
+  change compiled to the same instructions (`docs/ocio-2.6-plan.md`, "Wheel facts").
 
 The last section lists places where upstream's behaviour is undefined because it reads or
 writes memory it doesn't own. The port can't copy those. The owner's general rule
@@ -31,8 +46,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** image sizes and positions are C `long`, which is 32 bits on Windows and 64 bits
   on Linux. On Windows, for images of 2^31 pixels or more (about 46,000 × 46,000), the paths
   that pack channel by channel count the pixels as `width * height` and start each scanline at
-  pixel `y * width`, and both wrap (`ImagePacking.cpp:33-63, 103-133, 173-203, 243-273`,
-  `ScanlineHelper.cpp:142-146, 169-173` @ v2.5.2). Where a scanline's wrapped start falls
+  pixel `y * width`, and both wrap (`ImagePacking.cpp:34-64, 111-141, 181-211, 251-281`,
+  `ScanlineHelper.cpp:142-147, 170-174` @ v2.6.0). Where a scanline's wrapped start falls
   outside the wrapped count, reading it raises "Invalid output image position.", and writing
   it silently writes nothing, so the row is left as it was. Where it falls inside, the scanline
   is read or written from that pixel: for a top-down layout, that is the wrong pixels, from
@@ -82,7 +97,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** with any input bit depth except F32 and the default optimization, the optimizer
   bakes the leading separable ops into one Lut1D (`OptimizeSeparablePrefix`,
-  `OpOptimizers.cpp:553-595`). That Lut1D scales alpha instead of offsetting it, so a matrix's
+  `OpOptimizers.cpp:547-605` @ v2.6.0). That Lut1D scales alpha instead of offsetting it, so a matrix's
   alpha offset is lost. Seen through the wheel for UINT8, UINT10, UINT12, UINT16 and F16 input,
   with a Matrix then a Log; `OPTIMIZATION_NONE` keeps the offset.
 - **Who notices:** non-F32 images through a matrix that offsets alpha, with the default
@@ -136,7 +151,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-5. Different transforms can share a cached processor
 
 - **Upstream:** `Config::getProcessor` caches processors under a hash of the transform's text
-  (`Config.cpp:4830-4841`), and the cache is on by default. That text leaves things out:
+  (`Config.cpp:5446-5457` @ v2.6.0), and the cache is on by default. That text leaves things out:
   - for a `Lut1DTransform` or `Lut3DTransform` that holds its values in memory, it gives only the
     size, settings and the smallest and largest values (`transforms/Lut1DTransform.cpp:184-224`,
     `transforms/Lut3DTransform.cpp:174-218`). The Lut1DTransform's smallest and largest values
@@ -159,7 +174,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-6. A malformed UTF-8 sequence truncates a config's text and cache ID
 
 - **Upstream:** yaml-cpp decodes text leniently: the overlong sequence `C0 80` becomes a NUL byte,
-  and `serialize()` and the config's cache ID stop at that byte (`OCIOYaml.cpp:5447`). Configs
+  and `serialize()` and the config's cache ID stop at that byte (`OCIOYaml.cpp:5493` @ v2.6.0). Configs
   that differ only after it share a cache ID.
 - **Who notices:** configs that contain malformed UTF-8.
 - **A fix:** keep or refuse such bytes instead of truncating.
@@ -186,14 +201,14 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     offsets red by `.nan` writes `From nan nan` on Windows and `From -nan -nan` on Linux (the
     port matches each; `bake`, `crates/ocio/tests/bake_formats_oracle.rs`, p4-baker; probed
     2026-10-16);
-  - the CLF/CTF writer (`fileformats/ctf/CTFTransform.cpp` @ v2.5.2), which streams most
+  - the CLF/CTF writer (`fileformats/ctf/CTFTransform.cpp` @ v2.6.0), which streams most
     parameters as they are: a CDL's slope, offset and power and its saturation (`CDLWriter`,
-    813-933), a gamma's or an exponent's parameters (`AddGammaParams`, 1181-1214), a log's
-    (`AddLogParam`, 1967-1975) and a range's bounds (`WriteTag`, 2474-2480). A negative NaN
+    904-1024), a gamma's or an exponent's parameters (`AddGammaParams`, 1272-1305), a log's
+    (`AddLogParam`, 2058-2066) and a range's bounds (`WriteTag`, 2579-2585). A negative NaN
     that validation lets through (a CDL's offset, an exponent's alpha, a log's base or
     slopes) is written `-nan(ind)` on Windows and `-nan` on Linux; a range can't hold one, a
     NaN bound being an unset one. The FixedFunction params and the LUT arrays go through
-    `WriteValue` (519-539 @ v2.5.2), which writes `nan` on both (`write_transform`, p4-ctf-read-3).
+    `WriteValue` (610-630 @ v2.6.0), which writes `nan` on both (`write_transform`, p4-ctf-read-3).
 - **Who notices:** anyone comparing text, messages, shaders or cache IDs across platforms for
   transforms with NaN parameters.
 - **A fix:** one spelling on both platforms.
@@ -245,8 +260,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `serialize()` leaves out a `MatrixTransform`'s matrix when it is within the
   equality tolerance of identity (I-20), and offsets within that tolerance of 0
-  (`OCIOYaml.cpp:3071-3083`). It does the same for a CDL's slope, offset, power and saturation
-  (`OCIOYaml.cpp:740-762`). Through the wheel, a matrix entry of 1 + 2e-7 with an offset of
+  (`OCIOYaml.cpp:3084-3096` @ v2.6.0). It does the same for a CDL's slope, offset, power and saturation
+  (`OCIOYaml.cpp:753-775`). Through the wheel, a matrix entry of 1 + 2e-7 with an offset of
   2e-45 saves as an empty `!<MatrixTransform> {}`; 1 + 4e-7 and 5e-45 are written.
 - **Who notices:** anyone who saves and reloads a config with such values: they come back as
   the defaults.
@@ -260,12 +275,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** the config's cache of processors, and each processor's caches of optimized and
   CPU processors, key their entries by `std::hash<std::string>` of a text
-  (`Config.cpp:4836-4841`, `Processor.cpp:410-413, 563-566` @ v2.5.2), not by the text. The
+  (`Config.cpp:5452-5457`, `Processor.cpp:404-407, 557-560` @ v2.6.0), not by the text. The
   hash is the C++ library's: FNV-1a on Windows (MSVC), `_Hash_bytes` with the seed
   `0xc70f6907` on Linux (libstdc++). So:
   - two texts with the same 64-bit hash share an entry: the second gets the first one's
     processor;
-  - the config's fallback (`Config.cpp:4849-4873`) reuses the first cached processor with the
+  - the config's fallback (`Config.cpp:5465-5489`) reuses the first cached processor with the
     same cache ID in the order of the keys, so when several cached processors share a cache ID
     (cached while `OCIO_DISABLE_CACHE_FALLBACK` was set), which one comes back differs between
     the platforms.
@@ -278,7 +293,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-54. `OCIO_OPTIMIZATION_FLAGS` reads differently on Windows and Linux
 
 - **Upstream:** `EnvironmentOverride` reads the variable with `std::stoul(value, nullptr, 0)`
-  (`Processor.cpp:354-374` @ v2.5.2), whose `unsigned long` is 32 bits on Windows and 64 bits
+  (`Processor.cpp:348-368` @ v2.6.0), whose `unsigned long` is 32 bits on Windows and 64 bits
   on Linux, and whose messages are the C++ library's. So, between the wheels:
   - a value above 2^32 - 1 (`4294967296`) is an error on Windows ("Illegal value for
     OCIO_OPTIMIZATION_FLAGS: stoul argument out of range") and flags on Linux;
@@ -300,7 +315,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** yaml-cpp counts the reader's position, line and column in C++ `int`s with `++`
   (`Stream::get`, `AdvanceCurrent`, `src/stream.cpp:260-316` @ yaml-cpp-0.9.0; 262-303 in
-  0.8.0), and prints the line and column plus one (`include/yaml-cpp/exceptions.h:173-181`). Past 2^31 characters or
+  0.8.0), and prints the line and column plus one (`include/yaml-cpp/exceptions.h:175-183` @ yaml-cpp-0.9.0). Past 2^31 characters or
   lines the counters overflow, undefined behaviour that a plain machine addition resolves by
   wrapping. The port wraps them: marks turn negative, and a mark of -1 everywhere reads as
   "no mark".
@@ -312,8 +327,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-101. A NUL byte in an unquoted or block scalar starts an escape sequence
 
 - **Upstream:** yaml-cpp scans plain and block scalars with no escape character, which it
-  stores as `0`, and still compares each character with it (yaml-cpp 0.8.0
-  `src/scanscalar.cpp:69-75`). So a NUL byte and the character after it go through the
+  stores as `0`, and still compares each character with it (yaml-cpp 0.9.0, as
+  0.8.0, `src/scanscalar.cpp:69-75`). So a NUL byte and the character after it go through the
   escapes of double-quoted scalars (`src/exp.cpp:66-134`): NUL then `n` reads as a line
   break, NUL then `0` as a NUL, and NUL then another character fails with "unknown escape
   character: ...". Seen through the wheel: `ocio_profile_version: x<NUL>ny` reads the version
@@ -327,9 +342,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-102. The control character 0x04 can end a YAML token
 
 - **Upstream:** yaml-cpp's reader marks the end of the input with the character 0x04
-  (`Stream::eof()`, yaml-cpp 0.8.0 `src/stream.h:40`), and passes the byte 0x04 of UTF-8
+  (`Stream::eof()`, yaml-cpp 0.9.0 `src/stream.h:40`), and passes the byte 0x04 of UTF-8
   input through unchanged. Its expressions that accept "the end of the input" test for that
-  character (`RegEx::MatchOpEmpty`, `src/regeximpl.h:100-103`), so a 0x04 byte counts as the
+  character (`RegEx::MatchOpEmpty`, `src/regeximpl.h:104-107`), so a 0x04 byte counts as the
   end where the scanner looks for one: `:` followed by 0x04 is a mapping indicator, and so are
   `-`, `---` and `...` followed by it. Seen through the wheel: `ocio_profile_version:<0x04>x`
   is a map whose version is `<0x04>x`, where `ocio_profile_version:x` is a scalar. Elsewhere
@@ -341,18 +356,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-103. Configs read some numbers differently on Windows and Linux
 
-- **Upstream:** yaml-cpp reads a number with `std::stringstream >> value` (yaml-cpp 0.8.0
-  `include/yaml-cpp/node/convert.h:160-201`), so each wheel's C++ library decides what a number
-  is. MSVC's STL with the UCRT's `strtod` (Windows) reads hexadecimal floats (`0x1p3` is 8,
-  `0x.8` is 0.5) and refuses a nonzero value that rounds to zero (`1e-400`, `2e-324`: "bad
-  conversion"). libstdc++ with glibc's `strtod_l` (Linux) refuses hexadecimal floats (it reads
-  the `0` and stops) and reads a value that rounds to zero as 0. Both refuse a value that
-  overflows and keep subnormal values. A config with such a number loads with a different
-  value, or fails, on one platform only. Seen through both wheels (`yaml_scalars`, O3.3).
-  The Windows wheel doesn't ship its C++ library: it runs the `msvcp140.dll` of the machine
-  (System32), 14.51.36247 on the reference machine, so its reading can change with a Visual
-  C++ runtime update. The port translates the MSVC 14.44 headers' `num_get`, and is checked
-  against the 14.51 runtime.
+- **Upstream:** yaml-cpp reads a number with `std::stringstream >> value` (yaml-cpp 0.9.0
+  `include/yaml-cpp/node/convert.h:161-204`, which since 0.9.0 sets the stream's locale to the
+  classic one, the locale the wheels' streams have anyway, D-1), so each wheel's C++ library
+  decides what a number is. MSVC's STL with the UCRT's `strtod` (Windows) reads hexadecimal
+  floats (`0x1p3` is 8, `0x.8` is 0.5) and refuses a nonzero value that rounds to zero
+  (`1e-400`, `2e-324`: "bad conversion"). libstdc++ with glibc's `strtod_l` (Linux) refuses
+  hexadecimal floats (it reads the `0` and stops) and reads a value that rounds to zero as 0.
+  Both refuse a value that overflows and keep subnormal values. A config with such a number
+  loads with a different value, or fails, on one platform only. Seen through both wheels
+  (`yaml_scalars`, O3.3). The Windows wheel doesn't ship its C++ library: it runs the
+  `msvcp140.dll` of the machine (System32), 14.51.36247 on the reference machine, so its reading
+  can change with a Visual C++ runtime update. The port translates the MSVC 14.44 headers'
+  `num_get`, and is checked against the 14.51 runtime.
 - **Who notices:** configs with hexadecimal floats or numbers below the smallest subnormal.
 - **A fix:** one reader on both platforms (decimal only, and a value that rounds to zero
   read as 0, say).
@@ -362,8 +378,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-104. The escapes `\N` and `\_` give bytes that aren't UTF-8
 
 - **Upstream:** in a double-quoted scalar, yaml-cpp turns `\N` (next line, U+0085) into the
-  single byte 0x85 and `\_` (no-break space, U+00A0) into the single byte 0xA0 (yaml-cpp 0.8.0
-  `src/exp.cpp:117-120`), where UTF-8 needs two bytes (C2 85, C2 A0); the other escapes,
+  single byte 0x85 and `\_` (no-break space, U+00A0) into the single byte 0xA0 (yaml-cpp 0.9.0, as
+  0.8.0, `src/exp.cpp:117-120`), where UTF-8 needs two bytes (C2 85, C2 A0); the other escapes,
   `\L`, `\P` and `\x`/`\u`/`\U`, give UTF-8. So a config string with these escapes holds
   bytes that aren't UTF-8. Seen through the wheel: the version `"x\N\_\L\P"` reads as `x`,
   0x85, 0xA0, then E2 80 A8 and E2 80 A9.
@@ -374,8 +390,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-105. UTF-16 and UTF-32 configs are decoded leniently
 
 - **Upstream:** yaml-cpp converts a UTF-16 or UTF-32 input (found by its byte order mark or
-  its first bytes) to UTF-8 as it reads (yaml-cpp 0.8.0 `src/stream.cpp:161-182`,
-  `336-445`), and never refuses a code unit:
+  its first bytes) to UTF-8 as it reads (yaml-cpp 0.9.0 `src/stream.cpp:161-182`,
+  `353-462`), and never refuses a code unit:
   - a lone low surrogate, and a high surrogate that no low one follows, read as U+FFFD (the
     unit after a lone high surrogate is then read on its own);
   - U+0004, the reader's end-of-input character (I-102), reads as U+FFFD;
@@ -390,10 +406,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-130. Some setters keep a config's old cache ID
 
-- **Upstream:** a config caches its cache ID (`Config::getCacheID`, `Config.cpp:5250-5315`),
+- **Upstream:** a config caches its cache ID (`Config::getCacheID`, `Config.cpp:5881-5946` @ v2.6.0),
   the hash of its `serialize()` text, and most setters reset it (`Impl::resetCacheIDs`). But
   `setName`, `setDescription`, `setFamilySeparator` and `setMinorVersion`
-  (`Config.cpp:2115-2118, 2132-2145, 2154-2157, 1311-1324`) don't, though the text holds what
+  (`Config.cpp:2249-2252, 2266-2279, 2288-2291, 1445-1458`) don't, though the text holds what
   they set. Seen through the wheel: after each of them, `getCacheID()` returns the ID it
   returned before, while `serialize()` changed (`ocio_profile_version: 2.3` after
   `setMinorVersion(3)`); a later setter that resets the ID (`setStrictParsingEnabled`) gives a
@@ -406,10 +422,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-131. `isInactiveColorSpace` reads its own list its own way
 
-- **Upstream:** `Config::isInactiveColorSpace` (`Config.cpp:2561-2575`) doesn't ask the list
+- **Upstream:** `Config::isInactiveColorSpace` (`Config.cpp:2695-2709` @ v2.6.0) doesn't ask the list
   the config uses (`getColorSpaceNames(..., COLORSPACE_INACTIVE)`, built from the API's, the
   environment's or the config's list, split on `,` and trimmed, by name, alias or role,
-  `Config.cpp:5351-5407`). It splits the config's own list (`getInactiveColorSpaces`) on the
+  `Config.cpp:5982-6038`). It splits the config's own list (`getInactiveColorSpaces`) on the
   two characters `", "` and compares each piece with the name, ignoring case. So:
   - `OCIO_INACTIVE_COLORSPACES` is ignored;
   - `"a,b"` is one piece, so `a` is not inactive, though the config makes it so;
@@ -424,7 +440,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-132. Removing a named transform keeps it in the lists of active ones
 
-- **Upstream:** `Config::removeNamedTransform` (`Config.cpp:3300-3317`) returns as soon as it
+- **Upstream:** `Config::removeNamedTransform` (`Config.cpp:3529-3546` @ v2.6.0) returns as soon as it
   has erased the named transform, before it resets the cache IDs and rebuilds the lists of
   active and inactive named transforms; it does both only when no named transform has the
   name. So after a removal, `getNamedTransformNames()` (the active ones) and
@@ -433,7 +449,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   Python module doesn't bind `removeNamedTransform`, and upstream's tests don't call it. The
   config merger calls it on its working copy of a config (`apphelpers/mergeconfigs/
   SectionMerger.cpp:3288, 3415, 3563`), but builds the merged config with
-  `addNamedTransform`, which rebuilds the lists (`Config.cpp:3296-3297`), so a merged config
+  `addNamedTransform`, which rebuilds the lists (`Config.cpp:3525-3526`), so a merged config
   doesn't show the stale ones.
 - **Who notices:** C++ applications that remove named transforms and list them after.
 - **A fix:** reset and rebuild after the removal, as `removeColorSpace` does.
@@ -441,14 +457,14 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-134. Copying a config reads the environment again
 
-- **Upstream:** `Config::createEditableCopy` (`Config.cpp:1352-1357`) makes a new config with
-  `Config::Create`, whose `Impl` constructor (`Config.cpp:335-374`) reads `OCIO_ACTIVE_DISPLAYS`,
+- **Upstream:** `Config::createEditableCopy` (`Config.cpp:1486-1491` @ v2.6.0) makes a new config with
+  `Config::Create`, whose `Impl` constructor (`Config.cpp:353-392`) reads `OCIO_ACTIVE_DISPLAYS`,
   `OCIO_ACTIVE_VIEWS` and `OCIO_INACTIVE_COLORSPACES` and splits the first two with
   `SplitStringEnvStyle`, then overwrites all three with the copied config's. So the copy reads
   the environment for nothing, and it throws (`SplitStringEnvStyle`'s error for a quote opened
   and not closed before a separator) when the environment has changed since the config was
   made and one of those lists is now malformed. The Python binding's `__deepcopy__`
-  (`PyConfig.cpp:193-196`) goes through it.
+  (`PyConfig.cpp:200-203` @ v2.6.0) goes through it.
 - **Who notices:** a host that changes `OCIO_ACTIVE_DISPLAYS` or `OCIO_ACTIVE_VIEWS` to a
   malformed list while it holds a config, then copies the config.
 - **A fix:** copy the state without constructing a new `Impl` from the environment.
@@ -481,7 +497,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-136. Views for a color space miss rules on an alias, a role or an encoding's case
 
-- **Upstream:** `Config::Impl::getFilteredViews` (`Config.cpp:838-901`), behind
+- **Upstream:** `Config::Impl::getFilteredViews` (`Config.cpp:886-949` @ v2.6.0), behind
   `getViews(display, colorSpaceName)`, finds the image's color space by any of its names, but
   compares the rules' color spaces (roles resolved) with the name it was given, in lower case:
   given an alias or a role, it misses the rules that name the color space, and a rule that
@@ -525,17 +541,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-140. The transform loaders word their messages unevenly
 
-- **Upstream:** the loaders of a config's transforms (`OCIOYaml.cpp`) report the same things
+- **Upstream:** the loaders of a config's transforms (`OCIOYaml.cpp` @ v2.6.0) report the same things
   in different words:
   - an unknown key gives "At line N, unknown key 'key' in 'MatrixTransform'." in most
     classes, but "Unknown key in LogTransform: 'key'.", without its line, in the Log,
-    ExponentWithLinear, FixedFunction and grading loaders (`OCIOYaml.cpp:1118, 1476, 1748,
-    2056, 2239, 2443, 2920`, which call the other overload of `LogUnknownKeyWarning`);
+    ExponentWithLinear, FixedFunction and grading loaders (`OCIOYaml.cpp:1131, 1489, 1761,
+    2069, 2252, 2456, 2933`, which call the other overload of `LogUnknownKeyWarning`);
   - a `base` that isn't one number gives "LogTransform parse error, base must be a  single
-    double. Found 2." with two spaces, and no line (`OCIOYaml.cpp:2900-2901`);
+    double. Found 2." with two spaces, and no line (`OCIOYaml.cpp:2913-2914`);
   - a node that isn't a map gives "Unsupported Transform type encountered: (2) in OCIO
     profile.", the number of yaml-cpp's `NodeType` (2 a scalar, 3 a sequence) rather than its
-    name (`OCIOYaml.cpp:3198-3205`).
+    name (`OCIOYaml.cpp:3211-3218`).
   Seen through the wheel.
 - **Who notices:** anyone reading the warnings and errors of a config with mistakes in it.
 - **A fix:** one wording with the line for every unknown key; one space; the node type's
@@ -546,7 +562,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-141. A transform an alias names is loaded again at each use
 
-- **Upstream:** a GroupTransform loads each child node it lists (`OCIOYaml.cpp:2520-2525`),
+- **Upstream:** a GroupTransform loads each child node it lists (`OCIOYaml.cpp:2533-2538` @ v2.6.0),
   so a child given as an alias (`*m`) is loaded again for each use, and the config holds a
   transform per use. Nested aliases multiply: n levels of groups whose children are two
   aliases of the level below hold 2^n transforms, from a config of n lines.
@@ -560,7 +576,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-142. Two transform loaders take a repeated key
 
 - **Upstream:** the loaders of the BuiltinTransform and the DisplayViewTransform don't call
-  `CheckDuplicates` (`OCIOYaml.cpp:600-629, 840-891`), so a key given twice is read twice and
+  `CheckDuplicates` (`OCIOYaml.cpp:613-642, 853-904` @ v2.6.0), so a key given twice is read twice and
   the last value wins (`{view: a, view: b}` loads view `b`), where every other transform
   refuses it ("Key-value pair with key 'view' specified more than once. "). Seen through the
   wheel.
@@ -586,7 +602,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** the loaders of color spaces, looks, view transforms and the config read a
   description with `loadDescription`, which drops its trailing newlines (`SanitizeNewlines`);
-  the named transform's loader (`OCIOYaml.cpp:3965-3969`) and the view's, for displays, shared
+  the named transform's loader (`OCIOYaml.cpp:3978-3982` @ v2.6.0) and the view's, for displays, shared
   views and the virtual display (`OCIOYaml.cpp:452-455`), read it as a plain string, so
   `"d\n\n"` stays `d` and two newlines. Seen through the wheel.
 - **Who notices:** configs whose named transforms or views have descriptions ending in newlines
@@ -599,7 +615,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-145. A config's name loses its trailing newlines
 
 - **Upstream:** the config loader reads the `name` key with `loadDescription`
-  (`OCIOYaml.cpp:4531-4535`), so `SanitizeNewlines` drops its trailing newlines: `name: "n\n\n"`
+  (`OCIOYaml.cpp:4544-4548` @ v2.6.0), so `SanitizeNewlines` drops its trailing newlines: `name: "n\n\n"`
   gives the name `n`. Names of color spaces, looks and the other objects are read as plain
   strings. Seen through the wheel.
 - **Who notices:** configs whose name ends in a newline (a literal block `|` adds one); the name
@@ -612,8 +628,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** the config's version check (`Config::Impl::checkVersionConsistency`) refuses a
   BuiltinTransform in a version 1 config with "Only config version 2 (or higher) can have
-  BuiltinInTransform." (`Config.cpp:5594`), and a FileTransform's CDL style with "Only config
-  version 2 (or higher) can use CDL style' for FileTransform." (`Config.cpp:5719`), a stray
+  BuiltinInTransform." (`Config.cpp:6233` @ v2.6.0), and a FileTransform's CDL style with "Only config
+  version 2 (or higher) can use CDL style' for FileTransform." (`Config.cpp:6379`), a stray
   quote. Seen through the wheel.
 - **Who notices:** anyone who reads the messages.
 - **A fix:** "BuiltinTransform"; "CDL style".
@@ -623,10 +639,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-147. A config that failed validation can fail again with an empty message
 
 - **Upstream:** `Config::validate` keeps its result: a failed config throws its kept message
-  (`m_validationtext`) again on the next call (`Config.cpp:1361-1365`). Most failures set it
+  (`m_validationtext`) again on the next call (`Config.cpp:1495-1499` @ v2.6.0). Most failures set it
   before throwing, but four don't: an environment variable whose default names another variable
-  (`Config.cpp:1396-1402`), a transform's own `validate()` (`Config.cpp:1818`), a view's looks
-  that can't be parsed (`Config.cpp:670`), and the version check (`Config.cpp:2101`). For those,
+  (`Config.cpp:1530-1536`), a transform's own `validate()` (`Config.cpp:1952`), a view's looks
+  that can't be parsed (`Config.cpp:693`), and the version check (`Config.cpp:2235`). For those,
   the second `validate()` throws an empty message. Seen through the wheel.
 - **Who notices:** a caller that validates a config twice and reads the second message.
 - **A fix:** set the kept message in those four places too.
@@ -636,7 +652,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-148. The built-in configs' texts end their lines with CR LF on Windows
 
 - **Upstream:** the build embeds each `builtinconfigs/configs/*.ocio` file byte for byte, as the
-  build's checkout wrote it (`src/OpenColorIO/CMakeLists.txt:262-298`). The Windows wheel's
+  build's checkout wrote it (`src/OpenColorIO/CMakeLists.txt:266-302` @ v2.6.0). The Windows wheel's
   checkout wrote them with CR LF line ends and the Linux wheel's with LF, so
   `BuiltinConfigRegistry::getBuiltinConfig` (Python: `BuiltinConfigRegistry()[name]`) gives
   different texts on the two platforms. Seen through the wheels. The configs read from them are
@@ -652,7 +668,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `ResolveConfigPath`, `Config::CreateFromFile` and
   `Config::CreateFromBuiltinConfig` look for a URI with `std::regex_search` of
-  `ocio:\/\/([^\s]+)` (`BuiltinConfigRegistry.cpp:36-39`, `Config.cpp:1160-1164, 1246-1252`),
+  `ocio:\/\/([^\s]+)` (`BuiltinConfigRegistry.cpp:37-40`, `Config.cpp:1286-1290, 1380-1386` @ v2.6.0),
   which matches anywhere in the text, not only at its start: `x ocio://default` resolves to the
   default config's URI, and a file path with `ocio://` inside is read as a built-in config's name,
   whatever follows up to the next space. `CreateFromBuiltinConfig` adds the prefix only when the
@@ -667,9 +683,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-157. A config file of fewer than four bytes can read as empty on Windows
 
-- **Upstream:** `Config::CreateFromFile` hands yaml-cpp an `std::ifstream` (`Config.cpp:1176-1206`).
+- **Upstream:** `Config::CreateFromFile` hands yaml-cpp an `std::ifstream` (`Config.cpp:1310-1340` @ v2.6.0).
   yaml-cpp's detection of the encoding reads up to four bytes and puts back those that aren't a
-  byte order mark (yaml-cpp 0.8.0 `stream.cpp:189-245`). When the file ends first, it puts them
+  byte order mark (yaml-cpp 0.9.0, as 0.8.0, `stream.cpp:189-245`). When the file ends first, it puts them
   back after the end: libstdc++'s file stream (Linux) seeks back for each, as a string stream
   does, but MSVC's (Windows) puts back one byte with the C runtime's `ungetc` and one in its own
   putback character, and fails on a third, which sets `badbit`: the stream then reads as an
@@ -691,7 +707,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-158. Until Phase 4, an OCIOZ archive given to `CreateFromFile` was an error (retired)
 
 - **Upstream:** `Config::CreateFromFile` reads a file that starts with `PK` as an OCIOZ archive,
-  through `CIOPOciozArchive` and `CreateFromConfigIOProxy` (`Config.cpp:1188-1200`).
+  through `CIOPOciozArchive` and `CreateFromConfigIOProxy` (`Config.cpp:1322-1334` @ v2.6.0).
 - **Who notices:** no one since `p4-baker`. Before it, a caller that loaded an `.ocioz` file, or
   any file starting with `PK`.
 - **A fix:** none: this was the port's interim state, not upstream's. From `p3-loading` (3.10b)
@@ -707,8 +723,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-376. A data color space converted to a display and view in the inverse direction isn't a no-op
 
 - **Upstream:** `Config::GetProcessorFromConfigs` to a display and view, with interchange
-  spaces (`Config.cpp:5083-5145`), swaps the source color space and its interchange space for
-  `TRANSFORM_DIR_INVERSE` (5106-5109), then tests `srcColorSpace->isData()` (5138) to give an
+  spaces (`Config.cpp:5704-5788` @ v2.6.0), swaps the source color space and its interchange space for
+  `TRANSFORM_DIR_INVERSE` (5731-5734), then tests `srcColorSpace->isData()` (5779) to give an
   empty processor: in the inverse direction that tests the interchange space instead. A data
   source color space then gets the inverted view and its interchange conversion, and a data
   interchange space an empty processor. Probed on the Windows wheel (2026-10-23): a data
@@ -723,7 +739,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-377. The heuristics look for "srgb" in a color space's aliases case-sensitively
 
-- **Upstream:** `ConfigUtils::containsSRGB` (`ConfigUtils.cpp:164-183`) lowers the color
+- **Upstream:** `ConfigUtils::containsSRGB` (`ConfigUtils.cpp:165-184` @ v2.6.0) lowers the color
   space's name before it looks for `srgb`, but not its aliases. A space whose only sRGB
   spelling is an alias such as `Tex_SRGB` isn't tried as an sRGB texture space by
   `IdentifyInterchangeSpace` (and so `IdentifyBuiltinColorSpace` and
@@ -739,7 +755,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-378. The sRGB heuristic doesn't invert a from-reference transform whose direction is inverse
 
-- **Upstream:** `ConfigUtils::getReferenceSpaceFromSRGBSpace` (`ConfigUtils.cpp:483-504`)
+- **Upstream:** `ConfigUtils::getReferenceSpaceFromSRGBSpace` (`ConfigUtils.cpp:484-505` @ v2.6.0)
   turns a color space's from-reference transform into a to-reference one with
   `setDirection(TRANSFORM_DIR_INVERSE)`, which inverts it only if its direction was forward. A
   from-reference transform written in the inverse direction stays inverse, so the heuristic
@@ -755,7 +771,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-379. Config merging doesn't invert a transform whose direction is inverse
 
-- **Upstream:** `ConfigUtils::invertTransform` (`ConfigUtils.cpp:857-862`) copies a transform
+- **Upstream:** `ConfigUtils::invertTransform` (`ConfigUtils.cpp:858-863` @ v2.6.0) copies a transform
   and sets its direction to `TRANSFORM_DIR_INVERSE`, which inverts it only if it was forward.
   Config merging uses it where a color space has only the other direction's transform
   (`getTransformForDir`, so the fingerprints of the duplicate search and the reference-space
@@ -825,7 +841,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   - a value in [1 − 2.5·2⁻²⁴, 1 + 2.5·2⁻²³] (about 1 − 1.49e-7 to 1 + 2.98e-7) counts as 1: a
     v1 exponent in that band is dropped as a no-op.
 
-  `LogUtil::ValidateLegacyParams` (`ops/log/LogUtils.cpp:139-147`) compares a CTF Log's
+  `LogUtil::ValidateLegacyParams` (`ops/log/LogUtils.cpp:140-148` @ v2.6.0) compares a CTF Log's
   double gamma with the float `0.01f` (0.009999999776482582): a gamma equal to the float's
   value is refused, but the next double up is accepted, although it is below 0.01 and the
   message says it "should be greater than 0.01".
@@ -892,9 +908,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `FileNoOp::getCacheID` returns the op's `m_fileReference`, which the
   constructor never sets: it gives the path to the op's `FileNoOpData` instead
   (`ops/noop/NoOps.cpp:300-304, 358-361`). So the cache ID of the op that marks a loaded file
-  is empty. Processor cache IDs skip no-ops (`Op.cpp:448-465`), but `SerializeOpVec` prints
-  each op's cache ID (`Op.cpp:473-489`), in the optimizer's debug log
-  (`OpOptimizers.cpp:618-625, 636-646, 737-754`): the line of a file no-op has no file name,
+  is empty. Processor cache IDs skip no-ops (`Op.cpp:296-313` @ v2.6.0), but `SerializeOpVec` prints
+  each op's cache ID (`Op.cpp:321-335`), in the optimizer's debug log
+  (`OpOptimizers.cpp:607-621, 638-772` @ v2.6.0): the line of a file no-op has no file name,
   while a look no-op's line names the look.
 - **Who notices:** people reading OCIO's debug log.
 - **A fix:** return the path, as `LookNoOp` returns the look.
@@ -947,7 +963,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-45. Optimization flags are 32 bits on Windows and 64 on Linux
 
 - **Upstream:** `OptimizationFlags` is an `enum : unsigned long`
-  (`include/OpenColorIO/OpenColorTypes.h:634`), 32 bits with MSVC and 64 with GCC. The binding
+  (`include/OpenColorIO/OpenColorTypes.h:635` @ v2.6.0), 32 bits with MSVC and 64 with GCC. The binding
   converts a Python integer to it: on Linux `OptimizationFlags(2**32 + 1)` is accepted, and the
   CPU processor's cache ID prints `oFlags 4294967297`; on Windows the same call raises
   `TypeError`. The GPU processor's cache ID prints them whole too (`GPU Processor: oFlags
@@ -1013,13 +1029,13 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-52. The unknown Log style message is written over its own start
 
-- **Upstream:** `LogUtil::ConvertStringToStyle` (`ops/log/LogUtils.cpp:54-59`) builds its
+- **Upstream:** `LogUtil::ConvertStringToStyle` (`ops/log/LogUtils.cpp:55-60` @ v2.6.0) builds its
   error in `std::stringstream ss("Unknown Log style: '"); ss << str << "'.";`. A stream
   constructed with text starts writing at its beginning, so the style name and `'.` overwrite
   "Unknown Log style: '" instead of following it: "foo" gives "foo'.wn Log style: '", and a
   name of 18 characters or more replaces it all. `ConvertStyleToString`'s message for a value
-  outside the enum (`LogUtils.cpp:87-90`) has the same bug, but a Rust enum can't hold such a
-  value. The only caller, the CTF/CLF reader (`fileformats/ctf/CTFReaderHelper.cpp:3564-3571`),
+  outside the enum (`LogUtils.cpp:88-91`) has the same bug, but a Rust enum can't hold such a
+  value. The only caller, the CTF/CLF reader (`fileformats/ctf/CTFReaderHelper.cpp:3657-3664` @ v2.6.0),
   replaces the message with its own ("Required attribute 'style' 'foo' is invalid."), so no
   output shows it.
 - **Who notices:** nobody through the library; code calling the function directly.
@@ -1108,9 +1124,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-62. A CDL with a power of 1 depends on the optimization flags
 
 - **Upstream:** with `OPTIMIZATION_SIMPLIFY_OPS` (part of `OPTIMIZATION_LOSSLESS`, `_DEFAULT`,
-  `_GOOD` and `_ALL`; `OpOptimizers.cpp:673`), a CDL op whose power is 1 is replaced with a
+  `_GOOD` and `_ALL`; `ReplaceOps`, `OpOptimizers.cpp:142-149` @ v2.6.0), a CDL op whose power is 1 is replaced with a
   slope and offset matrix, a saturation matrix and clamps (`CDLOpData::getSimplerReplacement`,
-  `ops/cdl/CDLOpData.cpp:325-394`); an inverse one with the matrices inverted exactly
+  `ops/cdl/CDLOpData.cpp:325-392` @ v2.6.0); an inverse one with the matrices inverted exactly
   (`MatrixOpData`'s inverse). The CDL renderers instead floor a reverse slope, power and
   saturation at 0.01 before taking the reciprocal (`Reciprocal`, `ops/cdl/CDLOpCPU.cpp:18-23,
   62-99`). So an inverse CDL with a power of 1 and a slope or saturation of 0 fails with
@@ -1246,7 +1262,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-70. A camera log's break differs between Windows and Linux
 
-- **Upstream:** `LogUtil::GetLogSideBreak` (`ops/log/LogUtils.cpp:270-281`) computes the
+- **Upstream:** `LogUtil::GetLogSideBreak` (`ops/log/LogUtils.cpp:271-282` @ v2.6.0) computes the
   break on the log side of a LogCameraTransform as `float logSideBreak =
   log2((float)(...)); logSideBreak *= (float)logSlope / log2((float)base);`. The wheels
   compile it differently:
@@ -1262,7 +1278,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   is negative is a NaN of each platform's sign. The break feeds the offset of the linear
   segment (`GetLinearOffset`) and the inverse's choice of segment, so the pixels at and
   below the break differ, and so do the NaNs the linear segment produces.
-  `LogUtil::GetLinearSlope` (`LogUtils.cpp:255-268`), when no linear slope is set, also
+  `LogUtil::GetLinearSlope` (`LogUtils.cpp:256-269`), when no linear slope is set, also
   multiplies its numerator `logSlope * linSlope` in a different order on each: MSVC computes
   `linSlope * logSlope` (0x18021abde), GCC the source's order (0x40176d). With both slopes NaN
   the slope keeps the linear side's NaN on Windows and the log side's on Linux; with NaNs of
@@ -1308,7 +1324,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-91. The RGB curves' NaNs differ between Windows and Linux
 
 - **Upstream:** `KnotsCoefs::evalCurve` and `evalCurveRev`
-  (`ops/gradingrgbcurve/GradingBSplineCurve.cpp:1258-1381`) are scalar `float` code that the
+  (`ops/gradingrgbcurve/GradingBSplineCurve.cpp:1259-1382` @ v2.6.0) are scalar `float` code that the
   two wheels compile with different operand orders (`docs/wheel-inspect.md`). MSVC computes the
   segments' quadratic as `((t * A) + B) * t + C`, the low line as `(x - knStart) * B + C` and
   the high line as `offs + slope * (x - knEnd)` (`sub_1801e87d0`); GCC computes `((A * t) +
@@ -1500,9 +1516,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** in the metadata of transforms, ops and LUT files (`FormatMetadata`),
   `addAttribute`, `setName` and `setID` replace an attribute only when its name is exactly the
-  same (`fileformats/FormatMetadata.cpp:94-112`), while `getAttributeValue(name)`, `getName`,
+  same (`fileformats/FormatMetadata.cpp:97-115` @ v2.6.0), while `getAttributeValue(name)`, `getName`,
   `getID` and `combine` use the first attribute whose name matches ignoring ASCII case
-  (`fileformats/FormatMetadata.cpp:140-179, 219-231, 303-332`). After
+  (`fileformats/FormatMetadata.cpp:143-182, 236-248, 320-349`). After
   `addAttribute("Name", "a")`, `setName("b")` adds a second attribute, `name="b"`, and
   `getName()` still returns `a`. Under Python on Windows, the lookups also match names that
   differ in the case of non-ASCII bytes, by the ANSI code page; the port folds `A`-`Z` only
@@ -1517,7 +1533,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** renaming a metadata element to `ROOT`, or adding a child element named `ROOT`,
   fails with "'ROOT' is reversed for root FormatMetadata elements."
-  (`fileformats/FormatMetadata.cpp:241`): "reversed" for "reserved".
+  (`fileformats/FormatMetadata.cpp:258` @ v2.6.0): "reversed" for "reserved".
 - **Who notices:** anyone who reads the message.
 - **A fix:** "reserved".
 - **Status:** matched in `p1-foundations` (1.2a), checked against the wheel in
@@ -1584,13 +1600,13 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `FixedFunctionOpData::ConvertStyle(FixedFunctionStyle, TransformDirection)` gives
   the forward op style of `FIXED_FUNCTION_RGB_TO_HSV`, `XYZ_TO_xyY`, `XYZ_TO_uvY` and
-  `XYZ_TO_LUV` whatever the direction (`ops/fixedfunction/FixedFunctionOpData.cpp:433-436, 452-463`),
+  `XYZ_TO_LUV` whatever the direction (`ops/fixedfunction/FixedFunctionOpData.cpp:452-455, 471-482` @ v2.6.0),
   where every other style takes the inverse op style in the inverse direction.
   `FixedFunctionTransform::setStyle` converts the style in the transform's current direction
   (`transforms/FixedFunctionTransform.cpp:122-126`), so setting one of these styles on an
   inverse transform makes it forward: `getDirection()` then says forward, and the processor
   renders RGB to HSV instead of HSV to RGB. The config reader calls `setStyle` and
-  `setDirection` in the order of the YAML keys (`OCIOYaml.cpp:1421-1483`), so
+  `setDirection` in the order of the YAML keys (`OCIOYaml.cpp:1434-1496` @ v2.6.0), so
   `{direction: inverse, style: RGB_TO_HSV}` loads a forward transform where
   `{style: RGB_TO_HSV, direction: inverse}` loads an inverse one.
 - **Who notices:** code that sets the style of an inverse transform to one of these four, and
@@ -1603,21 +1619,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-81. Fixed function renderers order their NaNs per platform
 
 - **Upstream:** the fixed function renderers mix a pixel's channels in sums and products
-  (`ops/fixedfunction/FixedFunctionOpCPU.cpp`). Where two NaNs meet, x86 returns the first
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp` @ v2.6.0). Where two NaNs meet, x86 returns the first
   operand's, and the two compilers ordered the operands differently:
-  - the glows' YC (`rgbToYC`, 759-766): MSVC adds the green term to the blue one, GCC the
+  - the glows' YC (`rgbToYC`, 776-783): MSVC adds the green term to the blue one, GCC the
     blue term to the green one (Windows wheel `0x18018b37e`, Linux wheel `0x355195`), and the
     glows' gain is the first factor of red, green and blue with MSVC but the second of blue
     with GCC (`0x18018b4c5`, `0x35513f`);
-  - the Rec.2100 surround (1419-1454): MSVC computes `channel * factor`, GCC `factor *
+  - the Rec.2100 surround (1513-1548): MSVC computes `channel * factor`, GCC `factor *
     channel` for red and green (`0x18018da66`, `0x3548b8`);
-  - XYZ to xyY (1830-1854): MSVC `(Y + X) + Z` and `d * X`, GCC `(X + Y) + Z` and `X * d`
-    (`0x18018e1f9`, `0x353a7e`); xyY to XYZ (1861-1884): MSVC `(Y * x) * d`, GCC
+  - XYZ to xyY (1924-1948): MSVC `(Y + X) + Z` and `d * X`, GCC `(X + Y) + Z` and `X * d`
+    (`0x18018e1f9`, `0x353a7e`); xyY to XYZ (1955-1978): MSVC `(Y * x) * d`, GCC
     `(x * Y) * d` (`0x18018e703`, `0x353b40`);
-  - XYZ to CIELUV (1956-1987): MSVC `(9 * Y) * d`, GCC `d * (9 * Y)` (`0x18018ddbd`,
-    `0x35464f`); CIELUV to XYZ (1994-2026): MSVC `d * u*` and `(... * Y) * dd`, GCC `u* * d`
+  - XYZ to CIELUV (2050-2081): MSVC `(9 * Y) * d`, GCC `d * (9 * Y)` (`0x18018ddbd`,
+    `0x35464f`); CIELUV to XYZ (2088-2120): MSVC `d * u*` and `(... * Y) * dd`, GCC `u* * d`
     and `dd * (... * Y)` (`0x18018d5ac`, `0x353e2f`);
-  - RGB to HSY and back (`applyRGBToHSY`, `applyHSYToRGB`, 1591-1763): MSVC compiles one
+  - RGB to HSY and back (`applyRGBToHSY`, `applyHSYToRGB`, 1685-1857): MSVC compiles one
     function for the three styles, GCC a loop per style, and the luma's and the distance's
     sums, the scaling by `luma / currY`, the linear style's quadratic and the result's
     product each order their operands per compiler and, with GCC, per style (`0x18018ed10`
@@ -1668,7 +1684,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-82. RGB to HSV gives an all-negative-infinity pixel's saturation a different sign per platform
 
 - **Upstream:** for extended-range input, `Renderer_RGB_TO_HSV::apply` computes the saturation
-  as `(rgb_max - rgb_min) / -rgb_min` (`ops/fixedfunction/FixedFunctionOpCPU.cpp:1521-1524`).
+  as `(rgb_max - rgb_min) / -rgb_min` (`ops/fixedfunction/FixedFunctionOpCPU.cpp:1615-1618` @ v2.6.0).
   MSVC divides by the negated minimum; GCC computes `-(rgb_max - rgb_min) / rgb_min` (Linux
   wheel `0x35398c`: `subss`, `xorps` with the sign bit, `divss`), the same value for every
   input but a NaN difference, whose sign it flips. The difference is a NaN when the maximum
@@ -1684,7 +1700,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `Renderer_LIN_TO_GAMMA_LOG::apply` and `Renderer_GAMMA_LOG_TO_LIN::apply`
   restore the sign below the mirror point with `value * std::copysign(1.0f, mirrorin)`
-  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2271, 2314`), where `value` comes from
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2365, 2408` @ v2.6.0), where `value` comes from
   `|mirrorin|`, so for a NaN pixel it is a positive NaN. MSVC builds `±1.0f` and multiplies
   (Windows wheel `0x18018d39e`, `0x18018cd22`): the NaN keeps its sign. GCC turns the product
   into its `xorsign` pattern, `value ^ signbit(mirrorin)` (Linux wheel `0x354dbb`,
@@ -1703,7 +1719,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** with fast math off, `GetFixedFunctionCPURenderer` picks the SSE PQ renderers
   with `_mm_pow_ps` where the compiler is MSVC 2019 or later with AVX enabled, and the scalar
   `Renderer_LIN_TO_PQ<float>` and `Renderer_PQ_TO_LIN<float>` with `powf` elsewhere
-  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2557-2590`). MSVC compiles `_mm_pow_ps` to
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2658-2691` @ v2.6.0). MSVC compiles `_mm_pow_ps` to
   SVML's `__vdecl_powf4`, so the Windows wheel computes PQ with SVML and the Linux wheel with
   glibc's `powf`: different results in about 1.7% of the values (every `f32` measured): up to
   339 ulp for `LIN_TO_PQ`; for `PQ_TO_LIN`, up to 3,356,700 ulp up to 1 in magnitude (near
@@ -1801,10 +1817,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-34. The Metal class wrapper misreads declarations that line feeds split
 
 - **Upstream:** in MSL, the class wrapper reads the shader's declarations back line by line to
-  build its class (`GpuShaderClassWrapper.cpp:285-372`). It takes the line after each line that
+  build its class (`GpuShaderClassWrapper.cpp:259-346` @ v2.6.0). It takes the line after each line that
   starts with `texture` for that texture's sampler, and reads the sampler's name from
-  `find("sampler") + 7` (line 332): without `sampler`, from offset 6 of that line. Every other
-  line becomes a parameter, its first word the type and the next one the name (lines 342-353).
+  `find("sampler") + 7` (line 306): without `sampler`, from offset 6 of that line. Every other
+  line becomes a parameter, its first word the type and the next one the name (lines 316-327).
   Line feeds in the resource prefix, or in declaration code a caller adds
   (`addToParameterDeclareShaderCode`, `addToTextureDeclareShaderCode`), cut declarations into
   such lines: the class gets a sampler with a wrong name, and parameters that are pieces of
@@ -1871,10 +1887,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-85. The gamma-log shader subtracts the gamma segment's offset
 
 - **Upstream:** the CPU renderer of `LIN_TO_GAMMA_LOG` computes the gamma segment as
-  `slope * pow(E + offset, power)` (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2265`, as the
+  `slope * pow(E + offset, power)` (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2359` @ v2.6.0, as the
   comment in the shader writer says too), and its inverse subtracts the offset after the
   power. The shader writes `slope * pow(E - offset, power)`
-  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:2024-2025`), while its inverse matches the CPU's.
+  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:2048-2049` @ v2.6.0), while its inverse matches the CPU's.
 - **Who notices:** `FIXED_FUNCTION_LIN_TO_GAMMA_LOG` transforms whose gamma segment has an
   offset (the fifth parameter; the Rec.2100 HLG curve's is 0), forward, on the GPU: the shader
   gives other values than the CPU, and its inverse doesn't undo it.
@@ -1899,7 +1915,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `Add_DOUBLE_LOG_TO_LIN` computes the break points in log space as
   `logSlope * std::log(linSlope * break + linOff) + logOff` in `double`
-  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:2180-2181`), and validation allows a negative
+  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:2204-2205` @ v2.6.0), and validation allows a negative
   argument (it checks only the base and the breaks' order). The Windows wheel calls the
   UCRT's `log`, which returns the negative x86 default NaN for it; the Linux wheel links
   `log@GLIBC_2.2.5` (`Add_DOUBLE_LOG_TO_LIN` at 0x3711f0), whose compatibility wrapper returns
@@ -1908,7 +1924,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   both wheels link in its current version, and the other `log` calls of the gamma-log and
   double-log writers and renderers take the log base, which validation keeps positive. The
   gamma-log inverse shader's `std::pow(double, double)` (its break and mirror,
-  `FixedFunctionOpGPU.cpp:2055-2056`) is `pow@GLIBC_2.2.5` on Linux too, but its wrapper gives
+  `FixedFunctionOpGPU.cpp:2079-2080`) is `pow@GLIBC_2.2.5` on Linux too, but its wrapper gives
   a negative base with a non-integer power the same NaN as the current symbol.
 - **Who notices:** anyone comparing the shader text of such a `FIXED_FUNCTION_LIN_TO_DOUBLE_LOG`
   inverse between a Windows and a Linux machine (the shader's results don't depend on the sign).
@@ -1923,7 +1939,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `Lut1DOp::extractGpuShaderInfo` replaces an inverse 1D LUT with its fast
   forward LUT (`MakeFastLut1DFromInverse`) whatever the optimization flags say
-  (`ops/lut1d/Lut1DOp.cpp:157-175`, with a TODO for an exact GPU inverse), so a GPU processor
+  (`ops/lut1d/Lut1DOp.cpp:156-174` @ v2.6.0, with a TODO for an exact GPU inverse), so a GPU processor
   made with `OPTIMIZATION_NONE` (no `OPTIMIZATION_LUT_INV_FAST`) still writes the fast LUT, a
   resampling of the inverse on a lookup domain, where the CPU processor inverts exactly.
   `GetLut1DGPUShaderProgram` refuses the OSL translation ("The Lut1DOp is not yet supported
@@ -1938,12 +1954,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-481. Uniform getters run in the platform's argument evaluation order
 
 - **Upstream:** `OpenGLBuilder::Uniform::use` calls the Float3 getter once for each
-  component in the arguments of `glUniform3f` (`src/libutils/oglapphelpers/glsl.cpp:249-252
-  @ v2.5.2`). C++ does not prescribe those arguments' order. The exact expression through
+  component in the arguments of `glUniform3f` (`src/libutils/oglapphelpers/glsl.cpp:260-263
+  @ v2.6.0`). C++ does not prescribe those arguments' order. The exact expression through
   a function pointer on the Rocky reference platform's GCC, at both `-O0` and `-O2`, calls
   blue, green, then red: a getter filling all components with an incrementing counter
   produces `[3, 2, 1]` from three calls (platform probe, 2026-10-26).
-  The exact vector-float/int expressions (`glsl.cpp:253-262`) evaluate the vector
+  The exact vector-float/int expressions (`glsl.cpp:264-273`) evaluate the vector
   getter before the size getter, each once, on the same compiler at both optimization
   levels (independent vector probe, 2026-10-26).
 - **Who notices:** native OpenGL helper callers with stateful uniform getters. The normal
@@ -1962,8 +1978,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-501. Legacy and ordinary GPU processors share a cache keyed only by flags
 
 - **Upstream:** `getOptimizedLegacyGPUProcessor` partitions and bakes its own ops, then calls
-  the same `getGPUProcessor` as the ordinary GPU path (`src/OpenColorIO/Processor.cpp:447-523
-  @ v2.5.2`). That cache's key is only the optimization flags. An ordinary GPU processor
+  the same `getGPUProcessor` as the ordinary GPU path (`src/OpenColorIO/Processor.cpp:441-517
+  @ v2.6.0`). That cache's key is only the optimization flags. An ordinary GPU processor
   requested first is returned for a later legacy call with those flags, and the first legacy
   edge length is retained for later legacy calls with another edge. The later call still
   performs its bake before looking in the cache.
@@ -1992,7 +2008,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `Create3DLut` constructs an empty RGBA vector at edge zero and forms
   `&lut3D[0]` for identity generation and every op (`src/OpenColorIO/ops/noop/NoOps.cpp:175-206
   @ v2.5.2`). Those count-zero loops access no pixel. The resulting empty Lut3D op is rejected
-  by finalization in `getOptimizedLegacyGPUProcessor` (`Processor.cpp:447-489`). Both pinned
+  by finalization in `getOptimizedLegacyGPUProcessor` (`Processor.cpp:441-483` @ v2.6.0). Both pinned
   wheels raise Exception "Lut3D content array issue: Array content is empty." at gpu_processor,
   with no log or blobs (native boundary probes, 2026-10-26). An analytic-only chain skips the
   empty bake and accepts the same edge.
@@ -2040,7 +2056,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `GPU_LANGUAGE_GLSL_ES_1_0` shares the GLSL path, which writes what ES 1.00 lacks:
   array constructors for constant tables (`declareFloatArrayConst` and `declareIntArrayConst`,
-  `GpuShaderUtils.cpp:547-556, 610-618 @ v2.5.2`, used by the ACES 2 tables and the hue and RGB
+  `GpuShaderUtils.cpp:558-567, 621-629 @ v2.6.0`, used by the ACES 2 tables and the hue and RGB
   curve writers) and literals with an `f` suffix (`FixedFunctionOpGPU.cpp:483, 664, 1103-1118`).
   One upstream test's function name, `_another_func_name__`, also holds a `__`, which ES reserves
   (`Config_test.cpp:215`).
@@ -2108,7 +2124,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** Python turns any integer into a `GpuLanguage` (`OCIO.GpuLanguage(42)`), and
   `GpuShaderDesc.setLanguage` accepts it. Extraction then raises "Unknown GPU shader language.".
-  `getCacheID()`, however, ends the process. It is `noexcept` (`OpenColorIO.h:3410`), and the
+  `getCacheID()`, however, ends the process. It is `noexcept` (`OpenColorIO.h:3634` @ v2.6.0), and the
   `GpuLanguageToString` it calls throws "Unsupported GPU shader language."
   (`GpuShaderDesc.cpp:263-282`, `ParseUtils.cpp:258-275`), so C++ calls `std::terminate`.
   Through the wheels, the Python process ends with SIGABRT (exit 134) on Rocky Linux 9 and with
@@ -2143,7 +2159,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   unscoped enum's range, undefined in C++17 for an enum without a fixed type, which both
   wheels keep as the integer. The value reads as `???` (`<TransformDirection.???: 5>`), and
   the string-conversion functions give what their last line gives
-  (`ParseUtils.cpp:113-519` @ v2.5.2): `TransformDirectionToString` "inverse",
+  (`ParseUtils.cpp:113-521` @ v2.6.0): `TransformDirectionToString` "inverse",
   `GetInverseTransformDirection` `TRANSFORM_DIR_FORWARD`, `CombineTransformDirections`
   `TRANSFORM_DIR_INVERSE`, `BitDepthToString` "unknown", `BitDepthToInt` 0, `CDLStyleToString`
   "asc", `RangeStyleToString` "Clamp"; `GpuLanguageToString`, `FixedFunctionStyleToString`,
@@ -2212,7 +2228,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   stores it. Most classes keep the integer: `getDirection` gives it back
   (`<TransformDirection.???: 5>`), `operator<<` writes "inverse"
   (`TransformDirectionToString`), and `validate` raises from `Transform::validate`
-  (Transform.cpp:30-40 @ v2.5.2) with the C++ class's `typeid` name, which each compiler
+  (Transform.cpp:30-40 @ v2.6.0) with the C++ class's `typeid` name, which each compiler
   writes its own way, after the class's prefix: "MatrixTransform validation failed: class
   OpenColorIO_v2_5::MatrixTransformImpl: invalid direction." in the Windows wheel (MSVC), the
   mangled `N16OpenColorIO_v2_519MatrixTransformImplE` in the Linux one (GCC);
@@ -2220,7 +2236,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   style (CDL, exponent, exponent with linear, exposure contrast, fixed function:
   `GammaOpData::setDirection`, "invert when different") flip their direction instead, so
   setting such a value twice gives the first direction back. A processor validates its
-  transform first (Processor.cpp:633), so none is built from such a value.
+  transform first (Processor.cpp:627 @ v2.6.0), so none is built from such a value.
 - **Who notices:** Python code that sets a direction made from a number outside 0 and 1.
 - **A fix:** refuse the number when the enum is constructed (I-223's fix).
 - **Status:** matched in `p6-transforms` (6.3a, `crates/ocio-py/src/py_transform.rs`,
@@ -2235,7 +2251,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `std::stringstream ss("Unknown ...: "); ss << style;`, which writes the number over the
   start of the text, as I-52's: `GammaOpData::ConvertStyleBasic` and `ConvertStyleMonCurve`
   (`ops/gamma/GammaOpData.cpp:205-208`, `238-241`), `FixedFunctionOpData::ConvertStyle`
-  (`ops/fixedfunction/FixedFunctionOpData.cpp:488-491`) and `CDLOpData::ConvertStyle`
+  (`ops/fixedfunction/FixedFunctionOpData.cpp:507-510` @ v2.6.0) and `CDLOpData::ConvertStyle`
   (`ops/cdl/CDLOpData.cpp:102-105`). Python reaches them through `ExponentTransform` and
   `ExponentWithLinearTransform` (constructor and `setNegativeStyle`), `FixedFunctionTransform`
   (constructor and `setStyle`) and `CDLTransform.setStyle`: `OCIO.NegativeStyle(9)` gives
@@ -2817,7 +2833,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-172. The XML readers read a number out of range as 0 on Linux, and as infinity on Windows
 
-- **Upstream:** `ParseNumber` (`fileformats/xmlutils/XMLReaderUtils.h:150-205` @ v2.5.2)
+- **Upstream:** `ParseNumber` (`fileformats/xmlutils/XMLReaderUtils.h:151-206` @ v2.6.0)
   checks `NumberUtils::from_chars`'s `invalid_argument` only: a `result_out_of_range` passes,
   with the value `from_chars` left. On Windows (`std::from_chars`) that is the overflow's
   infinity, the underflow's 0, and a subnormal read as such; on Linux (`strtod_l`, which sets
@@ -2850,7 +2866,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `CDLTransform::CreateFromFile` and `CreateGroupFromFile` return the
   transforms the file cache holds, not copies (`getCDLGroup` of the CC, CCC and CDL formats,
   `FileFormatCC.cpp:29-34`, `FileFormatCCC.cpp:32-41`, `FileFormatCDL.cpp:55-64`;
-  `CDLTransform.cpp:34-118` @ v2.5.2). Editing one edits the cached file: later reads of the
+  `CDLTransform.cpp:33-117` @ v2.6.0). Editing one edits the cached file: later reads of the
   file give the edited values, and so do the processors of file transforms of it, until
   `ClearAllCaches` (probed 2026-10-08: `setSlope` on the CDL `CreateFromFile` gave, and a
   second `CreateFromFile`, `CreateGroupFromFile` and a `FileTransform`'s processor all give
@@ -2876,14 +2892,14 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-175. The CDL reader drops content in four places
 
-- **Upstream:** the CDL, CCC and CC parser (`fileformats/cdl/CDLParser.cpp` @ v2.5.2):
-  - ignores character data that is a single line feed (`CharacterDataHandler`, 896-897),
+- **Upstream:** the CDL, CCC and CC parser (`fileformats/cdl/CDLParser.cpp` @ v2.6.0):
+  - ignores character data that is a single line feed (`CharacterDataHandler`, 976-977),
     wherever it is: a description, a value or text where none belongs, which elsewhere is an
     error ("... not allowed ...") or part of the value, as long as expat hands it over alone
     (a line feed alone on its line);
   - lets a second root element inside the first, while the first has no correction yet,
     take the parsing info over (`HandleColorDecisionListStartElement`,
-    `HandleColorCorrectionCollectionStartElement`, 496-580): the outer root's descriptions
+    `HandleColorCorrectionCollectionStartElement`, 559-643): the outer root's descriptions
     and the corrections after the inner root ends are lost (probed 2026-10-08: a collection
     holding a collection with one correction, then a second correction, reads as the first
     correction alone, with the inner collection's description);
@@ -2903,8 +2919,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** the CDL parser reads the lines of the first 5 KiB of the file to find the
   root element's name ("<ColorDecisionList", "<ColorCorrectionCollection" or
   "<ColorCorrection", in that order, anywhere in that text) and picks the schema from it
-  (`loadHeader`, `initializeHandlers`, `fileformats/cdl/CDLParser.cpp:177-195, 286-325` @
-  v2.5.2); a file whose root starts later (after a long comment or DOCTYPE) fails with
+  (`loadHeader`, `initializeHandlers`, `fileformats/cdl/CDLParser.cpp:182-200, 304-343` @
+  v2.6.0); a file whose root starts later (after a long comment or DOCTYPE) fails with
   "Missing CDL tag".
 - **Who notices:** valid CDL, CCC and CC files with more than 5 KiB before their root.
 - **A fix:** pick the schema from the root element expat reports.
@@ -2914,8 +2930,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-177. The XML readers parse a line of 4 GiB or more modulo 2^32
 
 - **Upstream:** the CDL, Iridas look and CTF readers give expat each line with
-  `XML_Parse(parser, line.c_str(), (int)line.size(), done)` (`CDLParser.cpp:241-279`,
-  `FileFormatIridasLook.cpp:173-191`, `FileFormatCTF.cpp:238-274` @ v2.5.2). The cast keeps
+  `XML_Parse(parser, line.c_str(), (int)line.size(), done)` (`CDLParser.cpp:246-297`,
+  `FileFormatIridasLook.cpp:174-205`, `FileFormatCTF.cpp:256-305` @ v2.6.0, which since 2.6.0
+  rethrow a handler's exception once `XML_Parse` returns). The cast keeps
   the low 32 bits: a line of 2 GiB to 4 GiB has a negative length, which expat refuses
   ("invalid argument"); one of 4 GiB or more is parsed as its first `size mod 2^32` bytes, and
   the rest of the line is skipped.
@@ -2955,8 +2972,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-181. A CTF LUT's raw halfs outside [0, 65536) keep the low 16 bits of their `int`
 
 - **Upstream:** with `rawHalfs="true"`, `CTFReaderLut1DElt::endArray` and
-  `CTFReaderInvLut1DElt::endArray` (`fileformats/ctf/CTFReaderHelper.cpp:4201-4246,
-  3378-3429` @ v2.5.2) read each value as `ConvertHalfBitsToFloat((unsigned short)value)`. The
+  `CTFReaderInvLut1DElt::endArray` (`fileformats/ctf/CTFReaderHelper.cpp:4294-4339,
+  3471-3522` @ v2.6.0) read each value as `ConvertHalfBitsToFloat((unsigned short)value)`. The
   cast of a `float` outside `[0, 65536)` (negative, too large, NaN) is undefined. Both wheels
   compile it as `cvttss2si` to a 32-bit `int` (Windows `0x1800a76f3` and `0x1800a7d06`; Linux
   `0x209ad0` and `0x205750`, the Lut1D and InverseLUT1D sites), then keep its low 16 bits:
@@ -3026,7 +3043,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   second. The two agree on ordinary numbers and differ on edge cases: a sign before `0x`, a
   hex float, subnormal and out-of-range values, NaN payloads, octal integers, and the width of
   `long`. The line readers parse their values with it (`StringToFloat`, `StringToInt`,
-  `ParseUtils.cpp:575-608`), so a file holding such a number reads differently: in an Iridas
+  `ParseUtils.cpp:577-610` @ v2.6.0), so a file holding such a number reads differently: in an Iridas
   `.cube`, `-0x1p-2` reads as `-0` on Windows and `-0.25` on Linux, and `1e-40` reads as that
   subnormal on Windows while Linux refuses the file (wheel probes, 2026-10-15). The `.look`
   reader parses its size as a `long`: `"4294967298"` is out of range on Windows ("Invalid LUT
@@ -3047,12 +3064,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-186. A `.look` file's closed mask still refuses later skipped elements
 
 - **Upstream:** the `.look` parser sets `m_inMask` when a `<mask>` element starts, and skips
-  its content (`StartElementHandler`, `src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:
-  303-315` @ v2.5.2). The mask's end only lowers the skip depth: `m_inMask` is cleared by the
-  `else if (pImpl->m_inMask)` branch of `EndElementHandler` (385-393), which the skip branch
-  before it always takes (343-346). So after any mask, empty or not, an element nested in a
+  its content (`StartElementHandlerImpl`, `src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:
+  344-356` @ v2.6.0). The mask's end only lowers the skip depth: `m_inMask` is cleared by the
+  `else if (pImpl->m_inMask)` branch of `EndElementHandlerImpl` (448-456), which the skip branch
+  before it always takes (406-409). So after any mask, empty or not, an element nested in a
   later skipped element (`<shaders><base/></shaders>`) fails with "Cannot load .look LUT
-  containing mask" (272-276), though that element is no mask (wheel probes, Windows and Linux,
+  containing mask" (313-317), though that element is no mask (wheel probes, Windows and Linux,
   2026-10-15: `<mask/>` then `<shaders><base/></shaders>` is refused, `<mask/>` then
   `<shaders/>` reads).
 - **Who notices:** `.look` files with an empty mask before shaders or other sections with
@@ -3064,8 +3081,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-187. A CTF ACESParams without a gamma names the attribute without a space
 
-- **Upstream:** `CTFReaderACESParamsElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:1272-1323`
-  @ v2.5.2) refuses a Rec.2100 surround ACES element whose ACESParams has no `gamma` with
+- **Upstream:** `CTFReaderACESParamsElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:1365-1416`
+  @ v2.6.0) refuses a Rec.2100 surround ACES element whose ACESParams has no `gamma` with
   `"Missing required parameter ", ATTR_GAMMA, "for ACES FixedFunction element with style "`:
   the message reads "Missing required parameter gammafor ACES FixedFunction element with
   style Rec2100SurroundFwd.".
@@ -3078,7 +3095,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-188. One config gives two files' dynamic RGB curves the same processor
 
-- **Upstream:** `Config::getProcessor` (`Config.cpp:4849-4873` @ v2.5.2) reuses a cached
+- **Upstream:** `Config::getProcessor` (`Config.cpp:5465-5489` @ v2.6.0) reuses a cached
   processor whose cache ID equals the new one's (the fallback that
   `OCIO_DISABLE_CACHE_FALLBACK` turns off). A dynamic GradingRGBCurve op leaves its curves
   out of its cache ID (`GradingRGBCurveOpData::getCacheID`,
@@ -3103,7 +3120,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-189. A GradingRGBCurve's bypassLinToLog accepts only "true"
 
 - **Upstream:** `CTFReaderGradingRGBCurveElt::start`
-  (`fileformats/ctf/CTFReaderHelper.cpp:2592-2640` @ v2.5.2) refuses any `bypassLinToLog`
+  (`fileformats/ctf/CTFReaderHelper.cpp:2685-2733` @ v2.6.0) refuses any `bypassLinToLog`
   value other than `true` (ignoring case), `false` included, with "Unknown bypassLinToLog
   value: 'false' while parsing RGBCurve.", where the attribute is a boolean.
 - **Who notices:** a CTF writer that spells out the default, `bypassLinToLog="false"`.
@@ -3114,8 +3131,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-190. A curve's Slopes before its ControlPoints count the default curve's points
 
-- **Upstream:** `CTFReaderGradingCurveSlopesElt::end` (`CTFReaderHelper.cpp:2940-2954` @
-  v2.5.2) checks the number of slopes against the number of control points the curve has when
+- **Upstream:** `CTFReaderGradingCurveSlopesElt::end` (`CTFReaderHelper.cpp:3033-3047` @
+  v2.6.0) checks the number of slopes against the number of control points the curve has when
   the Slopes element ends. Before the ControlPoints element, that is the style's default curve
   (3 points for the log and video styles), so the same elements in the other order are
   refused or accepted differently, and a later ControlPoints keeps the slopes it doesn't
@@ -3128,9 +3145,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-191. The ACES reader's missing-style message starts with a lower-case letter
 
-- **Upstream:** `CTFReaderACESElt::start` (`CTFReaderHelper.cpp:1209-1239` @ v2.5.2) refuses an
+- **Upstream:** `CTFReaderACESElt::start` (`CTFReaderHelper.cpp:1302-1332` @ v2.6.0) refuses an
   ACES element without a style with "style parameter for FixedFunction is missing.", where the
-  FixedFunction and Function readers (1427-1473, 1506-1534) say "Style parameter ...".
+  FixedFunction and Function readers (1520-1566, 1599-1627) say "Style parameter ...".
 - **Who notices:** a reader of the error of a deprecated CTF 1.x ACES element.
 - **A fix:** capitalize it as the others do.
 - **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`, `fixed_function_start`);
@@ -3155,7 +3172,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-193. The processor cache ignores the context variables a CTF reference uses
 
-- **Upstream:** `Config::getProcessor` (`Config.cpp:4791-4873` @ v2.5.2) keys its processor
+- **Upstream:** `Config::getProcessor` (`Config.cpp:5407-5489` @ v2.6.0) keys its processor
   cache on the context variables `CollectContextVariables` finds in the transform. For a file
   transform those are the variables of its `src`, of the search path that finds it and of its
   CCC ID (`transforms/FileTransform.cpp:224-300`), not those of the references inside the CTF
@@ -3176,8 +3193,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-194. A Reference's basePath is read and ignored
 
-- **Upstream:** `CTFReaderReferenceElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:5025-5091`
-  @ v2.5.2) accepts a `basePath` attribute and drops its value ("Ignore BasePath for now"): the
+- **Upstream:** `CTFReaderReferenceElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:5118-5184`
+  @ v2.6.0) accepts a `basePath` attribute and drops its value ("Ignore BasePath for now"): the
   path resolves through the context's search paths alone. Its only effect is the error when an
   alias comes with it.
 - **Who notices:** a CTF file from another application that relies on `basePath` to find its
@@ -3189,8 +3206,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-195. A `.look` size is read from each piece of its text alone
 
-- **Upstream:** the `.look` parser reads the size in `CharacterDataHandler`
-  (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:416-440` @ v2.5.2), once for each
+- **Upstream:** the `.look` parser reads the size in `CharacterDataHandlerImpl`
+  (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:502-526` @ v2.6.0), once for each
   piece of text expat delivers: each piece must parse on its own (but a lone line feed), and
   the last one sets the size. expat delivers the text
   of an element in pieces at line ends (the reader gives it a line at a time), around
@@ -3208,8 +3225,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-196. A `.look` file's data may not hold tabs or carriage returns
 
 - **Upstream:** the `.look` parser removes spaces, quotes and line feeds from the data
-  (`CharacterDataHandler`, `src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:441-457` @
-  v2.5.2), though the format's description says "all whitespace and quotes" (52-53). A tab or
+  (`CharacterDataHandlerImpl`, `src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:527-543` @
+  v2.6.0), though the format's description says "all whitespace and quotes" (53-54). A tab or
   a carriage return (written `&#13;`, since expat turns CR LF into LF) stays in the data and
   is refused: tab-indented data lines give "Number of characters in 'data' must be multiple
   of 8. 193 elements found." (the `.look` verifier's probes, both wheels, 2026-10-16).
@@ -3221,11 +3238,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-197. Two `.look` data messages that mislead
 
-- **Upstream:** `getLut` (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:193-235` @
-  v2.5.2) says "Number of characters in 'data' must be multiple of 8. N elements found."
-  where N counts characters (195-203), and "Non-hex characters found in 'data' block at index
+- **Upstream:** `getLut` (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:207-249` @
+  v2.6.0) says "Number of characters in 'data' must be multiple of 8. N elements found."
+  where N counts characters (209-217), and "Non-hex characters found in 'data' block at index
   'I'." where I is the start of the 8-character group holding the bad character, not its own
-  position (211-221).
+  position (225-235).
 - **Who notices:** authors of malformed `.look` files.
 - **A fix:** say "characters", and give the bad character's index.
 - **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
@@ -3235,9 +3252,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-198. A `.look` LUT without a size or data fails after the reader
 
 - **Upstream:** `getLut` expects `3 * size^3` values, with a size of 0 when no `<size>`
-  element was read (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:205-233` @ v2.5.2),
+  element was read (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:219-247` @ v2.6.0),
   so a `<LUT>` without size and data passes it, and `read` makes a 3D LUT of 0 entries per
-  side (538-548). The file reads, and the error comes when its op is validated: "Lut3D
+  side (628-638). The file reads, and the error comes when its op is validated: "Lut3D
   content array issue: Array content is empty." (`Lut3DOpData::validate`,
   `ops/lut3d/Lut3DOpData.cpp:371-381`; `OpArray.h:168`), with no file name.
 - **Who notices:** authors of `.look` files without a LUT section's content.
@@ -3256,7 +3273,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `iridas_cube`, `iridas_itx` (whose message says "Unknown 3dl format name",
   `FileFormatIridasItx.cpp:257-263`), `resolve_cube`, `houdini`, `flame` and `lustre`
   (`FileFormat3DL.cpp:509-522`), and the CLF and CTF ("Unknown CLF/CTF file format name,
-  '<name>'.", `FileFormatCTF.cpp:1358-1364`). So `setFormat("SPI1D")` succeeds and `bake` fails with
+  '<name>'.", `FileFormatCTF.cpp:1526-1532` @ v2.6.0). So `setFormat("SPI1D")` succeeds and `bake` fails with
   "Error baking SPI1D:Unknown spi format name, 'SPI1D'." (wheel probes, Windows and Linux,
   2026-10-16). The cineSpace and Truelight bakes take the name in any case.
 - **Who notices:** callers that name a format in other case than the registry's.
@@ -3277,7 +3294,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   - A size of 0 makes `&shaperData[0]` index an empty vector: undefined behaviour, which both
     wheels resolve the same way. An empty vector's storage is a null pointer, so the index
     gives a null pointer, `GenerateIdentityLut1D` returns at its `if(!img) return;`
-    (`ops/lut1d/Lut1DOp.cpp:196`), and the shaper line is empty. A size of 1 writes a lone `0`
+    (`ops/lut1d/Lut1DOp.cpp:195` @ v2.6.0), and the shaper line is empty. A size of 1 writes a lone `0`
     (a NaN step, clamped to 0).
   - A negative size converts to a `size_t` past the vector's `max_size()`, and the constructor
     throws `std::length_error`, which `Baker::bake` reports with each C++ library's text:
@@ -3293,8 +3310,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-201. A Reference by an alias other than currentMonitor adds no ops
 
-- **Upstream:** the Reference reader keeps an alias (`CTFReaderHelper.cpp:5047-5056` @ v2.5.2),
-  refusing only `currentMonitor`, and `BuildOp` (`fileformats/FileFormatCTF.cpp:1218-1248`)
+- **Upstream:** the Reference reader keeps an alias (`CTFReaderHelper.cpp:5140-5149` @ v2.6.0),
+  refusing only `currentMonitor`, and `BuildOp` (`fileformats/FileFormatCTF.cpp:1386-1416` @ v2.6.0)
   builds only references by path: a reference by any other alias, inverted or not, silently
   adds nothing to the processor.
 - **Who notices:** a CTF file whose aliases name transforms the application is expected to
@@ -3307,7 +3324,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-202. A Reference's inverted attribute only ever sets the inverse
 
 - **Upstream:** the Reference reader sets the inverse direction when `inverted` is `true`,
-  ignoring case (`CTFReaderHelper.cpp:5058-5064` @ v2.5.2), and ignores any other value,
+  ignoring case (`CTFReaderHelper.cpp:5151-5157` @ v2.6.0), and ignores any other value,
   without a warning: `inverted="1"` or `"yes"` leaves the reference forward, and a later
   `inverted="false"` (the attribute again, in another case) doesn't undo an earlier `"true"`.
 - **Who notices:** a CTF writer that spells booleans another way.
@@ -3318,16 +3335,16 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-203. The CLF/CTF writer pads its arrays with a width that grows
 
-- **Upstream:** `WriteValues` (`fileformats/ctf/CTFTransform.cpp:561-671` @ v2.5.2) formats each
+- **Upstream:** `WriteValues` (`fileformats/ctf/CTFTransform.cpp:652-762` @ v2.6.0) formats each
   array value in an `ostringstream` whose width it set once, for the bit depth (3 for 8i, 4 for
   10i and 12i, 5 for 16i, 11 for 16f and 32f floats). A stream's width resets to 0 after each
   insertion, but the padding goes into the value's text first, and when a value's text is
   longer than the width, the width becomes that length for the values after it. So each value
   is padded to the longest text written before it in the array, not to the bit depth's width,
   and one long value shifts every later column. Upstream's own expected text shows it: in
-  `OCIO_ADD_TEST(CTFTransform, lut1d_10i_ctf)` (`FileFormatCTF_tests.cpp:7894-7925`) the third
+  `OCIO_ADD_TEST(CTFTransform, lut1d_10i_ctf)` (`FileFormatCTF_tests.cpp:8428-8459` @ v2.6.0) the third
   row is `   1023    1023    1023`, padded to the 7 characters of `4011.12` in the row above.
-  The GradingRGBCurve writer's `writeCurve` (`CTFTransform.cpp:1559-1603`) sets a width of 11
+  The GradingRGBCurve writer's `writeCurve` (`CTFTransform.cpp:1650-1694`) sets a width of 11
   with `SetOStream` and then streams `x << " " << y`: only the first number of each control
   point line, and only the first slope, is padded.
 - **Who notices:** readers of written CLF and CTF files, whose arrays don't line up in columns
@@ -3344,7 +3361,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** with a shaper space, the CLF/CTF bake's 1D LUT (no crosstalk) and its shaper
   of a set size (crosstalk) come after a Range from the shaper space's range
-  (`FileFormatCTF.cpp:1445, 1498, 1517-1532` @ v2.5.2). The range is the smallest start and
+  (`FileFormatCTF.cpp:1613, 1666, 1685-1700` @ v2.6.0). The range is the smallest start and
   the largest end of the three channels (`GetSrcRange`, `BakingUtils.cpp:53-73`), through
   `std::min` and `std::max`, which pass a NaN in red on and drop one in green or blue. A
   range that decreases (an inverted shaper space), whose ends are too close, or that starts
@@ -3833,7 +3850,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `ops/gradinghuecurve/GradingHueCurveOpData.cpp:117-119` @ v2.5.2), a check copied from the
   RGB curves' lin-to-log bypass, which only the linear style has. The hue curves' setting
   matters in every style: an op that converts RGB to HSY and back is no inverse of one that
-  doesn't. The optimizer (`RemoveInverseOps`, `OpOptimizers.cpp:207-300`) removes such a pair
+  doesn't. The optimizer (`RemoveInverseOps`, `OpOptimizers.cpp:234-328` @ v2.6.0) removes such a pair
   in the log and video styles, where the unoptimized processor applies both.
 - **Who notices:** a group of a log or video GradingHueCurveTransform and its inverse with
   `setRGBToHSY(HSY_TRANSFORM_NONE)` on one of them (an application doing its own HSY
@@ -3925,7 +3942,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-291. A version 1 config may hold a GradingHueCurveTransform
 
 - **Upstream:** `Config::Impl::checkVersionConsistency` refuses a GradingHueCurveTransform
-  only when `m_majorVersion == 2 && m_minorVersion < 5` (`Config.cpp:5785-5791` @ v2.5.2),
+  only when `m_majorVersion == 2 && m_minorVersion < 5` (`Config.cpp:6456-6462` @ v2.6.0),
   where the other classes version 2 brought test `m_majorVersion < 2`. A version 1 config
   (whose minor version is 0) loads and serializes one, though no version 1 library can read
   it, and the config is refused by every version 2 library before 2.5.
@@ -3942,7 +3959,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `CTFReaderECParamsElt::start` starts each parameter at a quiet NaN, parses
   the attributes into them, then takes a NaN as an absent attribute
-  (`fileformats/ctf/CTFReaderHelper.cpp:1777-1849` @ v2.5.2). An `exposure`, `contrast` or
+  (`fileformats/ctf/CTFReaderHelper.cpp:1870-1942` @ v2.6.0). An `exposure`, `contrast` or
   `pivot` written as `nan` is refused as missing ("ExposureContrast element: exposure
   missing."), and a `gamma`, `logExposureStep` or `logMidGray` written as `nan` is ignored:
   the op keeps its default (1, 0.088, 0.435).
@@ -3959,8 +3976,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-347. A written CTF GradingPrimary leaves out the controls its style doesn't use
 
 - **Upstream:** the CTF reader reads every GradingPrimary control into the op, "even those
-  that are not used by the current style" (`fileformats/ctf/CTFReaderHelper.cpp:2521-2568` @
-  v2.5.2), and the op's `equals` holds all of them (`GradingPrimaryOpData::equals`,
+  that are not used by the current style" (`fileformats/ctf/CTFReaderHelper.cpp:2614-2661` @
+  v2.6.0), and the op's `equals` holds all of them (`GradingPrimaryOpData::equals`,
   `ops/gradingprimary/GradingPrimaryOpData.cpp:249-263`, `operator==` at 265-268; the value
   comparison is `operator==(GradingPrimary)`, `ops/gradingprimary/GradingPrimary.cpp:26-41`).
   So does the cache ID of a non-dynamic op (`GradingPrimaryOpData::getCacheID`,
@@ -3968,7 +3985,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `isDynamic()` test at 201-204). `GradingPrimaryWriter::writeContent`
   writes only the style's controls: brightness, contrast and gamma for log, offset, exposure
   and contrast for linear (and no pivot black or white), lift, gamma, gain and offset for video
-  (`fileformats/ctf/CTFTransform.cpp:1394-1499`). The same holds for a GradingPrimaryTransform
+  (`fileformats/ctf/CTFTransform.cpp:1485-1590` @ v2.6.0). The same holds for a GradingPrimaryTransform
   whose values were set through the API.
 - **Who notices:** a GradingPrimary read from a CTF file (or set through the API) with a
   control of another style, written and read back: the values, the cache ID and `equals`
@@ -4498,7 +4515,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** the sixth `Config.GetProcessorFromConfigs` overload passes its sixth and
   seventh arguments to C++ as `dstDisplay` and `dstView`, but declares their keyword names
-  as `dstView` and `dstDisplay` (`src/bindings/python/PyConfig.cpp:903-917 @ v2.5.2`).
+  as `dstView` and `dstDisplay` (`src/bindings/python/PyConfig.cpp:951-965 @ v2.6.0`).
   Positional calls work normally; a keyword call must exchange the two names to mean the
   same request. The method's signature and TypeError text have the same swapped names.
 - **Who notices:** Python callers using this overload with explicit contexts and keywords.
@@ -4510,12 +4527,13 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-452. Instantiated displays retain a virtual-only color-space token
 
 - **Upstream:** instantiating a display copies the virtual template's views unchanged
-  (`Config.cpp:1005-1018 @ v2.5.2`). A display-defined view may therefore retain
+  (`Config.cpp:1130-1143 @ v2.6.0`). A display-defined view may therefore retain
   `display_colorspace: <USE_DISPLAY_NAME>`. Making it permanent only changes its flag
-  (`Config.cpp:4376-4384`); serialization writes the literal color-space field and reloading
-  preserves it (`Config.cpp:3601-3606`; `OCIOYaml.cpp:439-442,480-494,5198-5217`).
-  Ordinary-display validation rejects that token (`Config.cpp:601-621,1663-1693`), whereas
-  virtual-template validation bypasses the check (`Config.cpp:1711-1725`). The temporary
+  (`Config.cpp:4992-5000`); serialization writes the literal color-space field and reloading
+  preserves it (`Config.cpp:3868-3873`; `OCIOYaml.cpp:439-442,487-501,5237-5257` @ v2.6.0, which writes the
+  view's aliases too).
+  Ordinary-display validation rejects that token (`Config.cpp:624-644,1797-1827`), whereas
+  virtual-template validation bypasses the check (`Config.cpp:1845-1859`). The temporary
   flag controls serialization, not an exemption in the ordinary-display validation loop.
   The Windows 2.5.2 wheel (2026-10-27) rejects validation of the persisted/reloaded upstream
   `virtual_display` input's copied `Film` view with the exact "can not use
@@ -4534,14 +4552,14 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-453. Absolute FileTransforms still require a nonempty search path to validate
 
 - **Upstream:** `Config::validate` collects FileTransforms from all color spaces, including
-  ones not used by the active views (`Config.cpp:154-171,5476-5493 @ v2.5.2`). If any file
+  ones not used by the active views (`Config.cpp:155-172,6115-6132 @ v2.6.0`). If any file
   references exist, it requires at least one nonempty, resolvable search-path entry before
-  examining the individual files (`Config.cpp:1974-2039`). Absolute file sources are not
+  examining the individual files (`Config.cpp:2108-2173`). Absolute file sources are not
   exempted, although `Context::resolveFileLocation` handles them independently of search
   paths (`Context.cpp:441-454`). Instantiating a monitor display always adds its ICC
-  FileTransform (`Config.cpp:1024-1035`). With the upstream Raw-only active-display fixture,
-  saving its empty path writes `search_path: ""` (`OCIOYaml.cpp:5080-5086`); reloading
-  retains an empty-string path entry (`OCIOYaml.cpp:4509-4515`; `Context.cpp:195-203`, I-9).
+  FileTransform (`Config.cpp:1149-1160`). With the upstream Raw-only active-display fixture,
+  saving its empty path writes `search_path: ""` (`OCIOYaml.cpp:5118-5124` @ v2.6.0); reloading
+  retains an empty-string path entry (`OCIOYaml.cpp:4522-4528`; `Context.cpp:195-203`, I-9).
   The Windows 2.5.2 wheel (2026-10-27) then raises the exact validation message
   "Config failed search path validation. The search_path must not be an empty string if
   there are FileTransforms."
@@ -4605,8 +4623,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** both test `OCIO::GetEnvVariable("OCIO")` as a pointer, which is never null
   (`src/OpenColorIO/Config.cpp:GetEnvVariable @ v2.5.2`), so their branch that says "You must
-  specify an input OCIO configuration" is dead (`src/apps/ociocheck/main.cpp:155-169`,
-  `src/apps/ociobakelut/main.cpp:263-278 @ v2.5.2`). Without `$OCIO` and without `--iconfig`
+  specify an input OCIO configuration" is dead (`src/apps/ociocheck/main.cpp:158-172`,
+  `src/apps/ociobakelut/main.cpp:263-278 @ v2.6.0`). Without `$OCIO` and without `--iconfig`
   they load `Config::CreateFromEnv`, the raw config, and report on that.
 - **Who notices:** anyone who runs them with no config: `ociocheck` passes.
 - **A fix:** test for an empty string. The message would then appear where it was meant to.
@@ -4614,7 +4632,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ### I-603. `ociocheck` can't see an error in the validation log
 
-- **Upstream:** after `Config::validate`, `src/apps/ociocheck/main.cpp:639-650 @ v2.5.2` looks for
+- **Upstream:** after `Config::validate`, `src/apps/ociocheck/main.cpp:642-653 @ v2.6.0` looks for
   errors with `StringUtils::Contain(svec, "[OpenColorIO Error]")`. That compares whole lines,
   and a log line always goes on after the prefix, so the test is never true and `Validation:
   failed` comes only from an exception. The same comparison ignores case.
@@ -4626,8 +4644,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-605. The tools' help and error output disagree with each other
 
 - **Upstream:** `--help` exits with 1 in `ociowrite`, `ociocheck` and `ociobakelut`
-  (`src/apps/ociowrite/main.cpp:73-77`, `ociocheck/main.cpp:131-136`,
-  `ociobakelut/main.cpp:125-130 @ v2.5.2`), and with 0 in `ociochecklut`
+  (`src/apps/ociowrite/main.cpp:73-77`, `ociocheck/main.cpp:134-139`,
+  `ociobakelut/main.cpp:125-130 @ v2.6.0`), and with 0 in `ociochecklut`
   (`ociochecklut/main.cpp:216-233`). A bad command line prints its error on stderr in `ociowrite`
   and on stdout in the other three. `ociochecklut` prints transforms on `std::cout`, so that a
   `MatrixTransform` (I-73) raises the precision of every transform after it, for the rest of the
@@ -4895,16 +4913,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-6. Resource prefixes the Metal class wrapper reads past
 
 - **Upstream:** in MSL, a class wrapper reads the shader's declarations back to build its class
-  (`GpuShaderClassWrapper.cpp:285-372`), and their names start with the resource prefix.
+  (`GpuShaderClassWrapper.cpp:259-346` @ v2.6.0), and their names start with the resource prefix.
   - After a line that starts with `texture` past white space, it takes the next line for the
-    texture's sampler and reads from `find("sampler") + 7` (lines 330-335). Without `sampler`,
+    texture's sampler and reads from `find("sampler") + 7` (lines 304-309). Without `sampler`,
     that wraps past `npos` to 6, past the end of a shorter line. A line feed in the prefix cuts
     each declaration into lines, so this happens when the prefix's first segment between two
     line feeds is shorter than 6 bytes (it is the line after a texture's declaration), or when
     a segment after a line feed starts with `texture` past white space (the wrapper takes its
     line for a texture's declaration, and the line after the last declaration is empty).
   - The wrapper also passes the declarations' bytes to `std::isspace`, and the class name's
-    first byte to `std::isdigit` (lines 157, 226, 307, 325, 333, 348). The C++ standard leaves
+    first byte to `std::isdigit` (lines 157, 200, 281, 299, 307, 322). The C++ standard leaves
     them undefined for a non-ASCII byte, a negative `char`, but both wheels define them and give
     such a byte neither class, so there is no undefined behaviour there, and no D12 split:
     - Windows: the UCRT's `isspace` and `isdigit` return 0 below -1 in a single-byte locale
@@ -4934,9 +4952,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-10. A texture declared without a sampler after it, in MSL
 
 - **Upstream:** in MSL, the class wrapper reads the shader's declarations back to build its
-  class (`GpuShaderClassWrapper.cpp:285-372`). It takes the line after each line that starts
+  class (`GpuShaderClassWrapper.cpp:259-346` @ v2.6.0). It takes the line after each line that starts
   with `texture` for that texture's sampler, and reads the sampler's name from
-  `find("sampler") + 7` (lines 330-335). When that line has no `sampler`, `npos + 7` wraps to 6,
+  `find("sampler") + 7` (lines 304-309). When that line has no `sampler`, `npos + 7` wraps to 6,
   and a line shorter than 6 bytes is read past its end; `substr` then throws
   `std::out_of_range`. OCIO's own writers always declare a sampler after its texture, but the
   declarations also hold the code a caller adds (`addToParameterDeclareShaderCode`,
@@ -4951,7 +4969,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   - through the Rocky Linux 9 wheel (the verifier's probe), `basic_string::substr: __pos (which
     is 6) > this->size() (which is 0)` for the declarations `"texture2d<float> t;\n"`, and
     `(which is 2)` for `"texture2d<float> t;\nab\n"`. `__pos` can exceed 6: before `substr`
-    throws, the loop that skips spaces (line 333) reads the bytes past the line's end, stale
+    throws, the loop that skips spaces (line 307) reads the bytes past the line's end, stale
     ones of the string's buffer, and steps over any that are white space.
 
   It also escapes the `catch (const Exception &)` of `GPUProcessor.cpp:197-201`, so an
@@ -4983,7 +5001,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-12. Constant arrays written from a count and a pointer
 
 - **Upstream:** `declareFloatArrayConst` and `declareIntArrayConst` take a count and a pointer
-  (`int size, const float * v`) and write `size` values from it (`GpuShaderUtils.cpp:520-648`).
+  (`int size, const float * v`) and write `size` values from it (`GpuShaderUtils.cpp:531-659` @ v2.6.0).
   Their callers pass a count kept apart from the values: the grading curves' `getNumKnots()`
   with `getKnotsArray()`, `getNumCoefs()` with `getCoefsArray()`
   (`ops/gradingrgbcurve/GradingRGBCurveOpGPU.cpp:227-230`,
@@ -5003,7 +5021,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** on Windows, a scanline whose wrapped start (I-1) falls inside the image starts in
   the middle of a row, and its `width` pixels run past the row's end
-  (`ImagePacking.cpp:65-85, 135-155, 208-228, 278-298`). For the last rows, and for right-to-left
+  (`ImagePacking.cpp:72-92, 143-163, 216-236, 286-306` @ v2.6.0). For the last rows, and for right-to-left
   or bottom-up layouts, that is outside the image's memory: row 87,382 of a right-to-left UINT8
   plane of 49,152 × 87,383 pixels starts at pixel 32,768 of row 0, and is written up to 32,768
   bytes before the plane.
@@ -5109,8 +5127,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-27. A config's processor cache disabled while a thread uses it
 
 - **Upstream:** `Config::getProcessor` checks `m_processorCache.isEnabled()` before it takes the
-  cache's lock (`Config.cpp:4830-4832`), and `Config::setProcessorCacheFlags` is `const` and
-  doesn't take that lock (`Config.cpp:929-933`). When another thread disables the cache
+  cache's lock (`Config.cpp:5446-5448` @ v2.6.0), and `Config::setProcessorCacheFlags` is `const` and
+  doesn't take that lock (`Config.cpp:977-981`). When another thread disables the cache
   (`PROCESSOR_CACHE_OFF`) between the check and `m_processorCache[key]`, `operator[]` checks
   again and returns a function-static `dummy` entry (`Caching.h:71-77`), one per cache type,
   shared by every config: the call reads and writes it unlocked against other threads, a data
@@ -5128,7 +5146,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** `FixedFunctionOpData::GetStyle` refuses a null or empty name with "Unknown
   FixedFunction style: " followed by the name, appending the `const char *` to a `std::string`
-  (`ops/fixedfunction/FixedFunctionOpData.cpp:189-368`). For a null pointer that is undefined
+  (`ops/fixedfunction/FixedFunctionOpData.cpp:195-382` @ v2.6.0). For a null pointer that is undefined
   behaviour. The CTF reader calls it with an attribute's value, which is never null.
 - **Decided** (general rule): `FixedFunctionOpStyle::from_name(None)` refuses it as an empty
   name: "Unknown FixedFunction style: ".
@@ -5137,13 +5155,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-31. Queries of a FixedFunction op whose style has too few parameters
 
 - **Upstream:** the setters take any number of parameters, and only `validate` checks how many
-  the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-840`). Before that,
+  the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:640-864` @ v2.6.0). Before that,
   `isInverse` of two Rec.2100 surrounds of the same style reads both first parameters without
-  a check (`FixedFunctionOpData.cpp:842-854`), and these renderers read their parameters
+  a check (`FixedFunctionOpData.cpp:866-878`), and these renderers read their parameters
   without one: the ACES 1.3 gamut compression's seven
-  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:984-1002`), the Rec.2100 surround's one
-  (`FixedFunctionOpCPU.cpp:1406-1417`), the gamma-log's ten and the double-log's 13
-  (`FixedFunctionOpCPU.cpp:2230-2246, 2322-2344`). On a shorter vector, they read past its
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:1001-1019` @ v2.6.0), the Rec.2100 surround's one
+  (`FixedFunctionOpCPU.cpp:1500-1511`), the gamma-log's ten and the double-log's 13
+  (`FixedFunctionOpCPU.cpp:2324-2340, 2416-2438`). On a shorter vector, they read past its
   end. The processors validate their ops first (`OpRcPtrVec::finalize`), so only code that
   queries such data directly gets there.
 - **Decided** (general rule): `FixedFunctionOpData::is_inverse` and those renderers
@@ -5330,7 +5348,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 ### U-55. Upgrading a version 1 config without a scene color space for the default rule
 
-- **Upstream:** `Config::upgradeToLatestVersion` is `noexcept` (`Config.cpp:1332-1350`). For a
+- **Upstream:** `Config::upgradeToLatestVersion` is `noexcept` (`Config.cpp:1466-1484` @ v2.6.0). For a
   version 1 config, it calls `UpdateFileRulesFromV1ToV2` (`FileRules.cpp:960-1047`), which,
   when the config has no `default` role, no data `raw` color space, no data scene color space
   and no active color space, gives the default rule the first scene color space: `""` when
@@ -5353,7 +5371,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-56. Null rules, and a null rule name for empty viewing rules
 
 - **Upstream:** `Config::setFileRules(nullptr)` and `setViewingRules(nullptr)` call
-  `createEditableCopy` on the null pointer (`Config.cpp:4648-4654, 3337-3343`), and
+  `createEditableCopy` on the null pointer (`Config.cpp:5264-5270, 3566-3572` @ v2.6.0), and
   `ViewingRules::getIndexForRule(nullptr)` on rules without a rule writes the null pointer to a
   stream for its message (`ViewingRules.cpp:212-226`). Through the Windows wheel,
   `config.setFileRules(None)`, `config.setViewingRules(None)` and
@@ -5371,7 +5389,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** inverse, `BuildDisplayOps` finds the color space the view transform starts from
   as the result of the view's looks (`LooksResultColorSpace`,
-  `transforms/DisplayViewTransform.cpp:486-491`). When the first option of the looks names no
+  `transforms/DisplayViewTransform.cpp:505-510` @ v2.6.0). When the first option of the looks names no
   look, no look runs and the result is `""`, which no color space has. That happens for a list
   of empty names (`looks: ", "`, `"+"`, `"-"`, `'""'`, `"+, -"`), also when fallback options
   follow it (`"|x"`, `" | x"`, `" | lk0|lk0"`). The source color space is then null, and
@@ -5395,7 +5413,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `CollectContextVariables` and in `BuildOps`: a color space transform builds its color spaces'
   transforms (`transforms/ColorSpaceTransform.cpp:165-346`), a look transform its looks' and
   their process spaces' (`transforms/LookTransform.cpp:203-305`), a display view transform its
-  view's (`transforms/DisplayViewTransform.cpp:177-528`). Nothing bounds the depth, so a color
+  view's (`transforms/DisplayViewTransform.cpp:177-528` @ v2.5.2). Nothing bounds the depth, so a color
   space whose transform names itself (`to_scene_reference: !<ColorSpaceTransform> {src: self,
   dst: lin}`), or reaches itself through a look's process space or a default view transform,
   recurses until the stack overflows and the process ends (0xC00000FD on Windows). A long
@@ -5591,7 +5609,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** a GroupTransform loads each child through `load(const YAML::Node&,
   TransformRcPtr&)`, which loads a child group the same way: the loader recurses once per
-  nested group (`OCIOYaml.cpp:2520-2525, 3196-3351`). YAML aliases let a short config nest
+  nested group (`OCIOYaml.cpp:2533-2538, 3209-3364` @ v2.6.0). YAML aliases let a short config nest
   groups to any depth (each anchor a group of the one before), and a group that holds itself
   through an alias (`&t !<GroupTransform> {children: [*t]}`) nests forever. The wheel's stack
   then overflows (the process ends): at 1,182 levels in Python's main thread on Windows and
@@ -5696,10 +5714,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** the CDL parser picks the schema from the first 5 KiB of the file: the first
   of "<ColorDecisionList", "<ColorCorrectionCollection" and "<ColorCorrection" found anywhere
-  in it (`FindRootElement`, `fileformats/cdl/CDLParser.cpp:286-325` @ v2.5.2). A CDL or CCC
-  binds its parsing info when its root element starts (`CDLParser.cpp:496-580`); when the
+  in it (`FindRootElement`, `fileformats/cdl/CDLParser.cpp:304-343` @ v2.6.0). A CDL or CCC
+  binds its parsing info when its root element starts (`CDLParser.cpp:559-643`); when the
   text is found but the element never starts (in a comment, an attribute, a misspelled or
-  other root), `validateParsing` dereferences the null parsing info (`CDLParser.cpp:337`),
+  other root), `validateParsing` dereferences the null parsing info (`CDLParser.cpp:355`),
   and the wheel crashes (Windows, probed 2026-10-08: `<!-- <ColorDecisionList --><Foo/>` as a
   .cdl, and as a .ccc with the collection's name, end the process on a file transform's
   processor). A CC creates its parsing info up front, but the schema is the first name found,
@@ -5717,7 +5735,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-76. Chains of CTF references long enough to overflow the stack
 
 - **Upstream:** a CTF Reference builds its file through `BuildFileTransformOps`
-  (`fileformats/FileFormatCTF.cpp:1218-1248` @ v2.5.2), which builds the referenced CTF file's
+  (`fileformats/FileFormatCTF.cpp:1386-1416` @ v2.6.0), which builds the referenced CTF file's
   ops, references included (`transforms/FileTransform.cpp:895-970`): the build recurses once
   per file of a chain. The recursion check stops cycles (a reference resolves to the same path
   each time, so a cycle repeats a path within one turn), but nothing bounds a legal chain, each
@@ -5770,7 +5788,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `shaperSize * 3` for the 1D LUTs and shapers (`FileFormatSpi3D.cpp:289`,
   `FileFormatSpi1D.cpp:350`, `FileFormatResolveCube.cpp:609, 625, 651`,
   `FileFormatHDL.cpp:680, 695, 720`, `FileFormatCSP.cpp:716, 732-733, 778-779`,
-  `FileFormatCTF.cpp:1469, 1494` @ v2.5.2, and the cubes of the Iridas cube, itx, 3DL and
+  `FileFormatCTF.cpp:1637, 1662` @ v2.6.0, and the cubes of the Iridas cube, itx, 3DL and
   Truelight bakes).
   From a cube size of 895 (`895^3 * 3 = 2,150,752,125`) or a 1D or shaper size of 715,827,883,
   the product passes `INT_MAX`: undefined behaviour. Both wheels wrap it to 32 bits (MSVC;
@@ -6225,7 +6243,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (PyFormatMetadata.cpp:21-201 @ v2.5.2). The reference dangles once the vector reallocates
   (`addChildElement`, the CDL's `setFirstSOPDescription`; the elements are copied, so their own
   children's vectors are new too), once `clear` or the CDL's erased description destroys the
-  element (`FormatMetadata.cpp:367-379`, `CDLTransform.cpp:345-367`), or once the transform
+  element (`FormatMetadata.cpp:384-396` @ v2.6.0, `CDLTransform.cpp:344-366` @ v2.6.0), or once the transform
   dies; the wheel then reads and writes freed memory. pybind11 finds a returned element's Python
   object by its address, so when the allocator puts a later buffer where a freed one was, a
   lookup there returns the stale object.
@@ -6341,7 +6359,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Upstream:** `ExtractOCIOZArchive(const char * archivePath, const char * destination)`
   makes a `std::string` of the destination (`pystring::os::path::normpath(destination)`) and
   hands the archive path to minizip's `mz_zip_reader_open_file`, neither checked for null
-  (OCIOZArchive.cpp:335-388 @ v2.5.2); the binding (PyConfig.cpp:1486-1487) passes `None` as a
+  (OCIOZArchive.cpp:335-388 @ v2.6.0); the binding (PyConfig.cpp:1557-1558 @ v2.6.0) passes `None` as a
   null pointer. The Windows wheel's process dies for either path, or both (probed 2026-10-22).
 - **Who notices:** Python code that passes `None` as a path to `ExtractOCIOZArchive`.
 - **A fix:** refuse null paths with an `Exception`.
@@ -6730,7 +6748,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 ### U-171. The heuristics turn a shared config's processor cache off while other threads use it
 
-- **Upstream:** `ConfigUtils::SuspendCacheGuard` (`ConfigUtils.h:78-101`) switches a config's
+- **Upstream:** `ConfigUtils::SuspendCacheGuard` (`ConfigUtils.h:166-190` @ v2.6.0) switches a config's
   processor cache off for the heuristics and back on afterwards, through a const pointer
   (`setProcessorCacheFlags` is `const`). The flags are a plain member: another thread using
   the same config meanwhile (making processors, or running the heuristics too) races with the
@@ -6843,7 +6861,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** the library's caches lock a `std::mutex` while they make what they cache: a
   config's processors' cache while `Config::getProcessor` makes a processor
-  (Config.cpp:4830-4832 @ v2.5.2), a file's entry in the file cache while
+  (Config.cpp:5446-5448 @ v2.6.0), a file's entry in the file cache while
   `GetCachedFileAndFormat` loads it (FileTransform.cpp:837), and a processor's caches of its
   optimized, CPU and GPU processors. Making them can call the application's code: a config's
   I/O proxy loading a LUT (`PyConfigIOProxy.getLutData`), a logging function. Code there that
@@ -6905,11 +6923,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-184. A config changed by the code that runs while the library makes a processor of it
 
 - **Upstream:** `Config::getProcessor` locks the config's cache of processors (`std::mutex`)
-  and keeps it locked while it makes the processor (Config.cpp:4830-4832 @ v2.5.2). Making it
+  and keeps it locked while it makes the processor (Config.cpp:5446-5448 @ v2.6.0). Making it
   can call the application's code: a config I/O proxy loading a LUT
   (`PyConfigIOProxy.getLutData`), a logging function. Every change of the config that calls
   `resetCacheIDs` (`setRole`, `addColorSpace`, `removeColorSpace`, `setSearchPath`,
-  `addEnvironmentVar`, `setMajorVersion`, `setActiveDisplays`, ...; Config.cpp:5464-5474),
+  `addEnvironmentVar`, `setMajorVersion`, `setActiveDisplays`, ...; Config.cpp:6095-6113 @ v2.6.0, which since 2.6.0 also resets the
+  color space fingerprints under a mutex of their own),
   `clearProcessorCache` and `setProcessorCacheFlags` flushes or enables that cache through
   `GenericCache::clear` and `enable`, which are `noexcept` and lock the same mutex
   (Caching.h:45-57) on the same thread. MSVC's mutex throws `std::system_error` there, which
@@ -7048,12 +7067,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-246. OpenGL helpers consume caller buffers without their lengths
 
 - **Upstream:** `OglApp::updateImage` passes a raw image pointer to `glTexImage2D`
-  using the separately held image dimensions (`src/libutils/oglapphelpers/oglapp.cpp:73-82
-  @ v2.5.2); `OpenGLBuilder::Uniform::use` passes a vector getter's pointer and a
-  separate size getter's count to `glUniform1fv`/`glUniform1iv` (`glsl.cpp:236-270`).
+  using the separately held image dimensions (`src/libutils/oglapphelpers/oglapp.cpp:89-98
+  @ v2.6.0); `OpenGLBuilder::Uniform::use` passes a vector getter's pointer and a
+  separate size getter's count to `glUniform1fv`/`glUniform1iv` (`glsl.cpp:247-281` @ v2.6.0).
   A short caller allocation, or a size getter larger than the vector allocation,
   makes the driver read beyond that allocation. Texture upload similarly trusts
-  the description's dimensions and pointer (`glsl.cpp:78-146`). These are source-
+  the description's dimensions and pointer (`glsl.cpp:89-157`). These are source-
   established caller-buffer preconditions; no out-of-bounds driver call is run as
   a probe.
 - **Who notices:** callers of the OpenGL reference helpers with inconsistent
@@ -7236,7 +7255,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 ### I-542. CPU/GPU special-value differences in the llvmpipe harness
 
-- **Upstream:** OglApp::initImage selects GL_LINEAR (`oglapp.cpp:65-66 @ v2.5.2`).
+- **Upstream:** OglApp::initImage selects GL_LINEAR (`oglapp.cpp:81-82 @ v2.6.0`).
   Linear sampling can introduce NaN from a zero-weight non-finite texel; matrix
   arithmetic can also propagate Inf*0 into other channels. Independent native
   EGL/GL probes on Mesa25.2.7/LLVM21.1.8 reproduce the behavior without OCIO or
@@ -7269,7 +7288,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 ### I-544. The ACES2 nan_bug regression input is ill-conditioned on the CPU itself
 
-- **Upstream:** `tests/gpu/FixedFunctionOp_test.cpp:756-777 @ v2.5.2` uses gray
+- **Upstream:** `tests/gpu/FixedFunctionOp_test.cpp:757-778 @ v2.6.0` uses gray
   `0.89942779f` (`3f6640e6`) in a PQ/P3 inverse-output chain. It reaches the inverse
   Reinhard remap near its pole (`ACES2/Transform.cpp:1007-1040`). Small pow errors,
   amplified by Aab cancellation, put CPU and llvmpipe on opposite sides of the cap.
