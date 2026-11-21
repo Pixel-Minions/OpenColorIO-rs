@@ -15,11 +15,14 @@ inputs up to 1 in magnitude (and NaN inputs) may differ by at most the entry's `
 exact and NaN bits free; `PQ_TO_LIN` above 1 in magnitude, toward its pole near 1.992, may
 differ in any way. Alpha, fast math and Linux, whose wheel uses `powf`, stay bit-exact. Only
 `Case::compare_pixels` applies it, for the cases marked `Case::w0001`, and a test pins its
-callers. The measurements are in `waivers.toml`.
+callers. The measurements are in `waivers.toml`. The 2.6.0 wheel is the same case: its PQ
+renderers' source didn't change (`FixedFunctionOpCPU.cpp:2227-2288, 2666-2691` @ v2.6.0, the
+lines `waivers.toml` names at v2.5.2), and the 2.6.0 DLL's `__sse2_powf4` kernel has the same
+594 instructions (`docs/ocio-2.6-plan.md`, "Wheel facts").
 
 ## W0002 - NaN transform parameters (owner approved 2026-09-29; extended 2026-10-04)
 
-Every op, both platforms. OCIO 2.5.2 accepts a NaN parameter (YAML `.nan`), and it makes its
+Every op, both platforms. OCIO 2.5.2 and 2.6.0 accept a NaN parameter (YAML `.nan`), and it makes its
 channel NaN for every pixel. Which NaN comes out depends on the operand order MSVC and GCC
 chose, and they differ. In that channel the port must give NaN exactly where the wheel does,
 but the NaN's sign and payload bits may differ. Since 2026-10-04 this also covers the NaN
@@ -505,6 +508,10 @@ checks remain enforced. CI artifacts expire after 30 days: what stays of these r
 `gpu-nonfinite-validation.json` for CI40926626678 and the measured counts in
 `gpu-nonfinite.md` for the root-cause run CI40892696031.
 
+Extended to the 2.6.0 wheel (owner, 2026-11-18, after an identical re-check: commit 43339b7a).
+`waivers.toml` lists the releases a GPU waiver covers (`ocio_version`), and a rule is inactive
+for a wheel whose release it doesn't list.
+
 ## W0014-W0018 - Five individual finite GPU failure pins (owner approved 2026-10-30)
 
 These are five separately approved exact observed failures, not a new class rule.
@@ -535,6 +542,12 @@ their original limits; W0015 pow knockout also passes. For W0017, either pow or
 atan knockout passes, and both reduce error to about3.05e-5. W0018's minimal pow
 substitution reduces its error below3e-6. These identify renderer builtin precision
 and nan_bug's unstable input, with no port or harness defect.
+
+**Releases** (owner, 2026-11-18, commit 43339b7a): W0014, W0016 and W0017 cover the 2.5.2 and
+2.6.0 wheels, whose failures were identical in the re-check. W0015 and W0018 cover 2.5.2 only:
+2.6.0 raised those tests' thresholds, 0.018 to 0.019 and 3e-6 to 3e-5
+(`tests/gpu/FixedFunctionOp_test.cpp:660, 307` @ v2.6.0), and against the 2.6.0 wheel both
+tests pass without a waiver (their recorded maximum errors are 0.01835 and 2.24e-5).
 
 The [debugger report](evidence/gpu-exact-pins/aces2-debug/ACES2-GPU-FINDINGS.md),
 its knockout/injection sources and raw results, the
