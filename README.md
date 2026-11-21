@@ -5,7 +5,7 @@ that gives exactly the same output as the original, down to the last bit.**
 
 OpenColorIO (OCIO) is the color management library of the VFX and animation industry. This
 project ports it to Rust one upstream release at a time, and checks every result against the
-official library. The current release, **1.1.0** (`1.1.0+ocio.2.6.0`), matches
+official library. The current release, **1.1.0** (`1.1.0+ocio.2.6.0`), is the complete port of
 **OpenColorIO 2.6.0**: the same pixels, shaders, text, errors and accepted configs, from Rust and
 from Python.
 
@@ -43,8 +43,8 @@ cpu.apply(&mut image)?;
 | The `PyOpenColorIO`-compatible Python module | Complete: all 392 upstream Python tests pass unmodified |
 | Tools: `ociocheck`, `ociochecklut`, `ociowrite`, `ociobakelut` | Included; the official wheel's other tools aren't |
 
-Of the 835 upstream source files of 2.6.0, 659 are ported and 141 reviewed as not applicable;
-35 still need their 2.6.0 changes ported or recorded ([`upstream-map.toml`](upstream-map.toml)).
+All 835 upstream source files of 2.6.0 are accounted for: 692 ported and 143 reviewed as not
+applicable ([`upstream-map.toml`](upstream-map.toml)).
 What changed, the accepted speed exceptions and the known issues are in the
 [changelog](CHANGELOG.md). 1.0.0 matches OpenColorIO 2.5.2.
 
@@ -58,8 +58,8 @@ A release ships only when all of these hold:
   CPU, at every bit depth, pixel layout, optimization level and SIMD profile.
 - **GPU shaders are byte-identical**, with the same uniforms and textures.
 - **Where OCIO differs between Windows and Linux, the port does too.**
-- **OCIO's own tests pass:** 1,222 of 1,226 C++ tests ported (two reviewed not applicable,
-  two of 2.6.0's still to port), all 270 GPU tests and all 392 Python tests.
+- **OCIO's own tests pass:** 1,224 of 1,226 C++ tests ported (two reviewed not applicable),
+  all 270 GPU tests and all 392 Python tests.
 
 The few exceptions are written down and approved: [waivers](docs/waivers.md) (for example,
 NaN payload bits when a parameter is NaN), [intended deviations](docs/deviations.md) and the

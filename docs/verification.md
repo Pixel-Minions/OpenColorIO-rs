@@ -1,6 +1,6 @@
 # How the port is verified
 
-The port is accepted only on exact parity with the official OpenColorIO 2.5.2 package. The
+The port is accepted only on exact parity with the official OpenColorIO 2.6.0 package. The
 definition of done is [`PLAN.md`](../PLAN.md) section 3; this page explains how it is checked.
 
 ## The rules
@@ -9,7 +9,7 @@ definition of done is [`PLAN.md`](../PLAN.md) section 3; this page explains how 
   `serialize()`, CLF/CTF and other LUT files, baked LUTs, shader code, cache IDs, error and
   warning messages, and Python `repr()` strings.
 - **Pixels are bit-identical to the official library on the same machine.** The reference is
-  the official `opencolorio==2.5.2` Python package, on the same OS and CPU. That holds at every
+  the official `opencolorio==2.6.0` Python package, on the same OS and CPU. That holds at every
   bit depth, pixel layout and optimization level, and for every CPU SIMD variant (SSE2, AVX,
   AVX2, AVX-512) the official build can run.
 - **GPU shaders are byte-identical**, with the same uniforms and textures, in all 10 shading
@@ -41,7 +41,7 @@ definition of done is [`PLAN.md`](../PLAN.md) section 3; this page explains how 
 - **Guardrails nobody can skip** (`cargo xtask ci`). Reference files are locked by hashes.
   Tests can't be disabled or loosened. The count of ported upstream tests can only go up. Every
   upstream source file is tracked in [`upstream-map.toml`](../upstream-map.toml).
-- **GPU execution.** The 264 upstream GPU tests run headlessly on llvmpipe. The port's rendered
+- **GPU execution.** The 270 upstream GPU tests run headlessly on llvmpipe. The port's rendered
   images and shader text are compared bit for bit with the official shader's output on the same
   renderer. Legacy shader and LUT data are also compared with the official library's native API
   in all 10 languages ([coverage](cards/p88-legacy-live-qualification.md)).
@@ -87,9 +87,9 @@ PR 111 adds no computation: it adds re-exports and splits two GPU sweeps into pa
 
 | Suite | Ported | Reviewed not applicable | Total |
 |---|---:|---:|---:|
-| C++ | 1,189 | 2 | 1,191 |
-| GPU | 264 | 0 | 264 |
-| Python | 384 | 0 | 384 |
+| C++ | 1,224 | 2 | 1,226 |
+| GPU | 270 | 0 | 270 |
+| Python | 392 | 0 | 392 |
 
 The two C++ exclusions are the approved [P9-6 decisions](waivers.md). The Python tests run
 unmodified against the port's module, and against the installed wheel, on both platforms. The
