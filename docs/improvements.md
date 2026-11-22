@@ -9,6 +9,10 @@ entry names.
 **The decision for 1.0.0** (owner, 2026-11-03): every entry stays as its status says. 1.0.0
 fixes none of them; fixes are considered after 1.0.0, each as a deviation.
 
+**The decision for 1.1.0** (owner, 2026-11-22): the same. Every entry, those 2.6.0 added or
+changed included, stays as its status says; 1.1.0 fixes none of them. The fixes come after
+1.1.0, each as a deviation.
+
 **The 2.6.0 review** (release 1.1.0, `ocio26-registers`). Every entry's upstream code was read
 again at v2.6.0 (and at the libraries the 2.6.0 wheels bundle: yaml-cpp 0.9.0, expat 2.8.4,
 minizip-ng 4.2.2).
