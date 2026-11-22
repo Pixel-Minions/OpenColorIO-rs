@@ -292,8 +292,9 @@ Rules:
 - Chunks: one coherent unit, under ~600 non-test lines, tests in the same chunk, upstream-map.toml
   updated in the same chunk. Never commit docs/parity.md or docs/ratchet.toml.
 - Gates: `git add <exactly the chunk>`, then `cargo xtask gate --staged --crates <crates>,xtask`
-  while iterating and a full `cargo xtask gate --staged` before the commit, on your worktree's own
-  target; CARGO_BUILD_JOBS=<n>; one cargo process at a time.
+  while iterating and `cargo xtask gate --staged --touched` before the commit (with `--release
+  --rocky` for numeric or platform-sensitive chunks; docs-only chunks run no test steps), on your
+  worktree's own target; CARGO_BUILD_JOBS=<n>; one cargo process at a time.
 - Commit message: first line `<card>: <what> (<WP>)`; body: upstream files and lines ported, the
   tests, the evidence (which checks ran, on which platforms), the mutants; last line
   `Co-Authored-By: <your model/agent name>` (the previous agents used
@@ -388,7 +389,12 @@ bash ../tools/check_register_form.sh <phase0 sha>
 `docs/ratchet.toml`, then runs the full gate on the merge commit: fmt, clippy, ci, cargo-deny,
 the test binaries built, then Rocky's whole gate **in parallel** with Windows' debug and release
 tests, then `oracle check-all` on both platforms. Only then does `phase0` move. It never pushes.
-About 2.5 h with a warm oracle cache, 3.5-4 h cold.
+The tests cover only what changed since `phase0` (the packages `gate --touched` names for the
+merge, plus every package that depends on them; the whole workspace for the oracle, fixtures,
+upstream, the test kit or the build; none for docs); `--retest-all` tests everything (before a
+release). When the merge tree is the branch tip's plus the generated files and a gate recorded a
+full `--release --rocky` pass of that tree covering those tests, the land reuses it and runs no
+test step. A whole-workspace land takes about 2.5 h with a warm oracle cache, 3.5-4 h cold.
 
 Start it detached (agent tools often kill long commands), from PowerShell:
 
@@ -464,8 +470,8 @@ what to relaunch. Nothing is lost except the land's elapsed time.
 
 | Command | Use |
 |---|---|
-| `cargo xtask gate --staged [--crates a,b] [--release] [--rocky]` | gate exactly the staged chunk |
-| `cargo xtask land <branch>` | land a group onto `phase0` (§6) |
+| `cargo xtask gate --staged --touched [--release] [--rocky]` | gate exactly the staged chunk (`--crates a,b` while iterating) |
+| `cargo xtask land <branch> [--retest-all]` | land a group onto `phase0` (§6) |
 | `cargo xtask ci` / `cargo xtask guards` | quick checks (no tests) |
 | `cargo xtask parity` | regenerate `docs/parity.md` locally (never commit it from a chunk) |
 | `cargo xtask upstream-tests` | every upstream test and whether it is ported |

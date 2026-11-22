@@ -28,7 +28,8 @@ Runs, in order, stopping at the first failure:
   deny           with --main: cargo deny check, CI's third check (not in the Rocky pass)
   test           cargo test --workspace --no-fail-fast (debug)
   test-py        cargo test -p ocio-py --features python, against target/py-port's Python,
-                 when the tests cover the workspace or --crates names ocio-py
+                 when the tests cover the workspace, or packages among which are ocio-py,
+                 ocio-py-ffi or a package they depend on
   py-suite       then: cargo xtask py-suite (upstream's Python suite against the port's
                  module; every test function py-port/passing.txt lists must pass)
   test-release   the same in release, with --release (and test-release-py)
@@ -376,6 +377,24 @@ fn record_pass(
     }
 }
 
+/// The packages whose changes the Python steps test: the bindings and their native half.
+const PYTHON_PACKAGES: [&str; 2] = ["ocio-py", "ocio-py-ffi"];
+
+/// Whether the Python steps (test-py, py-suite and their release forms) run: with the tests of
+/// the whole workspace, or of packages among which are ocio-py, ocio-py-ffi or a package they
+/// depend on, directly or not.
+pub(crate) fn python_tested(
+    tests: bool,
+    crates: &[String],
+    graph: &crate::metadata::Graph,
+) -> bool {
+    tests
+        && (crates.is_empty()
+            || crate::metadata::with_dependents(crates, graph)
+                .iter()
+                .any(|p| PYTHON_PACKAGES.contains(&p.as_str())))
+}
+
 /// The test steps of this platform: debug, Python and its suite, then all three in release.
 fn run_tests(
     root: &Path,
@@ -385,7 +404,12 @@ fn run_tests(
     python: &[(&str, std::ffi::OsString)],
 ) -> Result<(), String> {
     let tier = if opts.full { "full" } else { "quick" };
-    let test_py = tests && (opts.crates.is_empty() || opts.crates.iter().any(|c| c == "ocio-py"));
+    let test_py = if tests && !opts.crates.is_empty() {
+        let (_, graph) = crate::metadata::workspace_graph(root)?;
+        python_tested(tests, &opts.crates, &graph)
+    } else {
+        tests
+    };
     if tests {
         runner.step(
             "test",
@@ -657,8 +681,8 @@ pub(crate) enum Touched {
 ///    `xtask ci` still run; cargo-deny, release and Rocky Linux 9 run on land's merge);
 /// 5. anything else: the whole workspace, to be safe.
 ///
-/// Packages that depend on a changed one aren't added: clippy builds them, and land's merge
-/// commit runs every test.
+/// Packages that depend on a changed one aren't added here: clippy builds them, and `xtask
+/// land` adds them to the tests of its merge commit (`land::land_tests`).
 pub(crate) fn touched_tests(files: &[&str], packages: &[crate::metadata::Package]) -> Touched {
     /// Inputs of every package's tests: the oracle and its data, the upstream sources and
     /// test files, the test kit and its waivers, the build's configuration.
@@ -1509,6 +1533,45 @@ mod tests {
                 Touched::Packages(vec![p.name.clone()])
             };
             assert_eq!(touched_tests(&[&file], &packages), want);
+        }
+    }
+
+    /// The Python steps run for the packages the bindings are or depend on, in this workspace.
+    #[test]
+    fn python_steps_follow_the_bindings_dependencies() {
+        let (_, graph) = crate::metadata::workspace_graph(&crate::root()).unwrap();
+        let py = |names: &[&str]| {
+            let names: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+            python_tested(true, &names, &graph)
+        };
+        assert!(python_tested(true, &[], &graph));
+        assert!(!python_tested(false, &[], &graph));
+        assert!(!python_tested(false, &["ocio-py".to_string()], &graph));
+        for yes in [
+            &["ocio-py"][..],
+            &["ocio-py-ffi"][..],
+            &["opencolorio-rs-ops"][..],
+            &["opencolorio-rs-formats"][..],
+            &["opencolorio-rs-gpu"][..],
+            &["opencolorio-rs"][..],
+            &["xtask", "opencolorio-rs"][..],
+        ] {
+            assert!(py(yes), "{yes:?}");
+        }
+        // The native half counts by itself, too.
+        let ffi_only: crate::metadata::Graph = vec![
+            ("ocio-py-ffi".into(), Vec::new()),
+            ("xtask".into(), Vec::new()),
+        ];
+        assert!(python_tested(true, &["ocio-py-ffi".to_string()], &ffi_only));
+        assert!(!python_tested(true, &["xtask".to_string()], &ffi_only));
+        for no in [
+            &["xtask"][..],
+            &["ocio-tools"][..],
+            &["ocio-gpu-exec"][..],
+            &["xtask", "ocio-tools"][..],
+        ] {
+            assert!(!py(no), "{no:?}");
         }
     }
 

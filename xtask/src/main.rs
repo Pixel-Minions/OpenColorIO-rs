@@ -137,8 +137,7 @@ fn main() -> ExitCode {
             print!("{}", land::USAGE);
             Ok(())
         }
-        ["land", rest @ ..] => land::parse(rest)
-            .and_then(|(branch, rocky, per_commit)| land::run(&branch, rocky, per_commit)),
+        ["land", rest @ ..] => land::parse(rest).and_then(|opts| land::run(&opts)),
         ["clean-scratch", rest @ ..] => scratch::run(rest),
         ["test-shard", "--help" | "-h"] => {
             print!("{}", shards::USAGE);
