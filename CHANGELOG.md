@@ -72,10 +72,19 @@ with `PyOpenColorIO.__version__` `2.6.0`.
 
 ### Known issues
 
-- **Emulated CPUs.** The full emulated-CPU workflow hasn't run on 1.1.0: GitHub Actions wasn't
-  available. What ran locally is in
+- **Emulated CPUs.** The full emulated-CPU workflow hasn't run on 1.1.0, because GitHub Actions
+  wasn't available: it waits for CI. A part of it ran locally. What ran, and each attempt that
+  didn't pass, is in
   [`docs/verification.md`](https://github.com/Pixel-Minions/OpenColorIO-rs/blob/main/docs/verification.md).
-- **An oracle crash under emulation, on Windows,** seen with the 2.5.2 wheel (1.0.0, below).
+- **Crashes under emulation, on Windows, with the 2.6.0 wheel.** The wheel's native helper
+  crashed five times with `0xC0000142`, and Pin logged that it failed to inject into child
+  processes. Four of those crashes showed as a mismatch inside the oracle, between the wheel and
+  that helper, before any comparison with the port. The oracle's process also died twice on a
+  Pin assertion. Each of those tests passed later, natively too. Five Pin lock logs couldn't be
+  tied to a test. The causes aren't known.
+- **A hang under emulation, open for CI.** `api_formats_oracle`, with its tests running
+  concurrently, hung on `nhm` on Windows and on Rocky Linux 9. One test at a time it passed
+  natively and on the five emulated CPUs. The cause isn't known.
 
 ## 1.0.0 (2026-11-05)
 
