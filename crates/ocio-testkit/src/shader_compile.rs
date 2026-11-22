@@ -35,8 +35,10 @@ use crate::gpu::{GpuLanguage, Shader};
 /// The directory that receives the corpus. When it is unset nothing is recorded.
 pub const CORPUS_ENV: &str = "OCIO_RS_SHADER_CORPUS";
 
-/// Upstream's GPU tests (`tests/gpu/*_test.cpp` @ v2.5.2, `docs/cards/phase7.md` WP 7.3).
-pub const SUITE_TESTS: usize = 264;
+/// Upstream's GPU tests (`tests/gpu/*_test.cpp` @ v2.6.0, `docs/cards/phase7.md` WP 7.3): 2.6.0
+/// adds six to 2.5.2's 264 (`FixedFunction.style_aces2_rgb_to_hmj_{fwd,inv}`,
+/// `GradingHueCurve.style_vid_{fwd,rev}{,_dynamic}`).
+pub const SUITE_TESTS: usize = 270;
 
 /// The GLSL languages glslang checks (P7-5).
 pub const GLSL_LANGUAGES: [GpuLanguage; 6] = [
@@ -83,7 +85,7 @@ pub const FAMILY_TARGETS: [&str; 15] = [
 /// Where a captured shader comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Corpus {
-    /// Upstream's 264 GPU tests, keyed `<group>.<name>`.
+    /// Upstream's 270 GPU tests, keyed `<group>.<name>`.
     Suite,
     /// The family oracle tests, keyed by test target.
     Family,
@@ -283,7 +285,7 @@ impl Cause {
     }
 
     /// Whether the cause can explain a failure of `corpus` in `language`, and must explain one:
-    /// [`check`] fails when such a cause explains none. Upstream's 264 tests hold no non-finite
+    /// [`check`] fails when such a cause explains none. Upstream's 270 tests hold no non-finite
     /// or very large parameter and no such name, so outside GLSL ES 1.0 no cause applies to them.
     pub fn applies(self, corpus: Corpus, language: GpuLanguage) -> bool {
         match self {
