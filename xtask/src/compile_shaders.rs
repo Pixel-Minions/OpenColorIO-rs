@@ -21,7 +21,7 @@ platform's compilers: glslang in Rocky Linux 9, the Windows SDK's fxc and dxc on
 it on Rocky through `scripts/rocky9.sh`.
 
 Each <check> is a prefix of the test names in crates/ocio-gpu-exec/tests/compile_glsl.rs or
-compile_hlsl.rs: suite_* (upstream's 264 GPU tests) or family_* (crates/ocio-gpu's *_oracle
+compile_hlsl.rs: suite_* (upstream's 270 GPU tests) or family_* (crates/ocio-gpu's *_oracle
 tests). The compilers' controls (control_*) always run. Only the corpora the checks name are
 captured. Writes target/shader-corpus/report/<check>.json, and fails if a shader fails for
 anything but a registered cause of ocio_testkit::shader_compile (P7-9), or if such a cause no
