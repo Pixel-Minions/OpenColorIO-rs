@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! `cargo xtask land <branch> [--no-rocky] [--per-commit]`: lands a card branch on `phase0`.
+//! `cargo xtask land <branch> [--no-rocky] [--per-commit] [--retest-all]`: lands a card branch
+//! on `phase0`.
 //!
 //! From the main checkout, on `phase0`, with a clean tree:
 //! 1. replays the branch's commits onto `phase0` in a temporary worktree (`target/land/wt`),
@@ -14,14 +15,23 @@
 //!    this platform: fmt, clippy (the whole workspace, all targets) and `xtask ci`, and the
 //!    tests of only the packages the commit changes (the whole workspace for changes to the
 //!    oracle, fixtures, upstream, the test kit or the build; none for documentation;
-//!    `gate::touched_tests`). Release, Rocky Linux 9 and every test run once, on the merge
-//!    commit, in step 4. Every replay merges `docs/improvements.md` entry by entry
+//!    `gate::touched_tests`). Release and Rocky Linux 9 run once, on the merge commit, in
+//!    step 4. Every replay merges `docs/improvements.md` entry by entry
 //!    (`xtask merge-register`, the `ocio-register` merge driver that `.gitattributes` names);
 //! 2. merges the result with `--no-ff`, listing each chunk's subject, and checks that the
 //!    merged register equals the one rebuilt entry by entry from the branch's own commits;
 //! 3. regenerates `docs/parity.md` and `docs/ratchet.toml` into that merge commit;
 //! 4. runs the full gate on it (debug and release, `xtask ci --main`, cargo-deny, Rocky) and
-//!    `xtask oracle check-all`;
+//!    `xtask oracle check-all`. phase0 passed a land at every step, so the gate's tests cover
+//!    only what changed since phase0 (owner, 2026-11-22; [`land_tests`]): the packages
+//!    `gate::touched_tests` names for the merge commit's changes, and every package that
+//!    depends on them; the whole workspace when they change the oracle, fixtures, upstream,
+//!    the test kit or the build, or with `--retest-all`; no test step for documentation.
+//!    fmt, clippy, `ci --main`, cargo-deny and `oracle check-all` run on every land. When the
+//!    merge tree is the branch tip's with the generated files, and a gate recorded a pass of
+//!    the tip's tree that covers these tests (`passes`: the full tier, release, Rocky when the
+//!    land runs it, the same rustc and CPU), the gate runs no test step (`--no-tests`) and the
+//!    land names the record it reused;
 //! 5. fast-forwards `phase0` to it and prints the push steps. It never pushes.
 //!
 //! `phase0` only moves once every step has passed. On a failure the temporary worktree stays
@@ -31,7 +41,9 @@ use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use crate::gate::{self, Kind, Runner};
+use crate::gate::{self, Kind, Runner, Touched};
+use crate::metadata;
+use crate::passes::{self, Tested};
 use crate::register_merge;
 
 /// The local integration branch; `main` on GitHub fast-forwards to it.
@@ -46,7 +58,7 @@ pub(crate) const LAND_LOCK_ENV: &str = "OCIO_RS_LAND_LOCK";
 pub(crate) const LAND_ID_ENV: &str = "OCIO_RS_LAND_ID";
 
 pub(crate) const USAGE: &str = "\
-cargo xtask land <branch> [--no-rocky] [--per-commit]
+cargo xtask land <branch> [--no-rocky] [--per-commit] [--retest-all]
 
 Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
   1. replays its commits onto phase0 in target/land/wt, first without gates: it stops if a
@@ -57,7 +69,7 @@ Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
      with `git rebase --exec \"cargo xtask gate --touched\"`: every commit is gated in debug on
      this platform, with fmt, clippy and ci over the whole workspace and the tests of the
      packages it changes only (`cargo xtask gate --help`; each chunk already passed its own
-     gate; release, Rocky Linux 9 and every test run on the merge commit, step 4); commits
+     gate; release and Rocky Linux 9 run on the merge commit, step 4); commits
      already on top of phase0 keep their hashes. For a branch with merge commits, a first
      replay without gates must give the tree that merging the branch as it is gives (a
      replay drops merge commits, and what only they carry); otherwise it stops at once.
@@ -66,37 +78,65 @@ Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
      commits
   3. regenerates docs/parity.md and docs/ratchet.toml into the merge commit
   4. runs `cargo xtask gate --full --release --main --rocky` (with cargo-deny) and
-     `xtask oracle check-all` on the merge commit
+     `xtask oracle check-all` on the merge commit. phase0 passed a land at every step, so
+     its tests cover only what changed since phase0: the packages `gate --touched` would
+     test for the merge commit's changes, and every package that depends on them (the
+     whole workspace for the oracle, fixtures, upstream, the test kit or the build, or with
+     --retest-all; no test step for documentation), on both platforms, with the Python
+     steps when they include the bindings or what they depend on. Its test steps are
+     skipped (--no-tests) when the merge commit's tree is the branch tip's with the
+     generated files, and a gate recorded a pass of that tree with the full tier, release,
+     Rocky Linux 9 (unless --no-rocky), the same rustc and CPU, and these tests; land names
+     the record it reuses
   5. fast-forwards phase0 to it, and prints the push steps. It never pushes.
 
   --no-rocky     skip Rocky Linux 9 everywhere (Docker unavailable); CI still runs it
   --per-commit   also gate every replayed commit (`gate --touched`), as lands did before
                  2026-10-24
+  --retest-all   test the whole workspace, whatever changed (before a release)
 
 One land runs at a time (an OS lock on target/land/lock). If a land is killed, the rebase and
 gate it started carry on until the gate's next step, which sees that land has exited and
 stops; a new land waits for no one, but refuses to start while such a gate still runs.
 ";
 
-pub(crate) fn parse(args: &[&str]) -> Result<(String, bool, bool), String> {
+/// What `cargo xtask land` was asked to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Options {
+    pub(crate) branch: String,
+    pub(crate) rocky: bool,
+    pub(crate) per_commit: bool,
+    /// Test the whole workspace, whatever changed.
+    pub(crate) retest_all: bool,
+}
+
+pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
     let mut branch = None;
     let mut rocky = true;
     let mut per_commit = false;
+    let mut retest_all = false;
     for &arg in args {
         match arg {
             "--rocky" => rocky = true,
             "--no-rocky" => rocky = false,
             "--per-commit" => per_commit = true,
+            "--retest-all" => retest_all = true,
             _ if arg.starts_with('-') => return Err(format!("unknown land option `{arg}`")),
             _ if branch.is_none() => branch = Some(arg.to_string()),
             _ => return Err(format!("land takes one branch\n\n{USAGE}")),
         }
     }
     let branch = branch.ok_or_else(|| format!("land needs a branch\n\n{USAGE}"))?;
-    Ok((branch, rocky, per_commit))
+    Ok(Options {
+        branch,
+        rocky,
+        per_commit,
+        retest_all,
+    })
 }
 
-pub(crate) fn run(branch: &str, rocky: bool, per_commit: bool) -> Result<(), String> {
+pub(crate) fn run(opts: &Options) -> Result<(), String> {
+    let (branch, rocky, per_commit) = (opts.branch.as_str(), opts.rocky, opts.per_commit);
     let root = crate::root();
     let git = |args: &[&str]| crate::git(&root, args).map(|s| s.trim().to_string());
 
@@ -285,6 +325,7 @@ pub(crate) fn run(branch: &str, rocky: bool, per_commit: bool) -> Result<(), Str
         build: &build,
         message_file: land_dir.join("MERGE_MSG"),
         rocky,
+        retest_all: opts.retest_all,
         lock: &lock,
         driver: &driver,
     };
@@ -513,6 +554,8 @@ struct Landing<'a> {
     build: &'a Path,
     message_file: PathBuf,
     rocky: bool,
+    /// Test the whole workspace (`--retest-all`), not only what changed since phase0.
+    retest_all: bool,
     lock: &'a Lock,
     /// The `git -c` options of the register's merge driver ([`register_driver`]).
     driver: &'a [String],
@@ -586,15 +629,74 @@ impl Landing<'_> {
         let landed = crate::git(wt, &["rev-parse", "HEAD"])?.trim().to_string();
         println!("land: merge commit {}", short(&landed));
 
-        // 4. The full gate on the merge commit, and the fixtures on each platform.
+        // 4. The full gate on the merge commit, and the fixtures on each platform. Its tests
+        // cover what changed since phase0, which passed a land at every step (owner,
+        // 2026-11-22), and are skipped when the branch's own gate passed them on the same tree.
+        let files = crate::git(wt, &["diff", "--name-only", base, "HEAD"])?;
+        let files: Vec<&str> = files.lines().filter(|f| !f.is_empty()).collect();
+        let (packages, graph) = metadata::workspace_graph(wt)?;
+        let tested = match land_tests(&files, &packages, &graph, self.retest_all) {
+            Touched::Nothing => {
+                println!(
+                    "land: the {} file(s) changed since {INTEGRATION} call for no test step",
+                    files.len()
+                );
+                Tested::Nothing
+            }
+            Touched::Workspace(why) => {
+                println!("land: the tests cover the whole workspace ({why})");
+                Tested::Workspace
+            }
+            Touched::Packages(names) => {
+                println!(
+                    "land: the tests cover the packages changed since {INTEGRATION} and those \
+                     that depend on them: {}",
+                    names.join(", ")
+                );
+                Tested::Packages(names)
+            }
+        };
+        let (tests, crates) = match &tested {
+            Tested::Nothing => (false, Vec::new()),
+            Tested::Workspace => (true, Vec::new()),
+            Tested::Packages(names) => (true, names.clone()),
+        };
+        let reuse = if tests {
+            self.reusable(tip, &tested)
+        } else {
+            Err("nothing to test".into())
+        };
+        let scope = match reuse {
+            Ok(record) => {
+                println!(
+                    "land: the merge commit's tree is {}'s with the generated files; reusing the \
+                     gate's pass of that tree from {} (tests: {}; logs: {}), so the gate runs \
+                     no test step",
+                    short(tip),
+                    record.time,
+                    record.tested.describe(),
+                    record.log_dir
+                );
+                gate::test_scope_args(false, &[])
+            }
+            Err(why) => {
+                if tests {
+                    println!("land: no recorded pass to reuse: {why}");
+                }
+                gate::test_scope_args(tests, &crates)
+            }
+        };
         let rocky = if self.rocky { " --rocky" } else { "" };
         println!(
-            "land: cargo xtask gate --full --release --main{rocky} on {}",
+            "land: cargo xtask gate --full --release --main{rocky}{}{} on {}",
+            if scope.is_empty() { "" } else { " " },
+            scope.join(" "),
             short(&landed)
         );
         let mut full = Command::new(cargo());
         full.current_dir(wt)
-            .args(["xtask", "gate", "--full", "--release", "--main"]);
+            .args(["xtask", "gate", "--full", "--release", "--main"])
+            .args(&scope);
         if self.rocky {
             full.arg("--rocky");
         }
@@ -625,6 +727,26 @@ impl Landing<'_> {
         Ok(landed)
     }
 
+    /// The recorded pass of the branch tip `tip`'s tree that covers the tests `tested` of the
+    /// merge commit (HEAD of the worktree), or why there is none ([`reusable`]).
+    fn reusable(&self, tip: &str, tested: &Tested) -> Result<passes::Record, String> {
+        let changed = crate::git(self.wt, &["diff", "--name-only", tip, "HEAD"])?;
+        let changed: Vec<&str> = changed.lines().filter(|l| !l.is_empty()).collect();
+        let tree = crate::git(
+            self.wt,
+            &["rev-parse", "--verify", &format!("{tip}^{{tree}}")],
+        )?;
+        let need = passes::Need {
+            tree: tree.trim().to_string(),
+            tested: tested.clone(),
+            rocky: self.rocky,
+            rustc: passes::rustc_version(self.wt)?,
+            machine: ocio_testkit::oracle::machine_description(),
+        };
+        let records = passes::read(&passes::dir(self.wt)?, &need.tree)?;
+        reusable(&changed, &records, &need).cloned()
+    }
+
     /// Runs `cmd` with land's environment and its output on the console.
     fn run(&self, cmd: &mut Command, what: &str) -> Result<(), String> {
         let status = land_env(cmd, self.build, self.lock)
@@ -636,6 +758,51 @@ impl Landing<'_> {
             Err(format!("{what} failed ({status})"))
         }
     }
+}
+
+/// The tests of a land whose merge commit changes `files` since phase0: with `retest_all`, the
+/// whole workspace; otherwise what [`gate::touched_tests`] calls for, plus every workspace
+/// package that depends on a package it names, directly or not ([`metadata::with_dependents`]).
+/// phase0 passed a land at every step, so what didn't change passed already.
+pub(crate) fn land_tests(
+    files: &[&str],
+    packages: &[metadata::Package],
+    graph: &metadata::Graph,
+    retest_all: bool,
+) -> Touched {
+    if retest_all {
+        return Touched::Workspace("--retest-all".into());
+    }
+    match gate::touched_tests(files, packages) {
+        Touched::Packages(names) => Touched::Packages(metadata::with_dependents(&names, graph)),
+        other => other,
+    }
+}
+
+/// The pass of the branch tip's tree, among its `records`, that lets the land skip its test
+/// steps: the merge commit's tree differs from the tip's only in the generated files (`changed`,
+/// `git diff --name-only <tip> <merge>`), and the record covers `need` ([`passes::covering`]).
+/// Otherwise why not.
+pub(crate) fn reusable<'a>(
+    changed: &[&str],
+    records: &'a [passes::Record],
+    need: &passes::Need,
+) -> Result<&'a passes::Record, String> {
+    if !passes::only_generated(changed) {
+        let other: Vec<&str> = changed
+            .iter()
+            .copied()
+            .filter(|f| !passes::GENERATED.contains(f))
+            .collect();
+        return Err(format!(
+            "the merge commit's tree differs from the branch tip's in {} file(s) besides the \
+             generated ones ({}{})",
+            other.len(),
+            other.iter().take(3).copied().collect::<Vec<_>>().join(", "),
+            if other.len() > 3 { ", ..." } else { "" }
+        ));
+    }
+    passes::covering(records, need)
 }
 
 /// `Merge <branch> (<n> chunks)`, the chunk subjects, and the trailers.
@@ -941,23 +1108,31 @@ mod tests {
 
     #[test]
     fn parses_arguments() {
+        let opts = |rocky, per_commit, retest_all| Options {
+            branch: "card/x".into(),
+            rocky,
+            per_commit,
+            retest_all,
+        };
         // Rocky Linux 9 is the default; --no-rocky opts out.
-        assert_eq!(
-            parse(&["card/x"]).unwrap(),
-            ("card/x".to_string(), true, false)
-        );
+        assert_eq!(parse(&["card/x"]).unwrap(), opts(true, false, false));
         assert_eq!(
             parse(&["--rocky", "card/x"]).unwrap(),
-            ("card/x".to_string(), true, false)
+            opts(true, false, false)
         );
         assert_eq!(
             parse(&["card/x", "--no-rocky"]).unwrap(),
-            ("card/x".to_string(), false, false)
+            opts(false, false, false)
         );
         // The plain replay lands; --per-commit also gates every replayed commit.
         assert_eq!(
             parse(&["card/x", "--per-commit"]).unwrap(),
-            ("card/x".to_string(), true, true)
+            opts(true, true, false)
+        );
+        // The tests cover what changed since phase0; --retest-all, the whole workspace.
+        assert_eq!(
+            parse(&["--retest-all", "card/x"]).unwrap(),
+            opts(true, false, true)
         );
         assert!(parse(&[]).is_err());
         assert!(parse(&["a", "b"]).is_err());
@@ -1034,6 +1209,154 @@ mod tests {
         );
         check_replayed(dir, &r.main, &r.card, &r.replay).unwrap();
         check_register(dir, &r.main, &r.card, &r.replay).unwrap();
+    }
+
+    /// What a land of this workspace tests for a merge commit that changes `files` since
+    /// phase0: the tests, whether the Python steps run, and the gate's options.
+    fn land_of(files: &[&str], retest_all: bool) -> (Touched, bool, Vec<String>) {
+        let (packages, graph) = metadata::workspace_graph(&crate::root()).unwrap();
+        let mut files = files.to_vec();
+        // The merge commit's regenerated files.
+        files.extend(passes::GENERATED);
+        let touched = land_tests(&files, &packages, &graph, retest_all);
+        let (tests, crates) = match &touched {
+            Touched::Nothing => (false, Vec::new()),
+            Touched::Workspace(_) => (true, Vec::new()),
+            Touched::Packages(names) => (true, names.clone()),
+        };
+        let python = gate::python_tested(tests, &crates, &graph);
+        (touched, python, gate::test_scope_args(tests, &crates))
+    }
+
+    #[test]
+    fn a_land_tests_what_changed_since_phase0() {
+        // (a) xtask only: xtask's tests, on both platforms; no Python step.
+        assert_eq!(
+            land_of(&["xtask/src/gate.rs", "xtask/src/land.rs"], false),
+            (
+                Touched::Packages(vec!["xtask".into()]),
+                false,
+                vec!["--crates".into(), "xtask".into()]
+            )
+        );
+        // (b) documentation only: no test step.
+        assert_eq!(
+            land_of(&["docs/orchestration.md", "README.md", "CLAUDE.md"], false),
+            (Touched::Nothing, false, vec!["--no-tests".into()])
+        );
+        // (c) the ops crate: it and every package that depends on it, the Python steps too.
+        let (packages, _) = metadata::workspace_graph(&crate::root()).unwrap();
+        let dependents: Vec<String> = packages
+            .iter()
+            .map(|p| p.name.clone())
+            .filter(|n| !["ocio-testkit", "ocio-py-ffi", "xtask"].contains(&n.as_str()))
+            .collect();
+        assert!(
+            dependents.contains(&"ocio-py".to_string()),
+            "{dependents:?}"
+        );
+        assert!(
+            dependents.contains(&"ocio-tools".to_string()),
+            "{dependents:?}"
+        );
+        assert_eq!(
+            land_of(&["crates/ocio-ops/src/ops/log/log_op_cpu.rs"], false),
+            (
+                Touched::Packages(dependents.clone()),
+                true,
+                vec!["--crates".into(), dependents.join(",")]
+            )
+        );
+        // (d) the oracle: the whole workspace.
+        assert_eq!(
+            land_of(&["oracle/ocio_oracle/text.py", "xtask/src/gate.rs"], false),
+            (
+                Touched::Workspace("oracle/ocio_oracle/text.py".into()),
+                true,
+                Vec::new()
+            )
+        );
+        // --retest-all: the whole workspace, whatever changed.
+        for files in [&["docs/orchestration.md"][..], &["xtask/src/gate.rs"][..]] {
+            assert_eq!(
+                land_of(files, true),
+                (Touched::Workspace("--retest-all".into()), true, Vec::new())
+            );
+        }
+        // Two packages: their dependents, once each.
+        let (touched, python, _) =
+            land_of(&["crates/ocio-tools/src/lib.rs", "xtask/build.rs"], false);
+        assert_eq!(
+            touched,
+            Touched::Packages(vec!["ocio-tools".into(), "xtask".into()])
+        );
+        assert!(!python);
+    }
+
+    /// A full pass of tree `t1`, of the whole workspace, and a land of that tree that needs it.
+    fn pass_and_need() -> (passes::Record, passes::Need) {
+        let pass = passes::Record {
+            tree: "t1".into(),
+            commit: "c1".into(),
+            time: "20261122T051209Z".into(),
+            log_dir: "D:/w/target/gate-staged/wt/target/gate-logs/20261122T051209Z".into(),
+            full: true,
+            release: true,
+            rocky: true,
+            main: false,
+            tested: Tested::Workspace,
+            rustc: "rustc 1.98.1 (abc 2026-10-01)".into(),
+            machine: "windows-x86_64 cpu=X features=sse2".into(),
+        };
+        let need = passes::Need {
+            tree: "t1".into(),
+            tested: Tested::Workspace,
+            rocky: true,
+            rustc: pass.rustc.clone(),
+            machine: pass.machine.clone(),
+        };
+        (pass, need)
+    }
+
+    /// The land skips its test steps only for the branch tip's tree plus the generated files,
+    /// with a record that covers it.
+    #[test]
+    fn a_land_reuses_a_covering_pass_of_the_tips_tree() {
+        let (pass, need) = pass_and_need();
+        let records = vec![pass.clone()];
+        for changed in [
+            &[][..],
+            &["docs/parity.md"][..],
+            &["docs/parity.md", "docs/ratchet.toml"][..],
+        ] {
+            assert_eq!(reusable(changed, &records, &need), Ok(&records[0]));
+        }
+        // phase0 moved since the branch left it: the merge tree has more than the tip's.
+        let moved = reusable(
+            &["docs/parity.md", "crates/ocio/src/config.rs", "README.md"],
+            &records,
+            &need,
+        )
+        .unwrap_err();
+        assert!(
+            moved.contains("2 file(s) besides the generated ones"),
+            "{moved}"
+        );
+        assert!(
+            moved.contains("crates/ocio/src/config.rs, README.md)"),
+            "{moved}"
+        );
+        // A quick pass, or none, isn't reused.
+        let quick = passes::Record {
+            full: false,
+            ..pass
+        };
+        let why = reusable(&[], std::slice::from_ref(&quick), &need).unwrap_err();
+        assert!(why.contains("the quick tier"), "{why}");
+        assert_eq!(
+            reusable(&[], &[], &need).unwrap_err(),
+            "no recorded pass of this tree"
+        );
     }
 
     #[test]
