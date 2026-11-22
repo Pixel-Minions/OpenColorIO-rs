@@ -5,7 +5,8 @@
 //!
 //! Every step is a child process whose exit status is checked. Its full output goes to
 //! `target/gate-logs/<UTC time>/<step>.log`; the gate prints one summary line per step and stops
-//! at the first failure, with a non-zero exit code.
+//! at the first failure, with a non-zero exit code. A top-level gate that passes records the
+//! pass by the git tree it tested (`passes`), for `cargo xtask land` to reuse.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -14,8 +15,8 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) const USAGE: &str = "\
-cargo xtask gate [--staged] [--crates a,b | --touched] [--release] [--rocky] [--quick|--full]
-                 [--main] [--auto]
+cargo xtask gate [--staged] [--crates a,b | --touched | --no-tests] [--release] [--rocky]
+                 [--quick|--full] [--main] [--auto]
 
 Runs, in order, stopping at the first failure:
   fmt            cargo xtask fmt-check: cargo fmt --check, one workspace package at a time
@@ -44,13 +45,15 @@ Runs, in order, stopping at the first failure:
                  the workspace); a package's name or its directory's (ocio-ops for
                  opencolorio-rs-ops)
   --touched      run the test steps only for the packages whose files the HEAD commit
-                 changes (with --staged: the staged changes); `xtask land` gates each
-                 replayed commit so. The whole workspace when it changes oracle/, fixtures/,
-                 upstream/, corpus/, .cargo/, crates/ocio-testkit/, a Cargo.toml, Cargo.lock,
-                 rust-toolchain.toml, waivers.toml, .gitattributes or a file outside these
-                 rules; xtask for upstream-map.toml and scripts/; no test step when it
-                 changes only docs/, .github/, tools/, Markdown, deny.toml, rustfmt.toml,
-                 LICENSE or NOTICE
+                 changes (with --staged: the staged changes), as chunks are gated (`xtask
+                 land --per-commit` gates each replayed commit so). The whole workspace
+                 when it changes oracle/, fixtures/, upstream/, corpus/, .cargo/,
+                 crates/ocio-testkit/, a Cargo.toml, Cargo.lock, rust-toolchain.toml,
+                 waivers.toml, .gitattributes or a file outside these rules; xtask for
+                 upstream-map.toml and scripts/; no test step when it changes only docs/,
+                 .github/, tools/, Markdown, deny.toml, rustfmt.toml, LICENSE or NOTICE
+  --no-tests     run no test step (`xtask land` when nothing it tests changed, or when it
+                 reuses a recorded pass)
   --quick        tests run the quick tier (OCIO_RS_TIER=quick): the default, per chunk
   --full         tests run the full tier (OCIO_RS_TIER=full), as `xtask land` does
   --main         check what `main` requires: the ci step also checks that
@@ -59,6 +62,13 @@ Runs, in order, stopping at the first failure:
                  `xtask land` uses it on the merge commit
   --auto         for `xtask land`: add --release, and keep --rocky, only when the HEAD commit
                  touches platform-sensitive files (Rust sources, the oracle, fixtures, scripts)
+
+A gate that passes every step (not the Rocky pass) records the pass by the git tree it
+tested, in <git common dir>/ocio-rs-gate-passes/<tree>.toml: the tier, --release, --rocky,
+--main, the packages the tests covered, rustc -vV's version line and this machine's CPU.
+`xtask land` reuses a full pass of a branch's tip. Only a tree that is exactly what was tested
+is recorded: HEAD's (with --staged, the temporary commit's) with nothing uncommitted or
+untracked.
 
 The ci step's ratchet baseline is docs/ratchet.toml where HEAD left phase0 (their merge base;
 else origin/main's), saved as base-ratchet.toml next to the logs for the Rocky pass too.
@@ -73,6 +83,8 @@ pub(crate) struct Options {
     pub(crate) crates: Vec<String>,
     /// Limit the test steps to the packages the HEAD commit changes (`touched_tests`).
     pub(crate) touched: bool,
+    /// Run no test step.
+    pub(crate) no_tests: bool,
     pub(crate) release: bool,
     pub(crate) rocky: bool,
     /// The full test tier instead of the quick one.
@@ -117,6 +129,7 @@ pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
             "--main" => opts.main = true,
             "--auto" => opts.auto = true,
             "--touched" => opts.touched = true,
+            "--no-tests" => opts.no_tests = true,
             "--staged" => opts.staged = true,
             "--quick" | "--full" => {
                 if tier.is_some_and(|t| t != arg) {
@@ -143,8 +156,9 @@ pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
             _ => return Err(format!("unknown gate option `{arg}`\n\n{USAGE}")),
         }
     }
-    if opts.touched && !opts.crates.is_empty() {
-        return Err("--crates and --touched are exclusive".into());
+    let limits = [!opts.crates.is_empty(), opts.touched, opts.no_tests];
+    if limits.iter().filter(|on| **on).count() > 1 {
+        return Err("--crates, --touched and --no-tests are exclusive".into());
     }
     Ok(opts)
 }
@@ -159,11 +173,18 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         *name = package_named(name, &packages)?;
     }
     let nested = opts.log_dir.is_some();
+    // The tree this gate tests, for its pass record (the Rocky pass records none).
+    let start = if nested {
+        Ok(None)
+    } else {
+        crate::passes::tree_state(&root)
+    };
     if opts.auto {
         resolve_auto(&root, &mut opts)?;
     }
-    // Whether the test steps run: not when --touched finds nothing they test.
-    let mut tests = true;
+    // Whether the test steps run: not with --no-tests, or when --touched finds nothing they
+    // test.
+    let mut tests = !opts.no_tests;
     if opts.touched {
         tests = resolve_touched(&root, &mut opts.crates)?;
     }
@@ -268,7 +289,7 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         runner.step("test-build", build, Kind::Plain)?;
     }
     let rocky = if opts.rocky {
-        let cmd = rocky_command(&root, &opts, &log_dir, base_file.as_deref())?;
+        let cmd = rocky_command(&root, &opts, tests, &log_dir, base_file.as_deref())?;
         let mut nested = Runner::new(log_dir.clone());
         Some(std::thread::spawn(move || {
             let result = nested.step("rocky", cmd, Kind::Nested);
@@ -295,8 +316,64 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
             runner.steps,
             duration(runner.started.elapsed())
         );
+        record_pass(&root, &opts, tests, &start, &log_dir);
     }
     Ok(())
+}
+
+/// What the test steps covered.
+pub(crate) fn tested(tests: bool, crates: &[String]) -> crate::passes::Tested {
+    use crate::passes::Tested;
+    match (tests, crates) {
+        (false, _) => Tested::Nothing,
+        (true, []) => Tested::Workspace,
+        (true, names) => Tested::Packages(names.to_vec()),
+    }
+}
+
+/// Records this gate's pass (`passes`), or says in one line why not; never an error.
+fn record_pass(
+    root: &Path,
+    opts: &Options,
+    tests: bool,
+    start: &Result<Option<crate::passes::TreeState>, String>,
+    log_dir: &Path,
+) {
+    use crate::passes::{self, Record, Recorded};
+    let shown = |path: &Path| crate::plain_path(path).to_string_lossy().replace('\\', "/");
+    let start = match start {
+        Ok(start) => start.as_ref(),
+        Err(e) => {
+            println!("gate: warning: could not record this pass: {e}");
+            return;
+        }
+    };
+    let result = passes::dir(root).and_then(|dir| {
+        passes::record(root, &dir, start, |state| {
+            Ok(Record {
+                tree: state.tree.clone(),
+                commit: state.commit.clone(),
+                time: utc_stamp(SystemTime::now()),
+                log_dir: shown(log_dir),
+                full: opts.full,
+                release: opts.release,
+                rocky: opts.rocky,
+                main: opts.main,
+                tested: tested(tests, &opts.crates),
+                rustc: passes::rustc_version(root)?,
+                machine: ocio_testkit::oracle::machine_description(),
+            })
+        })
+    });
+    match result {
+        Ok(Recorded::Written(file)) => println!("gate: recorded this pass in {}", shown(&file)),
+        Ok(Recorded::Dirty) => println!(
+            "gate: not recorded: the checkout has uncommitted changes or untracked files, so its \
+             tree is not what the gate tested"
+        ),
+        Ok(Recorded::Moved) => println!("gate: not recorded: HEAD moved while the gate ran"),
+        Err(e) => println!("gate: warning: could not record this pass: {e}"),
+    }
 }
 
 /// The test steps of this platform: debug, Python and its suite, then all three in release.
@@ -317,8 +394,13 @@ fn run_tests(
         )?;
     } else {
         let steps = if opts.release { 2 } else { 1 };
+        let why = if opts.no_tests {
+            "--no-tests"
+        } else {
+            "--touched"
+        };
         for name in ["test", "test-release"].iter().take(steps) {
-            println!("{}: {name:<NAME_WIDTH$} skipped (--touched)", runner.label);
+            println!("{}: {name:<NAME_WIDTH$} skipped ({why})", runner.label);
         }
     }
     if test_py {
@@ -352,9 +434,12 @@ fn run_tests(
 }
 
 /// The Rocky pass: this gate, with the same options, in Rocky Linux 9 (`scripts/rocky9.sh`).
+/// It tests what this platform tests: `--touched`, resolved here already, becomes the packages
+/// it found, or `--no-tests`.
 fn rocky_command(
     root: &Path,
     opts: &Options,
+    tests: bool,
     log_dir: &Path,
     base_file: Option<&Path>,
 ) -> Result<Command, String> {
@@ -362,12 +447,7 @@ fn rocky_command(
     rocky
         .current_dir(root)
         .args(["scripts/rocky9.sh", "cargo", "xtask", "gate"]);
-    if opts.touched {
-        // The Rocky pass reads the same HEAD, in the same checkout.
-        rocky.arg("--touched");
-    } else if !opts.crates.is_empty() {
-        rocky.args(["--crates", &opts.crates.join(",")]);
-    }
+    rocky.args(test_scope_args(tests, &opts.crates));
     if opts.release {
         rocky.arg("--release");
     }
@@ -383,6 +463,18 @@ fn rocky_command(
         rocky.arg("--base-file").arg(crate::display_path(file));
     }
     Ok(rocky)
+}
+
+/// The gate options that select these test steps: `--no-tests`, `--crates a,b`, or none (the
+/// whole workspace).
+pub(crate) fn test_scope_args(tests: bool, crates: &[String]) -> Vec<String> {
+    if !tests {
+        vec!["--no-tests".into()]
+    } else if crates.is_empty() {
+        Vec::new()
+    } else {
+        vec!["--crates".into(), crates.join(",")]
+    }
 }
 
 /// `--staged`: gates exactly the index. It becomes a temporary commit on HEAD (on no branch),
@@ -1229,6 +1321,32 @@ mod tests {
         assert!(o.staged && o.touched && o.crates.is_empty());
         assert_eq!(o.others, ["--touched"]);
         assert!(parse(&["--touched", "--crates", "xtask"]).is_err());
+        let o = parse(&["--no-tests", "--full"]).unwrap();
+        assert!(o.no_tests && !o.touched && o.crates.is_empty());
+        assert!(!parse(&["--full"]).unwrap().no_tests);
+        assert!(parse(&["--no-tests", "--crates", "xtask"]).is_err());
+        assert!(parse(&["--no-tests", "--touched"]).is_err());
+    }
+
+    /// What the Rocky pass and a land's gate are told to test, and what a record says was.
+    #[test]
+    fn test_scopes() {
+        use crate::passes::Tested;
+        let some = ["xtask".to_string(), "ocio-py".to_string()];
+        assert_eq!(test_scope_args(false, &some), ["--no-tests"]);
+        assert_eq!(test_scope_args(false, &[]), ["--no-tests"]);
+        assert_eq!(test_scope_args(true, &[]), Vec::<String>::new());
+        assert_eq!(test_scope_args(true, &some), ["--crates", "xtask,ocio-py"]);
+        assert_eq!(tested(false, &some), Tested::Nothing);
+        assert_eq!(tested(true, &[]), Tested::Workspace);
+        assert_eq!(tested(true, &some), Tested::Packages(some.to_vec()));
+        // Each scope parses back to the same test steps.
+        for (tests, crates) in [(false, &[][..]), (true, &[][..]), (true, &some[..])] {
+            let args = test_scope_args(tests, crates);
+            let args: Vec<&str> = args.iter().map(String::as_str).collect();
+            let o = parse(&args).unwrap();
+            assert_eq!((!o.no_tests, o.crates.as_slice()), (tests, crates));
+        }
     }
 
     fn package(name: &str, dir: &str) -> crate::metadata::Package {

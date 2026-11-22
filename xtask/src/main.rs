@@ -19,6 +19,7 @@ mod links;
 mod metadata;
 mod package_copies;
 mod parity;
+mod passes;
 mod py;
 mod py_driver;
 mod py_tools;
