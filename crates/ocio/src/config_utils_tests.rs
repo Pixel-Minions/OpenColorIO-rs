@@ -959,8 +959,7 @@ fn generate_local_id_for_color_space_test() {
     );
 }
 
-/// Port of `OCIO_ADD_TEST(ConfigUtils, generate_local_id_for_color_space_alias_preference)` @
-/// v2.6.0.
+/// Port of `OCIO_ADD_TEST(ConfigUtils, generate_local_id_for_color_space_alias_preference)` @ v2.6.0.
 #[test]
 fn generate_local_id_for_color_space_alias_preference() {
     let _env = EnvGuard::new();

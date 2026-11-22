@@ -254,7 +254,7 @@ fn role_color_space<'a>(config: &'a Config, role: &[u8]) -> Result<&'a ColorSpac
                 c_str(role),
                 b"' refers to the color space '",
                 config.role_color_space(role),
-                b"', which doesn't exist: OCIO 2.5.2 reads a null color space there, and its \
+                b"', which doesn't exist: OCIO 2.6.0 reads a null color space there, and its \
                   process dies (docs/improvements.md, U-141).",
             ]
             .concat(),
@@ -751,7 +751,7 @@ impl ColorSpaceMenuHelper {
                 } else {
                     Exception::new(
                         "ColorSpaceMenuHelper: a menu is made while this thread makes another \
-                         one (from a logging function its making calls): OCIO 2.5.2 locks its \
+                         one (from a logging function its making calls): OCIO 2.6.0 locks its \
                          menus' mutex again on the same thread, which is undefined behaviour \
                          (docs/improvements.md, U-181).",
                     )
@@ -845,7 +845,7 @@ impl ColorSpaceMenuHelper {
                         [
                             b"ColorSpaceMenuHelper: the menu item of the role '".as_slice(),
                             role,
-                            b"' is null (the role refers to no color space): OCIO 2.5.2 makes a \
+                            b"' is null (the role refers to no color space): OCIO 2.6.0 makes a \
                               menu with a null item there, and its process dies when the item \
                               is read (docs/improvements.md, U-142).",
                         ]

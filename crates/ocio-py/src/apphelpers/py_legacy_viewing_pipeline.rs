@@ -159,7 +159,7 @@ fn state(rc: &PipelineRc) -> Vec<(usize, u64)> {
 fn changed_during_call() -> PyErr {
     pyo3::exceptions::PyRuntimeError::new_err(
         "LegacyViewingPipeline: a callback changed the pipeline while the library made its \
-         processor, which OCIO 2.5.2 reads again after that callback and the port can't follow \
+         processor, which OCIO 2.6.0 reads again after that callback and the port can't follow \
          (docs/deviations.md, D-12)",
     )
 }

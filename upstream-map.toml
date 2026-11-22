@@ -17,16 +17,16 @@ note = "build system"
 [[file]]
 path = "include/OpenColorIO/OpenColorAppHelpers.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio/src/apphelpers/color_space_helpers.rs", "crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs", "crates/ocio/src/apphelpers/display_view_helpers.rs", "crates/ocio/src/apphelpers/mergeconfigs/merge_configs_helpers.rs", "crates/ocio/src/apphelpers/mixing_helpers.rs"]
-status = "partial"
-note = "P67 complete declaration audit: color-space menus, display/view helpers, LegacyViewingPipeline, MixingSlider/MixingColorSpaceManager and config-merging helpers map to the listed existing modules and lib.rs exports, within the approved Rust ownership APIs. The previous partial note predated the completed mixing and merging work. 2.6.0: changed at v2.6.0 lines 278-290; not yet re-ported (ocio26 cards). ocio26-config: ConfigCompatibilityHelpers::CheckCompatibility (278-289) in apphelpers/config_compatibility.rs."
+target = ["crates/ocio/src/lib.rs", "crates/ocio/src/apphelpers/color_space_helpers.rs", "crates/ocio/src/apphelpers/legacy_viewing_pipeline.rs", "crates/ocio/src/apphelpers/display_view_helpers.rs", "crates/ocio/src/apphelpers/mergeconfigs/merge_configs_helpers.rs", "crates/ocio/src/apphelpers/mixing_helpers.rs", "crates/ocio/src/apphelpers/config_compatibility.rs"]
+status = "done"
+note = "P67 complete declaration audit: color-space menus, display/view helpers, LegacyViewingPipeline, MixingSlider/MixingColorSpaceManager and config-merging helpers map to the listed existing modules and lib.rs exports, within the approved Rust ownership APIs. The previous partial note predated the completed mixing and merging work. 2.6.0: changed at v2.6.0 lines 278-290, the new namespace ConfigCompatibilityHelpers: ocio26-config ported CheckCompatibility (278-289) as apphelpers::config_compatibility::check_compatibility (exported from lib.rs as ocio::config_compatibility), checked in config_compatibility_tests.rs and by upstream's ConfigCompatibilityHelpersTest.py."
 
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/image_desc.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/gpu_shader_desc.rs", "crates/ocio-gpu/src/gpu_shader.rs", "crates/ocio-ops/src/exception.rs", "crates/ocio-ops/src/platform.rs", "crates/ocio/src/caching.rs", "crates/ocio/src/path_utils.rs", "crates/ocio/src/config.rs", "crates/ocio/src/file_rules.rs", "crates/ocio/src/viewing_rules.rs", "crates/ocio/src/color_space.rs", "crates/ocio/src/color_space_set.rs", "crates/ocio/src/look.rs", "crates/ocio/src/named_transform.rs", "crates/ocio/src/view_transform.rs", "crates/ocio/src/processor.rs", "crates/ocio-ops/src/cpu_processor.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/baker.rs", "crates/ocio/src/ocioz_archive.rs", "crates/ocio/src/context.rs", "crates/ocio/src/config_io_proxy.rs", "crates/ocio/src/system_monitor.rs", "crates/ocio/src/transforms/builtins/builtin_transform_registry.rs", "crates/ocio/src/builtinconfigs/builtin_config_registry.rs"]
-status = "partial"
-note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs; p3-context: GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent (197-203), re-exported from ocio_ops::platform (3.5a); Context (3865-3951) in context.rs and ConfigIOProxy (4095-4138) in config_io_proxy.rs (3.5e); p9-monitors9.3a: SystemMonitors (4047-4083), exported from lib.rs with P9-3's process singleton and fallible index getters; P89: declaration-block audit in docs/cards/p89-public-header-completion.md accounts for every existing Rust API implementation and reference test; P88 completes the final legacy post-extraction dynamic qualification. Retains the approved concrete shader-description and existing Rust/ABI boundaries. This closes source accounting only, not final SDE/release acceptance. 2.6.0: changed at v2.6.0 lines 222-223, 382-383, 389-390, 661-663, 756-792, 830-881, 956-966, 1022-1023, 1033-1054, 1089-1102, 1127-1203, 1333-1335, 1374-1376, 2780, 2789; not yet re-ported (ocio26 cards). ocio26-config: 756-792 (LocateBuiltinColorSpace) in config.rs."
+status = "done"
+note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs; p3-context: GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent (197-203), re-exported from ocio_ops::platform (3.5a); Context (3865-3951) in context.rs and ConfigIOProxy (4095-4138) in config_io_proxy.rs (3.5e); p9-monitors9.3a: SystemMonitors (4047-4083), exported from lib.rs with P9-3's process singleton and fallible index getters; P89: declaration-block audit in docs/cards/p89-public-header-completion.md accounts for every existing Rust API implementation and reference test; P88 completes the final legacy post-extraction dynamic qualification. Retains the approved concrete shader-description and existing Rust/ABI boundaries. This closes source accounting only, not final SDE/release acceptance. (The line numbers above are v2.5.2's.) 2.6.0: changed at v2.6.0 lines 222-223, 382-383, 389-390, 661-663, 756-792, 830-881, 956-966, 1022-1023, 1033-1054, 1089-1102, 1127-1203, 1333-1335, 1374-1376, 2780, 2789: ocio26-config ported every new Config declaration in config.rs: LocateBuiltinColorSpace (756-792) as Config::locate_builtin_color_space, findColorSpaceForID and generateLocalIDForColorSpace (830-881), the addSharedView overload with aliases (956-966) as add_shared_view_with_aliases, getNumDisplayViewAliases, getDisplayViewAlias and hasDisplayViewAlias (1033-1054), the addDisplayView overload with aliases (1089-1102) as add_display_view_with_aliases, and getUseDisplayAliases/setUseDisplayAliases, getCanonicalDisplayName, getCanonicalViewName, getResolvedDisplayViewColorSpaceName and getDisplayDescription (1127-1203). 661-663 documents isColorSpaceUsed's new alias resolution, ported with Config.cpp. The other hunks (222-223, 382-383, 389-390, 1022-1023, 1333-1335, 1374-1376, 2780, 2789) change comments only."
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
@@ -39,8 +39,8 @@ note = "P67 complete declaration audit: all23 transform classes map to their con
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
-status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524); p2-rgbcurve 2.6a: GradingStyle (560-566), RGBCurveType (580-588) and BSplineType (611-620), in open_color_types.rs, re-exported by ocio as GradingStyle, RgbCurveType and BSplineType; p5-values 5.0d: HueCurveType (590-602), in open_color_types.rs; p5-ec 5.1a: ExposureContrastStyle (526-532), in open_color_types.rs; p3-config-1 3.4f: SearchReferenceSpaceType (316-321), ColorSpaceVisibility (323-328), and the ROLE_* constants (870-913, defined in ParseUtils.cpp); p3-config-2 3.4h-j: NamedTransformVisibility (330-335), ViewType (337-341); p5-huecurve 5.4a: HSYTransformStyle (604-609) as HsyTransformStyle; P66 completes the public GpuLanguageFromString in ocio-gpu/open_color_types.rs (ParseUtils.cpp:277-296), shared with the Python binding, using the existing nullable C-string byte API. All declared constants/enums/conversions are mapped within the approved Rust API and enum policy. 2.6.0: changed at v2.6.0 lines 521, 746-752, 988-994; not yet re-ported (ocio26 cards). ocio26-config: ConfigCompatibility (746-751) in open_color_types.rs. ocio26-ops: FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 (521) at v2.6.0. ocio26-clf: METADATA_ID_ELEMENT ported."
+status = "done"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524); p2-rgbcurve 2.6a: GradingStyle (560-566), RGBCurveType (580-588) and BSplineType (611-620), in open_color_types.rs, re-exported by ocio as GradingStyle, RgbCurveType and BSplineType; p5-values 5.0d: HueCurveType (590-602), in open_color_types.rs; p5-ec 5.1a: ExposureContrastStyle (526-532), in open_color_types.rs; p3-config-1 3.4f: SearchReferenceSpaceType (316-321), ColorSpaceVisibility (323-328), and the ROLE_* constants (870-913, defined in ParseUtils.cpp); p3-config-2 3.4h-j: NamedTransformVisibility (330-335), ViewType (337-341); p5-huecurve 5.4a: HSYTransformStyle (604-609) as HsyTransformStyle; P66 completes the public GpuLanguageFromString in ocio-gpu/open_color_types.rs (ParseUtils.cpp:277-296), shared with the Python binding, using the existing nullable C-string byte API. All declared constants/enums/conversions are mapped within the approved Rust API and enum policy. (The line numbers above are v2.5.2's.) 2.6.0: changed at v2.6.0 lines 521, 746-752, 988-994: ocio26-ops added FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 (521) to FixedFunctionStyle as AcesRgbToHmj20; ocio26-config ported ConfigCompatibility (746-751) in open_color_types.rs, exported from lib.rs; ocio26-clf ported METADATA_ID_ELEMENT (988-994) in format_metadata.rs."
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -176,22 +176,22 @@ note = "p3-model-objects (3.4b): the class and the operators ||, && and - (Color
 path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
-status = "partial"
-note = "P67 complete source audit: config construction/edit/query, context/rules/serialization/version/validation, processors/caches and public statics are implemented in config.rs, including all8 inter-config overloads and monitor/ICC display instantiation. Supersedes the obsolete incremental partial note; existing Rust API decisions and documented upstream limitations remain. 2.6.0: changed at v2.6.0 lines 14, 251, 324, 337-352, 460, 474-477, 758-783, 983-1059, 1281, 1284, 1296-1303, 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914, 3084-3162, 3593-3600, 3615-3643, 3866-3867, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103, 4105, 4176-4427, 4745-4746, 4947-4948, 5742-5743, 5751-5772, 5779, 6105-6112, 6306-6326, 6423-6434, 6642-6686; not yet re-ported (ocio26 cards). ocio26-config: 251 (LastSupportedMinorVersion 6) and 6306-6318 (the MIRROR NEGS styles need 2.5) ported; 6319-6326 and 6423-6434 (APPLE_LOG, HMJ) are card ocio26-ops. Then 324 and 460 (m_useDisplayAliases), 758-783 (validateSharedView's collision check), 3593-3643, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103 (view aliases: the overloads with aliases, their collision checks, the alias getters), 4180-4191 (get/setUseDisplayAliases) and 6642-6686 (their version checks). Then 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914 (isColorSpaceUsed through canonical names), 4194-4424 (DisplayUsesColorSpace, getCanonicalDisplayName, getResolvedDisplayViewColorSpaceName, getDisplayDescription, getCanonicalViewName) and 5742-5743, 5751-5772, 5779 (GetProcessorFromConfigs's data check through the resolved view color space). Then 3152-3160 (generateLocalIDForColorSpace, findColorSpaceForID). Then 14, 1281, 1284, 1296-1303 (CreateFromFile's existence check, U-750). Then 337-352, 474-477, 983-1059, 3084-3151 and 6105-6112 (the fingerprint caches, getColorSpaceTestVals, getColorSpaceFingerprints, LocateBuiltinColorSpace, their reset in resetCacheIDs). ocio26-ops: 6319-6326 (APPLE_LOG-APPLEWG_to_ACES2065-1 needs 2.6) and 6423-6434 (ACES2_RGB_TO_HMJ needs 2.6)."
+status = "done"
+note = "P67 complete source audit: config construction/edit/query, context/rules/serialization/version/validation, processors/caches and public statics are implemented in config.rs, including all8 inter-config overloads and monitor/ICC display instantiation. Supersedes the obsolete incremental partial note; existing Rust API decisions and documented upstream limitations remain. 2.6.0: changed at v2.6.0 lines 14, 251, 324, 337-352, 460, 474-477, 758-783, 983-1059, 1281, 1284, 1296-1303, 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914, 3084-3162, 3593-3600, 3615-3643, 3866-3867, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103, 4105, 4176-4427, 4745-4746, 4947-4948, 5742-5743, 5751-5772, 5779, 6105-6112, 6306-6326, 6423-6434, 6642-6686. ocio26-config ported 251 (LastSupportedMinorVersion 6) and 6306-6318 (the MIRROR NEGS styles need 2.5); 324 and 460 (m_useDisplayAliases), 758-783 (validateSharedView's collision check), 3593-3643, 3898-3921, 3971-3991, 4012, 4018-4025, 4051, 4064-4103, 4105 (view aliases: the overloads with aliases, their collision checks, the alias getters), 4180-4191 (get/setUseDisplayAliases) and 6642-6686 (their version checks); 2801-2815, 2830, 2843, 2854, 2869, 2882-2883, 2900, 2914 (isColorSpaceUsed through canonical names), 4194-4424 (DisplayUsesColorSpace, getCanonicalDisplayName, getResolvedDisplayViewColorSpaceName, getDisplayDescription, getCanonicalViewName) and 5742-5743, 5751-5772, 5779 (GetProcessorFromConfigs's data check through the resolved view color space); 3152-3161 (generateLocalIDForColorSpace, findColorSpaceForID); 14, 1281, 1284, 1296-1303 (CreateFromFile's existence check, U-750); and 337-352, 474-477, 983-1059, 3084-3151 and 6105-6112 (the fingerprint caches, getColorSpaceTestVals, getColorSpaceFingerprints, LocateBuiltinColorSpace, their reset in resetCacheIDs). ocio26-ops ported 6319-6326 (APPLE_LOG-APPLEWG_to_ACES2065-1 needs 2.6) and 6423-6434 (ACES2_RGB_TO_HMJ needs 2.6). The rest (3162, 3866-3867, 4176-4179, 4425-4427, 4745-4746, 4947-4948) are comments and blank lines. Checked by the v2.6.0 Config, ConfigUtils, ColorSpace and DisplayViewTransform tests (config_tests.rs, config_utils_tests.rs, color_space_tests.rs, display_view_transform_tests.rs) and against the wheel in the ocio26-config oracle tests."
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/config_utils.rs"]
-status = "partial"
-note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion (59-162). 9.1a: the heuristics (14-58, 164-805: getSRGBColorSpaceName, getBuiltinLinearSpaceName, containsSRGB with I-377, getRefSpaceName, getDataSpaceName, isIdentityTransform, hasNonTrivialMatrixTransform, containsBlockedTransform, excludeColorSpaceFromHeuristics, getReferenceSpaceFromLinearSpace, getReferenceSpaceFromSRGBSpace with I-378, IdentifyInterchangeSpace, IdentifyBuiltinColorSpace), checked against the wheel in crates/ocio/tests/config_utils_oracle.rs. 9.1c: the reference-space converters and fingerprints (843-1478: simplifyTransform, invertTransform with I-379, getTransformForDir, getRefSpaceConverter, transformIsEmpty, updateReferenceColorspace, updateReferenceView, hasColorSpaceRefType, initializeRefSpaceConverters, calcColorSpaceFingerprint, initializeTestVals, initializeColorSpaceFingerprints, findEquivalentColorspace), with upstream's two ConfigUtils_tests; the Python module doesn't expose them, so the merge sweep (9.2j) checks them against the wheel. 2.6.0: changed at v2.6.0 lines 10, 1196-1198, 1222, 1226, 1236, 1239-1240, 1242, 1244-1250, 1276-1277, 1315-1316, 1318-1320, 1363-1364, 1366-1368, 1376-1379, after 1382 (deleted), 1415, 1427-1432, 1435, 1437, 1445-1446, 1448-1457, 1466, 1498, 1503, 1510-1769; not yet re-ported (ocio26 cards). ocio26-config: 1546-1768 ported (SanitizeIDToken, GenerateLocalIDForColorSpace, FindColorSpaceForID). Then 10 and 1192-1532: TestVals with the converted flags, initializeTestVals with its SuspendCacheGuard, initializeFingerprintVec, initializeColorSpaceFingerprints, both findEquivalentColorSpace overloads (continue became break: the same result), LocateBuiltinColorSpace; checked against the wheel in config_utils_oracle.rs (locate_builtin_color_space_*)."
+status = "done"
+note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion (59-162). 9.1a: the heuristics (14-58, 164-805: getSRGBColorSpaceName, getBuiltinLinearSpaceName, containsSRGB with I-377, getRefSpaceName, getDataSpaceName, isIdentityTransform, hasNonTrivialMatrixTransform, containsBlockedTransform, excludeColorSpaceFromHeuristics, getReferenceSpaceFromLinearSpace, getReferenceSpaceFromSRGBSpace with I-378, IdentifyInterchangeSpace, IdentifyBuiltinColorSpace), checked against the wheel in crates/ocio/tests/config_utils_oracle.rs. 9.1c: the reference-space converters and fingerprints (843-1478: simplifyTransform, invertTransform with I-379, getTransformForDir, getRefSpaceConverter, transformIsEmpty, updateReferenceColorspace, updateReferenceView, hasColorSpaceRefType, initializeRefSpaceConverters, calcColorSpaceFingerprint, initializeTestVals, initializeColorSpaceFingerprints, findEquivalentColorspace), with upstream's two ConfigUtils_tests; the Python module doesn't expose them, so the merge sweep (9.2j) checks them against the wheel. (The line numbers above are v2.5.2's.) 2.6.0: changed at v2.6.0 lines 10, 1196-1198, 1222, 1226, 1236, 1239-1240, 1242, 1244-1250, 1276-1277, 1315-1316, 1318-1320, 1363-1364, 1366-1368, 1376-1379, after 1382 (deleted), 1415, 1427-1432, 1435, 1437, 1445-1446, 1448-1457, 1466, 1498, 1503, 1510-1769. ocio26-config ported 10 and 1192-1532: TestVals with the converted flags, initializeTestVals with its SuspendCacheGuard, initializeFingerprintVec, initializeColorSpaceFingerprints, both findEquivalentColorSpace overloads (continue became break: the same result), LocateBuiltinColorSpace; checked against the wheel in config_utils_oracle.rs (locate_builtin_color_space_*). And 1533-1769: SanitizeIDToken, GenerateLocalIDForColorSpace and FindColorSpaceForID, with upstream's four new ConfigUtils tests (sanitize_id_token, generate_local_id_for_color_space, generate_local_id_for_color_space_alias_preference, find_color_space_for_id) in config_utils_tests.rs."
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.h"
 kind = "src"
 target = ["crates/ocio/src/config_utils.rs"]
-status = "partial"
-note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion's declaration (config_utils.rs: the function, and InterchangeRoles for its out-parameters). 9.1a: IdentifyInterchangeSpace, IdentifyBuiltinColorSpace and SuspendCacheGuard (U-171). 9.1c: Fingerprint, ColorSpaceFingerprints and the rest of the declarations. 2.6.0: changed at v2.6.0 lines 7-9, 58-60, 65-68, after 69 (deleted), 72-82, 85-99, 102-110, 114-115, 118-166; not yet re-ported (ocio26 cards). ocio26-config: the declarations of SanitizeIDToken, GenerateLocalIDForColorSpace and FindColorSpaceForID ported. Then Fingerprint (csName owned, as the port already had it), TestVals, ColorSpaceFingerprints, initializeTestVals, initializeFingerprintVec, the second findEquivalentColorSpace and LocateBuiltinColorSpace."
+status = "done"
+note = "p9-config-utils 9.1b: GetInterchangeRolesForColorSpaceConversion's declaration (config_utils.rs: the function, and InterchangeRoles for its out-parameters). 9.1a: IdentifyInterchangeSpace, IdentifyBuiltinColorSpace and SuspendCacheGuard (U-171). 9.1c: Fingerprint, ColorSpaceFingerprints and the rest of the declarations. 2.6.0: changed at v2.6.0 lines 7-9, 58-60, 65-68, after 69 (deleted), 72-82, 85-99, 102-110, 114-115, 118-166: ocio26-config ported every declaration in config_utils.rs: Fingerprint (csName owned, as the port already had it), TestVals, ColorSpaceFingerprints, calcColorSpaceFingerprint taking TestVals, initializeTestVals, initializeFingerprintVec, both findEquivalentColorSpace overloads (find_equivalent_color_space, find_equivalent_color_space_with), LocateBuiltinColorSpace, SanitizeIDToken, GenerateLocalIDForColorSpace and FindColorSpaceForID. 7-9 are includes."
 
 [[file]]
 path = "src/OpenColorIO/Context.cpp"
@@ -434,8 +434,8 @@ note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support
 path = "src/OpenColorIO/NamedTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/named_transform.rs"]
-status = "partial"
-note = "p3-model-objects (3.4c): the class and its operator<<; p3-builders 3.2a: NamedTransform::GetTransform and GetTransform(src, dst) (182-221, 310-334), an error where upstream dereferences null (U-52). 2.6.0: changed at v2.6.0 lines 89, 282; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-model-objects (3.4c): the class and its operator<<; p3-builders 3.2a: NamedTransform::GetTransform and GetTransform(src, dst) (182-221, 310-334), an error where upstream dereferences null (U-52). 2.6.0: changed at v2.6.0 lines 89, 282: push_back became emplace_back in addAlias and operator<<, the same strings in the same order; nothing to port."
 
 [[file]]
 path = "src/OpenColorIO/NamedTransform.h"
@@ -761,8 +761,8 @@ note = "p9-merge-1 9.2c"
 path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.cpp"
 kind = "src"
 target = ["crates/ocio/src/apphelpers/mergeconfigs/section_merger.rs"]
-status = "partial"
-note = "p9-merge-2 9.2d: SectionMerger (notify, merge), setMergedConfigVersion, GeneralMerger, RolesMerger; 9.2e: fileRulesAreEqual, copyRule, FileRulesMerger, LooksMerger; 9.2f: splitActiveList, mergeStringsWithoutDuplicates, viewingRulesAreEqual, copyViewingRule, addUniqueViewingRules, DisplayViewMerger; p9-merge-3 9.2g: viewTransformsAreEqual, ViewTransformsMerger; 9.2h: hasSearchPath, replaceSeparator, ColorspacesMerger; 9.2i: cleanUpInactiveList, NamedTransformsMerger. 2.6.0: changed at v2.6.0 lines 2251; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p9-merge-2 9.2d: SectionMerger (notify, merge), setMergedConfigVersion, GeneralMerger, RolesMerger; 9.2e: fileRulesAreEqual, copyRule, FileRulesMerger, LooksMerger; 9.2f: splitActiveList, mergeStringsWithoutDuplicates, viewingRulesAreEqual, copyViewingRule, addUniqueViewingRules, DisplayViewMerger; p9-merge-3 9.2g: viewTransformsAreEqual, ViewTransformsMerger; 9.2h: hasSearchPath, replaceSeparator, ColorspacesMerger; 9.2i: cleanUpInactiveList, NamedTransformsMerger. 2.6.0: changed at v2.6.0 lines 2251: the call in ColorspacesMerger::handleAvoidDuplicatesOption follows ConfigUtils' rename of findEquivalentColorspace to findEquivalentColorSpace; section_merger.rs calls config_utils::find_equivalent_color_space, which ocio26-config ported at v2.6.0."
 
 [[file]]
 path = "src/OpenColorIO/apphelpers/mergeconfigs/SectionMerger.h"
@@ -2267,8 +2267,8 @@ note = "p3-transforms (3.1b)"
 path = "src/OpenColorIO/transforms/CDLTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/cdl_transform.rs"]
-status = "partial"
-note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the parameters, style, ID, first SOP description, validation, equals, operator<< on the shared stream, I-73), checked against the wheel in crates/ocio/tests/cdl_transform_oracle.rs. p4-cdl 4.4e: GetCDL, CreateFromFile and CreateGroupFromFile (copies, I-174). 2.6.0: changed at v2.6.0 lines after 9 (deleted); not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the parameters, style, ID, first SOP description, validation, equals, operator<< on the shared stream, I-73), checked against the wheel in crates/ocio/tests/cdl_transform_oracle.rs. p4-cdl 4.4e: GetCDL, CreateFromFile and CreateGroupFromFile (copies, I-174). 2.6.0: changed at v2.6.0 lines after 9 (deleted): the include of fileformats/cdl/CDLParser.h, which the file no longer uses, was removed; nothing to port."
 
 [[file]]
 path = "src/OpenColorIO/transforms/CDLTransform.h"
@@ -3273,8 +3273,8 @@ note = "p6-objects 6.3e"
 path = "src/bindings/python/PyConfig.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_config.rs", "crates/ocio-py/src/py_config_utils.rs"]
-status = "partial"
-note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs. 2.6.0: changed at v2.6.0 lines 42, 69-70, 152-156, 340-344, 360-363, 381-391, 437-439, 441-443, 463-468, 500-511, 528-532, 535-537, 539-541, 1345-1367; not yet re-ported (ocio26 cards). ocio26-config: 42, 69-70, 152-156, 340-343, 360-363, 381-391 (LocateBuiltinColorSpace, py_config_utils.rs), 437-443, 463-468, 500-511, 528-541, 1345-1367 ported (DisplayViewAliasIterator; self_kind.rs lists its methods and getUseDisplayAliases)."
+status = "done"
+note = "p6-config 6.3f-g: the class Config (the config as Python shares it: the config's own color spaces, looks, view transforms, named transforms, context and rules, owner decision 2026-10-22), its 25 iterator classes, GetCurrentConfig, SetCurrentConfig, ExtractOCIOZArchive, ResolveConfigPath; 6.6a: CreateFromConfigIOProxy, getConfigIOProxy, setConfigIOProxy. p6-after-p9 6.8a: the ConfigUtils statics IdentifyBuiltinColorSpace, IdentifyInterchangeSpace, GetProcessorToBuiltinColorSpace, GetProcessorFromBuiltinColorSpace, GetProcessorFromConfigs (all eight overloads, nullable contexts with upstream error order, I-451 keyword order) in py_config_utils.rs. 2.6.0: changed at v2.6.0 lines 42, 69-70, 152-156, 340-344, 360-363, 381-391, 437-439, 441-443, 463-468, 500-511, 528-532, 535-537, 539-541, 1345-1367: ocio26-config ported them all: the iterator DisplayViewAliasIterator (42, 69-70, 152-156, 1345-1367), generateLocalIDForColorSpace and findColorSpaceForID (340-344), getUseDisplayAliases/setUseDisplayAliases (360-363; self_kind.rs lists getUseDisplayAliases), the static LocateBuiltinColorSpace (381-391, in py_config_utils.rs), the aliases keyword of addSharedView and addDisplayView (437-443, 528-541), getCanonicalDisplayName, getDisplayDescription and getCanonicalViewName (463-468), getResolvedDisplayViewColorSpaceName, getDisplayViewAliases and hasDisplayViewAlias (500-511); run by upstream's ConfigTest.py at v2.6.0 through cargo xtask py-suite."
 
 [[file]]
 path = "src/bindings/python/PyConfigIOProxy.cpp"
@@ -3379,15 +3379,15 @@ note = "p6-objects 6.3e"
 path = "src/bindings/python/PyOpenColorIO.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs"]
-status = "partial"
-note = "P70 complete binding registration audit: all binders, module functions/exceptions/constants/metadata and module initialization are registered in the existing binding modules. The original48 required Python modules/384 functions and complete module metadata already run in normal CI; retain the approved D-16 native C++ pointer boundary. 2.6.0: changed at v2.6.0 lines 100; not yet re-ported (ocio26 cards). ocio26-config: 100 (bindPyConfigCompatibilityHelpers) ported."
+status = "done"
+note = "P70 complete binding registration audit: all binders, module functions/exceptions/constants/metadata and module initialization are registered in the existing binding modules. The original48 required Python modules/384 functions and complete module metadata already run in normal CI; retain the approved D-16 native C++ pointer boundary. 2.6.0: changed at v2.6.0 lines 100: ocio26-config ported the call bindPyConfigCompatibilityHelpers(m) in py_open_color_io.rs (apphelpers/py_config_compatibility_helpers.rs); at v2.6.0 the suite has 49 modules and 392 functions, which cargo xtask py-suite runs."
 
 [[file]]
 path = "src/bindings/python/PyOpenColorIO.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs", "crates/ocio-py/src/py_transform.rs", "crates/ocio-py/src/lib.rs"]
-status = "partial"
-note = "P70 complete declaration audit: every binder declaration has its registration, and polymorphic class_name/to_py dispatch covers all supported classes. Existing Rust/Python ownership and D-16 native C++ pointer boundaries remain; the old partial note predated full binding completion. 2.6.0: changed at v2.6.0 lines 59; not yet re-ported (ocio26 cards). ocio26-config: 59 (bindPyConfigCompatibilityHelpers' declaration) ported."
+status = "done"
+note = "P70 complete declaration audit: every binder declaration has its registration, and polymorphic class_name/to_py dispatch covers all supported classes. Existing Rust/Python ownership and D-16 native C++ pointer boundaries remain; the old partial note predated full binding completion. 2.6.0: changed at v2.6.0 lines 59: ocio26-config ported bindPyConfigCompatibilityHelpers' declaration as apphelpers::py_config_compatibility_helpers::bind_py_config_compatibility_helpers, registered from py_open_color_io.rs."
 
 [[file]]
 path = "src/bindings/python/PyPackedImageDesc.cpp"
@@ -3449,8 +3449,8 @@ note = "P70 complete transform-binding declaration audit: base and all23 concret
 path = "src/bindings/python/PyTypes.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_types.rs"]
-status = "partial"
-note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984; not yet re-ported (ocio26 cards). ocio26-config: 864-871 (ConfigCompatibility) ported; 618-619 (HMJ) is ocio26-ops', 984 (METADATA_ID_ELEMENT) ocio26-clf's. ocio26-ops: FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 (618-619) at v2.6.0. ocio26-clf: METADATA_ID_ELEMENT ported."
+status = "done"
+note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString is shared with ocio-gpu/open_color_types.rs (P66); GradingStyleFromString and ExposureContrastStyleToString/FromString retain their binding wrappers and existing library equivalents. 2.6.0: changed at v2.6.0 lines 618-619, 864-871, 984: ocio26-ops added FIXED_FUNCTION_ACES_RGB_TO_HMJ_20 (618-619) to the FixedFunctionStyle enum (value 20, registered after ACES_RGB_TO_JMH_20 as upstream registers it); ocio26-config ported the enum ConfigCompatibility (864-871); ocio26-clf the constant METADATA_ID_ELEMENT (984). All in py_types.rs, run by upstream's ConstantsTest.py and ConfigCompatibilityHelpersTest.py at v2.6.0."
 
 [[file]]
 path = "src/bindings/python/PyUtils.cpp"
@@ -3758,8 +3758,8 @@ note = "New in 2.6.0 (PRs #2271, #2243): DirectX 12 / Vulkan GPU unit-test backe
 path = "src/libutils/oglapphelpers/glsl.cpp"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/glsl.rs"]
-status = "partial"
-note = "7.2b: test-only OpenGLBuilder, textures, dynamic uniforms, GLSL compile/link and texture limit query; EGL harness on Rocky llvmpipe (P7-2/P7-3). 2.6.0: changed at v2.6.0 lines 12-21, 23; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "7.2b: test-only OpenGLBuilder, textures, dynamic uniforms, GLSL compile/link and texture limit query; EGL harness on Rocky llvmpipe (P7-2/P7-3). 2.6.0: changed at v2.6.0 lines 12-21, 23: on Windows, WIN32_LEAN_AND_MEAN, NOMINMAX and windows.h before GL/glu.h, so that GLEW's macros let glu.h compile; build only, and glsl.rs doesn't link GLU. The OpenGLBuilder code is unchanged at v2.6.0."
 
 [[file]]
 path = "src/libutils/oglapphelpers/glsl.h"
@@ -3772,15 +3772,15 @@ note = "7.2b: OpenGLBuilder and its texture/uniform state."
 path = "src/libutils/oglapphelpers/graphicalapp.cpp"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
-status = "todo"
-note = "New in 2.6.0 (PR #2271): the backend-neutral GraphicalApp base that OglApp, DxApp and VulkanApp implement. The port executes only the OpenGL backend (crates/ocio-gpu-exec/src/oglapp.rs); decide with the tests/gpu port of card ocio26-base phase 1 whether anything here reaches it."
+status = "n/a"
+note = "New in 2.6.0 (PR #2271): GraphicalApp::CreateApp, the factory that picks the OpenGL (OglApp::CreateApp) or DirectX 12 (DxApp) backend of upstream's GPU unit tests. The DirectX 12 and Vulkan backends are not ported (docs/ocio-2.6-plan.md, Not ported; owner 2026-11-17). The port executes only the headless OpenGL backend, which oglapp.rs's HeadlessApp::new creates directly, as OglApp::CreateApp's OCIO_HEADLESS_ENABLED branch does."
 
 [[file]]
 path = "src/libutils/oglapphelpers/graphicalapp.h"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
-status = "todo"
-note = "New in 2.6.0 (PR #2271); see graphicalapp.cpp."
+status = "n/a"
+note = "New in 2.6.0 (PR #2271): GraphicalApp, the backend-neutral base class of upstream's GPU unit-test apps (OglApp, DxApp, VulkanApp). The base itself is not ported: only the OpenGL backend is (docs/ocio-2.6-plan.md, Not ported: the DirectX 12 and Vulkan backends; owner 2026-11-17). The members that 2.6.0 moved here from 2.5.2's OglApp stay in oglapp.rs's HeadlessApp with the same behaviour: Components, setYMirror/isYMirror (set_y_mirror) and setShaderVerbose/isShaderVerbose (set_print_shader, 2.5.2's setPrintShader). The pure virtual interface (initImage, updateImage, createBuffers, setShader, reshape, redisplay, readImage, printGraphicsInfo) is HeadlessApp's inherent methods."
 
 [[file]]
 path = "src/libutils/oglapphelpers/hlsl.cpp"
@@ -3834,15 +3834,15 @@ note = "OpenGL/Metal/image-IO helpers for upstream's apps"
 path = "src/libutils/oglapphelpers/oglapp.cpp"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
-status = "partial"
-note = "7.2b: OglApp image/FBO/shader/quad/readback and HeadlessApp's EGL context. ScreenApp's GLUT window is n/a: headless execution only, owner P7-3. 2.6.0: changed at v2.6.0 lines after 14 (deleted), 16-25, 43-51, 132, 181, 216, 246, 281, 298, 303, 309, 311, 316, 371, 376, 378, 382, 389; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "7.2b: OglApp image/FBO/shader/quad/readback and HeadlessApp's EGL context. ScreenApp's GLUT window is n/a: headless execution only, owner P7-3. 2.6.0: changed at v2.6.0 lines after 14 (deleted), 16-25, 43-51, 132, 181, 216, 246, 281, 298, 303, 309, 311, 316, 371, 376, 378, 382, 389: PR #2271's renames for the GraphicalApp base (ScreenApp and HeadlessApp became ScreenOglApp and HeadlessOglApp, createGLBuffers createBuffers, printGLInfo printGraphicsInfo, CreateOglApp CreateApp, m_yMirror and m_printShader the base's isYMirror and isShaderVerbose) and the freeglut include's NDEBUG guard (16-25, the GLUT window, n/a). The OpenGL calls, the image and FBO setup, the shader setup, the quad and the readback are unchanged, so oglapp.rs (HeadlessApp, ported at v2.5.2) runs the same code; its names and citations stay 2.5.2's."
 
 [[file]]
 path = "src/libutils/oglapphelpers/oglapp.h"
 kind = "app"
 target = ["crates/ocio-gpu-exec/src/oglapp.rs"]
-status = "partial"
-note = "7.2b: HeadlessApp/OglApp state; ScreenApp is n/a (P7-3). 2.6.0: changed at v2.6.0 lines 12, 19, 26-27, 29, 34-35, 55, 59-60, after 66 (deleted), 68-70, 72-73, 76, 83, 86, 90, 92-93, 95, 97, after 112 (deleted), after 119 (deleted), 124, 128, 131-133, 135, 137, 140, 151, 154, 156, 158, 160; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "7.2b: HeadlessApp/OglApp state; ScreenApp is n/a (P7-3). 2.6.0: changed at v2.6.0 lines 12, 19, 26-27, 29, 34-35, 55, 59-60, after 66 (deleted), 68-70, 72-73, 76, 83, 86, 90, 92-93, 95, 97, after 112 (deleted), after 119 (deleted), 124, 128, 131-133, 135, 137, 140, 151, 154, 156, 158, 160: OglApp now derives from GraphicalApp, which took over Components, setYMirror and the shader-printing flag (setPrintShader became setShaderVerbose), and the classes and methods were renamed as in oglapp.cpp. No state or behaviour changed: oglapp.rs's HeadlessApp keeps the OglApp/HeadlessOglApp state and the members that moved to the base (see graphicalapp.h)."
 
 [[file]]
 path = "src/libutils/oglapphelpers/vulkanapp.cpp"
@@ -3944,8 +3944,8 @@ note = "build system"
 path = "tests/cpu/CPUProcessor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/cpu_processor_tests.rs", "crates/ocio/tests/cpu_processor_tests.rs"]
-status = "partial"
-note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target); p5-dynamic 5.6a: dynamic_properties (crates/ocio/tests/cpu_processor_tests.rs). 2.6.0: changed at v2.6.0 lines 279-281, 623-626, 659-662, 671-674, 707-710, 718-721; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target); p5-dynamic 5.6a: dynamic_properties (crates/ocio/tests/cpu_processor_tests.rs). 2.6.0: changed at v2.6.0 lines 279-281, 623-626, 659-662, 671-674, 707-710, 718-721: the expected alpha of with_one_matrix (1.5, the input's alpha passed through) and of with_one_1d_lut (the bit depth's maximum); ocio26-base re-ported both tests at v2.6.0 with upstream's new values, with ImagePacking's new alpha (PR #2197). All 16 tests of the file are ported."
 
 [[file]]
 path = "tests/cpu/Caching_tests.cpp"
@@ -3965,22 +3965,22 @@ note = "All four Config-backed upstream cases are ported in the integration targ
 path = "tests/cpu/ColorSpace_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_tests.rs"]
-status = "partial"
-note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p4-ctf-bake 4.10b (its color spaces read CLF files); p9-config-utils 9.1a: ConfigUtils/processor_to_known_colorspace and ConfigUtils/processor_to_known_colorspace_alt_config. 2.6.0: changed at v2.6.0 lines 1926-2088; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p4-ctf-bake 4.10b (its color spaces read CLF files); p9-config-utils 9.1a: ConfigUtils/processor_to_known_colorspace and ConfigUtils/processor_to_known_colorspace_alt_config. 2.6.0: changed at v2.6.0 lines 1926-2088, the new LocateBuiltinColorSpace checks at the end of ConfigUtils/processor_to_known_colorspace: ocio26-config re-ported that test at v2.6.0 in color_space_tests.rs. All 14 tests of the file are ported."
 
 [[file]]
 path = "tests/cpu/ConfigUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_utils_tests.rs"]
-status = "partial"
-note = "p9-config-utils 9.1c: MergeConfigs/config_utils_update_reference and MergeConfigs/config_utils_find_equivalent_colorspace. 2.6.0: changed at v2.6.0 lines 715, 720, 725, 730, 735, 740, 745, 750, 755, 760, 766-767, 773-774, 779-1126; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p9-config-utils 9.1c: MergeConfigs/config_utils_update_reference and MergeConfigs/config_utils_find_equivalent_colorspace. 2.6.0: changed at v2.6.0 lines 715, 720, 725, 730, 735, 740, 745, 750, 755, 760, 766-767, 773-774, 779-1126: config_utils_find_equivalent_colorspace calls the renamed findEquivalentColorSpace (715-774), re-ported at v2.6.0 by ocio26-config, which also ported the four new tests (779-1126): ConfigUtils/sanitize_id_token, generate_local_id_for_color_space, generate_local_id_for_color_space_alias_preference and find_color_space_for_id, in config_utils_tests.rs. ocio26-close joined the alias-preference test's marker onto one line, so that cargo xtask upstream-tests counts it. All 6 tests of the file are ported."
 
 [[file]]
 path = "tests/cpu/Config_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_monitor_tests.rs", "crates/ocio/src/config_tests.rs"]
-status = "partial"
-note = "P57: all 88 original OCIO_ADD_TEST cases in this pinned upstream file have port markers in crates/ocio/src/config_monitor_tests.rs, crates/ocio/src/config_tests.rs. The prior partial phase notes were stale; this changes accounting only, with no assertion or test-source changes. Full normal CI validates the unchanged runtime suites. 2.6.0: changed at v2.6.0 lines 2096, 2101, 5359-5402, 6539, 6625-6627, 6636-6638, 6643-6644, 6646-6647, 6654-6657, 6693-6698, 6897-6948, 6951, 7415-8118, 8560-8690, 11367-11516; not yet re-ported (ocio26 cards). ocio26-ops: fixed_function_serialization (5359-5402) re-ported at v2.6.0."
+status = "done"
+note = "P57: all 88 original OCIO_ADD_TEST cases in this pinned upstream file have port markers in crates/ocio/src/config_monitor_tests.rs, crates/ocio/src/config_tests.rs. The prior partial phase notes were stale; this changes accounting only, with no assertion or test-source changes. Full normal CI validates the unchanged runtime suites. 2.6.0: changed at v2.6.0 lines 2096, 2101, 5359-5402, 6539, 6625-6627, 6636-6638, 6643-6644, 6646-6647, 6654-6657, 6693-6698, 6897-6948, 6951, 7415-8118, 8560-8690, 11367-11516. The changed tests are re-ported at v2.6.0: version (2096, 2101) by ocio26-config, fixed_function_serialization (5359-5402) by ocio26-ops, inactive_color_space_read_write (6539) by ocio26-deps, get_processor_from_two_configs (6625-6951) by ocio26-config and display_view (7415-7432) by group-26b. The 12 new tests, in config_tests.rs: view_aliases, aliased_view_name, aliased_display_name, active_display_alias, display_description, resolved_display_view_color_space_name (7433-8118) and is_colorspace_used_aliases (8560-8690) by ocio26-config; cyclic_color_space_transform, cyclic_color_space_two_step, cyclic_look_transform, cyclic_color_space_linearity_check and cyclic_display_view_transform (11367-11516) by ocio26-base. All 100 tests of the file are ported."
 
 [[file]]
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
@@ -4109,8 +4109,8 @@ note = "string_compare; envVariable, getenv, setenv (without their checks throug
 path = "tests/cpu/Processor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/processor_tests.rs"]
-status = "partial"
-note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut; p5-dynamic 5.6a: unique_dynamic_properties, dynamic_properties, is_noop, cache_optimized_processors, cache_cpu_processors and cache_gpu_processors. Cache tests on ops built directly add checks (cache_optimized_processors_of_ops, cache_cpu_processors_of_ops), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs and, for dynamic properties, crates/ocio/tests/dynamic_properties_oracle.rs. 2.6.0: changed at v2.6.0 lines 22, 37, 44, 49, 56, 66, 74, 81, 86; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut; p5-dynamic 5.6a: unique_dynamic_properties, dynamic_properties, is_noop, cache_optimized_processors, cache_cpu_processors and cache_gpu_processors. Cache tests on ops built directly add checks (cache_optimized_processors_of_ops, cache_cpu_processors_of_ops), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs and, for dynamic properties, crates/ocio/tests/dynamic_properties_oracle.rs. 2.6.0: changed at v2.6.0 lines 22, 37, 44, 49, 56, 66, 74, 81, 86: the processor cache IDs of basic_cache and basic_cache_lut, now in 2.6.0's UUID form (an empty group's is no longer <NOOP>); ocio26-base re-ported both at v2.6.0 with upstream's new IDs (HashUtils, Processor). All 11 tests of the file are ported."
 
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
@@ -4225,8 +4225,8 @@ status = "done"
 path = "tests/cpu/apphelpers/LegacyViewingPipeline_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/apphelpers/legacy_viewing_pipeline_tests.rs", "crates/ocio/tests/legacy_viewing_pipeline_oracle.rs"]
-status = "partial"
-note = "2.6.0: changed at v2.6.0 lines 956-1087; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "2.6.0: changed at v2.6.0 lines 956-1087, the new test LegacyViewingPipeline/display_view_alias_fallback: ocio26-config ported it at v2.6.0 in legacy_viewing_pipeline_tests.rs, with LegacyViewingPipeline.cpp's resolution of the display and view. The four older tests (basic, processorWithLooks, fullPipelineNoLook, processorWithNoOpLook) are unchanged at v2.6.0; crates/ocio/tests/legacy_viewing_pipeline_oracle.rs compares the pipelines with the wheel. All 5 tests of the file are ported."
 
 [[file]]
 path = "tests/cpu/apphelpers/MergeConfigsHelpers_tests.cpp"
@@ -4287,7 +4287,7 @@ note = "p4-readers 4.3e: simple_1d, simple_3d, less_strict_parse, failures_1d, f
 path = "tests/cpu/fileformats/FileFormatCTF_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_ctf_tests.rs"]
-status = "partial"
+status = "done"
 note = "p4-ctf-read-1 4.5b: missing_file, wrong_format, binary_file, process_list_invalid_version, clf_process_list_bad_version, process_list_higher_version, clf_process_list_higher_version, process_list_missing, transform_missing, transform_missing_id, transform_empty, transform_id_empty; 4.5c: matrix4x4, matrix_with_offset, matrix_with_offset_1_3, matrix_1_3_3x3, matrix_1_3_4x4, matrix_1_3_offsets, matrix_1_3_alpha_offsets, matrix_identity, matrix_windows_eol, matrix_no_newlines, check_utf8, info_example, process_list_valid_version, process_list_version_revision, process_list_no_version, info_element_version_test, transform_element_end_missing, array_missing_values, array_bad_value, array_bad_dimension, array_too_many_values, matrix_end_missing, transform_bad_outdepth, transform_end_missing, transform_corrupted_tag, range_default, range_test1_clamp, range_test1_noclamp, range_test2, range_nonmatching_clamp, range_empty, range_bad_noclamp, range_bad_values; 4.5e: gamma_test1-6, gamma_alpha_test1-6, exponent_bad_value, exponent_bad_param, exponent_all_styles, clf2_exponent_parse, cdl_clamp_fwd, cdl_missing_style, cdl_all_styles, cdl_bad_slope, cdl_bad_sat, cdl_bad_power, cdl_missing_slope, cdl_missing_offset, cdl_missing_power, cdl_bad_style, cdl_missing_sop, cdl_missing_sat, cdl_various_in_ctf, log_all_styles, log_logtolin, log_logtolinv2, log_lintolog_3chan, log_bad_style, log_bad_version, log_bad_param, log_missing_breakpnt, log_ocio_params_channels, log_ocio_params_base_missmatch, log_default_params; 4.5f: lut_1d, lut1d_hue_adjust_invalid_style, lut_3by1d_with_nan_infinity, lut1d_half_domain_set_false, lut1d_raw_half_set_false, lut1d_half_domain_raw_half_set, lut1d_half_domain_missing_values, 3by1d_lut, lut1d_long_lut, lut1d_inv, lut1d_inv_scaling, invlut1d_clf, indexMap_test, indexMap_test1_clfv2, indexMap_test3, indexMap_test4_clfv2, transform_missing_inbitdepth, transform_missing_outbitdepth, transform_with_bitdepth_mismatch, inverse_of_id_test, lut3d, lut3d_inv, lut3d_unequal_size, tabluation_support, indexMap_test2_clfv2; p4-ctf-read-3 (verifier fixes): difficult_syntax, difficult_xml_unknown_elements, unknown_elements, clf3_index_map, multiple_ops, clf_examples, lut_interpolation_option; 4.5g: load_deprecated_ops_file, load_fixed_function_file, load_ff_fail_version, load_ff_fail_params, load_ff_fail_style, load_ff_aces_fail_gamma_param, load_ff_aces_fail_gamma_twice, load_ff_aces_fail_missing_param, load_grading_rgbcurves_lin, load_grading_rgbcurves_log; 4.5h: reference_load_alias, reference_load_path, reference_load_multiple, reference_load_path_utf8, reference_load_alias_path; 4.6a: CTFTransform load_edit_save_matrix, save_matrix, load_save_matrix, save_matrix_444, load_edit_save_matrix_clf, matrix3x3_clf, matrix_offset_alpha_ctf, matrix_offset_alpha_bitdepth_ctf, matrix_offset_alpha_inverse_ctf, no_ops_ctf; 4.6b: CTFTransform save_cdl, save_log, save_log_affine, save_log_camera, save_range, save_group, legacy_cdl, cdl_clf, cdl_ctf, range_ctf, range1_clf, range2_clf, range3_clf, range4_clf, exponent_ctf, gamma1_ctf, gamma1_mirror_ctf, gamma1_pass_thru_ctf, gamma2_ctf, gamma3_ctf, gamma4_ctf, gamma5_ctf, gamma6_ctf, log_lin_to_log_ctf, log_log_to_lin_ctf, log_antilog2_ctf; 4.6c: CTFTransform save_lut_1d_1component, save_lut_1d_3components, save_invlut_1d_3components, save_lut1d_halfdomain, save_lut1d_f16_raw, save_lut1d_f32, save_lut1d_interpolation, save_invalid_lut_1d, save_lut_3d, lut1d_clf, lut1d_inverse_clf, lut1d_ctf, lut1d_attributes_ctf, lut1d_array_16x1_ctf, lut1d_array_16x3_ctf, lut1d_10i_ctf, lut1d_inverse_ctf, lut3d_array_ctf, lut3d_inverse_clf, lut3d_inverse_ctf, save_lut3d_interpolation, bitdepth_ctf; 4.6d: CTFTransform fixed_function_aces_gamut_comp_13_ctf, fixed_function_aces_gamut_comp_13_inverse_ctf, fixed_function_rec2100_ctf, fixed_function_rec2100_inverse_ctf, fixed_function_lin_to_gammalog_ctf, fixed_function_lin_to_doublelog_ctf; 4.6e: FileFormatCTF ff_load_save_ctf; p4-after-p5 4.5i: exposure_contrast_video, exposure_contrast_log, exposure_contrast_linear, exposure_contrast_no_gamma, exposure_contrast_failures, attribute_float_parse_extra_values, attribute_float_parse_leading_spaces, load_grading_primary_log, load_grading_primary_lin, load_grading_primary_video, load_grading_primary_errors, load_grading_huecurves_log, load_grading_curves_errors, CTFTransform load_grading_tone, load_grading_tone_errors; p4-after-p5 4.6f: CTFTransform exposure_contrast_video_ctf, exposure_contrast_log_ctf, exposure_contrast_linear_ctf, exposure_contrast_not_dynamic_ctf, exposure_contrast_log_params_ctf, grading_primary_log_ctf, grading_primary_lin_ctf, grading_primary_video_ctf, grading_rgbcurve_log_ctf, grading_rgbcurve_video_ctf, grading_rgbcurve_lin_ctf, grading_huecurve_lin_ctf, grading_tone_log_ctf, grading_tone_lin_ctf, grading_tone_video_ctf. 2.6.0: changed at v2.6.0 lines 30-50, 73-75, 77, 100-103, 125-133, 195-203, 238, 243-249, 304, 362, 367-373, 425, 477, 528, 577-578, 683-701, 752, 774, 826, 863, 932, 952, 1023, after 1047 (deleted), 1086, 1127, 1175-1176, 1221-1222, 1235-1236, 1273, 1289-1369, 1377-1386, 1389, 1404, 1407-1408, 1410-1413, 1415-1416, 1419, 1422-1425, 1427-1428, 1431-1438, 1441-1442, 1451-1727, 1738-1741, 1745-1750, 1752, 1757-1766, 1769, 1772-1773, 1776, 1892, 1976, 2085, 2096, 2103-2118, 2129, 2140, 2155, 2162-2182, 2240, 2336, 2339, 2360-2364, 2375, 2400, 2425, 2473, 2529, 2556, 2614-2617, 2619, 2648, 2679, 2709, 2756, 2778, 2809, 2845, 2877, 2918, 2974-2975, 3161-3170, 3205, 3229, 3305, 3326, 3349, 3390-3391, 3562-3563, 3590-3591, 3617-3618, 3661, 3694, 3747-3748, 3782-3783, 3896-3897, 3916-3917, 3935-3936, 3972-3973, 3997, 4030, 4067, 4104, 4176, 4191-4192, 4235-4236, 4282, 4304-4305, 4400-4403, 4530, 4634, 4735, 4934, 5022, 5120, 5328, 5417, 5459, 5493, 5500-5501, 5505-5506, 5508, 5511, 5543, 5577, 5585, 5587, 5589, 5591, 5593, 5595, 5597, 5599, 5625, 5650, 5673, 5753, 5802, 5844, 5959, 5989, 6002, 6013, 6060, 6075-6078, 6080-6082, 6097, 6099-6101, 6103-6106, 6108-6109, 6111-6113, 6129-6134, after 6135 (deleted), 6159, 6407, 6453, 6572, 6607, 6638, 6673, 6747, 6790, 6833, 6918, 7212-7260, 8217, 8992, 9068, 9110, 9162-9165, 9167, 9182, 9185-9188, 9266, 9316: ocio26-clf re-ported every changed test at v2.6.0, ff_load_save_ctf with HMJ, and ported the new smpte_id_element, smpte_id_bad_value, smpte_all_metadata, smpte_namespaces, non_smpte_xmlns, smpte_conflicting_version and smpte_higher_ns_version and smpte_broadcast_profile_noclamp_range (noClamp Range writing), fixed_function_aces_rgb_to_hmj_20_ctf and fixed_function_aces_hmj_to_rgb_20_ctf. The other 122 ported tests are byte-identical at v2.6.0 (the helpers they share changed only in getOps to getOpDataVec and a null check), and their markers say v2.6.0."
 
 [[file]]
@@ -4770,8 +4770,8 @@ note = "p3-transforms (3.1a): basic; p3-builders 3.2a: build_colorspace_ops, bui
 path = "tests/cpu/transforms/DisplayViewTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/display_view_transform_tests.rs"]
-status = "partial"
-note = "p3-transforms (3.1a): basic; build_ops_with_looks, config_load, apply_fwd_inv and context_variables come with 3.2c, build_ops uses ExposureContrast (Phase 5); p3-builders 3.2c: build_ops_with_looks, config_load, apply_fwd_inv, context_variables; p5-dynamic 5.6b: build_ops. 2.6.0: changed at v2.6.0 lines 1494-1872; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "p3-transforms (3.1a): basic; build_ops_with_looks, config_load, apply_fwd_inv and context_variables come with 3.2c, build_ops uses ExposureContrast (Phase 5); p3-builders 3.2c: build_ops_with_looks, config_load, apply_fwd_inv, context_variables; p5-dynamic 5.6b: build_ops. 2.6.0: changed at v2.6.0 lines 1494-1872, four new tests: ocio26-config ported use_display_name_alias, display_alias_fallback, view_alias_fallback and context_variables_with_resolved_display_view at v2.6.0 in display_view_transform_tests.rs; ocio26-close joined the last one's marker onto one line, so that cargo xtask upstream-tests counts it. The six older tests are unchanged at v2.6.0. All 10 tests of the file are ported."
 
 [[file]]
 path = "tests/cpu/transforms/ExponentTransform_tests.cpp"
@@ -4903,8 +4903,8 @@ note = "p1-transforms-fam1 (1.8c)"
 path = "tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry_tests.rs"]
-status = "partial"
-note = "All original tests complete. P27 read_write uses every registry entry in original order, validates the original 2.4 config, compares serialization byte for byte and creates the ref-to-test processor using existing APIs. Original values and assertions preserved; no API/runtime/waiver change. 2.6.0: changed at v2.6.0 lines 99; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "All original tests complete. P27 read_write uses every registry entry in original order, validates the original 2.4 config, compares serialization byte for byte and creates the ref-to-test processor using existing APIs. Original values and assertions preserved; no API/runtime/waiver change. 2.6.0: changed at v2.6.0 lines 99: read_write's config is ocio_profile_version 2.6 (its registry has built-ins that need 2.6); ocio26-config re-ported it at v2.6.0 in builtin_transform_registry_tests.rs. All 7 tests of the file are ported."
 
 [[file]]
 path = "tests/gpu/CDLOp_test.cpp"
@@ -5261,8 +5261,8 @@ note = "P54: 5 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/ColorSpaceTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 21 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 1113-1152; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 21 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). 2.6.0: changed at v2.6.0 lines 1113-1152, the LocateBuiltinColorSpace checks at the end of test_processor_to_known_colorspace; no test function was added, so py-port/passing.txt still records 21. They run unmodified against ocio-py's Config.LocateBuiltinColorSpace (ocio26-config); the complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ColorSpaceTransformTest.py"
@@ -5275,22 +5275,22 @@ note = "P54: 6 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/ConfigCompatibilityHelpersTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "todo"
-note = "New in 2.6.0 (PR #2344); card ocio26-config."
+status = "done"
+note = "New in 2.6.0 (PR #2344): 1 upstream test function (test_check_compatibility), recorded in py-port/passing.txt by ocio26-config; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs) against ocio-py's ConfigCompatibilityHelpers (apphelpers/py_config_compatibility_helpers.rs). The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ConfigTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 25 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 801-1087, 1291-1292, 1298, 1301, 1566-1568, 1736-1756; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 25 upstream test functions (its three classes) recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). 2.6.0: changed at v2.6.0 lines 801-1087, 1291-1292, 1298, 1301, 1566-1568, 1736-1756: the new ConfigTest functions test_generate_local_id_for_color_space, test_find_color_space_for_id, test_use_display_aliases, test_display_view_aliases, test_display_description, test_resolved_display_view_color_space_name (801-1087) and test_cyclic_color_space_transform (1736-1756), and the 2.6 built-in configs (cg-config-v5.0.0_aces-v2.1_ocio-v2.6, 57 color spaces in the studio config, ExceptionMissingFile) in test_create_builtin_config (1291-1301) and test_resolve_config (1566-1568). ocio26-config recorded the 7 new functions in py-port/passing.txt: 32 at v2.6.0, was 25. The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ConstantsTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 1 upstream test function recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 50; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 1 upstream test function recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). 2.6.0: changed at v2.6.0 lines 50: test_string_constants checks METADATA_ID_ELEMENT ('Id'), which ocio26-clf added to py_types.rs; still 1 function. The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ContextTest.py"
@@ -5408,8 +5408,8 @@ note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/GroupTransformTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 9 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 165; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 9 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs); inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 165: the CLF that test_write_clf expects has the SMPTE ST 2136-1 xmlns on ProcessList, as ocio26-clf's CLF writer at v2.6.0 does; still 9 functions. The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/LegacyViewingPipelineTest.py"
@@ -5506,8 +5506,8 @@ note = "P54: 2 upstream test functions recorded in py-port/passing.txt; source r
 path = "tests/python/OpenColorIOTestSuite.py"
 kind = "test-python"
 target = ["xtask/src/py.rs", "xtask/src/py_driver.rs"]
-status = "partial"
-note = "P54/P73: driver_modules/modules_of_driver consume the unchanged get_test_modules inventory (48 modules); py-suite runs those modules unmodified in fresh processes and verifies all 384 functions against the wheel. It also executes the original unmodified driver as one process against each package, checking the wheel-inventoried test IDs/multiplicities, successful unittest footer and exact run order. Its valid module-selection and unknown-module CLI paths are compared too; actual logs are retained in py-driver.json. Both-platform runtime qualification is required before the P73 chunk lands. 2.6.0: changed at v2.6.0 lines 60, 112; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54/P73: driver_modules/modules_of_driver consume the unchanged get_test_modules inventory; py-suite runs those modules unmodified in fresh processes and verifies every function against the wheel. It also executes the original unmodified driver as one process against each package, checking the wheel-inventoried test IDs/multiplicities, successful unittest footer and exact run order. Its valid module-selection and unknown-module CLI paths are compared too; actual logs are retained in py-driver.json. 2.6.0: changed at v2.6.0 lines 60, 112: the import and get_test_modules entry of the new ConfigCompatibilityHelpersTest; the driver code is unchanged, so xtask reads the v2.6.0 inventory, 49 modules and 392 functions, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/ProcessorCacheTest.py"
@@ -5520,8 +5520,8 @@ note = "P54: 1 upstream test function recorded in py-port/passing.txt; source ru
 path = "tests/python/ProcessorTest.py"
 kind = "test-python"
 target = ["run unmodified against ocio-py"]
-status = "partial"
-note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). The complete 48-module suite passes all 384 functions on Windows and Rocky Linux 9; inherited TransformsBaseTest functions are included. 2.6.0: changed at v2.6.0 lines 53; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P54: 7 upstream test functions recorded in py-port/passing.txt; source runs unmodified through cargo xtask py-suite (xtask/src/py.rs). 2.6.0: changed at v2.6.0 lines 53: test_cache_id expects 2.6.0's UUID-shaped processor cache ID, which ocio26-base ported (HashUtils, Processor); still 7 functions. The complete suite is 49 modules and 392 functions at v2.6.0, on Windows and Rocky Linux 9."
 
 [[file]]
 path = "tests/python/RangeTransformTest.py"
@@ -5596,8 +5596,8 @@ note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support
 path = "tests/testutils/UnitTest.h"
 kind = "test-support"
 target = ["crates/ocio-testkit/src/upstream/mod.rs"]
-status = "partial"
-note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. Rust #[test] and existing upstream assertion, throw and float helpers replace the private C++ macros/static registry/SkipException and diagnostic spelling. Every translated assertion remains required. 2.6.0: changed at v2.6.0 lines after 65 (deleted), 133-135; not yet re-ported (ocio26 cards)."
+status = "done"
+note = "P81 / owner-approved D-19 (2026-11-01): Rust-native private test support; no OCIO case, SDK behavior, comparison or tolerance excluded. Rust #[test] and existing upstream assertion, throw and float helpers replace the private C++ macros/static registry/SkipException and diagnostic spelling. Every translated assertion remains required. 2.6.0: changed at v2.6.0 lines after 65 (deleted), 133-135: the unused extern unit_test_failures is gone, and the new OCIO_CHECK_EQUAL_STR compares two strings as std::string_view; the ported CTF tests that use it (FileFormatCTF_tests, CTFTransform_tests) compare the same bytes with assert_eq! and the testkit's check_equal. Nothing else to port."
 
 [[file]]
 path = "tests/utils/CMakeLists.txt"

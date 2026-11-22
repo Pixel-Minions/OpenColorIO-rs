@@ -5,8 +5,8 @@ that gives exactly the same output as the original, down to the last bit.**
 
 OpenColorIO (OCIO) is the color management library of the VFX and animation industry. This
 project ports it to Rust one upstream release at a time, and checks every result against the
-official library. The current release, **1.0.0** (`1.0.0+ocio.2.5.2`), is the complete port of
-**OpenColorIO 2.5.2**: the same pixels, shaders, text, errors and accepted configs, from Rust and
+official library. The current release, **1.1.0** (`1.1.0+ocio.2.6.0`), is the complete port of
+**OpenColorIO 2.6.0**: the same pixels, shaders, text, errors and accepted configs, from Rust and
 from Python.
 
 ## Installing
@@ -40,12 +40,13 @@ cpu.apply(&mut image)?;
 | All 24 file formats, `.ocioz` archives and the baker | Complete |
 | GPU shader generation, in all 10 shading languages | Complete |
 | Dynamic properties, grading and the app helpers | Complete |
-| The `PyOpenColorIO`-compatible Python module | Complete: all 384 upstream Python tests pass unmodified |
+| The `PyOpenColorIO`-compatible Python module | Complete: all 392 upstream Python tests pass unmodified |
 | Tools: `ociocheck`, `ociochecklut`, `ociowrite`, `ociobakelut` | Included; the official wheel's other tools aren't |
 
-All 913 upstream source files are accounted for: 685 ported and 228 reviewed as not
-applicable ([`upstream-map.toml`](upstream-map.toml)). What changed, the accepted speed
-exceptions and the known issues are in the [changelog](CHANGELOG.md).
+All 835 upstream source files of 2.6.0 are accounted for: 692 ported and 143 reviewed as not
+applicable ([`upstream-map.toml`](upstream-map.toml)).
+What changed, the accepted speed exceptions and the known issues are in the
+[changelog](CHANGELOG.md). 1.0.0 matches OpenColorIO 2.5.2.
 
 ## How exact
 
@@ -53,12 +54,12 @@ A release ships only when all of these hold:
 
 - **Text is byte-identical on every platform:** written configs, LUT files, baked LUTs, shader
   code, cache IDs, error and warning messages, and Python `repr()` strings.
-- **Pixels are bit-identical** to the official `opencolorio==2.5.2` package on the same OS and
+- **Pixels are bit-identical** to the official `opencolorio==2.6.0` package on the same OS and
   CPU, at every bit depth, pixel layout, optimization level and SIMD profile.
 - **GPU shaders are byte-identical**, with the same uniforms and textures.
 - **Where OCIO differs between Windows and Linux, the port does too.**
-- **OCIO's own tests pass:** 1,189 of 1,191 C++ tests ported (two reviewed not applicable),
-  all 264 GPU tests and all 384 Python tests.
+- **OCIO's own tests pass:** 1,224 of 1,226 C++ tests ported (two reviewed not applicable),
+  all 270 GPU tests and all 392 Python tests.
 
 The few exceptions are written down and approved: [waivers](docs/waivers.md) (for example,
 NaN payload bits when a parameter is NaN), [intended deviations](docs/deviations.md) and the
@@ -68,7 +69,7 @@ the reference platforms and the emulated CPUs, is in [`docs/verification.md`](do
 ## Why a Rust port
 
 - **Interchangeable with other OCIO applications.** A config gives the same pixels, shaders,
-  baked LUTs and cache IDs as any application using OCIO 2.5.2 on the same machine.
+  baked LUTs and cache IDs as any application using OCIO 2.6.0 on the same machine.
 - **No C++ in your stack.** The whole build is `cargo build`: no CMake, no C++ dependencies,
   no ABI mismatches.
 - **Safe with untrusted files.** The config and LUT parsers have no `unsafe` code. Where
@@ -78,7 +79,7 @@ the reference platforms and the emulated CPUs, is in [`docs/verification.md`](do
   upstream doesn't have, renders rows on several threads, and the tests check it against the
   official library.
 - **Tracks new OCIO releases.** Each upstream release is ported as a diff and checked again
-  against that release. The version says what it matches: `1.0.0+ocio.2.5.2`.
+  against that release. The version says what it matches: `1.1.0+ocio.2.6.0`.
 
 ## Building and testing
 

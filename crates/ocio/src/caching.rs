@@ -145,7 +145,7 @@ pub(crate) fn relock_error() -> Exception {
         Exception::system_error("resource deadlock would occur: resource deadlock would occur")
     } else {
         Exception::new(
-            "A cache's mutex is locked again by the thread that holds it (code the library              calls while it makes a processor or loads a file, such as a config's I/O proxy,              makes a processor of the same config or loads the same file): OCIO 2.5.2 waits              for itself, which is undefined behaviour (docs/improvements.md, U-182).",
+            "A cache's mutex is locked again by the thread that holds it (code the library              calls while it makes a processor or loads a file, such as a config's I/O proxy,              makes a processor of the same config or loads the same file): OCIO 2.6.0 waits              for itself, which is undefined behaviour (docs/improvements.md, U-182).",
         )
     }
 }

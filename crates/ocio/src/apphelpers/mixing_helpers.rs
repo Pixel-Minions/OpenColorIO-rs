@@ -322,7 +322,7 @@ fn color_picker_of(config: &Config) -> Result<Option<ColorSpaceInfo>> {
                 ROLE_COLOR_PICKING.as_bytes(),
                 b"' refers to the color space '",
                 config.role_color_space(ROLE_COLOR_PICKING),
-                b"', which doesn't exist: OCIO 2.5.2 reads a null color space there, and its \
+                b"', which doesn't exist: OCIO 2.6.0 reads a null color space there, and its \
                   process dies (docs/improvements.md, U-152).",
             ]
             .concat(),

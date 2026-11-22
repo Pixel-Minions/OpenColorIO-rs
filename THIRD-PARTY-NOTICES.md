@@ -1,8 +1,8 @@
 # Third-party notices
 
-OpenColorIO-rs is a port of OpenColorIO 2.5.2 under BSD-3-Clause (see [`LICENSE`](LICENSE)
+OpenColorIO-rs is a port of OpenColorIO 2.6.0 under BSD-3-Clause (see [`LICENSE`](LICENSE)
 and [`NOTICE`](NOTICE)). It also translates code from other projects: from the libraries
-OpenColorIO 2.5.2 is built with, whose behavior the port must reproduce, and from the files
+OpenColorIO 2.6.0 is built with, whose behavior the port must reproduce, and from the files
 OpenColorIO carries under their own notices. This file lists each one, what the port takes from
 it and where, and reproduces its copyright and license notice.
 

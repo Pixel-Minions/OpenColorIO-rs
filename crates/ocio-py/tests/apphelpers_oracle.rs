@@ -1886,7 +1886,7 @@ fn a_lut_loader_that_changes_the_pipeline_is_d12() {
                 assert_eq!(
                     message,
                     "LegacyViewingPipeline: a callback changed the pipeline while the library \
-                     made its processor, which OCIO 2.5.2 reads again after that callback and \
+                     made its processor, which OCIO 2.6.0 reads again after that callback and \
                      the port can't follow (docs/deviations.md, D-12)"
                 );
             } else {
@@ -1952,7 +1952,7 @@ fn a_lut_loader_changes_the_manager_that_makes_a_processor() {
 
 /// D-12's error (docs/deviations.md).
 const D12: &str = "LegacyViewingPipeline: a callback changed the pipeline while the library made \
-                   its processor, which OCIO 2.5.2 reads again after that callback and the port \
+                   its processor, which OCIO 2.6.0 reads again after that callback and the port \
                    can't follow (docs/deviations.md, D-12)";
 
 /// What a LUT loader's call does to the pipeline whose processor loads the LUT.

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! OpenColorIO, ported to Rust. This release line matches OpenColorIO 2.5.2 exactly
+//! OpenColorIO, ported to Rust. This release line matches OpenColorIO 2.6.0 exactly
 //! (PLAN.md §2): results, text output, errors and accepted configs.
 //!
 //! The package is `opencolorio-rs`; in code the library is `ocio`. Its calls are OCIO's C++ API
@@ -243,7 +243,6 @@ mod tests {
     fn versions() {
         assert_eq!(super::version(), "2.6.0");
         assert!(!super::PORT_VERSION.contains('+'));
-        // The crates' versions move to `+ocio.2.6.0` with the 1.1.0 release (phase 7).
-        assert!(env!("CARGO_PKG_VERSION").ends_with("+ocio.2.5.2"));
+        assert!(env!("CARGO_PKG_VERSION").ends_with("+ocio.2.6.0"));
     }
 }

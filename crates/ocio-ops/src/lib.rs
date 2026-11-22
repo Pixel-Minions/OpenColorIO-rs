@@ -3,7 +3,7 @@
 
 //! Op data, CPU renderers and the optimizer: a port of `src/OpenColorIO/ops/`,
 //! `Op.cpp`, `OpOptimizers.cpp`, `CPUInfo.cpp`, `BitDepthUtils` and `ImagePacking`
-//! from OpenColorIO 2.5.2.
+//! from OpenColorIO 2.6.0.
 //!
 //! This crate is a building block of [`opencolorio-rs`](https://crates.io/crates/opencolorio-rs):
 //! use that crate. Its API follows OpenColorIO's internals and may change in minor releases.
@@ -39,7 +39,7 @@
     )
 )))]
 compile_error!(
-    "ocio-ops reproduces the OpenColorIO 2.5.2 wheels for x86_64-pc-windows-msvc and \
+    "ocio-ops reproduces the OpenColorIO 2.6.0 wheels for x86_64-pc-windows-msvc and \
      x86_64-unknown-linux-gnu only (PLAN.md D11): the wheel behavior of this target has not \
      been verified"
 );
