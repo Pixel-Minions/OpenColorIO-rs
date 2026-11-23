@@ -540,30 +540,33 @@ mod tests {
     }
 
     /// The CPUID bits OCIO decodes agree with the Rust standard library's own CPUID and XCR0
-    /// decoding. (The slow-CPU quirks and the brand string are compared with the wheel's
-    /// `ociocpuinfo`, which needs the `cpu_info` oracle command.)
+    /// decoding, after OCIO 2.6.0's EPYC 9V45 quirk, which turns AVX-512 off whatever CPUID
+    /// says (GitHub's Windows runners can be that CPU). (The slow-CPU quirks and the brand
+    /// string are compared with the wheel's `ociocpuinfo`, which needs the `cpu_info` oracle
+    /// command.)
     #[test]
     fn feature_bits_agree_with_std_detection() {
         use std::arch::is_x86_feature_detected as has;
 
         let cpu = CpuInfo::detect(BuildConfig::X86_64_WHEEL);
         let flag = |f: u32| cpu.flags & f != 0;
-        assert_eq!(flag(X86_CPU_FLAG_SSE2), has!("sse2"));
-        assert_eq!(flag(X86_CPU_FLAG_SSE3), has!("sse3"));
-        assert_eq!(flag(X86_CPU_FLAG_SSSE3), has!("ssse3"));
-        assert_eq!(flag(X86_CPU_FLAG_SSE4), has!("sse4.1"));
-        assert_eq!(flag(X86_CPU_FLAG_SSE42), has!("sse4.2"));
-        assert_eq!(flag(X86_CPU_FLAG_AVX), has!("avx"));
-        assert_eq!(flag(X86_CPU_FLAG_F16C), has!("f16c"));
-        assert_eq!(flag(X86_CPU_FLAG_AVX2), has!("avx2"));
-        assert_eq!(
-            flag(X86_CPU_FLAG_AVX512),
-            has!("avx2")
-                && has!("avx512f")
-                && has!("avx512dq")
-                && has!("avx512cd")
-                && has!("avx512bw")
-                && has!("avx512vl")
-        );
+        let which = format!("{} ({})", cpu.name(), cpu.vendor());
+        assert_eq!(flag(X86_CPU_FLAG_SSE2), has!("sse2"), "{which}");
+        assert_eq!(flag(X86_CPU_FLAG_SSE3), has!("sse3"), "{which}");
+        assert_eq!(flag(X86_CPU_FLAG_SSSE3), has!("ssse3"), "{which}");
+        assert_eq!(flag(X86_CPU_FLAG_SSE4), has!("sse4.1"), "{which}");
+        assert_eq!(flag(X86_CPU_FLAG_SSE42), has!("sse4.2"), "{which}");
+        assert_eq!(flag(X86_CPU_FLAG_AVX), has!("avx"), "{which}");
+        assert_eq!(flag(X86_CPU_FLAG_F16C), has!("f16c"), "{which}");
+        assert_eq!(flag(X86_CPU_FLAG_AVX2), has!("avx2"), "{which}");
+        let avx512 = has!("avx2")
+            && has!("avx512f")
+            && has!("avx512dq")
+            && has!("avx512cd")
+            && has!("avx512bw")
+            && has!("avx512vl");
+        let decoded = if avx512 { X86_CPU_FLAG_AVX512 } else { 0 };
+        let expected = epyc_9v45_quirk(decoded, cpu.vendor_bytes(), cpu.name_bytes()) != 0;
+        assert_eq!(flag(X86_CPU_FLAG_AVX512), expected, "{which}");
     }
 }
