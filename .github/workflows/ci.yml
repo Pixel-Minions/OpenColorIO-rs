@@ -36,7 +36,7 @@ env:
 
 jobs:
   # Both reference platforms (PLAN.md D11) run the live oracle: pixel checks compare the port
-  # with the opencolorio==2.5.2 wheel on the same machine. The oracle test battery runs its
+  # with the opencolorio==2.6.0 wheel on the same machine. The oracle test battery runs its
   # full tier here (OCIO_RS_TIER, ocio_testkit::battery::Tier); quick is the local default.
   windows-checks:
     name: Windows checks
