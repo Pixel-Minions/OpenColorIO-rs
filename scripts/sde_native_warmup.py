@@ -4,11 +4,18 @@
 import json
 import os
 import pathlib
+import re
 import subprocess
 import time
 
 started = time.monotonic()
 root = pathlib.Path(__file__).resolve().parents[1]
+# The wheel the oracle pins (oracle/pyproject.toml), which the helper must be built against.
+pins = re.findall(r'"opencolorio==([0-9][0-9.]*)"',
+                  (root / 'oracle' / 'pyproject.toml').read_text(encoding='utf-8'))
+if len(pins) != 1:
+    raise RuntimeError(f'Expected one opencolorio pin in oracle/pyproject.toml, found {pins}')
+pinned = pins[0]
 metadata = json.loads(subprocess.check_output(
     ['cargo', 'metadata', '--no-deps', '--format-version=1'], cwd=root))
 venv = pathlib.Path(metadata['target_directory']) / 'oracle-venv'
@@ -18,14 +25,14 @@ if not python.is_file():
 # Match the existing oracle's environment; only the build tools receive native_build's
 # explicit compiler-discovery variables. No caller values enter OCIO expected outputs.
 environment = {key: os.environ[key] for key in ('SYSTEMROOT', 'TEMP', 'TMP', 'TMPDIR') if key in os.environ}
-script = '''import hashlib,json
+script = '''import hashlib,json,sys
 from ocio_oracle.native_build import executable
 path, provenance = executable()
-assert provenance['wheel_version'] == '2.5.2' and path.is_file()
+assert provenance['wheel_version'] == sys.argv[1] and path.is_file(), (provenance, sys.argv[1])
 print(json.dumps(dict(Executable=str(path), Provenance=provenance,
                      ExecutableSHA256=hashlib.sha256(path.read_bytes()).hexdigest())))
 '''
-output = subprocess.check_output([str(python), '-X', 'utf8', '-c', script],
+output = subprocess.check_output([str(python), '-X', 'utf8', '-c', script, pinned],
                                  cwd=root / 'oracle', env=environment, timeout=600)
 result = json.loads(output)
 if not all(len(result['Provenance'][key]) == 64 for key in ('source_key', 'library_sha256')):
