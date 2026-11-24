@@ -66,11 +66,30 @@ CPU's kernels, so every kernel is compared, whatever CPU the tests run on.
 
 ### The 1.1.0 qualification
 
+Every CPU-dependent test passed on all five emulated CPUs, on Windows and on Rocky Linux 9,
+with no difference from the official library:
+
+- **CI:** SDE run 45107827293 on the release commit `7ff5a2f4`: the full workflow, every
+  `cargo cpu-tests` target on all five CPUs, the GPU sweeps (`legacy_gpu_live_oracle`,
+  `api_gpu_oracle`) included. Each job runs its tests one at a time, each in a fresh emulator.
+  It ran twice: the second run repeated the jobs that failed. Every Rocky job passed the first
+  time. Six Windows jobs failed, none on a comparison with the port:
+  - In five, the oracle's process running the official 2.6.0 wheel exited with `0xc0000005`
+    partway through an oracle `batch`: `legacy_gpu_live_oracle` parts 17 (`snb`), 25 (`hsw`), 22
+    (`skl`) and 21 (`skx`), each a batch of 24 calls, and
+    `legacy_allocation_cuts_and_file_boundaries_match_native_wheel_part2` (`legacy_gpu_oracle`,
+    `skx`), a batch of 50.
+  - In one (`skx`, kernel shard 2) the runner stopped partway through the tests and left no log.
+
+  All six passed in the second run, and so did each CPU's check that every target and test
+  passed exactly once. The cause of the crashes isn't known. As in 1.0.0, they came only under
+  emulation on Windows, on a different test each time. CI run 45107772907 on the same commit
+  passed all 33 jobs.
+- **Locally,** before GitHub Actions was available: the run below.
+
 Run on 2026-11-21 under SDE on one workstation, on Windows and on Rocky Linux 9, on `643f44b7`:
 release builds, the quick tier, the official 2.6.0 wheel, no oracle cache. It covers part of
-`cargo cpu-tests`: targets whose code 2.6.0 changed directly. GitHub Actions wasn't available,
-so **the full workflow waits for CI**: every target on all five CPUs, the GPU sweeps
-(`legacy_gpu_live_oracle`, `api_gpu_oracle`) included.
+`cargo cpu-tests`: targets whose code 2.6.0 changed directly.
 
 Every test in the first table passed at least once on each CPU and platform named. Not every
 attempt passed: 27 didn't, listed in the second table, and an earlier run hung.
@@ -138,11 +157,12 @@ check's 13 runs all passed, one at a time, and left no emulator log.
 - The kernel under the container killed nothing for memory from its boot, before the runs, to
   their end (`oom_kill` 0). By the runs' own timings, the runner's cleanup of a timed-out test
   (`pkill -9 -f ocio_oracle`, in the same container) came within 2 seconds of both SIGKILLs.
-- **A hang, open for CI:** on `b648dc8c`, `api_formats_oracle` with its tests running
+- **A hang:** on `b648dc8c`, `api_formats_oracle` with its tests running
   concurrently (4 threads) was idle on nhm on both platforms, and was stopped after about 70
   minutes on Windows and 80 on Rocky. On Rocky, threads of three of its tests and their oracle
   processes were blocked reading pipes. It wasn't run concurrently again. One test at a time,
-  all 24 passed natively and on the five emulated CPUs, on both platforms.
+  all 24 passed natively and on the five emulated CPUs, on both platforms, and in the CI run
+  above.
 - For a failed test the runner kept the last 40 lines of output, for a capped one the last 15.
   The check kept all of it.
 

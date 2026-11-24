@@ -3,7 +3,7 @@
 Each release names the OpenColorIO version it matches. A version's build metadata says it too:
 `1.0.0+ocio.2.5.2`.
 
-## 1.1.0
+## 1.1.0 (2026-11-24)
 
 Matches **OpenColorIO 2.6.0**.
 
@@ -72,19 +72,20 @@ with `PyOpenColorIO.__version__` `2.6.0`.
 
 ### Known issues
 
-- **Emulated CPUs.** The full emulated-CPU workflow hasn't run on 1.1.0, because GitHub Actions
-  wasn't available: it waits for CI. A part of it ran locally. What ran, and each attempt that
-  didn't pass, is in
+- **Crashes under emulation, on Windows, with the 2.6.0 wheel.** In the full emulated-CPU run in
+  CI, the oracle's process running the wheel exited with `0xC0000005` partway through a batch of
+  calls in five Windows jobs, on a different test each time (`legacy_gpu_live_oracle` on `snb`,
+  `hsw`, `skl` and `skx`, `legacy_gpu_oracle` on `skx`), before any comparison with the port.
+  Each passed when the failed jobs ran again; Rocky Linux 9 failed none. Locally, the wheel's
+  native helper crashed five times with `0xC0000142`, and Pin logged that it failed to inject
+  into child processes. Four of those crashes showed as a mismatch inside the oracle, between the
+  wheel and that helper, before any comparison with the port. The oracle's process also died
+  twice on a Pin assertion. Each of those tests passed later, natively too. Five Pin lock logs
+  couldn't be tied to a test. The causes aren't known. Every run is in
   [`docs/verification.md`](https://github.com/Pixel-Minions/OpenColorIO-rs/blob/main/docs/verification.md).
-- **Crashes under emulation, on Windows, with the 2.6.0 wheel.** The wheel's native helper
-  crashed five times with `0xC0000142`, and Pin logged that it failed to inject into child
-  processes. Four of those crashes showed as a mismatch inside the oracle, between the wheel and
-  that helper, before any comparison with the port. The oracle's process also died twice on a
-  Pin assertion. Each of those tests passed later, natively too. Five Pin lock logs couldn't be
-  tied to a test. The causes aren't known.
-- **A hang under emulation, open for CI.** `api_formats_oracle`, with its tests running
-  concurrently, hung on `nhm` on Windows and on Rocky Linux 9. One test at a time it passed
-  natively and on the five emulated CPUs. The cause isn't known.
+- **A hang under emulation.** Locally, `api_formats_oracle`, with its tests running
+  concurrently, hung on `nhm` on Windows and on Rocky Linux 9. One test at a time, as CI runs
+  them, it passed natively and on the five emulated CPUs. The cause isn't known.
 
 ## 1.0.0 (2026-11-05)
 
